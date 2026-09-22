@@ -217,7 +217,7 @@ private fun ModernTopBar(
                 
                 Column {
                     Text(
-                        text = "TelePlay",
+                        text = "کمد",
                         style = MaterialTheme.typography.titleLarge,
                         color = TVTextPrimary,
                         fontWeight = FontWeight.Bold,

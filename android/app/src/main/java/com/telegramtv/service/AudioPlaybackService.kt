@@ -77,7 +77,7 @@ class AudioPlaybackService : MediaSessionService() {
         val session = mediaSession
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.app_logo)
-            .setContentTitle("TelePlay")
+            .setContentTitle("کمد")
             .setContentText("Playing audio in background")
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)

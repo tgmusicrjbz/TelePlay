@@ -105,7 +105,7 @@ fun LoginScreen(
             Spacer(modifier = Modifier.height(10.dp))
 
             Text(
-                text = "TelePlay",
+                text = "کمد",
                 style = MaterialTheme.typography.headlineLarge,
                 color = TVTextPrimary,
                 fontWeight = FontWeight.Bold

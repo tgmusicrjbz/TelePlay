@@ -4,6 +4,7 @@ Handles both bot commands and file streaming via a client pool.
 """
 from .patch import Client
 from pyrogram.types import Message, BotCommand
+from pyrogram.errors import MessageIdInvalid
 from .config import get_settings
 from pathlib import Path
 import asyncio
@@ -61,14 +62,23 @@ async def start_one_client(i, c):
             await c.set_bot_commands([
                 BotCommand("start", "باز کردن منوی اصلی"),
                 BotCommand("myfiles", "دیدن فایل‌های ذخیره‌شده"),
-                BotCommand("folders", "مرور پوشه‌ها و کتابخانه"),
-                BotCommand("search", "جست‌وجو در فایل‌ها و پوشه‌ها"),
-                BotCommand("newfolder", "ساخت پوشهٔ جدید"),
+                BotCommand("folders", "مرور کشوهای کمد"),
+                BotCommand("search", "جست‌وجو در فایل‌ها و کشوها"),
+                BotCommand("newfolder", "ساخت کشوی جدید"),
                 BotCommand("web", "راهنمای ورود به نسخهٔ وب"),
                 BotCommand("login", "تأیید کد ورود دستگاه"),
                 BotCommand("help", "نمایش راهنمای استفاده"),
                 BotCommand("logout_all", "خروج از همهٔ دستگاه‌ها"),
             ])
+            if hasattr(c, "set_bot_name"):
+                try:
+                    await c.set_bot_name("کمد 🗄️")
+                    await c.set_bot_info_short_description("کمد شخصی فایل‌هات؛ ذخیره، جست‌وجو و مرتب‌سازی در کشوها")
+                    await c.set_bot_info_description(
+                        "فایل، عکس، فیلم، آهنگ، سند یا متن‌هات رو بفرست؛ کمد برات نگه‌شون می‌داره و داخل کشوها مرتبشون می‌کنه."
+                    )
+                except Exception as error:
+                    logger.warning("Could not update Telegram bot profile text: %s", error)
     except Exception as e:
         logger.error("Client %d failed to start: %s", i, e)
         if i == 0:
@@ -124,13 +134,30 @@ async def forward_to_storage_channel(message: Message) -> Message:
 
 
 async def delete_from_storage_channel(message_ids: int | list[int]) -> bool:
-    """Delete message(s) from the storage channel."""
+    """Delete channel messages idempotently, with per-message fallback for mixed batches."""
+    ids = message_ids if isinstance(message_ids, list) else [message_ids]
+    if not ids:
+        return True
     try:
         await tg_client.delete_messages(
             settings.telegram_storage_channel_id,
-            message_ids,
+            ids if isinstance(message_ids, list) else ids[0],
         )
         return True
-    except Exception:
-        return False
+    except MessageIdInvalid:
+        # One stale ID can reject a complete Telegram batch. Retry each message;
+        # an already removed message is considered a successful delete.
+        pass
+    except Exception as error:
+        logger.warning("Batch delete failed for %d storage message(s): %s", len(ids), error)
 
+    failed = []
+    for message_id in ids:
+        try:
+            await tg_client.delete_messages(settings.telegram_storage_channel_id, message_id)
+        except MessageIdInvalid:
+            continue
+        except Exception as error:
+            logger.error("Could not delete storage message %s: %s", message_id, error)
+            failed.append(message_id)
+    return not failed

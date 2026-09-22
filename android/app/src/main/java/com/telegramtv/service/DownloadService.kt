@@ -163,7 +163,7 @@ class DownloadService : Service() {
     private fun buildSummaryNotification(text: String): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download)
-            .setContentTitle("TelePlay Downloads")
+            .setContentTitle("دانلودهای کمد")
             .setContentText(text)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)

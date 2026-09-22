@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan - start/stop Telegram client and init DB."""
-    logger.info("Starting TelePlay Backend...")
+    logger.info("Starting کمد Backend...")
     await init_db()
     logger.info("Database initialized")
     await start_telegram_client()
@@ -47,7 +47,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="TelePlay API",
+    title="کمد API",
     description="Stream files from Telegram to Android TV and Web",
     version="1.0.0",
     lifespan=lifespan,

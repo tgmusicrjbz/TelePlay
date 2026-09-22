@@ -73,11 +73,11 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                     <div className="flex items-center gap-3">
                         <img 
                             src={logo} 
-                            alt="TelePlay Logo" 
+                            alt="لوگوی کمد"
                             className="w-8 h-8 rounded-lg shadow-lg shadow-primary-500/20 object-contain" 
                         />
                         <span className="text-lg font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-white/70">
-                            TelePlay
+                            کمد
                         </span>
                     </div>
                     {/* Close button for mobile */}

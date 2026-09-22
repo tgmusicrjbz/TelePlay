@@ -28,6 +28,7 @@ from app.routers.folders import delete_folder_contents, update_folder
 from app.routers.streaming import stored_message_response
 from app.schemas import BatchFileUpdate, FileUpdate, FolderUpdate
 from app.telegram import start_one_client
+from app import telegram
 
 
 class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
@@ -265,6 +266,12 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
 
 
 class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
+    async def test_batch_storage_delete_falls_back_to_individual_messages(self):
+        client = SimpleNamespace(delete_messages=AsyncMock(side_effect=[RuntimeError("batch failed"), None, None]))
+        with patch.object(telegram, "tg_client", client):
+            self.assertTrue(await telegram.delete_from_storage_channel([101, 102]))
+        self.assertEqual(client.delete_messages.await_count, 3)
+
     async def test_home_callback_does_not_depend_on_a_folder(self):
         from app.telegram import build_clients
         build_clients()
@@ -278,6 +285,7 @@ class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(settings, "auth_users_str", ""):
             await handle_callback(None, callback)
         callback.message.edit.assert_awaited_once()
+        self.assertIn("رسیدیم به کُمدت", callback.message.edit.await_args.args[0])
 
     async def test_main_client_failure_aborts_startup(self):
         client = SimpleNamespace(start=AsyncMock(side_effect=RuntimeError("invalid credentials")), is_connected=False)
@@ -299,16 +307,18 @@ class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
     async def test_bot_commands_and_description_detail(self):
         client = SimpleNamespace(
             start=AsyncMock(), get_me=AsyncMock(return_value=SimpleNamespace(username="teleplay_test_bot")),
-            set_bot_commands=AsyncMock(), is_connected=True,
+            set_bot_commands=AsyncMock(), set_bot_name=AsyncMock(),
+            set_bot_info_short_description=AsyncMock(), set_bot_info_description=AsyncMock(), is_connected=True,
         )
         await start_one_client(0, client)
         commands = client.set_bot_commands.await_args.args[0]
         self.assertIn("search", [command.command for command in commands])
         self.assertTrue(all(command.description for command in commands))
+        client.set_bot_name.assert_awaited_once_with("کمد 🗄️")
 
         from app.telegram import build_clients
         build_clients()
-        from app.bot import file_detail_keyboard, file_detail_text, format_jalali, pagination_row, search_type_keyboard, sort_keyboard, sort_drafts, truncate_description, type_filter_keyboard
+        from app.bot import file_detail_keyboard, file_detail_text, format_jalali, main_menu_keyboard, pagination_row, search_type_keyboard, sort_keyboard, sort_drafts, truncate_description, type_filter_keyboard
         file = SimpleNamespace(
             file_type="video", file_name="clip.mp4", file_size=10,
             duration=5, description="توضیح همراه رسانه",
@@ -333,6 +343,10 @@ class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
         sort_buttons = [button for row in sort_keyboard(111).inline_keyboard for button in row]
         self.assertTrue(any("1. ↑" in button.text for button in sort_buttons))
         self.assertTrue(all(len(button.callback_data or "") <= 64 for button in sort_buttons))
+        menu_labels = [button.text for row in main_menu_keyboard(111).inline_keyboard for button in row]
+        self.assertIn("📦 فایل‌های من", menu_labels)
+        self.assertIn("🗄️ کشوهای من", menu_labels)
+        self.assertIn("🔍 بگرد تو کمد", menu_labels)
 
 
 if __name__ == "__main__":

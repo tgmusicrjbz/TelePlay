@@ -514,8 +514,8 @@ export default function FileBrowser() {
                             <button
                                 onClick={() => navigateToBreadcrumb(breadcrumbs.length - 2)}
                                 className="sm:hidden p-2 -ml-2 rounded-lg text-dark-300 hover:text-white hover:bg-white/[0.06]"
-                                aria-label="برگشت به پوشه قبلی"
-                                title="پوشه قبلی"
+                                aria-label="برگشت به کشوی قبلی"
+                                title="کشوی قبلی"
                             >
                                 <ArrowLeft className="w-5 h-5" />
                             </button>

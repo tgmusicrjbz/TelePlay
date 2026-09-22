@@ -106,7 +106,7 @@ fun MobileLoginScreen(
             Spacer(modifier = Modifier.height(24.dp))
             
             Text(
-                text = "TelePlay",
+                text = "کمد",
                 style = MaterialTheme.typography.headlineLarge,
                 color = Color.White,
                 fontWeight = FontWeight.Bold

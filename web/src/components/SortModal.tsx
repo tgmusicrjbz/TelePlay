@@ -4,7 +4,7 @@ import { SortCriterion, SortField } from '../lib/api';
 
 const labels: Record<SortField, string> = {
     name: 'نام', type: 'نوع', size: 'حجم', duration: 'مدت',
-    created: 'تاریخ آپلود', updated: 'تاریخ ویرایش', count: 'تعداد فایل‌های پوشه',
+    created: 'تاریخ آپلود', updated: 'تاریخ ویرایش', count: 'تعداد فایل‌های کشو',
 };
 
 interface Props {
