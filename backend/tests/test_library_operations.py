@@ -23,10 +23,10 @@ from sqlalchemy import select
 
 from app.database import Base, async_session, engine
 from app.models import File, Folder, User, WatchProgress
-from app.routers.files import get_text_preview, list_files, update_file
+from app.routers.files import batch_update_files, get_text_preview, list_files, update_file
 from app.routers.folders import delete_folder_contents, update_folder
 from app.routers.streaming import stored_message_response
-from app.schemas import FileUpdate, FolderUpdate
+from app.schemas import BatchFileUpdate, FileUpdate, FolderUpdate
 from app.telegram import start_one_client
 
 
@@ -144,6 +144,38 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             user = await db.get(User, self.user_id)
             result = await list_files(None, "video,text", None, 1, 20, db, user)
             self.assertEqual([item.file_type for item in result.files], ["video"])
+
+    async def test_files_support_multi_level_sorting(self):
+        async with async_session() as db:
+            first = self.make_file(self.user_id, None, 121)
+            first.file_name, first.file_type = "B", "video"
+            second = self.make_file(self.user_id, None, 122)
+            second.file_name, second.file_type = "A", "audio"
+            third = self.make_file(self.user_id, None, 123)
+            third.file_name, third.file_type = "A", "video"
+            db.add_all([first, second, third])
+            await db.commit()
+            user = await db.get(User, self.user_id)
+            result = await list_files(None, None, None, 1, 20, db, user, "name:asc,type:desc")
+            self.assertEqual([item.file_type for item in result.files], ["video", "audio", "video"])
+
+    async def test_batch_edit_preserves_extensions_and_updates_descriptions(self):
+        async with async_session() as db:
+            first = self.make_file(self.user_id, None, 124)
+            first.file_name = "one.mp4"
+            first.description = "old"
+            second = self.make_file(self.user_id, None, 125)
+            second.file_name = "two.mp3"
+            db.add_all([first, second])
+            await db.commit()
+            user = await db.get(User, self.user_id)
+            await batch_update_files(BatchFileUpdate(
+                ids=[first.id, second.id], description_mode="append", description="new",
+                rename_mode="prefix", rename_value="fav-",
+            ), db, user)
+            refreshed = (await db.execute(select(File).where(File.id.in_([first.id, second.id])).order_by(File.id))).scalars().all()
+            self.assertEqual([item.file_name for item in refreshed], ["fav-one.mp4", "fav-two.mp3"])
+            self.assertEqual([item.description for item in refreshed], ["old\nnew", "new"])
 
     async def test_folder_actions_build_their_own_description_buttons(self):
         from app.telegram import build_clients
@@ -276,7 +308,7 @@ class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
 
         from app.telegram import build_clients
         build_clients()
-        from app.bot import file_detail_keyboard, file_detail_text, format_jalali, pagination_row, search_type_keyboard, truncate_description, type_filter_keyboard
+        from app.bot import file_detail_keyboard, file_detail_text, format_jalali, pagination_row, search_type_keyboard, sort_keyboard, sort_drafts, truncate_description, type_filter_keyboard
         file = SimpleNamespace(
             file_type="video", file_name="clip.mp4", file_size=10,
             duration=5, description="توضیح همراه رسانه",
@@ -297,6 +329,10 @@ class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
         selected_buttons = [button for row in library_buttons for button in row if (button.callback_data or "").startswith("library_filter_toggle:")]
         self.assertEqual(sum("✅" in button.text for button in selected_buttons), 2)
         self.assertTrue(truncate_description("\n".join(["خط"] * 6)).endswith("…"))
+        sort_drafts[111] = [("name", "asc"), ("type", "desc")]
+        sort_buttons = [button for row in sort_keyboard(111).inline_keyboard for button in row]
+        self.assertTrue(any("1. ↑" in button.text for button in sort_buttons))
+        self.assertTrue(all(len(button.callback_data or "") <= 64 for button in sort_buttons))
 
 
 if __name__ == "__main__":

@@ -2,8 +2,8 @@
  * Main FileBrowser component - the core of the web interface
  */
 import { useEffect, useCallback, useRef, useState } from 'react';
-import { FolderPlus, Grid, List, Search, ChevronRight, Home, RefreshCw, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, Menu, FolderInput, Trash2, Pencil, X } from 'lucide-react';
-import { useFiles, useFolders, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useRecentFiles, useContinueWatching, useDeleteFolders, useMoveFolders, canPreviewText } from '../lib/api';
+import { FolderPlus, Grid, List, Search, ChevronRight, Home, RefreshCw, Clipboard, ArrowUp, ArrowLeft, Film, Music, Image as ImageIcon, FileText, Menu, FolderInput, Trash2, Pencil, X, SlidersHorizontal } from 'lucide-react';
+import { useFiles, useFolders, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useRecentFiles, useContinueWatching, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, serializeSort, useBatchUpdateFiles, BatchFileEdit } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import FileCard from './FileCard';
 import FolderCard from './FolderCard';
@@ -12,6 +12,8 @@ import MoveFileModal from './MoveFileModal';
 import DeleteConfirmModal from './DeleteConfirmModal';
 import RenameModal from './RenameModal';
 import DescriptionModal from './DescriptionModal';
+import SortModal from './SortModal';
+import BatchEditModal from './BatchEditModal';
 import Sidebar from './Sidebar';
 import Toasts from './Toasts';
 
@@ -60,11 +62,19 @@ export default function FileBrowser() {
     const [page, setPage] = useState(1);
     const [hasMore, setHasMore] = useState(true);
     const [allFiles, setAllFiles] = useState<TelegramFile[]>([]);
+    const [showSort, setShowSort] = useState(false);
+    const [showBatchEdit, setShowBatchEdit] = useState(false);
+    const [sortCriteria, setSortCriteria] = useState<SortCriterion[]>(() => {
+        try { return JSON.parse(localStorage.getItem('teleplay-sort') || '') || [{ field: 'created', direction: 'desc' }]; }
+        catch { return [{ field: 'created', direction: 'desc' }]; }
+    });
+    const sortValue = serializeSort(sortCriteria.filter(item => item.field !== 'count'));
+    const folderSortValue = serializeSort(sortCriteria.filter(item => ['name', 'created', 'updated', 'count'].includes(item.field)));
 
     // Data Fetching
-    const { data: filesList, isLoading: filesLoading, refetch: refetchFiles } = useFiles(currentFolderId, fileTypeFilter.join(',') || undefined, searchQuery || undefined, page);
-    const { data: recentFiles, isLoading: recentLoading, refetch: refetchRecent } = useRecentFiles(50);
-    const { data: cwFiles, isLoading: cwLoading, refetch: refetchCW } = useContinueWatching(50);
+    const { data: filesList, isLoading: filesLoading, refetch: refetchFiles } = useFiles(currentFolderId, fileTypeFilter.join(',') || undefined, searchQuery || undefined, page, sortValue);
+    const { data: recentFiles, isLoading: recentLoading, refetch: refetchRecent } = useRecentFiles(50, sortValue);
+    const { data: cwFiles, isLoading: cwLoading, refetch: refetchCW } = useContinueWatching(50, sortValue);
     
 
     // For files section, accumulate files from all pages
@@ -96,7 +106,7 @@ export default function FileBrowser() {
     }
 
     // Folders only show in 'files' mode
-    const { data: folders, isLoading: foldersLoading, refetch: refetchFolders } = useFolders(currentFolderId);
+    const { data: folders, isLoading: foldersLoading, refetch: refetchFolders } = useFolders(currentFolderId, folderSortValue);
     const showFolders = activeSection === 'files' && !searchQuery && fileTypeFilter.length === 0;
 
     // Combined loading state
@@ -110,6 +120,7 @@ export default function FileBrowser() {
     const moveFilesMutation = useMoveFiles();
     const moveFoldersMutation = useMoveFolders();
     const updateFolderMutation = useUpdateFolder();
+    const batchUpdateFilesMutation = useBatchUpdateFiles();
 
     const containerRef = useRef<HTMLDivElement>(null);
     const [isSelecting, setIsSelecting] = useState(false);
@@ -156,6 +167,16 @@ export default function FileBrowser() {
         }
         setDescriptionItem(null);
     }, [descriptionItem, updateFileMutation, updateFolderMutation, setDescriptionItem]);
+
+    const handleBatchEdit = useCallback(async (data: Omit<BatchFileEdit, 'ids'>) => {
+        await batchUpdateFilesMutation.mutateAsync({ ids: Array.from(selectedFileIds), ...data });
+        clearSelection();
+        addToast(`${selectedFileIds.size} فایل با موفقیت ویرایش شد`, 'success');
+    }, [addToast, batchUpdateFilesMutation, clearSelection, selectedFileIds]);
+
+    useEffect(() => {
+        localStorage.setItem('teleplay-sort', JSON.stringify(sortCriteria));
+    }, [sortCriteria]);
 
     // Navigate to folder
     const navigateToFolder = useCallback((folder: Folder | null) => {
@@ -460,12 +481,12 @@ export default function FileBrowser() {
         }
     }, [isLoading, hasMore, activeSection]);
 
-    // Reset pagination when filters change
+    // Reset pagination when the query changes. Page-one data replaces the old list
+    // when it arrives; clearing here could race with that response and hide results.
     useEffect(() => {
         setPage(1);
-        setAllFiles([]);
         setHasMore(true);
-    }, [currentFolderId, fileTypeFilter, searchQuery, activeSection]);
+    }, [currentFolderId, fileTypeFilter, searchQuery, activeSection, sortValue]);
 
     const selectedFilesForActions = displayFiles?.filter(file => selectedFileIds.has(file.id)) || [];
     const selectedFoldersForActions = folders?.filter(folder => selectedFolderIds.has(folder.id)) || [];
@@ -488,6 +509,17 @@ export default function FileBrowser() {
                         >
                             <Menu className="w-6 h-6" />
                         </button>
+
+                        {activeSection === 'files' && breadcrumbs.length > 1 && (
+                            <button
+                                onClick={() => navigateToBreadcrumb(breadcrumbs.length - 2)}
+                                className="sm:hidden p-2 -ml-2 rounded-lg text-dark-300 hover:text-white hover:bg-white/[0.06]"
+                                aria-label="برگشت به پوشه قبلی"
+                                title="پوشه قبلی"
+                            >
+                                <ArrowLeft className="w-5 h-5" />
+                            </button>
+                        )}
 
                         {/* Search */}
                         <div className="relative w-full max-w-[200px] sm:max-w-xs md:w-64">
@@ -526,6 +558,14 @@ export default function FileBrowser() {
 
                     {/* Right: Actions */}
                     <div className="flex items-center gap-2 sm:gap-3">
+                        <button
+                            onClick={() => setShowSort(true)}
+                            className="p-2 rounded-lg text-dark-300 hover:text-white hover:bg-white/[0.06]"
+                            title="مرتب‌سازی"
+                            aria-label="مرتب‌سازی"
+                        >
+                            <SlidersHorizontal className="w-4 h-4" />
+                        </button>
                          {/* Filter buttons with Icons */}
                         <div className="hidden md:flex items-center bg-dark-800/50 rounded-lg p-0.5 border border-white/[0.06] mr-2">
                              <button
@@ -578,7 +618,7 @@ export default function FileBrowser() {
                             </button>
                         </div>
  
-                         <div className="flex items-center gap-1 bg-dark-800/50 rounded-lg p-0.5 border border-white/[0.06]">
+                         <div className="hidden sm:flex items-center gap-1 bg-dark-800/50 rounded-lg p-0.5 border border-white/[0.06]">
                              <button
                                  onClick={handleRefresh}
                                  disabled={isLoading}
@@ -649,6 +689,7 @@ export default function FileBrowser() {
                             <div className="flex flex-wrap items-center gap-2 rounded-xl border border-primary-500/20 bg-primary-500/10 p-2">
                                 <span className="text-sm font-medium text-primary-200 px-2">{selectedItems.length} selected</span>
                                 {selectedItems.length === 1 && <button className="btn-secondary text-sm flex items-center gap-2" onClick={() => selectedFilesForActions[0] ? setRenameFile(selectedFilesForActions[0]) : setRenameFolder(selectedFoldersForActions[0])}><Pencil className="w-4 h-4" /> Rename</button>}
+                                {selectedFilesForActions.length > 0 && <button className="btn-secondary text-sm flex items-center gap-2" onClick={() => setShowBatchEdit(true)}><Pencil className="w-4 h-4" /> ویرایش گروهی</button>}
                                 <button className="btn-secondary text-sm flex items-center gap-2" onClick={() => setMoveItems({ files: selectedFilesForActions, folders: selectedFoldersForActions })}><FolderInput className="w-4 h-4" /> Move</button>
                                 <button className="btn-secondary text-sm flex items-center gap-2 text-red-300" onClick={() => setDeleteConfirm({ type: selectedFoldersForActions.length && selectedFilesForActions.length ? 'multiple' : selectedFoldersForActions.length ? 'folder' : 'file', items: selectedItems })}><Trash2 className="w-4 h-4" /> Delete</button>
                                 <button className="btn-icon" title="Clear selection" onClick={clearSelection}><X className="w-4 h-4" /></button>
@@ -804,6 +845,18 @@ export default function FileBrowser() {
                 currentDescription={descriptionItem?.item.description || ''}
                 onClose={() => setDescriptionItem(null)}
                 onSave={handleSaveDescription}
+            />
+            <SortModal
+                open={showSort}
+                criteria={sortCriteria}
+                onApply={setSortCriteria}
+                onClose={() => setShowSort(false)}
+            />
+            <BatchEditModal
+                open={showBatchEdit}
+                count={selectedFilesForActions.length}
+                onClose={() => setShowBatchEdit(false)}
+                onSave={handleBatchEdit}
             />
         </div>
     );

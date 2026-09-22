@@ -2,7 +2,7 @@
 Pydantic schemas for API request/response validation.
 """
 from datetime import datetime
-from typing import Optional, List
+from typing import Literal, Optional, List
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -84,6 +84,15 @@ class FileUpdate(BaseModel):
     file_name: Optional[str] = None
     description: Optional[str] = None
     folder_id: Optional[int] = None
+
+
+class BatchFileUpdate(BaseModel):
+    ids: List[int] = Field(min_length=1, max_length=500)
+    description_mode: Optional[Literal["set", "append", "clear"]] = None
+    description: Optional[str] = None
+    rename_mode: Optional[Literal["prefix", "suffix", "replace"]] = None
+    rename_value: Optional[str] = None
+    rename_search: Optional[str] = None
 
 
 class FileResponse(FileBase):

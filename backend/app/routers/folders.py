@@ -4,7 +4,7 @@ Folder management API endpoints.
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, update, delete, text
+from sqlalchemy import select, func, update, delete, text, asc, desc
 
 from ..database import get_db
 from ..models import Folder, File, User, WatchProgress
@@ -69,6 +69,7 @@ async def get_folder_file_count(db: AsyncSession, folder_id: int) -> int:
 @router.get("", response_model=List[FolderResponse])
 async def list_folders(
     parent_id: Optional[int] = Query(None, description="Filter by parent folder ID"),
+    sort: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -79,7 +80,6 @@ async def list_folders(
         .outerjoin(File, File.folder_id == Folder.id)
         .where(Folder.user_id == current_user.id)
         .group_by(Folder.id)
-        .order_by(Folder.name)
     )
     
     if parent_id is not None:
@@ -87,6 +87,19 @@ async def list_folders(
     else:
         stmt = stmt.where(Folder.parent_id.is_(None))
     
+    folder_sort_fields = {
+        "name": func.lower(Folder.name),
+        "count": func.count(File.id),
+        "created": Folder.created_at,
+        "updated": Folder.updated_at,
+    }
+    criteria = []
+    for raw in (sort or "name:asc").split(",")[:4]:
+        field, _, direction = raw.strip().partition(":")
+        column = folder_sort_fields.get(field)
+        if column is not None:
+            criteria.append(desc(column) if direction.lower() == "desc" else asc(column))
+    stmt = stmt.order_by(*(criteria or [asc(func.lower(Folder.name))]), asc(Folder.id))
     result = await db.execute(stmt)
     rows = result.all()
     

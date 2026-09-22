@@ -57,6 +57,12 @@ export interface FileListResponse {
     per_page: number;
 }
 
+export type SortField = 'name' | 'type' | 'size' | 'duration' | 'created' | 'updated' | 'count';
+export type SortDirection = 'asc' | 'desc';
+export interface SortCriterion { field: SortField; direction: SortDirection; }
+export const serializeSort = (criteria: SortCriterion[]): string =>
+    criteria.map(({ field, direction }) => `${field}:${direction}`).join(',');
+
 export const canPreviewText = (file: TelegramFile): boolean =>
     file.file_type === 'text' || (file.file_type === 'document' && (
         file.mime_type?.startsWith('text/') ||
@@ -266,9 +272,9 @@ export const useVerifyLoginCode = () => {
 
 // ============== Files Hooks ==============
 
-export const useFiles = (folderId?: number | null, fileType?: string, search?: string, page = 1) => {
+export const useFiles = (folderId?: number | null, fileType?: string, search?: string, page = 1, sort = '') => {
     return useQuery({
-        queryKey: ['files', folderId, fileType, search, page],
+        queryKey: ['files', folderId, fileType, search, page, sort],
         queryFn: async () => {
             const params: Record<string, any> = {};
             if (folderId !== undefined) params.folder_id = folderId;
@@ -276,6 +282,7 @@ export const useFiles = (folderId?: number | null, fileType?: string, search?: s
             if (search) params.search = search;
             params.page = page;
             params.per_page = 50; // Load 50 files per page
+            if (sort) params.sort = sort;
             const { data } = await api.get<FileListResponse>('/files', { params });
             return data;
         },
@@ -350,21 +357,21 @@ export const useMoveFiles = () => {
     });
 };
 
-export const useRecentFiles = (limit = 20) => {
+export const useRecentFiles = (limit = 20, sort = '') => {
     return useQuery<FileListResponse>({
-        queryKey: ['files', 'recent', limit],
+        queryKey: ['files', 'recent', limit, sort],
         queryFn: async () => {
-             const { data } = await api.get<FileListResponse>('/files/recent', { params: { limit } });
+             const { data } = await api.get<FileListResponse>('/files/recent', { params: { limit, sort: sort || undefined } });
              return data;
         },
     });
 };
 
-export const useContinueWatching = (limit = 20) => {
+export const useContinueWatching = (limit = 20, sort = '') => {
     return useQuery<FileListResponse>({
-        queryKey: ['files', 'continue-watching', limit],
+        queryKey: ['files', 'continue-watching', limit, sort],
         queryFn: async () => {
-             const { data } = await api.get<FileListResponse>('/files/continue-watching', { params: { limit } });
+             const { data } = await api.get<FileListResponse>('/files/continue-watching', { params: { limit, sort: sort || undefined } });
              return data;
         },
     });
@@ -404,12 +411,13 @@ export const useMoveFolders = () => {
     });
 };
 
-export const useFolders = (parentId?: number | null) => {
+export const useFolders = (parentId?: number | null, sort = '') => {
     return useQuery({
-        queryKey: ['folders', parentId],
+        queryKey: ['folders', parentId, sort],
         queryFn: async () => {
             const params: Record<string, any> = {};
             if (parentId !== undefined) params.parent_id = parentId;
+            if (sort) params.sort = sort;
             const { data } = await api.get<Folder[]>('/folders', { params });
             return data;
         },
@@ -508,6 +516,29 @@ export const formatDuration = (seconds: number | null): string => {
         return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     }
     return `${minutes}:${secs.toString().padStart(2, '0')}`;
+};
+
+export interface BatchFileEdit {
+    ids: number[];
+    description_mode?: 'set' | 'append' | 'clear';
+    description?: string;
+    rename_mode?: 'prefix' | 'suffix' | 'replace';
+    rename_value?: string;
+    rename_search?: string;
+}
+
+export const useBatchUpdateFiles = () => {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async (payload: BatchFileEdit) => {
+            const { data } = await api.post<{ message: string; updated: number }>('/files/batch-update', payload);
+            return data;
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['files'] });
+            queryClient.invalidateQueries({ queryKey: ['folders'] });
+        },
+    });
 };
 
 export const formatPersianDate = (value: string): string => {

@@ -30,11 +30,65 @@ filter_previous: dict[tuple[int, str], set[str]] = {}
 search_filter_returns: dict[int, str] = {}
 input_action_queues: dict[int, asyncio.Queue[str]] = {}
 detail_back_targets: dict[int, str] = {}
+sort_preferences: dict[int, list[tuple[str, str]]] = {}
+sort_drafts: dict[int, list[tuple[str, str]]] = {}
+sort_return_targets: dict[int, str] = {}
+batch_selections: dict[int, set[int]] = {}
+batch_return_targets: dict[int, str] = {}
 PAGE_SIZE = 8
 PREVIEW_TTL_SECONDS = 300
 TEHRAN_TZ = timezone(timedelta(hours=3, minutes=30))
 FILE_ICONS = {"video": "🎬", "audio": "🎵", "document": "📄", "image": "🖼", "text": "📝"}
 TYPE_LABELS = {"all": "همه", "video": "فیلم", "audio": "آهنگ", "image": "عکس", "text": "متن", "document": "سند", "folder": "پوشه"}
+SORT_LABELS = {"name": "نام", "type": "نوع", "size": "حجم", "duration": "مدت", "created": "تاریخ آپلود", "updated": "تاریخ ویرایش"}
+
+
+def _sort_value(kind: str, item, field: str):
+    if kind == "root":
+        return None
+    if field == "name":
+        return (item.file_name if kind == "file" else item.name).casefold()
+    if field == "type":
+        return item.file_type if kind == "file" else "folder"
+    if field == "size":
+        return item.file_size if kind == "file" else None
+    if field == "duration":
+        return item.duration if kind == "file" else None
+    if field == "created":
+        return item.created_at
+    if field == "updated":
+        return item.updated_at
+    return None
+
+
+def sort_library_items(items: list[tuple[str, object]], telegram_id: int) -> list[tuple[str, object]]:
+    """Stable multi-level sorting with missing values kept at the end."""
+    ordered = list(items)
+    criteria = sort_preferences.get(telegram_id, [("created", "desc")])
+    for field, direction in reversed(criteria):
+        present = [entry for entry in ordered if _sort_value(entry[0], entry[1], field) is not None]
+        missing = [entry for entry in ordered if _sort_value(entry[0], entry[1], field) is None]
+        present.sort(key=lambda entry: _sort_value(entry[0], entry[1], field), reverse=direction == "desc")
+        ordered = present + missing
+    return ordered
+
+
+def sort_keyboard(telegram_id: int) -> InlineKeyboardMarkup:
+    draft = sort_drafts.get(telegram_id, [])
+    buttons = []
+    fields = list(SORT_LABELS)
+    for start in range(0, len(fields), 2):
+        row = []
+        for field in fields[start:start + 2]:
+            current = next(((index, direction) for index, (name, direction) in enumerate(draft) if name == field), None)
+            prefix = f"{current[0] + 1}. {'↑' if current[1] == 'asc' else '↓'} " if current else ""
+            row.append(InlineKeyboardButton(f"{prefix}{SORT_LABELS[field]}", callback_data=f"sort_toggle:{field}"))
+        buttons.append(row)
+    buttons.extend([
+        [InlineKeyboardButton("اعمال مرتب‌سازی", callback_data="sort_apply"), InlineKeyboardButton("پیش‌فرض", callback_data="sort_default")],
+        [InlineKeyboardButton("لغو", callback_data="sort_cancel")],
+    ])
+    return InlineKeyboardMarkup(buttons)
 
 
 def escape_markdown(value: str) -> str:
@@ -242,6 +296,24 @@ def pagination_row(prefix: str, page: int, total: int) -> list[InlineKeyboardBut
     return row
 
 
+def file_list_button(file: File, telegram_id: int) -> InlineKeyboardButton:
+    selected = file.id in batch_selections.get(telegram_id, set())
+    label = f"{'✅ ' if selected else ''}{FILE_ICONS.get(file.file_type, '📎')} {file.file_name[:38]}"
+    callback_data = f"batch_toggle:{file.id}" if telegram_id in batch_return_targets else f"openfile:{file.id}"
+    return InlineKeyboardButton(label, callback_data=callback_data)
+
+
+def list_action_rows(telegram_id: int, target: str) -> list[list[InlineKeyboardButton]]:
+    if telegram_id in batch_return_targets:
+        count = len(batch_selections.get(telegram_id, set()))
+        return [
+            [InlineKeyboardButton(f"انتخاب‌شده‌ها: {count}", callback_data="noop")],
+            [InlineKeyboardButton("📂 انتقال", callback_data="batch_move:0"), InlineKeyboardButton("✏️ ویرایش", callback_data="batch_edit")],
+            [InlineKeyboardButton("🗑 حذف", callback_data="batch_delete"), InlineKeyboardButton("لغو انتخاب", callback_data="batch_cancel")],
+        ]
+    return [[InlineKeyboardButton("☑️ انتخاب گروهی", callback_data=f"batch_start:{target}"), InlineKeyboardButton("↕️ مرتب‌سازی", callback_data=f"sort_open:{target}")]]
+
+
 async def folder_path(db, folder: Folder | None) -> str:
     names = []
     current = folder
@@ -270,14 +342,14 @@ async def render_folder_page(message: Message, telegram_id: int, parent_id: int 
         file_query = select(File).where(File.user_id == user.id, File.folder_id == parent_id)
         if selected_types:
             file_query = file_query.where(File.file_type.in_(selected_types))
-        files = (await db.execute(file_query.order_by(File.created_at.desc()))).scalars().all()
+        files = (await db.execute(file_query)).scalars().all()
         root_file_count = len(files) if parent_id is None else 0
         path = await folder_path(db, parent)
 
     if parent_id is None:
-        items = [("root", root_file_count)] + [("folder", item) for item in folders]
+        items = [("root", root_file_count)] + sort_library_items([("folder", item) for item in folders], telegram_id)
     else:
-        items = [("folder", item) for item in folders] + [("file", item) for item in files]
+        items = sort_library_items([("folder", item) for item in folders] + [("file", item) for item in files], telegram_id)
     total = len(items)
     max_page = max(0, (total - 1) // PAGE_SIZE)
     page = min(max(page, 0), max_page)
@@ -289,9 +361,13 @@ async def render_folder_page(message: Message, telegram_id: int, parent_id: int 
         elif kind == "folder":
             buttons.append([InlineKeyboardButton(f"📂 {item.name[:40]}", callback_data=f"folder:{item.id}:0")])
         else:
-            buttons.append([InlineKeyboardButton(f"{FILE_ICONS.get(item.file_type, '📎')} {item.file_name[:40]}", callback_data=f"openfile:{item.id}")])
+            buttons.append([file_list_button(item, telegram_id)])
     if total > PAGE_SIZE:
         buttons.append(pagination_row(f"folders:{parent_id or 0}", page, total))
+    if parent_id is None and telegram_id not in batch_return_targets:
+        buttons.append([InlineKeyboardButton("↕️ مرتب‌سازی پوشه‌ها", callback_data=f"sort_open:folders:0:{page}")])
+    else:
+        buttons.extend(list_action_rows(telegram_id, f"folders:{parent_id or 0}:{page}"))
     if parent:
         buttons.extend([
             [InlineKeyboardButton("➕ ساخت زیرپوشه", callback_data=f"create_folder:{parent.id}"),
@@ -328,12 +404,14 @@ async def render_root_files(message: Message, telegram_id: int, page: int = 0) -
         query = select(File).where(File.user_id == user.id, File.folder_id.is_(None))
         if selected_types:
             query = query.where(File.file_type.in_(selected_types))
-        files = (await db.execute(query.order_by(File.created_at.desc()))).scalars().all()
+        files = (await db.execute(query)).scalars().all()
+    files = [item for _, item in sort_library_items([("file", file) for file in files], telegram_id)]
     page = min(max(page, 0), max(0, (len(files) - 1) // PAGE_SIZE))
     shown = files[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
-    buttons = [[InlineKeyboardButton(f"{FILE_ICONS.get(file.file_type, '📎')} {file.file_name[:40]}", callback_data=f"openfile:{file.id}")] for file in shown]
+    buttons = [[file_list_button(file, telegram_id)] for file in shown]
     if len(files) > PAGE_SIZE:
         buttons.append(pagination_row("rootfiles", page, len(files)))
+    buttons.extend(list_action_rows(telegram_id, f"rootfiles:{page}"))
     buttons.extend([
         [InlineKeyboardButton("☑️ انتخاب نوع", callback_data="library_filter:rootfiles")],
         [InlineKeyboardButton("↩️ کتابخانه", callback_data="folders:0:0"), InlineKeyboardButton("🏠 منوی اصلی", callback_data="home")],
@@ -357,12 +435,14 @@ async def render_recent_files(message: Message, telegram_id: int, page: int = 0)
         query = select(File).where(File.user_id == user.id)
         if selected_types:
             query = query.where(File.file_type.in_(selected_types))
-        files = (await db.execute(query.order_by(File.created_at.desc()))).scalars().all()
+        files = (await db.execute(query)).scalars().all()
+    files = [item for _, item in sort_library_items([("file", file) for file in files], telegram_id)]
     page = min(max(page, 0), max(0, (len(files) - 1) // PAGE_SIZE))
     shown = files[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
-    buttons = [[InlineKeyboardButton(f"{FILE_ICONS.get(file.file_type, '📎')} {file.file_name[:40]}", callback_data=f"openfile:{file.id}")] for file in shown]
+    buttons = [[file_list_button(file, telegram_id)] for file in shown]
     if len(files) > PAGE_SIZE:
         buttons.append(pagination_row("files", page, len(files)))
+    buttons.extend(list_action_rows(telegram_id, f"files:{page}"))
     buttons.extend([[InlineKeyboardButton("☑️ انتخاب نوع", callback_data="library_filter:files"), InlineKeyboardButton("🔍 جست‌وجو", callback_data="search_choose")], [InlineKeyboardButton("🗂️ پوشه‌ها", callback_data="folders:0:0"), InlineKeyboardButton("🏡 منوی اصلی", callback_data="home")]])
     text = "📁 **فایل‌های من**"
     if selected_types:
@@ -413,7 +493,7 @@ async def render_search_results(message: Message, telegram_id: int, page: int = 
             Folder.user_id == user.id,
             or_(Folder.name.ilike(pattern, escape="\\"), Folder.description.ilike(pattern, escape="\\")),
         ).order_by(Folder.name))).scalars().all() if user and include_folders else []
-    items = [("folder", folder) for folder in folders] + [("file", file) for file in files]
+    items = sort_library_items([("folder", folder) for folder in folders] + [("file", file) for file in files], telegram_id)
     page = min(max(page, 0), max(0, (len(items) - 1) // PAGE_SIZE))
     detail_back_targets[telegram_id] = f"search:{page}"
     shown = items[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
@@ -422,9 +502,10 @@ async def render_search_results(message: Message, telegram_id: int, page: int = 
         if kind == "folder":
             buttons.append([InlineKeyboardButton(f"📂 {item.name[:40]}", callback_data=f"folder:{item.id}:0")])
         else:
-            buttons.append([InlineKeyboardButton(f"{FILE_ICONS.get(item.file_type, '📎')} {item.file_name[:40]}", callback_data=f"openfile:{item.id}")])
+            buttons.append([file_list_button(item, telegram_id)])
     if len(items) > PAGE_SIZE:
         buttons.append(pagination_row("search", page, len(items)))
+    buttons.extend(list_action_rows(telegram_id, f"search:{page}"))
     buttons.extend([
         [InlineKeyboardButton("🔍 عبارت تازه", callback_data="search_again"), InlineKeyboardButton("☑️ تغییر نوع‌ها", callback_data="search_refine")],
         [InlineKeyboardButton("🏡 منوی اصلی", callback_data="home")],
@@ -434,6 +515,20 @@ async def render_search_results(message: Message, telegram_id: int, page: int = 
     if not items:
         text += "\n\nچیزی پیدا نکردم؛ عبارت یا نوع محتوا رو تغییر بده 🌱"
     await message.edit(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+
+async def render_list_target(message: Message, telegram_id: int, target: str) -> None:
+    if target.startswith("files:"):
+        await render_recent_files(message, telegram_id, int(target.split(":")[1]))
+    elif target.startswith("rootfiles:"):
+        await render_root_files(message, telegram_id, int(target.split(":")[1]))
+    elif target.startswith("folders:"):
+        _, parent, page = target.split(":")
+        await render_folder_page(message, telegram_id, int(parent) or None, int(page))
+    elif target.startswith("search:"):
+        await render_search_results(message, telegram_id, int(target.split(":")[1]))
+    else:
+        await render_recent_files(message, telegram_id)
 
 
 def file_detail_text(file: File) -> str:
@@ -913,7 +1008,224 @@ async def handle_callback(client, callback: CallbackQuery):
     elif data == "noop":
         await callback.answer()
 
+    elif data.startswith("sort_open:"):
+        target = data.split(":", 1)[1]
+        sort_return_targets[callback.from_user.id] = target
+        sort_drafts[callback.from_user.id] = list(sort_preferences.get(callback.from_user.id, [("created", "desc")]))
+        await callback.message.edit(
+            "↕️ **مرتب‌سازی چندمرحله‌ای**\n\nمعیارها به ترتیب انتخاب، اولویت می‌گیرن. هر دکمه رو دوباره بزن تا جهتش عوض بشه یا حذف بشه.",
+            reply_markup=sort_keyboard(callback.from_user.id),
+        )
+        await callback.answer()
+
+    elif data.startswith("sort_toggle:"):
+        field = data.split(":", 1)[1]
+        draft = sort_drafts.setdefault(callback.from_user.id, [])
+        match = next((index for index, item in enumerate(draft) if item[0] == field), None)
+        if match is None:
+            draft.append((field, "asc"))
+        elif draft[match][1] == "asc":
+            draft[match] = (field, "desc")
+        else:
+            draft.pop(match)
+        await callback.message.edit_reply_markup(sort_keyboard(callback.from_user.id))
+        await callback.answer()
+
+    elif data == "sort_default":
+        sort_drafts[callback.from_user.id] = [("created", "desc")]
+        await callback.message.edit_reply_markup(sort_keyboard(callback.from_user.id))
+        await callback.answer("مرتب‌سازی پیش‌فرض انتخاب شد.")
+
+    elif data in ("sort_apply", "sort_cancel"):
+        if data == "sort_apply":
+            sort_preferences[callback.from_user.id] = list(sort_drafts.get(callback.from_user.id) or [("created", "desc")])
+        target = sort_return_targets.pop(callback.from_user.id, "files:0")
+        sort_drafts.pop(callback.from_user.id, None)
+        await render_list_target(callback.message, callback.from_user.id, target)
+        await callback.answer("مرتب‌سازی اعمال شد." if data == "sort_apply" else "تغییری اعمال نشد.")
+
+    elif data.startswith("batch_start:"):
+        target = data.split(":", 1)[1]
+        batch_return_targets[callback.from_user.id] = target
+        batch_selections[callback.from_user.id] = set()
+        await render_list_target(callback.message, callback.from_user.id, target)
+        await callback.answer("فایل‌ها رو انتخاب کن.")
+
+    elif data.startswith("batch_toggle:"):
+        file_id = int(data.split(":", 1)[1])
+        async with async_session() as db:
+            exists = (await db.execute(owned_file(file_id, callback.from_user.id))).scalar_one_or_none()
+        if exists is None:
+            await callback.answer("فایل پیدا نشد.", show_alert=True)
+            return
+        selected = batch_selections.setdefault(callback.from_user.id, set())
+        selected.symmetric_difference_update({file_id})
+        target = batch_return_targets.get(callback.from_user.id, "files:0")
+        await render_list_target(callback.message, callback.from_user.id, target)
+        await callback.answer("انتخاب شد." if file_id in selected else "از انتخاب خارج شد.")
+
+    elif data == "batch_cancel":
+        target = batch_return_targets.pop(callback.from_user.id, "files:0")
+        batch_selections.pop(callback.from_user.id, None)
+        await render_list_target(callback.message, callback.from_user.id, target)
+        await callback.answer("انتخاب گروهی بسته شد.")
+
+    elif data == "batch_delete":
+        count = len(batch_selections.get(callback.from_user.id, set()))
+        if not count:
+            await callback.answer("اول حداقل یک فایل انتخاب کن.", show_alert=True)
+            return
+        await callback.message.edit(
+            f"🗑 **حذف {count} فایل**\nاین فایل‌ها از کتابخانه و کانال ذخیره‌سازی حذف می‌شن. مطمئنی؟",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("بله، حذف شوند", callback_data="batch_delete_confirm")],
+                [InlineKeyboardButton("↩️ برگشت", callback_data="batch_return")],
+            ]),
+        )
+        await callback.answer()
+
+    elif data == "batch_delete_confirm":
+        selected_ids = batch_selections.get(callback.from_user.id, set())
+        async with async_session() as db:
+            user = (await db.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one_or_none()
+            files = (await db.execute(select(File).where(File.user_id == user.id, File.id.in_(selected_ids)))).scalars().all() if user else []
+            message_ids = [file.channel_message_id for file in files]
+            for start in range(0, len(message_ids), 100):
+                if not await delete_from_storage_channel(message_ids[start:start + 100]):
+                    await callback.answer("حذف از فضای ذخیره‌سازی انجام نشد.", show_alert=True)
+                    return
+            for file in files:
+                await db.delete(file)
+            await db.commit()
+        target = batch_return_targets.pop(callback.from_user.id, "files:0")
+        batch_selections.pop(callback.from_user.id, None)
+        await render_list_target(callback.message, callback.from_user.id, target)
+        await callback.answer(f"{len(files)} فایل حذف شد.")
+
+    elif data == "batch_return":
+        await render_list_target(callback.message, callback.from_user.id, batch_return_targets.get(callback.from_user.id, "files:0"))
+        await callback.answer()
+
+    elif data.startswith("batch_move:"):
+        if not batch_selections.get(callback.from_user.id):
+            await callback.answer("اول حداقل یک فایل انتخاب کن.", show_alert=True)
+            return
+        page = int(data.split(":", 1)[1])
+        async with async_session() as db:
+            user = (await db.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one_or_none()
+            folders = (await db.execute(select(Folder).where(Folder.user_id == user.id).order_by(Folder.name))).scalars().all() if user else []
+            targets = [(folder, await folder_path(db, folder)) for folder in folders]
+        page = min(max(page, 0), max(0, (len(targets) - 1) // PAGE_SIZE))
+        shown = targets[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
+        buttons = [[InlineKeyboardButton(f"📂 {path[:42]}", callback_data=f"batch_moveto:{folder.id}")] for folder, path in shown]
+        if len(targets) > PAGE_SIZE:
+            buttons.append(pagination_row("batch_move", page, len(targets)))
+        buttons.extend([[InlineKeyboardButton("🗂 فایل‌های بدون پوشه", callback_data="batch_moveto:0")], [InlineKeyboardButton("↩️ برگشت", callback_data="batch_return")]])
+        await callback.message.edit("📂 فایل‌های انتخاب‌شده به کجا منتقل بشن؟", reply_markup=InlineKeyboardMarkup(buttons))
+        await callback.answer()
+
+    elif data.startswith("batch_moveto:"):
+        target_id = int(data.split(":", 1)[1]) or None
+        selected_ids = batch_selections.get(callback.from_user.id, set())
+        async with async_session() as db:
+            user = (await db.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one_or_none()
+            if target_id is not None:
+                target = (await db.execute(select(Folder).where(Folder.id == target_id, Folder.user_id == user.id))).scalar_one_or_none() if user else None
+                if target is None:
+                    await callback.answer("پوشه مقصد پیدا نشد.", show_alert=True)
+                    return
+            files = (await db.execute(select(File).where(File.user_id == user.id, File.id.in_(selected_ids)))).scalars().all() if user else []
+            for file in files:
+                file.folder_id = target_id
+            await db.commit()
+        return_target = batch_return_targets.pop(callback.from_user.id, "files:0")
+        batch_selections.pop(callback.from_user.id, None)
+        await render_list_target(callback.message, callback.from_user.id, return_target)
+        await callback.answer(f"{len(files)} فایل منتقل شد.")
+
+    elif data == "batch_edit":
+        if not batch_selections.get(callback.from_user.id):
+            await callback.answer("اول حداقل یک فایل انتخاب کن.", show_alert=True)
+            return
+        await callback.message.edit(
+            "✏️ **ویرایش گروهی فایل‌ها**\nچه تغییری اعمال بشه؟",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📝 جایگزینی توضیحات", callback_data="batch_edit_input:desc_set"), InlineKeyboardButton("➕ افزودن توضیحات", callback_data="batch_edit_input:desc_append")],
+                [InlineKeyboardButton("🧹 پاک‌کردن توضیحات", callback_data="batch_edit_apply:desc_clear")],
+                [InlineKeyboardButton("پیشوند نام", callback_data="batch_edit_input:name_prefix"), InlineKeyboardButton("پسوند نام", callback_data="batch_edit_input:name_suffix")],
+                [InlineKeyboardButton("پیدا و جایگزین نام", callback_data="batch_edit_input:name_replace")],
+                [InlineKeyboardButton("↩️ برگشت", callback_data="batch_return")],
+            ]),
+        )
+        await callback.answer()
+
+    elif data.startswith("batch_edit_apply:"):
+        action = data.split(":", 1)[1]
+        selected_ids = batch_selections.get(callback.from_user.id, set())
+        async with async_session() as db:
+            user = (await db.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one_or_none()
+            files = (await db.execute(select(File).where(File.user_id == user.id, File.id.in_(selected_ids)))).scalars().all() if user else []
+            if action == "desc_clear":
+                for file in files:
+                    file.description = None
+            await db.commit()
+        await render_list_target(callback.message, callback.from_user.id, batch_return_targets.get(callback.from_user.id, "files:0"))
+        await callback.answer(f"{len(files)} فایل ویرایش شد.")
+
+    elif data.startswith("batch_edit_input:"):
+        action = data.split(":", 1)[1]
+        hints = {
+            "desc_set": "توضیحات جدید رو بفرست.", "desc_append": "متنی که باید اضافه بشه رو بفرست.",
+            "name_prefix": "پیشوند نام فایل‌ها رو بفرست.", "name_suffix": "پسوند نام فایل‌ها رو بفرست.",
+            "name_replace": "عبارت قبلی و جدید رو به شکل `قدیمی => جدید` بفرست.",
+        }
+        pending_input_chats.add(callback.message.chat.id)
+        prompt = await callback.message.reply(hints[action], reply_markup=input_keyboard())
+        await callback.answer()
+        reply = None
+        try:
+            reply, input_action = await wait_for_input(client, callback.message.chat.id)
+            if input_action == "cancel" or reply is None or not reply.text:
+                await callback.message.edit("ویرایش گروهی لغو شد.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ برگشت", callback_data="batch_return")]]))
+                return
+            value = reply.text.strip()
+            if not value:
+                return
+            replacement = ""
+            if action == "name_replace":
+                if "=>" not in value:
+                    await callback.message.edit("قالب متن درست نبود. نمونه: `قدیمی => جدید`", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ برگشت", callback_data="batch_return")]]))
+                    return
+                value, replacement = [part.strip() for part in value.split("=>", 1)]
+                if not value:
+                    return
+            selected_ids = batch_selections.get(callback.from_user.id, set())
+            async with async_session() as db:
+                user = (await db.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one_or_none()
+                files = (await db.execute(select(File).where(File.user_id == user.id, File.id.in_(selected_ids)))).scalars().all() if user else []
+                for file in files:
+                    if action == "desc_set":
+                        file.description = value[:1024]
+                    elif action == "desc_append":
+                        file.description = f"{file.description}\n{value}".strip()[:1024] if file.description else value[:1024]
+                    else:
+                        stem, dot, extension = file.file_name.rpartition(".")
+                        if not dot or not stem:
+                            stem, extension = file.file_name, ""
+                        if action == "name_prefix": stem = value + stem
+                        elif action == "name_suffix": stem = stem + value
+                        else: stem = stem.replace(value, replacement)
+                        file.file_name = sanitize_filename(f"{stem}.{extension}" if extension else stem)
+                await db.commit()
+            await render_list_target(callback.message, callback.from_user.id, batch_return_targets.get(callback.from_user.id, "files:0"))
+        finally:
+            pending_input_chats.discard(callback.message.chat.id)
+            await safe_delete(prompt)
+            await safe_delete(reply)
+
     elif data == "home":
+        batch_selections.pop(callback.from_user.id, None)
+        batch_return_targets.pop(callback.from_user.id, None)
         await callback.message.edit(
             "🌟 **دوباره رسیدیم به خونهٔ TelePlay**\n\nکتابخونه‌ات همین‌جاست؛ می‌تونی فایل‌هات رو ببینی، چیزی پیدا کنی یا یه پوشهٔ تازه بسازی. از کجا ادامه بدیم؟ 👇",
             reply_markup=main_menu_keyboard(callback.from_user.id),

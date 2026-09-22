@@ -5,12 +5,12 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 import secrets
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, delete
+from sqlalchemy import select, func, delete, asc, desc
 from sqlalchemy.orm import selectinload
 
 from ..database import get_db
 from ..models import File, User, WatchProgress, Folder
-from ..schemas import FileResponse, FileListResponse, FileUpdate, WatchProgressUpdate
+from ..schemas import BatchFileUpdate, FileResponse, FileListResponse, FileUpdate, WatchProgressUpdate
 from ..auth import get_current_user
 from ..telegram import delete_from_storage_channel, get_message_from_channel
 from .. import telegram
@@ -25,6 +25,30 @@ from ..services import (
 
 router = APIRouter(prefix="/files", tags=["Files"])
 settings = get_settings()
+
+
+FILE_SORT_FIELDS = {
+    "name": func.lower(File.file_name),
+    "type": File.file_type,
+    "size": File.file_size,
+    "duration": File.duration,
+    "created": File.created_at,
+    "updated": File.updated_at,
+}
+
+
+def apply_file_sort(query, sort: Optional[str]):
+    """Apply a comma-separated, stable multi-column sort such as name:asc,type:desc."""
+    criteria = []
+    for raw in (sort or "created:desc").split(",")[:6]:
+        field, _, direction = raw.strip().partition(":")
+        column = FILE_SORT_FIELDS.get(field)
+        if column is None:
+            continue
+        criteria.append(desc(column) if direction.lower() == "desc" else asc(column))
+    if not criteria:
+        criteria = [desc(File.created_at)]
+    return query.order_by(*criteria, asc(File.id))
 
 
 @router.get("/{file_id}/text")
@@ -73,6 +97,7 @@ async def list_files(
     per_page: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    sort: Optional[str] = None,
 ):
     """List user's files with optional filtering."""
     query = select(File).where(File.user_id == current_user.id).options(selectinload(File.watch_progress))
@@ -101,7 +126,7 @@ async def list_files(
     total = (await db.execute(count_query)).scalar()
     
     # Apply pagination
-    query = query.order_by(File.created_at.desc())
+    query = apply_file_sort(query, sort)
     query = query.offset((page - 1) * per_page).limit(per_page)
     
     result = await db.execute(query)
@@ -118,11 +143,13 @@ async def list_files(
 @router.get("/recent", response_model=FileListResponse)
 async def get_recent_files(
     limit: int = Query(20, ge=1, le=100),
+    sort: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Get recently added files across all folders."""
-    files = await fetch_recent_files(db, current_user.id, limit)
+    query = select(File).where(File.user_id == current_user.id).options(selectinload(File.watch_progress))
+    files = (await db.execute(apply_file_sort(query, sort).limit(limit))).scalars().all()
     
     return FileListResponse(
         files=[FileResponse(**add_urls_to_file(f)) for f in files],
@@ -137,9 +164,24 @@ async def get_continue_watching(
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    sort: Optional[str] = None,
 ):
     """Get files with watch progress."""
-    files = await fetch_continue_watching_files(db, current_user.id, limit)
+    if sort:
+        query = (
+            select(File)
+            .join(WatchProgress, File.id == WatchProgress.file_id)
+            .where(
+                File.user_id == current_user.id,
+                WatchProgress.user_id == current_user.id,
+                WatchProgress.position > 0,
+                WatchProgress.completed == False,
+            )
+            .options(selectinload(File.watch_progress))
+        )
+        files = (await db.execute(apply_file_sort(query, sort).limit(limit))).scalars().unique().all()
+    else:
+        files = await fetch_continue_watching_files(db, current_user.id, limit)
     
     return FileListResponse(
         files=[FileResponse(**add_urls_to_file(f)) for f in files],
@@ -282,6 +324,51 @@ async def batch_delete_files(
     await db.commit()
     
     return {"message": f"Deleted {len(files)} files"}
+
+
+@router.post("/batch-update")
+async def batch_update_files(
+    update_data: BatchFileUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Edit descriptions and names for a selected group of files."""
+    files = (await db.execute(select(File).where(
+        File.id.in_(dict.fromkeys(update_data.ids)), File.user_id == current_user.id
+    ))).scalars().all()
+    if not files:
+        raise HTTPException(status_code=404, detail="No files found")
+    if update_data.description_mode in {"set", "append"} and update_data.description is None:
+        raise HTTPException(status_code=400, detail="Description is required")
+    if update_data.rename_mode in {"prefix", "suffix"} and not update_data.rename_value:
+        raise HTTPException(status_code=400, detail="Rename value is required")
+    if update_data.rename_mode == "replace" and not update_data.rename_search:
+        raise HTTPException(status_code=400, detail="Search text is required")
+
+    description = (update_data.description or "").strip()[:1024]
+    for file in files:
+        if update_data.description_mode == "clear":
+            file.description = None
+        elif update_data.description_mode == "set":
+            file.description = description or None
+        elif update_data.description_mode == "append" and description:
+            file.description = f"{file.description}\n{description}".strip()[:1024] if file.description else description
+
+        if update_data.rename_mode:
+            name = file.file_name
+            stem, dot, extension = name.rpartition(".")
+            if not dot or not stem:
+                stem, extension = name, ""
+            if update_data.rename_mode == "prefix":
+                stem = f"{update_data.rename_value}{stem}"
+            elif update_data.rename_mode == "suffix":
+                stem = f"{stem}{update_data.rename_value}"
+            else:
+                stem = stem.replace(update_data.rename_search or "", update_data.rename_value or "")
+            file.file_name = sanitize_filename(f"{stem}.{extension}" if extension else stem)
+
+    await db.commit()
+    return {"message": f"Updated {len(files)} files", "updated": len(files)}
 
 
 @router.post("/{file_id}/progress")
