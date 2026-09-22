@@ -10,12 +10,13 @@ interface FolderCardProps {
     folder: Folder;
     viewMode: 'grid' | 'list';
     selected?: boolean;
+    selectionMode?: boolean;
     onSelect?: (multi: boolean) => void;
     onOpen: () => void;
     onFileDrop: (fileId: number, folderId: number) => void;
 }
 
-export default function FolderCard({ folder, viewMode, selected, onSelect, onOpen, onFileDrop }: FolderCardProps) {
+export default function FolderCard({ folder, viewMode, selected, selectionMode = false, onSelect, onOpen, onFileDrop }: FolderCardProps) {
     const [isDragOver, setIsDragOver] = useState(false);
     const { activeContextMenu, setActiveContextMenu } = useAppStore();
 
@@ -29,7 +30,7 @@ export default function FolderCard({ folder, viewMode, selected, onSelect, onOpe
     };
 
     const handleClick = (e: React.MouseEvent) => {
-        if (onSelect && (e.ctrlKey || e.metaKey || e.shiftKey)) {
+        if (onSelect && (selectionMode || e.ctrlKey || e.metaKey || e.shiftKey)) {
             e.preventDefault();
             e.stopPropagation();
             onSelect(true);
@@ -104,7 +105,9 @@ export default function FolderCard({ folder, viewMode, selected, onSelect, onOpe
                         className={`absolute -top-1 -left-1 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all
                             ${selected 
                                 ? 'bg-primary-500 border-dark-950 scale-110 shadow-lg shadow-primary-500/20' 
-                                : 'bg-dark-800 border-white/10 opacity-0 group-hover:opacity-100 hover:border-primary-500/50'}`}
+                                : selectionMode
+                                    ? 'bg-dark-800 border-white/30 opacity-100'
+                                    : 'bg-dark-800 border-white/10 opacity-0 group-hover:opacity-100 hover:border-primary-500/50'}`}
                     >
                         <div className={`w-1.5 h-1.5 rounded-full bg-white transition-transform ${selected ? 'scale-100' : 'scale-0'}`} />
                     </div>
@@ -167,7 +170,9 @@ export default function FolderCard({ folder, viewMode, selected, onSelect, onOpe
                         className={`absolute -top-1.5 -left-1.5 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all z-10
                             ${selected 
                                 ? 'bg-primary-500 border-dark-900 scale-110 shadow-lg shadow-primary-500/20' 
-                                : 'bg-dark-800 border-white/10 opacity-0 group-hover:opacity-100 hover:border-primary-500/50'}`}
+                                : selectionMode
+                                    ? 'bg-dark-800 border-white/30 opacity-100'
+                                    : 'bg-dark-800 border-white/10 opacity-0 group-hover:opacity-100 hover:border-primary-500/50'}`}
                     >
                          <div className={`w-1.5 h-1.5 rounded-full bg-white transition-transform ${selected ? 'scale-100' : 'scale-0'}`} />
                     </div>

@@ -89,7 +89,7 @@ export default function PwaManager() {
             <WifiOff className="h-4 w-4" /> آفلاینی؛ برای دیدن فایل‌ها دوباره به اینترنت وصل شو.
         </div>}
 
-        {(showInstall || waitingWorker) && <div className="pwa-safe-bottom fixed bottom-4 right-4 z-[190] flex max-w-[calc(100vw-2rem)] flex-col gap-2 sm:flex-row" dir="rtl">
+        {(showInstall || waitingWorker) && <div className="pwa-safe-bottom fixed bottom-4 left-4 z-[190] flex max-w-[calc(100vw-2rem)] flex-col gap-2 sm:flex-row" dir="rtl">
             {waitingWorker && <button onClick={applyUpdate} className="flex items-center justify-center gap-2 rounded-xl border border-primary-400/30 bg-dark-900/95 px-4 py-3 text-sm font-semibold text-white shadow-2xl backdrop-blur">
                 <RefreshCw className="h-4 w-4 text-primary-300" /> نسخه جدید آماده است
             </button>}

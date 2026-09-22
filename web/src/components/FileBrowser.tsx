@@ -2,8 +2,8 @@
  * Main FileBrowser component - the core of the web interface
  */
 import { useEffect, useCallback, useRef, useState } from 'react';
-import { FolderPlus, Folder as FolderIcon, Grid, List, Search, ChevronRight, Home, RefreshCw, Clipboard, ArrowUp, ArrowRight, Film, Music, Image as ImageIcon, FileText, Menu, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes } from 'lucide-react';
-import { useFiles, useFolders, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useRecentFiles, useContinueWatching, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, serializeSort, useBatchUpdateFiles, BatchFileEdit } from '../lib/api';
+import { FolderPlus, Folder as FolderIcon, Grid, List, Search, ChevronRight, Home, RefreshCw, Clipboard, ArrowUp, ArrowRight, Film, Music, Image as ImageIcon, FileText, Menu, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ChevronDown, ChevronUp, Plus, CheckSquare, Square, MousePointer2 } from 'lucide-react';
+import { useFiles, useFolders, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useRecentFiles, useContinueWatching, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import FileCard from './FileCard';
 import FolderCard from './FolderCard';
@@ -12,10 +12,14 @@ import MoveFileModal from './MoveFileModal';
 import DeleteConfirmModal from './DeleteConfirmModal';
 import RenameModal from './RenameModal';
 import DescriptionModal from './DescriptionModal';
-import SortModal from './SortModal';
 import BatchEditModal from './BatchEditModal';
 import Sidebar from './Sidebar';
 import Toasts from './Toasts';
+
+const sortLabels: Record<SortField, string> = {
+    name: 'نام', type: 'نوع', size: 'حجم', duration: 'مدت',
+    created: 'تاریخ آپلود', updated: 'تاریخ ویرایش', count: 'تعداد فایل‌های کشو',
+};
 
 export default function FileBrowser() {
     const {
@@ -65,6 +69,7 @@ export default function FileBrowser() {
     const [showSort, setShowSort] = useState(false);
     const [showFilters, setShowFilters] = useState(false);
     const [showBatchEdit, setShowBatchEdit] = useState(false);
+    const [selectionMode, setSelectionMode] = useState(false);
     const [contentScope, setContentScope] = useState<'all' | 'files' | 'folders'>('all');
     const [sortCriteria, setSortCriteria] = useState<SortCriterion[]>(() => {
         try { return JSON.parse(localStorage.getItem('teleplay-sort') || '') || [{ field: 'created', direction: 'desc' }]; }
@@ -513,6 +518,29 @@ export default function FileBrowser() {
         setFileTypeFilter(type);
         clearSelection();
     };
+    const availableSortFields = (Object.keys(sortLabels) as SortField[]).filter(field => !sortCriteria.some(item => item.field === field));
+    const updateSort = (index: number, next: SortCriterion) => setSortCriteria(sortCriteria.map((item, itemIndex) => itemIndex === index ? next : item));
+    const moveSort = (index: number, offset: number) => {
+        const target = index + offset;
+        if (target < 0 || target >= sortCriteria.length) return;
+        const next = [...sortCriteria];
+        [next[index], next[target]] = [next[target], next[index]];
+        setSortCriteria(next);
+    };
+    const removeSort = (index: number) => {
+        const next = sortCriteria.filter((_, itemIndex) => itemIndex !== index);
+        setSortCriteria(next.length ? next : [{ field: 'created', direction: 'desc' }]);
+    };
+    const visibleFileIds = showFiles ? displayFiles?.map(file => file.id) || [] : [];
+    const visibleFolderIds = showFolders ? visibleFolders?.map(folder => folder.id) || [] : [];
+    const visibleItemCount = visibleFileIds.length + visibleFolderIds.length;
+    const allVisibleSelected = visibleItemCount > 0
+        && visibleFileIds.every(id => selectedFileIds.has(id))
+        && visibleFolderIds.every(id => selectedFolderIds.has(id));
+    const toggleSelectAll = () => {
+        if (allVisibleSelected) clearSelection();
+        else selectAll(visibleFileIds, visibleFolderIds);
+    };
 
     return (
         <div dir="rtl" className="flex h-screen bg-dark-950 text-white selection:bg-primary-500/30 overflow-hidden">
@@ -565,13 +593,13 @@ export default function FileBrowser() {
                                     {index > 0 && <ChevronRight className="w-4 h-4 text-dark-600 mx-1 shrink-0 rotate-180" />}
                                     <button 
                                         onClick={() => navigateToBreadcrumb(index)}
-                                        className={`px-2 py-1 rounded-md text-sm truncate max-w-[150px] transition-colors ${index === breadcrumbs.length - 1 
+                                        className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-sm truncate max-w-[150px] transition-colors ${index === breadcrumbs.length - 1
                                             ? 'text-white font-medium bg-white/[0.05]'
                                             : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'
                                             }`}
                                     >
-                                        {index === 0 && <Home className="w-3.5 h-3.5" />}
-                                        {crumb.name}
+                                        {index === 0 && <Home className="w-3.5 h-3.5 shrink-0" />}
+                                        <span className="truncate">{crumb.name}</span>
                                     </button>
                                 </div>
                             ))}
@@ -679,14 +707,23 @@ export default function FileBrowser() {
                                     ))}
                                 </div>
                                 <div className="flex flex-wrap items-center gap-2">
-                                    <button onClick={() => setShowFilters(value => !value)} disabled={contentScope === 'folders'} className={`btn-secondary flex items-center gap-2 text-sm disabled:cursor-not-allowed disabled:opacity-40 ${fileTypeFilter.length ? 'border-primary-500/40 text-primary-200' : ''}`}>
+                                    <button onClick={() => { setShowFilters(value => !value); setShowSort(false); }} disabled={contentScope === 'folders'} className={`btn-secondary flex items-center gap-2 text-sm disabled:cursor-not-allowed disabled:opacity-40 ${fileTypeFilter.length ? 'border-primary-500/40 text-primary-200' : ''}`}>
                                         <SlidersHorizontal className="h-4 w-4" />
                                         نوع فایل
                                         {fileTypeFilter.length > 0 && <span className="rounded-full bg-primary-500 px-1.5 text-[10px] text-white">{fileTypeFilter.length.toLocaleString('fa-IR')}</span>}
                                     </button>
-                                    <button onClick={() => setShowSort(true)} className="btn-secondary flex items-center gap-2 text-sm">
+                                    <button onClick={() => { setShowSort(value => !value); setShowFilters(false); }} className={`btn-secondary flex items-center gap-2 text-sm ${showSort ? 'border-primary-500/40 text-primary-200' : ''}`}>
                                         <SlidersHorizontal className="h-4 w-4" /> مرتب‌سازی
                                     </button>
+                                    <button onClick={() => setSelectionMode(value => !value)} className={`btn-secondary flex items-center gap-2 text-sm ${selectionMode ? 'border-primary-500/40 bg-primary-500/10 text-primary-200' : ''}`}>
+                                        <MousePointer2 className="h-4 w-4" /> {selectionMode ? 'پایان انتخاب' : 'انتخاب گروهی'}
+                                    </button>
+                                    {(selectionMode || selectedItems.length > 0) && (
+                                        <button onClick={toggleSelectAll} disabled={visibleItemCount === 0} className="btn-secondary flex items-center gap-2 text-sm disabled:opacity-40">
+                                            {allVisibleSelected ? <CheckSquare className="h-4 w-4 text-primary-300" /> : <Square className="h-4 w-4" />}
+                                            {allVisibleSelected ? 'لغو انتخاب همه' : 'انتخاب همه'}
+                                        </button>
+                                    )}
                                     <button onClick={handleRefresh} className="btn-secondary flex items-center gap-2 text-sm sm:hidden">
                                         <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} /> تازه‌سازی
                                     </button>
@@ -708,6 +745,32 @@ export default function FileBrowser() {
                                     </div>
                                 </div>
                             )}
+                            {showSort && (
+                                <div className="mt-3 border-t border-white/[0.06] pt-3">
+                                    <div className="mb-3 flex items-center justify-between gap-3">
+                                        <div><p className="text-sm font-medium text-white">مرتب‌سازی چندمرحله‌ای ✨</p><p className="mt-1 text-xs text-dark-400">اولویت‌ها از راست و بالا به پایین اعمال می‌شوند و تغییرات همان لحظه نمایش داده می‌شوند.</p></div>
+                                        <button onClick={() => setSortCriteria([{ field: 'created', direction: 'desc' }])} className="shrink-0 text-xs text-dark-400 hover:text-white">حالت پیش‌فرض</button>
+                                    </div>
+                                    <div className="space-y-2">
+                                        {sortCriteria.map((item, index) => (
+                                            <div key={item.field} className="flex flex-wrap items-center gap-2 rounded-xl border border-white/[0.08] bg-dark-800/60 p-2">
+                                                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary-500/15 text-xs text-primary-300">{(index + 1).toLocaleString('fa-IR')}</span>
+                                                <span className="min-w-24 flex-1 text-sm">{sortLabels[item.field]}</span>
+                                                <button className="rounded-lg bg-dark-700 px-2.5 py-1.5 text-xs hover:bg-dark-600" onClick={() => updateSort(index, { ...item, direction: item.direction === 'asc' ? 'desc' : 'asc' })}>
+                                                    {item.direction === 'asc' ? <><ArrowUp className="inline h-3.5 w-3.5" /> صعودی</> : <><ArrowDown className="inline h-3.5 w-3.5" /> نزولی</>}
+                                                </button>
+                                                <button className="btn-icon p-1.5" disabled={index === 0} title="یک اولویت بالاتر" onClick={() => moveSort(index, -1)}><ChevronUp className="h-4 w-4" /></button>
+                                                <button className="btn-icon p-1.5" disabled={index === sortCriteria.length - 1} title="یک اولویت پایین‌تر" onClick={() => moveSort(index, 1)}><ChevronDown className="h-4 w-4" /></button>
+                                                <button className="btn-icon p-1.5 text-red-300" title="حذف این معیار" onClick={() => removeSort(index)}><X className="h-4 w-4" /></button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    {availableSortFields.length > 0 && <div className="mt-3 flex flex-wrap gap-2">
+                                        {availableSortFields.map(field => <button key={field} className="flex items-center gap-1.5 rounded-full border border-white/10 bg-dark-800 px-3 py-2 text-xs text-dark-300 hover:border-primary-500/30 hover:text-white" onClick={() => setSortCriteria([...sortCriteria, { field, direction: 'asc' }])}><Plus className="h-3.5 w-3.5" /> {sortLabels[field]}</button>)}
+                                    </div>}
+                                </div>
+                            )}
+                            <p className="mt-3 flex items-start gap-2 text-xs leading-6 text-dark-500"><span>💡</span><span>برای انتخاب چند مورد، «انتخاب گروهی» را بزن. روی رایانه می‌تونی کلید Ctrl یا Shift را هم نگه داری و روی فایل‌ها کلیک کنی.</span></p>
                         </div>
                     )}
                     {isLoading && !displayFiles ? (
@@ -731,6 +794,7 @@ export default function FileBrowser() {
                                             folder={folder}
                                             viewMode={viewMode}
                                             selected={selectedFolderIds.has(folder.id)}
+                                            selectionMode={selectionMode}
                                             onSelect={(multi) => selectFolder(folder.id, multi)}
                                             onOpen={() => navigateToFolder(folder)}
                                             onFileDrop={handleFileDrop}
@@ -744,7 +808,8 @@ export default function FileBrowser() {
                                             file={file}
                                             viewMode={viewMode}
                                             selected={selectedFileIds.has(file.id)}
-                                            onSelect={(multi) => selectFile(file.id, multi)}
+                                            selectionMode={selectionMode}
+                                            onSelect={(multi) => selectFile(file.id, selectionMode || multi)}
                                             onPlay={() => handleFileOpen(file)}
                                         />
                                     ))}
@@ -847,12 +912,6 @@ export default function FileBrowser() {
                 currentDescription={descriptionItem?.item.description || ''}
                 onClose={() => setDescriptionItem(null)}
                 onSave={handleSaveDescription}
-            />
-            <SortModal
-                open={showSort}
-                criteria={sortCriteria}
-                onApply={setSortCriteria}
-                onClose={() => setShowSort(false)}
             />
             <BatchEditModal
                 open={showBatchEdit}

@@ -3,6 +3,17 @@
 @tailwind utilities;
 
 :root {
+  --primary-50: 250 245 255;
+  --primary-100: 243 232 255;
+  --primary-200: 233 213 255;
+  --primary-300: 216 180 254;
+  --primary-400: 192 132 252;
+  --primary-500: 168 85 247;
+  --primary-600: 147 51 234;
+  --primary-700: 124 58 237;
+  --primary-800: 107 33 168;
+  --primary-900: 88 28 135;
+  --primary-950: 59 7 100;
   font-family:
     "Vazirmatn",
     system-ui,
@@ -23,7 +34,7 @@ body {
 
 /* Selection color */
 ::selection {
-  background: rgba(168, 85, 247, 0.3);
+  background: rgb(var(--primary-500) / 0.3);
   color: #fff;
 }
 

@@ -1,8 +1,25 @@
-import { Files, Clock, PlayCircle, LogOut, HardDrive, X, Users } from 'lucide-react';
+import { Files, Clock, PlayCircle, LogOut, HardDrive, X, Users, Palette, FolderPlus, RotateCcw } from 'lucide-react';
 import logo from '../assets/logo.png';
 import { useAppStore } from '../lib/store';
 import { useStorageStats, formatFileSize, useLogoutAll } from '../lib/api';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+
+const colorThemes = {
+    violet: { label: 'بنفش', dot: '#a855f7', shades: ['250 245 255','243 232 255','233 213 255','216 180 254','192 132 252','168 85 247','147 51 234','124 58 237','107 33 168','88 28 135','59 7 100'] },
+    blue: { label: 'آبی', dot: '#3b82f6', shades: ['239 246 255','219 234 254','191 219 254','147 197 253','96 165 250','59 130 246','37 99 235','29 78 216','30 64 175','30 58 138','23 37 84'] },
+    emerald: { label: 'زمردی', dot: '#10b981', shades: ['236 253 245','209 250 229','167 243 208','110 231 183','52 211 153','16 185 129','5 150 105','4 120 87','6 95 70','6 78 59','2 44 34'] },
+    rose: { label: 'رز', dot: '#f43f5e', shades: ['255 241 242','255 228 230','254 205 211','253 164 175','251 113 133','244 63 94','225 29 72','190 18 60','159 18 57','136 19 55','76 5 25'] },
+    amber: { label: 'کهربایی', dot: '#f59e0b', shades: ['255 251 235','254 243 199','253 230 138','252 211 77','251 191 36','245 158 11','217 119 6','180 83 9','146 64 14','120 53 15','69 26 3'] },
+} as const;
+
+type ColorTheme = keyof typeof colorThemes;
+
+const applyTheme = (theme: ColorTheme) => {
+    colorThemes[theme].shades.forEach((value, index) => {
+        const shade = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950][index];
+        document.documentElement.style.setProperty(`--primary-${shade}`, value);
+    });
+};
 
 interface SidebarProps {
     isOpen: boolean;
@@ -10,11 +27,23 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ isOpen, onClose }: SidebarProps) {
-    const { activeSection, setActiveSection } = useAppStore();
+    const { activeSection, setActiveSection, setShowNewFolder, setSearchQuery, setFileTypeFilter } = useAppStore();
     const { data: storage } = useStorageStats();
     const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
     const [showLogoutAllConfirm, setShowLogoutAllConfirm] = useState(false);
+    const [theme, setTheme] = useState<ColorTheme>(() => {
+        const saved = localStorage.getItem('komod-color-theme');
+        return saved && saved in colorThemes ? saved as ColorTheme : 'violet';
+    });
     const logoutAllMutation = useLogoutAll();
+
+    useEffect(() => { applyTheme(theme); }, [theme]);
+
+    const chooseTheme = (nextTheme: ColorTheme) => {
+        setTheme(nextTheme);
+        localStorage.setItem('komod-color-theme', nextTheme);
+        applyTheme(nextTheme);
+    };
 
     const handleLogout = () => {
         localStorage.removeItem('access_token');
@@ -94,7 +123,24 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                     <NavItem section="files" icon={Files} label="فایل‌ها و کشوها" />
                     <NavItem section="recent" icon={Clock} label="تازه اضافه‌شده‌ها" />
                     <NavItem section="continue_watching" icon={PlayCircle} label="ادامه پخش" />
+
+                    <div className="pt-5 pb-2 px-2 text-xs font-semibold text-dark-500">⚡ دسترسی سریع</div>
+                    <button onClick={() => { setActiveSection('files'); setShowNewFolder(true); onClose(); }} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-dark-300 hover:text-white hover:bg-white/[0.05] transition-colors">
+                        <FolderPlus className="h-5 w-5 text-primary-400" /> کشوی تازه
+                    </button>
+                    <button onClick={() => { setSearchQuery(''); setFileTypeFilter(null); setActiveSection('files'); onClose(); }} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-dark-300 hover:text-white hover:bg-white/[0.05] transition-colors">
+                        <RotateCcw className="h-5 w-5 text-primary-400" /> پاک‌کردن جست‌وجو و فیلتر
+                    </button>
                 </nav>
+
+                <div className="mx-3 mb-2 rounded-xl border border-white/[0.06] bg-dark-800/40 p-3">
+                    <div className="mb-3 flex items-center gap-2 text-xs font-medium text-dark-300"><Palette className="h-4 w-4" /> رنگ کمد</div>
+                    <div className="flex items-center justify-between gap-2">
+                        {(Object.entries(colorThemes) as [ColorTheme, typeof colorThemes[ColorTheme]][]).map(([key, item]) => (
+                            <button key={key} onClick={() => chooseTheme(key)} title={item.label} aria-label={`رنگ ${item.label}`} className={`h-7 w-7 rounded-full border-2 transition-transform hover:scale-110 ${theme === key ? 'scale-110 border-white shadow-lg' : 'border-transparent opacity-70 hover:opacity-100'}`} style={{ backgroundColor: item.dot }} />
+                        ))}
+                    </div>
+                </div>
 
                 {/* Storage Info */}
                 <div className="p-4 m-3 rounded-xl bg-dark-800/50 border border-white/[0.04]">

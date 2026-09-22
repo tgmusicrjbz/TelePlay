@@ -1,7 +1,7 @@
 /**
  * FileCard component - displays a single file in grid or list view
  */
-import { Play, MoreVertical, Film, Music, FileText, Image } from 'lucide-react';
+import { Play, MoreVertical, Film, Music, FileText, Image, Check } from 'lucide-react';
 import { TelegramFile, formatFileSize, formatDuration, formatPersianDate } from '../lib/api';
 import { useAppStore } from '../lib/store';
 
@@ -9,6 +9,7 @@ interface FileCardProps {
     file: TelegramFile;
     viewMode: 'grid' | 'list';
     selected: boolean;
+    selectionMode?: boolean;
     onSelect: (multi: boolean) => void;
     onPlay: () => void;
 }
@@ -17,6 +18,7 @@ export default function FileCard({
     file,
     viewMode,
     selected,
+    selectionMode = false,
     onSelect,
     onPlay
 }: FileCardProps) {
@@ -41,6 +43,7 @@ export default function FileCard({
 
     const handleDoubleClick = (e: React.MouseEvent) => {
         e.stopPropagation();
+        if (selectionMode) return;
         onPlay();
     };
 
@@ -74,7 +77,7 @@ export default function FileCard({
     if (viewMode === 'list') {
         return (
             <div
-                className={`flex items-center gap-4 p-3 rounded-xl cursor-pointer transition-all duration-200 animate-slide-up active:scale-[0.99]
+                className={`relative flex items-center gap-4 p-3 rounded-xl cursor-pointer transition-all duration-200 animate-slide-up active:scale-[0.99]
                     ${selected
                         ? 'bg-primary-500/10 border border-primary-500/30'
                         : 'glass-card hover:bg-white/[0.03] border-white/[0.05]'
@@ -84,6 +87,7 @@ export default function FileCard({
                 onDoubleClick={handleDoubleClick}
                 data-file-id={file.id}
             >
+                {selectionMode && <div className={`absolute left-2 top-2 z-10 flex h-5 w-5 items-center justify-center rounded-md border ${selected ? 'border-primary-400 bg-primary-500 text-white' : 'border-white/30 bg-dark-900/90'}`}>{selected && <Check className="h-3.5 w-3.5" />}</div>}
                 <div className="w-12 h-12 rounded-lg bg-dark-800/80 flex items-center justify-center overflow-hidden shrink-0 border border-white/[0.05]">
                     {authorizedThumbnailUrl ? (
                         <img src={authorizedThumbnailUrl} alt={file.file_name} className="w-full h-full object-cover" />
@@ -155,6 +159,7 @@ export default function FileCard({
             onDoubleClick={handleDoubleClick}
             data-file-id={file.id}
         >
+            {selectionMode && <div className={`absolute left-2 top-2 z-20 flex h-5 w-5 items-center justify-center rounded-md border ${selected ? 'border-primary-400 bg-primary-500 text-white' : 'border-white/30 bg-dark-900/90'}`}>{selected && <Check className="h-3.5 w-3.5" />}</div>}
             <div className={`aspect-video rounded-lg mb-3 overflow-hidden relative border ${selected ? 'border-primary-500/20' : 'border-white/[0.05]'} bg-dark-900/50`}>
                 {authorizedThumbnailUrl ? (
                     <>
