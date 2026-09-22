@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../lib/store';
-import { TelegramFile, Folder, api } from '../lib/api';
-import { Play, Download, Link, Edit, FolderInput, Trash2, Globe, ShieldOff, HardDriveDownload } from 'lucide-react';
+import { TelegramFile, Folder, api, canPreviewText } from '../lib/api';
+import { Play, Download, Link, Edit, FolderInput, Trash2, Globe, ShieldOff, HardDriveDownload, Eye } from 'lucide-react';
 
 export default function GlobalContextMenu() {
     const { activeContextMenu, setActiveContextMenu, setPreviewFile, setMoveItems, setMoveFiles, setDeleteConfirm, setRenameFile, setRenameFolder, selectedFileIds, selectedFiles } = useAppStore();
@@ -179,6 +179,12 @@ export default function GlobalContextMenu() {
                                         Play
                                     </button>
                                 )}
+                                {(activeContextMenu.item.file_type === 'image' || canPreviewText(activeContextMenu.item as TelegramFile)) && (
+                                    <button className="context-menu-item w-full text-left" onClick={() => handleAction(() => setPreviewFile(activeContextMenu.item as TelegramFile))}>
+                                        <Eye className="w-4 h-4" />
+                                        Preview
+                                    </button>
+                                )}
                                 <button
                                     className="context-menu-item w-full text-left"
                                     onClick={() => { handleDownload(activeContextMenu.item as TelegramFile); setActiveContextMenu(null); }}
@@ -255,6 +261,10 @@ export default function GlobalContextMenu() {
                         >
                             <Edit className="w-4 h-4" />
                             Rename
+                        </button>
+                        <button className="context-menu-item w-full text-left" onClick={() => handleAction(() => setMoveItems({ files: [], folders: [activeContextMenu.item as Folder] }))}>
+                            <FolderInput className="w-4 h-4" />
+                            Move to...
                         </button>
                         <hr className="border-white/[0.08] my-1" />
                         <button

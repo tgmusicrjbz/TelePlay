@@ -2,8 +2,8 @@
  * Main FileBrowser component - the core of the web interface
  */
 import { useEffect, useCallback, useRef, useState } from 'react';
-import { FolderPlus, Grid, List, Search, ChevronRight, Home, RefreshCw, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, Menu } from 'lucide-react';
-import { useFiles, useFolders, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useRecentFiles, useContinueWatching, useDeleteFolders, useMoveFolders } from '../lib/api';
+import { FolderPlus, Grid, List, Search, ChevronRight, Home, RefreshCw, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, Menu, FolderInput, Trash2, Pencil, X } from 'lucide-react';
+import { useFiles, useFolders, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useRecentFiles, useContinueWatching, useDeleteFolders, useMoveFolders, canPreviewText } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import FileCard from './FileCard';
 import FolderCard from './FolderCard';
@@ -68,9 +68,10 @@ export default function FileBrowser() {
     useEffect(() => {
         if (filesList && activeSection === 'files') {
             setAllFiles(prev => {
-                const existingIds = new Set(prev.map(f => f.id));
-                const newFiles = filesList.files.filter(f => !existingIds.has(f.id));
-                return [...prev, ...newFiles];
+                if (filesList.page === 1) return filesList.files;
+                const refreshed = new Map(prev.map(f => [f.id, f]));
+                filesList.files.forEach(f => refreshed.set(f.id, f));
+                return Array.from(refreshed.values());
             });
             setHasMore(filesList.page * filesList.per_page < filesList.total);
         }
@@ -164,7 +165,7 @@ export default function FileBrowser() {
     }, [breadcrumbs, clearSelection, setBreadcrumbs, setCurrentFolderId]);
 
     // Handle delete confirmation
-    const handleDeleteConfirm = async () => {
+    const handleDeleteConfirm = async (deleteContents: boolean) => {
         if (!deleteConfirm) return;
         const { type, items } = deleteConfirm;
         
@@ -175,20 +176,17 @@ export default function FileBrowser() {
             } else if (type === 'folder') {
                 const ids = items.map(i => i.id);
                 if (ids.length > 1) {
-                    await deleteFoldersMutation.mutateAsync(ids);
+                    await deleteFoldersMutation.mutateAsync({ ids, deleteContents });
                 } else {
-                    await deleteFolderMutation.mutateAsync({ id: ids[0] });
+                    await deleteFolderMutation.mutateAsync({ id: ids[0], deleteContents });
                 }
             } else if (type === 'multiple') {
                  // Split into files and folders
                  const fileIds = items.filter(i => 'file_name' in i).map(i => i.id);
                  const folderIds = items.filter(i => 'name' in i && !('file_name' in i)).map(i => i.id);
                  
-                 const promises = [];
-                 if (fileIds.length > 0) promises.push(deleteFilesMutation.mutateAsync(fileIds));
-                 if (folderIds.length > 0) promises.push(deleteFoldersMutation.mutateAsync(folderIds));
-                 
-                 await Promise.all(promises);
+                 if (folderIds.length > 0) await deleteFoldersMutation.mutateAsync({ ids: folderIds, deleteContents });
+                 if (fileIds.length > 0) await deleteFilesMutation.mutateAsync(fileIds);
             }
             setDeleteConfirm(null);
             clearSelection();
@@ -322,15 +320,8 @@ export default function FileBrowser() {
 
     // Handle File Open / Play
     const handleFileOpen = (file: TelegramFile) => {
-        if (file.file_type === 'video' || file.file_type === 'audio') {
+        if (file.file_type === 'video' || file.file_type === 'audio' || file.file_type === 'image' || canPreviewText(file)) {
             setPreviewFile(file);
-        } else {
-            // For now, do nothing or show a toast
-            // Maybe implement lightbox for images later
-            if (file.file_type === 'image') {
-                 // Future: Lightbox
-            }
-            // Prevent opening empty player
         }
     };
 
@@ -463,6 +454,11 @@ export default function FileBrowser() {
         setHasMore(true);
     }, [currentFolderId, fileTypeFilter, searchQuery, activeSection]);
 
+    const selectedFilesForActions = displayFiles?.filter(file => selectedFileIds.has(file.id)) || [];
+    const selectedFoldersForActions = folders?.filter(folder => selectedFolderIds.has(folder.id)) || [];
+    const selectedItems = [...selectedFilesForActions, ...selectedFoldersForActions];
+    const sectionTitle = activeSection === 'recent' ? 'Recently added' : activeSection === 'continue_watching' ? 'Continue watching' : (breadcrumbs[breadcrumbs.length - 1]?.name || 'My files');
+
     return (
         <div className="flex h-screen bg-dark-950 text-white selection:bg-primary-500/30 overflow-hidden">
             <Sidebar isOpen={isSidebarOpen} onClose={() => setSidebarOpen(false)} />
@@ -564,6 +560,9 @@ export default function FileBrowser() {
                             >
                                 <FileText className="w-4 h-4" />
                             </button>
+                            <button onClick={() => setFileTypeFilter('text')} title="Notes" className={`p-1.5 rounded-md transition-all ${fileTypeFilter === 'text' ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'}`}>
+                                <FileText className="w-4 h-4" />
+                            </button>
                         </div>
  
                          <div className="flex items-center gap-1 bg-dark-800/50 rounded-lg p-0.5 border border-white/[0.06]">
@@ -616,7 +615,7 @@ export default function FileBrowser() {
                 {/* Content Area */}
                 <div 
                     ref={containerRef}
-                    className="flex-1 overflow-auto p-6 relative outline-none"
+                    className="flex-1 overflow-auto p-4 sm:p-6 lg:p-8 relative outline-none"
                     onMouseDown={handleMouseDown}
                     onMouseMove={handleMouseMove}
                     onMouseUp={handleMouseUp}
@@ -625,6 +624,38 @@ export default function FileBrowser() {
                     // Prevent default drag behaviors on container
                     onDragOver={(e) => e.preventDefault()}
                 >
+                    <div className="max-w-7xl mx-auto mb-6 sm:mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+                        <div>
+                            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-primary-300 mb-2">Your library</p>
+                            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">{sectionTitle}</h1>
+                            <p className="text-sm text-dark-400 mt-2">
+                                {activeSection === 'continue_watching' ? 'Pick up where you left off.' : `${showFolders ? folders?.length || 0 : 0} folders · ${displayFiles?.length || 0} files shown`}
+                            </p>
+                        </div>
+                        {selectedItems.length > 0 ? (
+                            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-primary-500/20 bg-primary-500/10 p-2">
+                                <span className="text-sm font-medium text-primary-200 px-2">{selectedItems.length} selected</span>
+                                {selectedItems.length === 1 && <button className="btn-secondary text-sm flex items-center gap-2" onClick={() => selectedFilesForActions[0] ? setRenameFile(selectedFilesForActions[0]) : setRenameFolder(selectedFoldersForActions[0])}><Pencil className="w-4 h-4" /> Rename</button>}
+                                <button className="btn-secondary text-sm flex items-center gap-2" onClick={() => setMoveItems({ files: selectedFilesForActions, folders: selectedFoldersForActions })}><FolderInput className="w-4 h-4" /> Move</button>
+                                <button className="btn-secondary text-sm flex items-center gap-2 text-red-300" onClick={() => setDeleteConfirm({ type: selectedFoldersForActions.length && selectedFilesForActions.length ? 'multiple' : selectedFoldersForActions.length ? 'folder' : 'file', items: selectedItems })}><Trash2 className="w-4 h-4" /> Delete</button>
+                                <button className="btn-icon" title="Clear selection" onClick={clearSelection}><X className="w-4 h-4" /></button>
+                            </div>
+                        ) : activeSection === 'files' && (
+                            <p className="text-xs text-dark-500 hidden sm:block">Send files, photos or text to your Telegram bot to add them here.</p>
+                        )}
+                    </div>
+                    {activeSection === 'files' && (
+                        <div className="max-w-7xl mx-auto mb-5 flex gap-2 overflow-x-auto pb-1 md:hidden" aria-label="File type filters">
+                            {([
+                                ['All', null], ['Video', 'video'], ['Audio', 'audio'],
+                                ['Images', 'image'], ['Documents', 'document'], ['Notes', 'text'],
+                            ] as const).map(([label, type]) => (
+                                <button key={label} onClick={() => setFileTypeFilter(type)} className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium border transition-colors ${fileTypeFilter === type ? 'bg-primary-600 border-primary-500 text-white' : 'bg-dark-800 border-white/10 text-dark-300'}`}>
+                                    {label}
+                                </button>
+                            ))}
+                        </div>
+                    )}
                     {isLoading && !displayFiles ? (
                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 animate-fade-in">
                             {[...Array(10)].map((_, i) => (
@@ -636,8 +667,8 @@ export default function FileBrowser() {
                              {/* Unified View */}
                              {(showFolders && folders?.length ? folders.length : 0) + (displayFiles?.length || 0) > 0 ? (
                                 <div className={viewMode === 'grid'
-                                    ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4 pb-20'
-                                    : 'flex flex-col gap-2 pb-20'
+                                    ? 'max-w-7xl mx-auto grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4 pb-20'
+                                    : 'max-w-7xl mx-auto flex flex-col gap-2 pb-20'
                                 }>
                                     {/* Folders */}
                                     {showFolders && folders?.map((folder) => (

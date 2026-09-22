@@ -20,6 +20,16 @@ export default function MoveFileModal({ items, onClose }: MoveFileModalProps) {
 
     const isPending = isFilesPending || isFoldersPending;
     const totalItems = items.files.length + items.folders.length;
+    const movingFolderIds = new Set(items.folders.map(folder => folder.id));
+    const blockedIds = new Set<number>();
+    const markBlocked = (folders: Folder[], insideMovingFolder = false) => {
+        folders.forEach(folder => {
+            const blocked = insideMovingFolder || movingFolderIds.has(folder.id);
+            if (blocked) blockedIds.add(folder.id);
+            if (folder.children) markBlocked(folder.children, blocked);
+        });
+    };
+    markBlocked(folderTree || []);
 
     const handleMove = async () => {
         try {
@@ -30,8 +40,8 @@ export default function MoveFileModal({ items, onClose }: MoveFileModalProps) {
             if (items.folders.length > 0) {
                 // Prevent moving folder into itself
                 const folderIds = items.folders.map(f => f.id);
-                if (selectedId && folderIds.includes(selectedId)) {
-                    addToast('Cannot move a folder into itself', 'error');
+                if (selectedId && blockedIds.has(selectedId)) {
+                    addToast('Cannot move a folder into itself or its subfolders', 'error');
                     return;
                 }
                 promises.push(moveFolders({ ids: folderIds, folderId: selectedId }));
@@ -79,6 +89,7 @@ export default function MoveFileModal({ items, onClose }: MoveFileModalProps) {
                                 key={folder.id}
                                 folder={folder}
                                 selectedId={selectedId}
+                                blockedIds={blockedIds}
                                 onSelect={setSelectedId}
                                 depth={0}
                             />
@@ -113,9 +124,10 @@ export default function MoveFileModal({ items, onClose }: MoveFileModalProps) {
     );
 }
 
-function FolderTreeItem({ folder, selectedId, onSelect, depth }: {
+function FolderTreeItem({ folder, selectedId, blockedIds, onSelect, depth }: {
     folder: Folder;
     selectedId: number | null;
+    blockedIds: Set<number>;
     onSelect: (id: number) => void;
     depth: number;
 }) {
@@ -126,7 +138,9 @@ function FolderTreeItem({ folder, selectedId, onSelect, depth }: {
         <div>
             <button
                 onClick={() => onSelect(folder.id)}
-                className={`w-full flex items-center gap-2 px-4 py-2 hover:bg-dark-700 transition-colors ${selectedId === folder.id ? 'bg-primary-600/20 text-primary-400' : ''
+                disabled={blockedIds.has(folder.id)}
+                title={blockedIds.has(folder.id) ? 'Cannot move into this folder' : undefined}
+                className={`w-full flex items-center gap-2 px-4 py-2 hover:bg-dark-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${selectedId === folder.id ? 'bg-primary-600/20 text-primary-400' : ''
                     }`}
                 style={{ paddingLeft: `${16 + depth * 16}px` }}
             >
@@ -149,6 +163,7 @@ function FolderTreeItem({ folder, selectedId, onSelect, depth }: {
                     key={child.id}
                     folder={child}
                     selectedId={selectedId}
+                    blockedIds={blockedIds}
                     onSelect={onSelect}
                     depth={depth + 1}
                 />

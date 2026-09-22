@@ -7,18 +7,21 @@ import { X } from 'lucide-react';
 interface RenameModalProps {
     isOpen: boolean;
     onClose: () => void;
-    onRename: (newName: string) => void;
+    onRename: (newName: string) => Promise<void>;
     currentName: string;
     itemType: 'file' | 'folder';
 }
 
 export default function RenameModal({ isOpen, onClose, onRename, currentName, itemType }: RenameModalProps) {
     const [name, setName] = useState(currentName);
+    const [isSaving, setIsSaving] = useState(false);
+    const [error, setError] = useState('');
     const inputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
         if (isOpen) {
             setName(currentName);
+            setError('');
             setTimeout(() => {
                 if (inputRef.current) {
                     inputRef.current.focus();
@@ -38,12 +41,19 @@ export default function RenameModal({ isOpen, onClose, onRename, currentName, it
         }
     }, [isOpen, currentName, itemType]);
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (name.trim() && name !== currentName) {
-            onRename(name.trim());
+        if (!name.trim() || name.trim() === currentName) return;
+        setIsSaving(true);
+        setError('');
+        try {
+            await onRename(name.trim());
+            onClose();
+        } catch {
+            setError('Could not rename this item. Please try again.');
+        } finally {
+            setIsSaving(false);
         }
-        onClose();
     };
 
     if (!isOpen) return null;
@@ -66,9 +76,11 @@ export default function RenameModal({ isOpen, onClose, onRename, currentName, it
                         type="text"
                         value={name}
                         onChange={(e) => setName(e.target.value)}
+                        maxLength={255}
                         className="w-full px-4 py-3 bg-dark-700 border border-dark-600 rounded-lg text-white placeholder-dark-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                         placeholder={`Enter ${itemType} name`}
                     />
+                    {error && <p className="mt-2 text-sm text-red-400" role="alert">{error}</p>}
 
                     <div className="flex gap-3 mt-6">
                         <button
@@ -80,10 +92,10 @@ export default function RenameModal({ isOpen, onClose, onRename, currentName, it
                         </button>
                         <button
                             type="submit"
-                            disabled={!name.trim() || name === currentName}
+                            disabled={isSaving || !name.trim() || name.trim() === currentName}
                             className="flex-1 px-4 py-2 bg-primary-600 hover:bg-primary-500 disabled:bg-dark-600 disabled:text-dark-400 text-white rounded-lg transition-colors"
                         >
-                            Rename
+                            {isSaving ? 'Saving...' : 'Rename'}
                         </button>
                     </div>
                 </form>

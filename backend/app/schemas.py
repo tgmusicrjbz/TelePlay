@@ -63,7 +63,7 @@ class FileBase(BaseModel):
     file_name: str
     file_size: int
     mime_type: Optional[str] = None
-    file_type: str  # video, audio, document, image
+    file_type: str  # video, audio, document, image, text
     duration: Optional[float] = None
     width: Optional[int] = None
     height: Optional[int] = None

@@ -59,11 +59,16 @@ async def start_one_client(i, c):
         logger.info("Client %d (%s) started → @%s", i, label, me.username)
     except Exception as e:
         logger.error("Client %d failed to start: %s", i, e)
+        if i == 0:
+            await stop_one_client(c)
+            raise
 
 
 async def start_all_clients():
     logger.info("Starting %d Telegram client(s)...", len(clients))
-    await asyncio.gather(*(start_one_client(i, c) for i, c in enumerate(clients)))
+    await start_one_client(0, clients[0])
+    if len(clients) > 1:
+        await asyncio.gather(*(start_one_client(i, c) for i, c in enumerate(clients[1:], 1)))
 
 
 async def stop_one_client(c):

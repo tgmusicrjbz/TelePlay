@@ -35,7 +35,7 @@ export interface TelegramFile {
     file_name: string;
     file_size: number;
     mime_type: string | null;
-    file_type: 'video' | 'audio' | 'document' | 'image';
+    file_type: 'video' | 'audio' | 'document' | 'image' | 'text';
     duration: number | null;
     width: number | null;
     height: number | null;
@@ -54,6 +54,13 @@ export interface FileListResponse {
     page: number;
     per_page: number;
 }
+
+export const canPreviewText = (file: TelegramFile): boolean =>
+    file.file_type === 'text' || (file.file_type === 'document' && (
+        file.mime_type?.startsWith('text/') ||
+        ['application/json', 'application/xml'].includes(file.mime_type || '') ||
+        /\.(txt|md|json|csv|log|xml|ya?ml)$/i.test(file.file_name)
+    ));
 
 export interface BotInfo {
     username: string;
@@ -450,8 +457,8 @@ export const useUpdateFolder = () => {
 export const useDeleteFolder = () => {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async ({ id, moveFilesTo }: { id: number; moveFilesTo?: number | null }) => {
-            const params = moveFilesTo !== undefined ? { move_files_to: moveFilesTo } : {};
+        mutationFn: async ({ id, deleteContents }: { id: number; deleteContents: boolean }) => {
+            const params = { delete_contents: deleteContents };
             await api.delete(`/folders/${id}`, { params });
         },
         onSuccess: () => {
@@ -465,8 +472,8 @@ export const useDeleteFolder = () => {
 export const useDeleteFolders = () => {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (ids: number[]) => {
-            await api.post('/folders/batch-delete', ids as any);
+        mutationFn: async ({ ids, deleteContents }: { ids: number[]; deleteContents: boolean }) => {
+            await api.post('/folders/batch-delete', ids, { params: { delete_contents: deleteContents } });
         },
         onSuccess: () => {
              queryClient.invalidateQueries({ queryKey: ['folders'] });

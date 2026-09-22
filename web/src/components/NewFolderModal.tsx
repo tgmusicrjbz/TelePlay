@@ -12,17 +12,20 @@ interface NewFolderModalProps {
 
 export default function NewFolderModal({ parentId, onClose }: NewFolderModalProps) {
     const [name, setName] = useState('');
+    const [error, setError] = useState('');
     const createFolder = useCreateFolder();
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!name.trim()) return;
 
-        await createFolder.mutateAsync({
-            name: name.trim(),
-            parent_id: parentId,
-        });
-        onClose();
+        setError('');
+        try {
+            await createFolder.mutateAsync({ name: name.trim(), parent_id: parentId });
+            onClose();
+        } catch {
+            setError('Could not create this folder. Check the name and try again.');
+        }
     };
 
     return (
@@ -43,10 +46,12 @@ export default function NewFolderModal({ parentId, onClose }: NewFolderModalProp
                         type="text"
                         value={name}
                         onChange={(e) => setName(e.target.value)}
+                        maxLength={255}
                         placeholder="Folder name"
                         autoFocus
                         className="w-full px-4 py-3 bg-dark-700 border border-dark-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500/50 mb-4"
                     />
+                    {error && <p className="mb-4 text-sm text-red-400" role="alert">{error}</p>}
 
                     <div className="flex justify-end gap-3">
                         <button

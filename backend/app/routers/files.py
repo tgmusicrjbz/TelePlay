@@ -9,10 +9,11 @@ from sqlalchemy import select, func, delete
 from sqlalchemy.orm import selectinload
 
 from ..database import get_db
-from ..models import File, User, WatchProgress
+from ..models import File, User, WatchProgress, Folder
 from ..schemas import FileResponse, FileListResponse, FileUpdate, WatchProgressUpdate
 from ..auth import get_current_user
-from ..telegram import delete_from_storage_channel
+from ..telegram import delete_from_storage_channel, get_message_from_channel
+from .. import telegram
 from ..config import get_settings
 from ..services import (
     escape_like, 
@@ -24,6 +25,43 @@ from ..services import (
 
 router = APIRouter(prefix="/files", tags=["Files"])
 settings = get_settings()
+
+
+@router.get("/{file_id}/text")
+async def get_text_preview(
+    file_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Preview a saved text message or a small UTF-8 text document."""
+    file = (await db.execute(select(File).where(
+        File.id == file_id, File.user_id == current_user.id
+    ))).scalar_one_or_none()
+    if file is None:
+        raise HTTPException(status_code=404, detail="File not found")
+    is_text_document = file.file_type == "document" and (
+        (file.mime_type or "").startswith("text/")
+        or (file.mime_type or "") in {"application/json", "application/xml"}
+        or file.file_name.lower().endswith((".txt", ".md", ".json", ".csv", ".log", ".xml", ".yaml", ".yml"))
+    )
+    if file.file_type != "text" and not is_text_document:
+        raise HTTPException(status_code=415, detail="Text preview is not available for this file")
+    if file.file_size > 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Text preview is limited to 1 MB")
+    message = await get_message_from_channel(file.channel_message_id)
+    if message is None:
+        raise HTTPException(status_code=404, detail="Message not found in storage")
+    if file.file_type == "text":
+        return {"content": message.text or ""}
+    contents = await telegram.tg_client.download_media(message, in_memory=True)
+    if contents is None:
+        raise HTTPException(status_code=502, detail="Could not load text document")
+    try:
+        raw = contents.getvalue()
+        encoding = "utf-16" if raw.startswith((b"\xff\xfe", b"\xfe\xff")) else "utf-8-sig"
+        return {"content": raw.decode(encoding)}
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=415, detail="Only UTF-8 and UTF-16 text preview is supported")
 
 
 @router.get("", response_model=FileListResponse)
@@ -159,7 +197,14 @@ async def update_file(
     if update_data.file_name is not None:
         file.file_name = sanitize_filename(update_data.file_name)
     if update_data.folder_id is not None:
-        file.folder_id = update_data.folder_id if update_data.folder_id != 0 else None
+        target_id = update_data.folder_id or None
+        if target_id is not None:
+            target = (await db.execute(select(Folder).where(
+                Folder.id == target_id, Folder.user_id == current_user.id
+            ))).scalar_one_or_none()
+            if target is None:
+                raise HTTPException(status_code=404, detail="Destination folder not found")
+        file.folder_id = target_id
     
     await db.commit()
     
@@ -188,7 +233,8 @@ async def delete_file(
         raise HTTPException(status_code=404, detail="File not found")
     
     # Delete from Telegram storage channel
-    await delete_from_storage_channel(file.channel_message_id)
+    if not await delete_from_storage_channel(file.channel_message_id):
+        raise HTTPException(status_code=502, detail="Could not delete file from Telegram storage")
     
     # Delete from database
     await db.delete(file)
@@ -217,8 +263,9 @@ async def batch_delete_files(
     msg_ids = [f.channel_message_id for f in files]
     
     # Delete from Telegram (batch)
-    if msg_ids:
-        await delete_from_storage_channel(msg_ids)
+    for start in range(0, len(msg_ids), 100):
+        if not await delete_from_storage_channel(msg_ids[start:start + 100]):
+            raise HTTPException(status_code=502, detail="Could not delete files from Telegram storage")
     
     # Delete from DB
     for file in files:

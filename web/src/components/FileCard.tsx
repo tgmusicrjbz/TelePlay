@@ -46,8 +46,9 @@ export default function FileCard({
 
     // Generate authenticated stream URL for thumbnail
     const token = localStorage.getItem('access_token');
-    const authorizedThumbnailUrl = file.thumbnail_url
-        ? `${file.thumbnail_url}${file.thumbnail_url.includes('?') ? '&' : '?'}token=${token}`
+    const thumbnailSource = file.thumbnail_url || (file.file_type === 'image' ? file.stream_url : null);
+    const authorizedThumbnailUrl = thumbnailSource
+        ? `${thumbnailSource}${thumbnailSource.includes('?') ? '&' : '?'}token=${encodeURIComponent(token || '')}`
         : null;
 
     const getIcon = () => {

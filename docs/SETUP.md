@@ -33,9 +33,9 @@ The bot is your command center for uploading and managing media.
 
 ### 2.1 Uploading Files
 
-- **Direct Upload**: Send any Video, Audio, or Document to the bot.
+- **Direct Upload**: Send a video, audio file, photo, document, or ordinary text message to the bot.
 - **Forwarding**: Forward messages from other channels to the bot.
-- **Auto-Sync**: The bot saves the file and gives you a `File ID` (e.g., `123`).
+- **Auto-Sync**: The bot saves the item and shows buttons for managing it. Text messages become notes in the library.
 
 ### 2.2 Key Commands
 
@@ -49,11 +49,13 @@ The bot is your command center for uploading and managing media.
 
 ### 2.3 Managing Files
 
-When you upload a file or use `/file <id>`, you get interactive buttons to:
+When you upload a file, open a recent item, or use `/file <id>`, you get interactive buttons to:
 
 - **✏️ Rename**: Change the display name.
 - **📂 Move**: Put files into folders for better organization.
 - **🗑 Delete**: Remove from both TelePlay and your channel.
+
+Deleting a folder asks whether to keep its files and subfolders (moving them up one level) or remove the entire folder and its contents. In the web app, double-click an image or text item to preview it. UTF-8 and UTF-16 text documents up to 1 MB can be previewed.
 
 ---
 

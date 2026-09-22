@@ -2,7 +2,8 @@
 
 # Telegram MTProto Client
 pyrotgfork>=2.2.0
-TgCrypto>=1.2.3
+# Optional speedup; on Windows it commonly requires a C++ build toolchain.
+TgCrypto>=1.2.3; platform_system != "Windows"
 
 # Web Framework
 fastapi>=0.109.0

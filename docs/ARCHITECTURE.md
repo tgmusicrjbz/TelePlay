@@ -150,7 +150,7 @@ The bot is the primary interface for uploading and managing files. It runs withi
 **Key Features:**
 
 - **Authorization Middleware** (`group=-2`): Checks `AUTH_USERS` env var. If set, only listed Telegram IDs can interact with the bot.
-- **File Handling**: Receives video, audio, documents, and photos. Forwards them to the storage channel and saves metadata to the database.
+- **File Handling**: Receives video, audio, documents, photos, and ordinary text messages. Copies them to the storage channel and saves metadata to the database. Text messages use a synthetic file ID based on the channel message ID.
 - **Inline Keyboards**: Interactive buttons for rename, move-to-folder, delete, and opening the web app.
 - **Login System**: Generates 6-digit codes for authenticating Web and TV clients.
 - **Deep Links**: `/start <code>` automatically verifies login codes from other apps.
@@ -188,6 +188,7 @@ GET  /api/auth/bot-info        → Get bot username (for deep links)
 ```
 GET    /api/files              → List files (with folder, search, type filters)
 GET    /api/files/{id}         → Get file details
+GET    /api/files/{id}/text    → Preview a text message or small UTF-8 text document
 PATCH  /api/files/{id}         → Update file (rename, move to folder)
 DELETE /api/files/{id}         → Delete file (DB + Telegram channel message)
 POST   /api/files/batch-delete → Delete multiple files at once
@@ -200,7 +201,7 @@ GET    /api/folders            → List all folders (with file counts)
 POST   /api/folders            → Create a new folder
 GET    /api/folders/{id}       → Get folder contents (files + subfolders)
 PATCH  /api/folders/{id}       → Rename or move a folder
-DELETE /api/folders/{id}       → Recursively delete folder and contents
+DELETE /api/folders/{id}       → Delete the folder; keep contents by default, or set delete_contents=true to delete its subtree
 ```
 
 #### Streaming (`routers/streaming.py`)

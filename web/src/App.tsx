@@ -312,12 +312,14 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 import MediaPlayer from './components/MediaPlayer';
+import ContentPreview from './components/ContentPreview';
 
 function App() {
     return (
         <>
             <GlobalContextMenu />
             <MediaPlayer />
+            <ContentPreview />
             <Routes>
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/auth" element={<AuthCallback />} />

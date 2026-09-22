@@ -60,18 +60,19 @@ To increase download speeds, you can create multiple bots (e.g., "TelePlay Helpe
 
 _Best if you just want to see it working on your own computer._
 
-1. **Install Docker Desktop**: Download and install it from [docker.com](https://www.docker.com/products/docker-desktop/).
-2. **Setup Folder**:
-   - Download the code (Clone or Zip).
-   - Open the project folder on your computer.
-3. **Configure Settings**:
-   - Go to the `backend/` folder.
-   - Find `.env.example` and rename it to `.env`.
-   - Open `.env` in a text editor (like Notepad) and fill in your `API_ID`, `API_HASH`, and `BOT_TOKEN`.
-4. **Run it**:
-   - Open a terminal/command prompt in the main project folder.
-   - Type: `docker compose up -d --build`
-5. **Access**: Open your browser to [http://localhost](http://localhost).
+Create a private Telegram storage channel, add your bot as an administrator with permission to post and delete messages, and collect the API ID, API hash, bot token, and channel ID from Step 1.
+
+**Windows PowerShell, running the source directly:**
+
+1. In the project root, run `Copy-Item backend/.env.example backend/.env` and `New-Item -ItemType Directory -Force backend/data`.
+2. Edit `backend/.env` with your credentials. Set `DATABASE_URL=sqlite:///./data/teleplay.db`, `WEB_BASE_URL=http://localhost:3000`, and a long random `JWT_SECRET`. Leave `TELEGRAM_HELPER_BOT_TOKENS` and `AUTH_USERS` empty unless needed.
+3. In one terminal, run `cd backend`, `python -m venv .venv` if necessary, `.\.venv\Scripts\python.exe -m pip install -r requirements.txt`, then `.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000`.
+4. In a second terminal, run `cd web`, `npm install` if necessary, then `npm run dev`.
+5. Open [http://localhost:3000](http://localhost:3000) on the same computer. The backend health endpoint is [http://localhost:8000/health](http://localhost:8000/health). Use the login code shown by the web app and send `/login CODE` to your bot.
+
+**Docker Desktop:** Use the root `.env.example` as the template for a **root** `.env` file (not `backend/.env`), set `WEB_BASE_URL=http://localhost`, start Docker Desktop, then run `docker compose up -d --build` from the project root. Open [http://localhost](http://localhost). Stop any directly running backend first so only one process receives bot updates.
+
+With a local HTTP address, the bot's web button shows code-login instructions because Telegram rejects localhost button URLs. For a Telegram Mini App, expose the web frontend at an HTTPS address and set `WEB_BASE_URL` to that address.
 
 ---
 

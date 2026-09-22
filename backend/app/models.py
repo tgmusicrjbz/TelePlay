@@ -67,7 +67,7 @@ class File(Base):
     file_name: Mapped[str] = mapped_column(String(500), nullable=False)
     file_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
     mime_type: Mapped[Optional[str]] = mapped_column(String(100))
-    file_type: Mapped[str] = mapped_column(String(50), nullable=False)  # video, audio, document, image
+    file_type: Mapped[str] = mapped_column(String(50), nullable=False)  # video, audio, document, image, text
     
     # Media-specific metadata
     duration: Mapped[Optional[int]] = mapped_column(Integer)  # seconds

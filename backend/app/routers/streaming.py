@@ -41,6 +41,38 @@ def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
     return start, min(end, file_size - 1)
 
 
+async def stored_message_response(file: File, message, range_header: str | None, download: int):
+    """Serve text messages and Telegram photos, which have no document stream."""
+    if file.file_type == "text":
+        content = (message.text or "").encode("utf-8")
+    else:
+        media = await telegram.tg_client.download_media(message, in_memory=True)
+        if media is None:
+            raise HTTPException(status_code=502, detail="Could not load photo")
+        content = media.getvalue()
+    size = len(content)
+    if size == 0:
+        return Response(content=b"", media_type=file.mime_type or "application/octet-stream")
+    start, end = parse_range_header(range_header, size)
+    if start >= size or end < start:
+        return Response(status_code=416, headers={"Content-Range": f"bytes */{size}"})
+    from urllib.parse import quote
+    disposition = "attachment" if download else "inline"
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(end - start + 1),
+        "Content-Disposition": f"{disposition}; filename*=utf-8''{quote(file.file_name)}",
+    }
+    if range_header:
+        headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+    return Response(
+        content=content[start:end + 1],
+        media_type=file.mime_type or "application/octet-stream",
+        status_code=206 if range_header else 200,
+        headers=headers,
+    )
+
+
 @router.get("/{file_id}")
 async def stream_file(
     file_id: int,
@@ -79,6 +111,8 @@ async def stream_file(
     message = await get_message_from_channel(file.channel_message_id)
     if not message:
         raise HTTPException(status_code=404, detail="Message not found in channel")
+    if file.file_type == "text" or message.photo:
+        return await stored_message_response(file, message, range_header, download)
     
     async def file_streamer():
         """Generator that streams file chunks from Telegram MTProto."""
@@ -92,7 +126,7 @@ async def stream_file(
     
     # Determine content disposition
     mime_type = file.mime_type or "application/octet-stream"
-    disposition = "attachment" if download else ("inline" if ("video/" in mime_type or "audio/" in mime_type) else "attachment")
+    disposition = "attachment" if download else ("inline" if mime_type.startswith(("video/", "audio/", "image/", "text/")) else "attachment")
     
     from urllib.parse import quote
     encoded_filename = quote(file.file_name)
@@ -144,7 +178,7 @@ async def get_thumbnail(
         elif message.audio and message.audio.thumbs:
             thumbnail = message.audio.thumbs[0]
         elif message.photo:
-            thumbnail = message.photo[-1]  # Use best quality photo
+            thumbnail = message.photo.sizes[-1]
             
         if not thumbnail:
             # Try using the file_id directly if stored (fallback)
@@ -205,6 +239,8 @@ async def stream_public_file(
     message = await get_message_from_channel(file.channel_message_id)
     if not message:
         raise HTTPException(status_code=404, detail="Message not found in channel")
+    if file.file_type == "text" or message.photo:
+        return await stored_message_response(file, message, range_header, download)
     
     async def file_streamer():
         """Generator that streams file chunks from Telegram MTProto."""
@@ -218,7 +254,7 @@ async def stream_public_file(
     
     # Determine content disposition
     mime_type = file.mime_type or "application/octet-stream"
-    disposition = "attachment" if download else ("inline" if ("video/" in mime_type or "audio/" in mime_type) else "attachment")
+    disposition = "attachment" if download else ("inline" if mime_type.startswith(("video/", "audio/", "image/", "text/")) else "attachment")
     
     from urllib.parse import quote
     encoded_filename = quote(file.file_name)

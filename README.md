@@ -18,8 +18,8 @@ Stream and manage your Telegram files on any device — TV, Mobile, or Browser �
 
 ### 🤖 Telegram Bot — [Full Command List](docs/SETUP.md#part-2-using-the-telegram-bot)
 
-- Upload any file type (video, audio, documents, photos)
-- Organize files into folders with inline buttons
+- Save videos, audio, documents, photos, and ordinary text messages
+- Browse nested folders and manage files with inline buttons
 - Rename, move, and delete files via chat commands
 - Search your library with `/myfiles`
 - Get an auto-login web link with `/web`
@@ -27,9 +27,9 @@ Stream and manage your Telegram files on any device — TV, Mobile, or Browser �
 ### 🌐 Web App — [Login Methods](docs/SETUP.md#31-web-interface)
 
 - Full file browser with folder navigation
-- Multi-select, batch delete, rename, and move operations
+- Multi-select, batch delete, rename, and move operations; folder deletion offers a choice to keep or remove contents
 - Context menu (right-click) on files
-- Inline video/audio player with seeking
+- Inline video/audio player with seeking, image viewer, and UTF-8/UTF-16 text preview (up to 1 MB)
 - Three login methods (direct link, login code, [remote authorization](docs/SETUP.md#31-web-interface))
 - Responsive — works on desktop and mobile
 

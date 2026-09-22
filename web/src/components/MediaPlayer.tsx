@@ -9,7 +9,7 @@ import { useAppStore } from '../lib/store';
 export default function MediaPlayer() {
     const { previewFile: file, setPreviewFile, isPlayerMinimized, setPlayerMinimized } = useAppStore();
     
-    if (!file) return null;
+    if (!file || (file.file_type !== 'video' && file.file_type !== 'audio')) return null;
 
     return <MediaPlayerContent file={file} onClose={() => setPreviewFile(null)} isMinimized={isPlayerMinimized} setMinimized={setPlayerMinimized} />;
 }
