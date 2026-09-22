@@ -297,3 +297,30 @@ body {
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
+html, body, #root {
+    min-height: 100%;
+}
+
+body {
+    overscroll-behavior-y: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
+@media (display-mode: standalone) {
+    body {
+        user-select: none;
+        -webkit-user-select: none;
+    }
+
+    input, textarea, [contenteditable="true"] {
+        user-select: text;
+        -webkit-user-select: text;
+    }
+}
+
+@supports (padding: max(0px)) {
+    .pwa-safe-bottom {
+        bottom: max(1rem, env(safe-area-inset-bottom));
+        right: max(1rem, env(safe-area-inset-right));
+    }
+}

@@ -1,0 +1,29 @@
+{
+  "name": "کمد 🗄️",
+  "short_name": "کمد",
+  "description": "کمد شخصی فایل‌های تلگرام؛ ذخیره، جست‌وجو، پخش و مرتب‌سازی در کشوها",
+  "lang": "fa",
+  "dir": "rtl",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#07090f",
+  "theme_color": "#7c3aed",
+  "categories": ["productivity", "utilities", "entertainment"],
+  "icons": [
+    {
+      "src": "/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
