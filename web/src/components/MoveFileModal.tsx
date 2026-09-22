@@ -41,18 +41,18 @@ export default function MoveFileModal({ items, onClose }: MoveFileModalProps) {
                 // Prevent moving folder into itself
                 const folderIds = items.folders.map(f => f.id);
                 if (selectedId && blockedIds.has(selectedId)) {
-                    addToast('Cannot move a folder into itself or its subfolders', 'error');
+                    addToast('نمی‌شود یک کشو را داخل خودش یا زیرکشوهایش جابه‌جا کرد.', 'error');
                     return;
                 }
                 promises.push(moveFolders({ ids: folderIds, folderId: selectedId }));
             }
 
             await Promise.all(promises);
-            addToast(`Moved ${totalItems} item(s) successfully`);
+            addToast(`${totalItems.toLocaleString('fa-IR')} مورد با موفقیت جابه‌جا شد.`);
             clearSelection();
             onClose();
         } catch (error) {
-            addToast('Failed to move items', 'error');
+            addToast('جابه‌جایی انجام نشد. دوباره تلاش کن.', 'error');
         }
     };
 
@@ -60,14 +60,14 @@ export default function MoveFileModal({ items, onClose }: MoveFileModalProps) {
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
             <div className="glass-card w-full max-w-md p-6 animate-scale-in">
                 <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-lg font-semibold">Move {totalItems} Item{totalItems !== 1 ? 's' : ''}</h2>
+                    <h2 className="text-lg font-semibold">جابه‌جایی {totalItems.toLocaleString('fa-IR')} مورد</h2>
                     <button onClick={onClose} className="p-1 hover:bg-dark-700 rounded">
                         <X className="w-5 h-5" />
                     </button>
                 </div>
 
                 <p className="text-sm text-dark-400 mb-4 truncate">
-                    Select destination folder
+                    کشوی مقصد را انتخاب کن
                 </p>
 
                 <div className="bg-dark-800 rounded-lg max-h-64 overflow-y-auto mb-4 custom-scrollbar">
@@ -78,11 +78,11 @@ export default function MoveFileModal({ items, onClose }: MoveFileModalProps) {
                             }`}
                     >
                         <Home className="w-4 h-4" />
-                        <span>Root (No folder)</span>
+                        <span>بیرون از کشو</span>
                     </button>
 
                     {isLoading ? (
-                        <div className="p-4 text-center text-dark-400">Loading...</div>
+                        <div className="p-4 text-center text-dark-400">در حال بارگذاری…</div>
                     ) : (
                         folderTree?.map((folder) => (
                             <FolderTreeItem
@@ -102,7 +102,7 @@ export default function MoveFileModal({ items, onClose }: MoveFileModalProps) {
                         onClick={onClose}
                         className="px-4 py-2 text-dark-400 hover:text-white transition-colors"
                     >
-                        Cancel
+                        لغو
                     </button>
                     <button
                         onClick={handleMove}
@@ -112,10 +112,10 @@ export default function MoveFileModal({ items, onClose }: MoveFileModalProps) {
                         {isPending ? (
                             <>
                                 <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                Moving...
+                                در حال جابه‌جایی…
                             </>
                         ) : (
-                            'Move Here'
+                            'انتقال به اینجا'
                         )}
                     </button>
                 </div>
@@ -139,10 +139,10 @@ function FolderTreeItem({ folder, selectedId, blockedIds, onSelect, depth }: {
             <button
                 onClick={() => onSelect(folder.id)}
                 disabled={blockedIds.has(folder.id)}
-                title={blockedIds.has(folder.id) ? 'Cannot move into this folder' : undefined}
+                title={blockedIds.has(folder.id) ? 'انتقال به این کشو ممکن نیست' : undefined}
                 className={`w-full flex items-center gap-2 px-4 py-2 hover:bg-dark-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${selectedId === folder.id ? 'bg-primary-600/20 text-primary-400' : ''
                     }`}
-                style={{ paddingLeft: `${16 + depth * 16}px` }}
+                style={{ paddingRight: `${16 + depth * 16}px` }}
             >
                 {hasChildren && (
                     <div

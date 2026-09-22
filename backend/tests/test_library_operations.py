@@ -314,7 +314,13 @@ class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
         commands = client.set_bot_commands.await_args.args[0]
         self.assertIn("search", [command.command for command in commands])
         self.assertTrue(all(command.description for command in commands))
-        client.set_bot_name.assert_awaited_once_with("کمد 🗄️")
+        client.set_bot_name.assert_awaited_once_with("🗂 کمد | درایو ابری تلگرام")
+        client.set_bot_info_short_description.assert_awaited_once_with(
+            "فایلات رو کشوبندی کن، فیلم و موزیکاتو بدون نیاز به دانلود استریم کن و همه‌چیز رو منظم نگه دار! 📦✨"
+        )
+        profile_description = client.set_bot_info_description.await_args.args[0]
+        assert profile_description.startswith("به کُمُد 🗄 خوش اومدی!")
+        assert "جست‌وجوی تیزبین" in profile_description
 
         from app.telegram import build_clients
         build_clients()

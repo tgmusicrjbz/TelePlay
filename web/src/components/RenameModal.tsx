@@ -50,7 +50,7 @@ export default function RenameModal({ isOpen, onClose, onRename, currentName, it
             await onRename(name.trim());
             onClose();
         } catch {
-            setError('Could not rename this item. Please try again.');
+            setError('نام مورد تغییر نکرد. دوباره تلاش کن.');
         } finally {
             setIsSaving(false);
         }
@@ -63,7 +63,7 @@ export default function RenameModal({ isOpen, onClose, onRename, currentName, it
             <div className="bg-dark-800 rounded-xl border border-dark-600 p-6 w-full max-w-md shadow-2xl">
                 <div className="flex items-center justify-between mb-4">
                     <h2 className="text-lg font-semibold text-white">
-                        Rename {itemType === 'file' ? 'File' : 'Folder'}
+                        تغییر نام {itemType === 'file' ? 'فایل' : 'کشو'}
                     </h2>
                     <button onClick={onClose} className="text-dark-400 hover:text-white transition-colors">
                         <X className="w-5 h-5" />
@@ -78,7 +78,7 @@ export default function RenameModal({ isOpen, onClose, onRename, currentName, it
                         onChange={(e) => setName(e.target.value)}
                         maxLength={255}
                         className="w-full px-4 py-3 bg-dark-700 border border-dark-600 rounded-lg text-white placeholder-dark-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        placeholder={`Enter ${itemType} name`}
+                        placeholder={`نام ${itemType === 'file' ? 'فایل' : 'کشو'} را بنویس`}
                     />
                     {error && <p className="mt-2 text-sm text-red-400" role="alert">{error}</p>}
 
@@ -88,14 +88,14 @@ export default function RenameModal({ isOpen, onClose, onRename, currentName, it
                             onClick={onClose}
                             className="flex-1 px-4 py-2 bg-dark-700 hover:bg-dark-600 text-white rounded-lg transition-colors"
                         >
-                            Cancel
+                            لغو
                         </button>
                         <button
                             type="submit"
                             disabled={isSaving || !name.trim() || name.trim() === currentName}
                             className="flex-1 px-4 py-2 bg-primary-600 hover:bg-primary-500 disabled:bg-dark-600 disabled:text-dark-400 text-white rounded-lg transition-colors"
                         >
-                            {isSaving ? 'Saving...' : 'Rename'}
+                            {isSaving ? 'در حال ذخیره…' : 'تغییر نام'}
                         </button>
                     </div>
                 </form>

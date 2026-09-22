@@ -2,7 +2,7 @@
  * Main FileBrowser component - the core of the web interface
  */
 import { useEffect, useCallback, useRef, useState } from 'react';
-import { FolderPlus, Grid, List, Search, ChevronRight, Home, RefreshCw, Clipboard, ArrowUp, ArrowLeft, Film, Music, Image as ImageIcon, FileText, Menu, FolderInput, Trash2, Pencil, X, SlidersHorizontal } from 'lucide-react';
+import { FolderPlus, Folder as FolderIcon, Grid, List, Search, ChevronRight, Home, RefreshCw, Clipboard, ArrowUp, ArrowRight, Film, Music, Image as ImageIcon, FileText, Menu, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes } from 'lucide-react';
 import { useFiles, useFolders, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useRecentFiles, useContinueWatching, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, serializeSort, useBatchUpdateFiles, BatchFileEdit } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import FileCard from './FileCard';
@@ -63,7 +63,9 @@ export default function FileBrowser() {
     const [hasMore, setHasMore] = useState(true);
     const [allFiles, setAllFiles] = useState<TelegramFile[]>([]);
     const [showSort, setShowSort] = useState(false);
+    const [showFilters, setShowFilters] = useState(false);
     const [showBatchEdit, setShowBatchEdit] = useState(false);
+    const [contentScope, setContentScope] = useState<'all' | 'files' | 'folders'>('all');
     const [sortCriteria, setSortCriteria] = useState<SortCriterion[]>(() => {
         try { return JSON.parse(localStorage.getItem('teleplay-sort') || '') || [{ field: 'created', direction: 'desc' }]; }
         catch { return [{ field: 'created', direction: 'desc' }]; }
@@ -105,9 +107,16 @@ export default function FileBrowser() {
         isLoading = filesLoading;
     }
 
-    // Folders only show in 'files' mode
+    // Folder and file visibility is controlled from one shared content switcher.
     const { data: folders, isLoading: foldersLoading, refetch: refetchFolders } = useFolders(currentFolderId, folderSortValue);
-    const showFolders = activeSection === 'files' && !searchQuery && fileTypeFilter.length === 0;
+    const visibleFolders = folders?.filter(folder => {
+        if (!searchQuery.trim()) return true;
+        const query = searchQuery.trim().toLocaleLowerCase('fa');
+        return folder.name.toLocaleLowerCase('fa').includes(query)
+            || (folder.description || '').toLocaleLowerCase('fa').includes(query);
+    });
+    const showFolders = activeSection === 'files' && contentScope !== 'files';
+    const showFiles = activeSection !== 'files' || contentScope !== 'folders';
 
     // Combined loading state
     isLoading = isLoading || (activeSection === 'files' && foldersLoading);
@@ -182,7 +191,7 @@ export default function FileBrowser() {
     const navigateToFolder = useCallback((folder: Folder | null) => {
         if (folder === null) {
             setCurrentFolderId(null);
-            setBreadcrumbs([{ id: null, name: 'My Files' }]);
+            setBreadcrumbs([{ id: null, name: 'کمد من' }]);
         } else {
             setCurrentFolderId(folder.id);
             setBreadcrumbs([...breadcrumbs, { id: folder.id, name: folder.name }]);
@@ -224,10 +233,10 @@ export default function FileBrowser() {
             }
             setDeleteConfirm(null);
             clearSelection();
-            addToast('Items deleted successfully', 'success');
+            addToast('موارد انتخاب‌شده با موفقیت حذف شدند.', 'success');
         } catch (error) {
             console.error('Delete failed:', error);
-            addToast('Failed to delete items', 'error');
+            addToast('حذف موارد انتخاب‌شده انجام نشد.', 'error');
         }
     };
 
@@ -253,7 +262,7 @@ export default function FileBrowser() {
                 }
                 setClipboard(null);
             } else if (clipboard.mode === 'copy') {
-                alert("Copying files is not yet supported. Only Move (Cut) is supported.");
+                alert('در حال حاضر فقط جابه‌جایی فایل‌ها پشتیبانی می‌شود.');
             }
         } catch (error) {
             console.error('Paste failed:', error);
@@ -491,13 +500,25 @@ export default function FileBrowser() {
     const selectedFilesForActions = displayFiles?.filter(file => selectedFileIds.has(file.id)) || [];
     const selectedFoldersForActions = folders?.filter(folder => selectedFolderIds.has(folder.id)) || [];
     const selectedItems = [...selectedFilesForActions, ...selectedFoldersForActions];
-    const sectionTitle = activeSection === 'recent' ? 'Recently added' : activeSection === 'continue_watching' ? 'Continue watching' : (breadcrumbs[breadcrumbs.length - 1]?.name || 'My files');
+    const sectionTitle = activeSection === 'recent' ? 'تازه اضافه‌شده‌ها' : activeSection === 'continue_watching' ? 'ادامه پخش' : (breadcrumbs[breadcrumbs.length - 1]?.name || 'کمد من');
+    const shownFolderCount = showFolders ? visibleFolders?.length || 0 : 0;
+    const shownFileCount = showFiles ? displayFiles?.length || 0 : 0;
+    const selectScope = (scope: 'all' | 'files' | 'folders') => {
+        setContentScope(scope);
+        if (scope === 'folders') setFileTypeFilter(null);
+        clearSelection();
+    };
+    const toggleFileType = (type: string | null) => {
+        if (type !== null) setContentScope('files');
+        setFileTypeFilter(type);
+        clearSelection();
+    };
 
     return (
-        <div className="flex h-screen bg-dark-950 text-white selection:bg-primary-500/30 overflow-hidden">
+        <div dir="rtl" className="flex h-screen bg-dark-950 text-white selection:bg-primary-500/30 overflow-hidden">
             <Sidebar isOpen={isSidebarOpen} onClose={() => setSidebarOpen(false)} />
             
-            <main className={`flex-1 flex flex-col min-w-0 relative bg-gradient-to-br from-dark-950 to-dark-900 transition-[margin] duration-300 ease-in-out ${isSidebarOpen ? 'md:ml-64' : 'ml-0'}`}>
+            <main className={`flex-1 flex flex-col min-w-0 relative bg-gradient-to-br from-dark-950 to-dark-900 transition-[margin] duration-300 ease-in-out ${isSidebarOpen ? 'md:mr-64' : 'mr-0'}`}>
                 {/* Header */}
                 <header className="h-16 border-b border-white/[0.06] flex items-center justify-between px-4 sm:px-6 bg-dark-900/50 backdrop-blur-sm z-30 sticky top-0">
                     {/* Left: Hamburger & Search & Breadcrumbs */}
@@ -505,7 +526,8 @@ export default function FileBrowser() {
                         {/* Hamburger */}
                         <button 
                             onClick={() => setSidebarOpen(!isSidebarOpen)}
-                            className="p-2 -ml-2 text-dark-400 hover:text-white"
+                            className="p-2 -mr-2 text-dark-400 hover:text-white"
+                            aria-label="باز کردن منو"
                         >
                             <Menu className="w-6 h-6" />
                         </button>
@@ -513,23 +535,23 @@ export default function FileBrowser() {
                         {activeSection === 'files' && breadcrumbs.length > 1 && (
                             <button
                                 onClick={() => navigateToBreadcrumb(breadcrumbs.length - 2)}
-                                className="sm:hidden p-2 -ml-2 rounded-lg text-dark-300 hover:text-white hover:bg-white/[0.06]"
+                                className="sm:hidden p-2 -mr-2 rounded-lg text-dark-300 hover:text-white hover:bg-white/[0.06]"
                                 aria-label="برگشت به کشوی قبلی"
                                 title="کشوی قبلی"
                             >
-                                <ArrowLeft className="w-5 h-5" />
+                                <ArrowRight className="w-5 h-5" />
                             </button>
                         )}
 
                         {/* Search */}
                         <div className="relative w-full max-w-[200px] sm:max-w-xs md:w-64">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-500" />
+                            <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-500" />
                             <input
                                 type="text"
-                                placeholder="Search..."
+                                placeholder="جست‌وجو در کمد…"
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
-                                className="w-full bg-dark-800/50 border border-white/[0.06] rounded-lg pl-9 pr-3 py-1.5 text-sm text-white focus:outline-none focus:border-primary-500/50 focus:bg-dark-800 transition-all"
+                                className="w-full bg-dark-800/50 border border-white/[0.06] rounded-lg pr-9 pl-3 py-1.5 text-sm text-white focus:outline-none focus:border-primary-500/50 focus:bg-dark-800 transition-all"
                             />
                         </div>
                         
@@ -540,7 +562,7 @@ export default function FileBrowser() {
                         <nav className="flex items-center gap-0.5 overflow-hidden hidden sm:flex">
                             {breadcrumbs.map((crumb, index) => (
                                 <div key={crumb.id || 'root'} className="flex items-center min-w-0">
-                                    {index > 0 && <ChevronRight className="w-4 h-4 text-dark-600 mx-1 shrink-0" />}
+                                    {index > 0 && <ChevronRight className="w-4 h-4 text-dark-600 mx-1 shrink-0 rotate-180" />}
                                     <button 
                                         onClick={() => navigateToBreadcrumb(index)}
                                         className={`px-2 py-1 rounded-md text-sm truncate max-w-[150px] transition-colors ${index === breadcrumbs.length - 1 
@@ -558,72 +580,13 @@ export default function FileBrowser() {
 
                     {/* Right: Actions */}
                     <div className="flex items-center gap-2 sm:gap-3">
-                        <button
-                            onClick={() => setShowSort(true)}
-                            className="p-2 rounded-lg text-dark-300 hover:text-white hover:bg-white/[0.06]"
-                            title="مرتب‌سازی"
-                            aria-label="مرتب‌سازی"
-                        >
-                            <SlidersHorizontal className="w-4 h-4" />
-                        </button>
-                         {/* Filter buttons with Icons */}
-                        <div className="hidden md:flex items-center bg-dark-800/50 rounded-lg p-0.5 border border-white/[0.06] mr-2">
-                             <button
-                                onClick={() => setFileTypeFilter(null)}
-                                title="All Files"
-                                className={`p-1.5 rounded-md transition-all ${
-                                    fileTypeFilter.length === 0 ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'
-                                }`}
-                            >
-                                <Grid className="w-4 h-4" />
-                            </button>
-                            <button
-                                onClick={() => setFileTypeFilter('video')}
-                                title="Videos"
-                                className={`p-1.5 rounded-md transition-all ${
-                                    fileTypeFilter.includes('video') ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'
-                                }`}
-                            >
-                                <Film className="w-4 h-4" />
-                            </button>
-                            <button
-                                onClick={() => setFileTypeFilter('audio')}
-                                title="Audio"
-                                className={`p-1.5 rounded-md transition-all ${
-                                    fileTypeFilter.includes('audio') ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'
-                                }`}
-                            >
-                                <Music className="w-4 h-4" />
-                            </button>
-                            <button
-                                onClick={() => setFileTypeFilter('image')}
-                                title="Images"
-                                className={`p-1.5 rounded-md transition-all ${
-                                    fileTypeFilter.includes('image') ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'
-                                }`}
-                            >
-                                <ImageIcon className="w-4 h-4" />
-                            </button>
-                            <button
-                                onClick={() => setFileTypeFilter('document')}
-                                title="Documents"
-                                className={`p-1.5 rounded-md transition-all ${
-                                    fileTypeFilter.includes('document') ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'
-                                }`}
-                            >
-                                <FileText className="w-4 h-4" />
-                            </button>
-                            <button onClick={() => setFileTypeFilter('text')} title="Notes" className={`p-1.5 rounded-md transition-all ${fileTypeFilter.includes('text') ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'}`}>
-                                <FileText className="w-4 h-4" />
-                            </button>
-                        </div>
- 
                          <div className="hidden sm:flex items-center gap-1 bg-dark-800/50 rounded-lg p-0.5 border border-white/[0.06]">
                              <button
                                  onClick={handleRefresh}
                                  disabled={isLoading}
                                  className={`p-1.5 rounded-md text-dark-400 hover:text-white hover:bg-white/[0.05] transition-all active:scale-95 ${isLoading ? 'animate-spin' : ''}`}
-                                 title="Refresh"
+                                 title="تازه‌سازی"
+                                 aria-label="تازه‌سازی"
                              >
                                  <RefreshCw className="w-4 h-4" />
                              </button>
@@ -646,20 +609,20 @@ export default function FileBrowser() {
                         {clipboard && (clipboard.files.length > 0 || clipboard.folders.length > 0) && (
                             <button
                                 onClick={handlePaste}
-                                className="ml-2 btn-secondary py-1.5 px-3 text-xs flex items-center gap-2 bg-primary-500/10 text-primary-300 border-primary-500/20 hover:bg-primary-500/20"
+                                className="mr-2 btn-secondary py-1.5 px-3 text-xs flex items-center gap-2 bg-primary-500/10 text-primary-300 border-primary-500/20 hover:bg-primary-500/20"
                             >
                                 <Clipboard className="w-3.5 h-3.5" />
-                                Paste ({clipboard.files.length + clipboard.folders.length})
+                                انتقال به اینجا ({clipboard.files.length + clipboard.folders.length})
                             </button>
                         )}
 
                         {activeSection === 'files' && (
                             <button
                                 onClick={() => setShowNewFolder(true)}
-                                className="ml-2 btn-primary py-1.5 px-3 text-sm flex items-center gap-2 shadow-lg shadow-primary-500/20"
+                                className="mr-2 btn-primary py-1.5 px-3 text-sm flex items-center gap-2 shadow-lg shadow-primary-500/20"
                             >
                                 <FolderPlus className="w-4 h-4" />
-                                <span className="hidden sm:inline">New Folder</span>
+                                <span className="hidden sm:inline">کشوی تازه</span>
                             </button>
                         )}
                     </div>
@@ -679,35 +642,72 @@ export default function FileBrowser() {
                 >
                     <div className="max-w-7xl mx-auto mb-6 sm:mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                         <div>
-                            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-primary-300 mb-2">Your library</p>
+                            <p className="text-xs font-semibold text-primary-300 mb-2">🗄️ کمد شخصی تو</p>
                             <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">{sectionTitle}</h1>
                             <p className="text-sm text-dark-400 mt-2">
-                                {activeSection === 'continue_watching' ? 'Pick up where you left off.' : `${showFolders ? folders?.length || 0 : 0} folders · ${displayFiles?.length || 0} files shown`}
+                                {activeSection === 'continue_watching'
+                                    ? 'از همون‌جایی که رها کردی ادامه بده.'
+                                    : `${shownFolderCount.toLocaleString('fa-IR')} کشو و ${shownFileCount.toLocaleString('fa-IR')} فایل نمایش داده می‌شود`}
                             </p>
                         </div>
                         {selectedItems.length > 0 ? (
                             <div className="flex flex-wrap items-center gap-2 rounded-xl border border-primary-500/20 bg-primary-500/10 p-2">
-                                <span className="text-sm font-medium text-primary-200 px-2">{selectedItems.length} selected</span>
-                                {selectedItems.length === 1 && <button className="btn-secondary text-sm flex items-center gap-2" onClick={() => selectedFilesForActions[0] ? setRenameFile(selectedFilesForActions[0]) : setRenameFolder(selectedFoldersForActions[0])}><Pencil className="w-4 h-4" /> Rename</button>}
+                                <span className="text-sm font-medium text-primary-200 px-2">{selectedItems.length.toLocaleString('fa-IR')} مورد انتخاب شده</span>
+                                {selectedItems.length === 1 && <button className="btn-secondary text-sm flex items-center gap-2" onClick={() => selectedFilesForActions[0] ? setRenameFile(selectedFilesForActions[0]) : setRenameFolder(selectedFoldersForActions[0])}><Pencil className="w-4 h-4" /> تغییر نام</button>}
                                 {selectedFilesForActions.length > 0 && <button className="btn-secondary text-sm flex items-center gap-2" onClick={() => setShowBatchEdit(true)}><Pencil className="w-4 h-4" /> ویرایش گروهی</button>}
-                                <button className="btn-secondary text-sm flex items-center gap-2" onClick={() => setMoveItems({ files: selectedFilesForActions, folders: selectedFoldersForActions })}><FolderInput className="w-4 h-4" /> Move</button>
-                                <button className="btn-secondary text-sm flex items-center gap-2 text-red-300" onClick={() => setDeleteConfirm({ type: selectedFoldersForActions.length && selectedFilesForActions.length ? 'multiple' : selectedFoldersForActions.length ? 'folder' : 'file', items: selectedItems })}><Trash2 className="w-4 h-4" /> Delete</button>
-                                <button className="btn-icon" title="Clear selection" onClick={clearSelection}><X className="w-4 h-4" /></button>
+                                <button className="btn-secondary text-sm flex items-center gap-2" onClick={() => setMoveItems({ files: selectedFilesForActions, folders: selectedFoldersForActions })}><FolderInput className="w-4 h-4" /> جابه‌جایی</button>
+                                <button className="btn-secondary text-sm flex items-center gap-2 text-red-300" onClick={() => setDeleteConfirm({ type: selectedFoldersForActions.length && selectedFilesForActions.length ? 'multiple' : selectedFoldersForActions.length ? 'folder' : 'file', items: selectedItems })}><Trash2 className="w-4 h-4" /> حذف</button>
+                                <button className="btn-icon" title="لغو انتخاب" onClick={clearSelection}><X className="w-4 h-4" /></button>
                             </div>
                         ) : activeSection === 'files' && (
-                            <p className="text-xs text-dark-500 hidden sm:block">Send files, photos or text to your Telegram bot to add them here.</p>
+                            <p className="text-xs text-dark-500 hidden sm:block">فایل، عکس یا متن را برای ربات بفرست تا همین‌جا به کمدت اضافه شود.</p>
                         )}
                     </div>
                     {activeSection === 'files' && (
-                        <div className="max-w-7xl mx-auto mb-5 flex gap-2 overflow-x-auto pb-1 md:hidden" aria-label="File type filters">
-                            {([
-                                ['All', null], ['Video', 'video'], ['Audio', 'audio'],
-                                ['Images', 'image'], ['Documents', 'document'], ['Notes', 'text'],
-                            ] as const).map(([label, type]) => (
-                                <button key={label} onClick={() => setFileTypeFilter(type)} className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium border transition-colors ${(type === null ? fileTypeFilter.length === 0 : fileTypeFilter.includes(type)) ? 'bg-primary-600 border-primary-500 text-white' : 'bg-dark-800 border-white/10 text-dark-300'}`}>
-                                    {label}
-                                </button>
-                            ))}
+                        <div className="max-w-7xl mx-auto mb-6 rounded-2xl border border-white/[0.07] bg-dark-900/70 p-3 sm:p-4 shadow-lg shadow-black/10">
+                            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                                <div className="grid grid-cols-3 gap-1 rounded-xl bg-dark-950/70 p-1" aria-label="انتخاب نوع محتوا">
+                                    {([
+                                        ['all', 'همه', Boxes],
+                                        ['files', 'فایل‌ها', FileText],
+                                        ['folders', 'کشوها', FolderIcon],
+                                    ] as const).map(([scope, label, Icon]) => (
+                                        <button key={scope} onClick={() => selectScope(scope)} className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm transition-all ${contentScope === scope ? 'bg-primary-600 text-white shadow-md' : 'text-dark-400 hover:bg-white/[0.05] hover:text-white'}`}>
+                                            <Icon className="h-4 w-4" />
+                                            {label}
+                                        </button>
+                                    ))}
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <button onClick={() => setShowFilters(value => !value)} disabled={contentScope === 'folders'} className={`btn-secondary flex items-center gap-2 text-sm disabled:cursor-not-allowed disabled:opacity-40 ${fileTypeFilter.length ? 'border-primary-500/40 text-primary-200' : ''}`}>
+                                        <SlidersHorizontal className="h-4 w-4" />
+                                        نوع فایل
+                                        {fileTypeFilter.length > 0 && <span className="rounded-full bg-primary-500 px-1.5 text-[10px] text-white">{fileTypeFilter.length.toLocaleString('fa-IR')}</span>}
+                                    </button>
+                                    <button onClick={() => setShowSort(true)} className="btn-secondary flex items-center gap-2 text-sm">
+                                        <SlidersHorizontal className="h-4 w-4" /> مرتب‌سازی
+                                    </button>
+                                    <button onClick={handleRefresh} className="btn-secondary flex items-center gap-2 text-sm sm:hidden">
+                                        <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} /> تازه‌سازی
+                                    </button>
+                                </div>
+                            </div>
+                            {showFilters && contentScope !== 'folders' && (
+                                <div className="mt-3 border-t border-white/[0.06] pt-3">
+                                    <p className="mb-2 text-xs text-dark-400">می‌تونی چند نوع فایل را هم‌زمان انتخاب کنی:</p>
+                                    <div className="flex flex-wrap gap-2">
+                                        {([
+                                            ['ویدیو', 'video', Film], ['موسیقی و صوت', 'audio', Music],
+                                            ['عکس', 'image', ImageIcon], ['سند', 'document', FileText], ['متن و یادداشت', 'text', FileText],
+                                        ] as const).map(([label, type, Icon]) => (
+                                            <button key={type} onClick={() => toggleFileType(type)} className={`flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-medium transition-colors ${fileTypeFilter.includes(type) ? 'border-primary-500 bg-primary-600 text-white' : 'border-white/10 bg-dark-800 text-dark-300 hover:border-white/20 hover:text-white'}`}>
+                                                <Icon className="h-4 w-4" /> {label}
+                                            </button>
+                                        ))}
+                                        {fileTypeFilter.length > 0 && <button onClick={() => toggleFileType(null)} className="rounded-full px-3 py-2 text-xs text-red-300 hover:bg-red-500/10">پاک‌کردن فیلترها</button>}
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     )}
                     {isLoading && !displayFiles ? (
@@ -719,13 +719,13 @@ export default function FileBrowser() {
                     ) : (
                         <>
                              {/* Unified View */}
-                             {(showFolders && folders?.length ? folders.length : 0) + (displayFiles?.length || 0) > 0 ? (
+                             {shownFolderCount + shownFileCount > 0 ? (
                                 <div className={viewMode === 'grid'
                                     ? 'max-w-7xl mx-auto grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4 pb-20'
                                     : 'max-w-7xl mx-auto flex flex-col gap-2 pb-20'
                                 }>
                                     {/* Folders */}
-                                    {showFolders && folders?.map((folder) => (
+                                    {showFolders && visibleFolders?.map((folder) => (
                                         <FolderCard
                                             key={folder.id}
                                             folder={folder}
@@ -738,7 +738,7 @@ export default function FileBrowser() {
                                     ))}
                                     
                                     {/* Files */}
-                                    {displayFiles?.map((file) => (
+                                    {showFiles && displayFiles?.map((file) => (
                                         <FileCard
                                             key={file.id}
                                             file={file}
@@ -754,9 +754,11 @@ export default function FileBrowser() {
                                     <div className="w-24 h-24 rounded-3xl bg-dark-800/50 flex items-center justify-center border border-white/[0.04] mb-6 shadow-2xl">
                                         <ArrowUp className="w-10 h-10 text-dark-600 animate-bounce" />
                                     </div>
-                                    <h3 className="text-xl font-bold text-white mb-2">No files found</h3>
+                                    <h3 className="text-xl font-bold text-white mb-2">
+                                        {contentScope === 'folders' ? 'کشویی پیدا نشد' : 'چیزی پیدا نشد'}
+                                    </h3>
                                     <p className="text-dark-400 max-w-xs">
-                                        Upload files by sending them to the Telegram bot
+                                        {searchQuery ? 'عبارت جست‌وجو یا فیلترها را تغییر بده.' : 'فایل‌ها را برای ربات تلگرام بفرست تا به کمدت اضافه شوند.'}
                                     </p>
                                 </div>
                             )}
@@ -777,16 +779,16 @@ export default function FileBrowser() {
                     )}
 
                     {/* Loading indicator for infinite scroll */}
-                    {activeSection === 'files' && isLoading && hasMore && (
+                    {activeSection === 'files' && showFiles && isLoading && hasMore && (
                         <div className="flex justify-center py-4">
                             <div className="w-6 h-6 border-2 border-primary-500/30 border-t-primary-500 rounded-full animate-spin"></div>
                         </div>
                     )}
 
                     {/* No more files message */}
-                    {activeSection === 'files' && !hasMore && allFiles.length > 0 && (
+                    {activeSection === 'files' && showFiles && !hasMore && allFiles.length > 0 && (
                         <div className="text-center py-4 text-dark-400">
-                            No more files
+                            همه فایل‌ها نمایش داده شدند
                         </div>
                     )}
                 </div>

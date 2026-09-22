@@ -31,7 +31,7 @@ export default function DescriptionModal({ isOpen, itemType, currentDescription,
             await onSave(description.trim());
             onClose();
         } catch {
-            setError('Could not save the description. Please try again.');
+            setError('توضیحات ذخیره نشد. دوباره تلاش کن.');
         } finally {
             setSaving(false);
         }
@@ -43,7 +43,7 @@ export default function DescriptionModal({ isOpen, itemType, currentDescription,
                 <div className="flex items-center justify-between mb-4">
                     <h2 className="text-lg font-semibold flex items-center gap-2">
                         <AlignLeft className="w-5 h-5 text-primary-400" />
-                        {currentDescription ? 'Edit' : 'Add'} {itemType} description
+                        {currentDescription ? 'ویرایش' : 'افزودن'} توضیحات {itemType === 'file' ? 'فایل' : 'کشو'}
                     </h2>
                     <button type="button" onClick={onClose} className="p-1 hover:bg-dark-700 rounded"><X className="w-5 h-5" /></button>
                 </div>
@@ -53,21 +53,21 @@ export default function DescriptionModal({ isOpen, itemType, currentDescription,
                     maxLength={1024}
                     rows={7}
                     autoFocus
-                    placeholder="Write a short description…"
+                    placeholder="یک توضیح کوتاه بنویس…"
                     className="w-full resize-y px-4 py-3 bg-dark-700 border border-dark-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500/50"
                 />
                 <div className="flex justify-between mt-2 text-xs text-dark-400">
-                    <span>Leave empty to remove the description.</span>
+                    <span>برای حذف توضیحات، این بخش را خالی بگذار.</span>
                     <span>{description.length}/1024</span>
                 </div>
                 {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
                 <div className="flex justify-end gap-3 mt-5">
-                    <button type="button" onClick={onClose} className="px-4 py-2 text-dark-400 hover:text-white">Cancel</button>
+                    <button type="button" onClick={onClose} className="px-4 py-2 text-dark-400 hover:text-white">لغو</button>
                     {currentDescription && (
-                        <button type="button" disabled={saving} onClick={() => setDescription('')} className="px-4 py-2 text-red-400 hover:bg-red-500/10 rounded-lg">Clear</button>
+                        <button type="button" disabled={saving} onClick={() => setDescription('')} className="px-4 py-2 text-red-400 hover:bg-red-500/10 rounded-lg">پاک‌کردن</button>
                     )}
                     <button type="submit" disabled={saving} className="px-4 py-2 bg-primary-600 hover:bg-primary-700 rounded-lg font-medium disabled:opacity-50">
-                        {saving ? 'Saving…' : 'Save'}
+                        {saving ? 'در حال ذخیره…' : 'ذخیره'}
                     </button>
                 </div>
             </form>

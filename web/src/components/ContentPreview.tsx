@@ -45,8 +45,8 @@ export default function ContentPreview() {
                         {file.description && <p dir="auto" className="text-sm text-dark-400 mt-1 whitespace-pre-wrap">{file.description}</p>}
                         <p className="text-xs text-dark-500 mt-1">آپلود: {formatPersianDate(file.created_at)} · آخرین تغییر: {formatPersianDate(file.updated_at)}</p>
                     </div>
-                    <a href={`${url}&download=1`} download={file.file_name} className="btn-icon" title="Download"><Download className="w-5 h-5" /></a>
-                    <button onClick={() => setPreviewFile(null)} className="btn-icon" title="Close"><X className="w-5 h-5" /></button>
+                    <a href={`${url}&download=1`} download={file.file_name} className="btn-icon" title="دانلود"><Download className="w-5 h-5" /></a>
+                    <button onClick={() => setPreviewFile(null)} className="btn-icon" title="بستن"><X className="w-5 h-5" /></button>
                 </header>
                 {file.file_type === 'image' ? (
                     <div className="min-h-0 flex-1 flex items-center justify-center p-4 overflow-auto">
@@ -54,7 +54,7 @@ export default function ContentPreview() {
                     </div>
                 ) : (
                     <div className="min-h-0 overflow-auto p-5 sm:p-8 bg-dark-950/60">
-                        {loading ? <p className="text-dark-400">Loading text...</p> : error ? <p className="text-red-400">{error}</p> :
+                        {loading ? <p className="text-dark-400">در حال بارگذاری متن…</p> : error ? <p className="text-red-400">{error}</p> :
                             <pre dir="auto" className="whitespace-pre-wrap break-words font-mono text-sm leading-7 text-dark-100">{content}</pre>}
                     </div>
                 )}

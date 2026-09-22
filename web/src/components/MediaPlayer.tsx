@@ -175,9 +175,9 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
         if (videoRef.current?.error) {
             const code = videoRef.current.error.code;
             if (code === 3 || code === 4) { // MEDIA_ERR_DECODE or MEDIA_ERR_SRC_NOT_SUPPORTED
-                setError("Browser cannot decode this video format.");
+                setError('مرورگر نمی‌تواند فرمت این ویدیو را پخش کند.');
             } else {
-                setError("An error occurred while trying to play this video.");
+                setError('هنگام پخش ویدیو مشکلی پیش آمد.');
             }
             setIsLoading(false);
         }
@@ -333,7 +333,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                         <div className="w-16 h-16 rounded-2xl bg-yellow-500/20 flex items-center justify-center mx-auto mb-5 border border-yellow-500/30">
                             <AlertTriangle className="w-8 h-8 text-yellow-400" />
                         </div>
-                        <h3 className="text-xl font-bold text-white mb-2">Playback Not Supported</h3>
+                        <h3 className="text-xl font-bold text-white mb-2">پخش این فایل در مرورگر ممکن نیست</h3>
                         <p className="text-dark-300 mb-6">{error}</p>
 
                         <div className="flex flex-col gap-3">
@@ -342,7 +342,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                                 className="btn-primary flex items-center justify-center gap-2"
                             >
                                 <ExternalLink className="w-4 h-4" />
-                                Open in VLC
+                                باز کردن در VLC
                             </a>
                             <div className="flex gap-3">
                                 <Button
@@ -350,7 +350,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                                     className="flex-1 btn-secondary flex items-center justify-center gap-2"
                                 >
                                     <Copy className="w-4 h-4" />
-                                    Copy URL
+                                    کپی پیوند
                                 </Button>
                                 <a
                                     href={externalUrl}
@@ -359,7 +359,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                                     onClick={(e) => e.stopPropagation()}
                                 >
                                     <Download className="w-4 h-4" />
-                                    Download
+                                    دانلود
                                 </a>
                             </div>
                         </div>
@@ -367,7 +367,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                             onClick={onClose}
                             className="mt-6 text-dark-400 hover:text-white text-sm transition-colors"
                         >
-                            Close
+                            بستن
                         </button>
                     </div>
                 ) : (
@@ -387,7 +387,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                                             }}
                                          />
                                          <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent flex items-end justify-center pb-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <span className="text-white text-sm font-medium">Original Artwork</span>
+                                            <span className="text-white text-sm font-medium">تصویر اصلی</span>
                                          </div>
                                     </div>
                                 ) : (
@@ -448,10 +448,10 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                     </div>
 
                     <div className="flex items-center gap-2 border-l border-white/10 pl-4">
-                         <button onClick={() => setMinimized(false)} className="p-2 text-dark-400 hover:text-white" title="Maximize">
+                         <button onClick={() => setMinimized(false)} className="p-2 text-dark-400 hover:text-white" title="بزرگ‌نمایی">
                             <ChevronUp className="w-5 h-5" />
                         </button>
-                        <button onClick={onClose} className="p-2 text-dark-400 hover:text-red-400" title="Close">
+                        <button onClick={onClose} className="p-2 text-dark-400 hover:text-red-400" title="بستن">
                             <X className="w-5 h-5" />
                         </button>
                     </div>
@@ -476,14 +476,14 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                             {file.description && <p dir="auto" className="text-xs text-dark-300 max-w-lg line-clamp-2">{file.description}</p>}
                             <p className="text-[10px] text-dark-400 mt-1">آپلود: {formatPersianDate(file.created_at)} · تغییر: {formatPersianDate(file.updated_at)}</p>
                             {((extendedFile?.last_pos || 0) > 0) && currentTime < 5 && (
-                                <p className="text-xs text-primary-400">Resumed from {formatDuration(extendedFile?.last_pos || 0)}</p>
+                                <p className="text-xs text-primary-400">ادامه از {formatDuration(extendedFile?.last_pos || 0)}</p>
                             )}
                         </div>
                         <div className="flex items-center gap-2">
                              <button
                                 onClick={() => setMinimized(true)}
                                 className="p-2 text-white hover:bg-white/20 rounded-full transition-colors"
-                                title="Minimize"
+                                title="کوچک‌نمایی"
                             >
                                 <ChevronDown className="w-6 h-6" />
                             </button>
@@ -589,7 +589,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                                         ? 'bg-primary-500/30 text-primary-300 border border-primary-500/40'
                                         : 'bg-white/10 text-white/80 border border-white/10 hover:bg-white/20 hover:text-white'
                                         }`}
-                                    title="Playback Speed"
+                                    title="سرعت پخش"
                                 >
                                     <Gauge className="w-4 h-4" />
                                     <span>{playbackSpeed}x</span>
@@ -603,7 +603,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                                             ? 'bg-primary-500/30 text-primary-300'
                                             : 'hover:bg-white/10 text-white/80 hover:text-white'
                                             }`}
-                                        title="Picture in Picture"
+                                        title="تصویر در تصویر"
                                     >
                                         <PictureInPicture2 className="w-5 h-5" />
                                     </button>
@@ -613,7 +613,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                                 <button
                                     onClick={toggleFullscreen}
                                     className="p-2 rounded-lg hover:bg-white/10 text-white/80 hover:text-white transition-all"
-                                    title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
+                                    title={isFullscreen ? 'خروج از تمام‌صفحه' : 'تمام‌صفحه'}
                                 >
                                     {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
                                 </button>

@@ -69,6 +69,8 @@ export default function FileCard({
         }
     };
 
+    const typeLabel = ({ video: 'ویدیو', audio: 'صوت', image: 'عکس', document: 'سند', text: 'متن' } as Record<string, string>)[file.file_type] || 'فایل';
+
     if (viewMode === 'list') {
         return (
             <div
@@ -96,7 +98,7 @@ export default function FileCard({
                     <div className="flex items-center gap-3 text-xs text-dark-400 mt-1">
                         <span className="flex items-center gap-1">
                             {getSmallIcon()}
-                            <span className="capitalize">{file.file_type}</span>
+                            <span>{typeLabel}</span>
                         </span>
                         <span className="w-1 h-1 rounded-full bg-dark-600"></span>
                         <span>{formatFileSize(file.file_size)}</span>
@@ -206,7 +208,7 @@ export default function FileCard({
                             : 'bg-dark-800 border-white/[0.05] text-dark-400 group-hover:border-white/[0.1]'
                         }`}>
                             {getSmallIcon()}
-                            <span className="capitalize">{file.file_type}</span>
+                            <span>{typeLabel}</span>
                         </span>
                         <p className="text-[10px] text-dark-500">
                             {formatFileSize(file.file_size)}

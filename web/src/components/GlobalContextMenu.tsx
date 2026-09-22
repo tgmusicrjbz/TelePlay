@@ -59,7 +59,7 @@ export default function GlobalContextMenu() {
             setCopiedId(id);
             setTimeout(() => setCopiedId(null), 2000);
         } catch (err) {
-            console.error('Failed to copy:', err);
+                    console.error('کپی‌کردن انجام نشد:', err);
         }
     };
 
@@ -145,7 +145,8 @@ export default function GlobalContextMenu() {
             {/* Context Menu */}
             <div
                 ref={menuRef}
-                className="fixed bg-dark-800/95 backdrop-blur-xl border border-white/[0.08] rounded-xl shadow-2xl py-1.5 min-w-[220px] z-[99999] animate-scale-in"
+                dir="rtl"
+                className="fixed bg-dark-800/95 backdrop-blur-xl border border-white/[0.08] rounded-xl shadow-2xl py-1.5 min-w-[220px] z-[99999] animate-scale-in text-right"
                 style={{
                     left: position.left,
                     top: position.top,
@@ -160,98 +161,98 @@ export default function GlobalContextMenu() {
                         {isMultiSelect ? (
                             <>
                                 <div className="px-3 py-2 text-xs font-medium text-dark-400 uppercase tracking-wider">
-                                    {selectedFileIds.size} Selected
+                                    {selectedFileIds.size.toLocaleString('fa-IR')} فایل انتخاب شده
                                 </div>
-                                <button className="context-menu-item w-full text-left" onClick={() => handleAction(() => setMoveFiles(selectedFiles))}>
+                                <button className="context-menu-item w-full text-right" onClick={() => handleAction(() => setMoveFiles(selectedFiles))}>
                                     <FolderInput className="w-4 h-4" />
-                                    Move ({selectedFileIds.size}) Items
+                                    جابه‌جایی فایل‌های انتخاب‌شده
                                 </button>
-                                <button className="context-menu-item w-full text-left text-red-400 hover:bg-red-500/10" onClick={() => handleAction(() => setDeleteConfirm({ type: 'file', items: Array.from(selectedFileIds).map(id => ({ id } as any)) }))}> 
+                                <button className="context-menu-item w-full text-right text-red-400 hover:bg-red-500/10" onClick={() => handleAction(() => setDeleteConfirm({ type: 'file', items: Array.from(selectedFileIds).map(id => ({ id } as any)) }))}>
                                     <Trash2 className="w-4 h-4" />
-                                    Delete ({selectedFileIds.size}) Items
+                                    حذف فایل‌های انتخاب‌شده
                                 </button>
                             </>
                         ) : (
                             <>
                                 {(activeContextMenu.item.file_type === 'video' || activeContextMenu.item.file_type === 'audio') && (
-                                    <button className="context-menu-item w-full text-left" onClick={() => handleAction(() => handlePlay(activeContextMenu.item as TelegramFile))}>
+                                    <button className="context-menu-item w-full text-right" onClick={() => handleAction(() => handlePlay(activeContextMenu.item as TelegramFile))}>
                                         <Play className="w-4 h-4" />
-                                        Play
+                                        پخش
                                     </button>
                                 )}
                                 {(activeContextMenu.item.file_type === 'image' || canPreviewText(activeContextMenu.item as TelegramFile)) && (
-                                    <button className="context-menu-item w-full text-left" onClick={() => handleAction(() => setPreviewFile(activeContextMenu.item as TelegramFile))}>
+                                    <button className="context-menu-item w-full text-right" onClick={() => handleAction(() => setPreviewFile(activeContextMenu.item as TelegramFile))}>
                                         <Eye className="w-4 h-4" />
-                                        Preview
+                                        پیش‌نمایش
                                     </button>
                                 )}
                                 <button
-                                    className="context-menu-item w-full text-left"
+                                    className="context-menu-item w-full text-right"
                                     onClick={() => { handleDownload(activeContextMenu.item as TelegramFile); setActiveContextMenu(null); }}
                                 >
                                     <Download className="w-4 h-4" />
-                                    Download
+                                    دانلود
                                 </button>
                                 
                                 <hr className="border-white/[0.08] my-1" />
 
-                                <button className="context-menu-item w-full text-left" onClick={async () => {
+                                <button className="context-menu-item w-full text-right" onClick={async () => {
                                     const url = await ensurePublicLink(activeContextMenu.item as TelegramFile);
                                     handleCopy(url, 'stream');
                                 }}>
                                     <Link className="w-4 h-4" />
-                                    {copiedId === 'stream' ? '✓ Copied!' : 'Copy Stream URL'}
+                                    {copiedId === 'stream' ? '✓ کپی شد' : 'کپی پیوند پخش'}
                                 </button>
 
-                                <button className="context-menu-item w-full text-left" onClick={async () => {
+                                <button className="context-menu-item w-full text-right" onClick={async () => {
                                     const url = await ensurePublicLink(activeContextMenu.item as TelegramFile);
                                     const downloadUrl = url + (url.includes('?') ? '&' : '?') + 'download=1';
                                     handleCopy(downloadUrl, 'download');
                                 }}>
                                     <HardDriveDownload className="w-4 h-4" />
-                                    {copiedId === 'download' ? '✓ Copied!' : 'Copy Download URL'}
+                                    {copiedId === 'download' ? '✓ کپی شد' : 'کپی پیوند دانلود'}
                                 </button>
 
                                 <hr className="border-white/[0.08] my-1" />
 
                                 {(activeContextMenu.item as TelegramFile).public_stream_url ? (
                                     <>
-                                        <button className="context-menu-item w-full text-left" onClick={() => handleCopy(`${window.location.protocol}//${window.location.host}${(activeContextMenu.item as TelegramFile).public_stream_url}`, 'public')}>
+                                        <button className="context-menu-item w-full text-right" onClick={() => handleCopy(`${window.location.protocol}//${window.location.host}${(activeContextMenu.item as TelegramFile).public_stream_url}`, 'public')}>
                                             <Globe className="w-4 h-4 text-emerald-400" />
-                                            {copiedId === 'public' ? '✓ Copied!' : 'Copy Public Link'}
+                                            {copiedId === 'public' ? '✓ کپی شد' : 'کپی پیوند عمومی'}
                                         </button>
-                                        <button className="context-menu-item w-full text-left text-orange-400 hover:bg-orange-500/10" onClick={() => handleRevokeShare(activeContextMenu.item as TelegramFile)}>
+                                        <button className="context-menu-item w-full text-right text-orange-400 hover:bg-orange-500/10" onClick={() => handleRevokeShare(activeContextMenu.item as TelegramFile)}>
                                             <ShieldOff className="w-4 h-4" />
-                                            Revoke Public Link
+                                            لغو پیوند عمومی
                                         </button>
                                     </>
                                 ) : (
-                                    <button className="context-menu-item w-full text-left" onClick={() => handleShare(activeContextMenu.item as TelegramFile)}>
+                                    <button className="context-menu-item w-full text-right" onClick={() => handleShare(activeContextMenu.item as TelegramFile)}>
                                         <Globe className="w-4 h-4" />
-                                        Create Public Link
+                                        ساخت پیوند عمومی
                                     </button>
                                 )}
 
                                 <hr className="border-white/[0.08] my-1" />
                                 
-                                <button className="context-menu-item w-full text-left" onClick={() => handleAction(() => setRenameFile(activeContextMenu.item as TelegramFile))}>
+                                <button className="context-menu-item w-full text-right" onClick={() => handleAction(() => setRenameFile(activeContextMenu.item as TelegramFile))}>
                                     <Edit className="w-4 h-4" />
-                                    Rename
+                                    تغییر نام
                                 </button>
-                                <button className="context-menu-item w-full text-left" onClick={() => handleAction(() => setDescriptionItem({ type: 'file', item: activeContextMenu.item as TelegramFile }))}>
+                                <button className="context-menu-item w-full text-right" onClick={() => handleAction(() => setDescriptionItem({ type: 'file', item: activeContextMenu.item as TelegramFile }))}>
                                     <AlignLeft className="w-4 h-4" />
-                                    {(activeContextMenu.item as TelegramFile).description ? 'Edit Description' : 'Add Description'}
+                                    {(activeContextMenu.item as TelegramFile).description ? 'ویرایش توضیحات' : 'افزودن توضیحات'}
                                 </button>
-                                <button className="context-menu-item w-full text-left" onClick={() => handleAction(() => setMoveItems({ files: [activeContextMenu.item as TelegramFile], folders: [] }))}>
+                                <button className="context-menu-item w-full text-right" onClick={() => handleAction(() => setMoveItems({ files: [activeContextMenu.item as TelegramFile], folders: [] }))}>
                                     <FolderInput className="w-4 h-4" />
-                                    Move to...
+                                    جابه‌جایی به…
                                 </button>
                                 
                                 <hr className="border-white/[0.08] my-1" />
                                 
-                                <button className="context-menu-item w-full text-left text-red-400 hover:bg-red-500/10" onClick={() => handleAction(() => setDeleteConfirm({ type: 'file', items: [activeContextMenu.item] }))}>
+                                <button className="context-menu-item w-full text-right text-red-400 hover:bg-red-500/10" onClick={() => handleAction(() => setDeleteConfirm({ type: 'file', items: [activeContextMenu.item] }))}>
                                     <Trash2 className="w-4 h-4" />
-                                    Delete
+                                    حذف
                                 </button>
                             </>
                         )}
@@ -260,27 +261,27 @@ export default function GlobalContextMenu() {
                     // Folder Context Menu
                     <>
                         <button
-                            className="context-menu-item w-full text-left"
+                            className="context-menu-item w-full text-right"
                             onClick={() => handleAction(() => setRenameFolder(activeContextMenu.item as Folder))}
                         >
                             <Edit className="w-4 h-4" />
-                            Rename
+                            تغییر نام
                         </button>
-                        <button className="context-menu-item w-full text-left" onClick={() => handleAction(() => setDescriptionItem({ type: 'folder', item: activeContextMenu.item as Folder }))}>
+                        <button className="context-menu-item w-full text-right" onClick={() => handleAction(() => setDescriptionItem({ type: 'folder', item: activeContextMenu.item as Folder }))}>
                             <AlignLeft className="w-4 h-4" />
-                            {(activeContextMenu.item as Folder).description ? 'Edit Description' : 'Add Description'}
+                            {(activeContextMenu.item as Folder).description ? 'ویرایش توضیحات' : 'افزودن توضیحات'}
                         </button>
-                        <button className="context-menu-item w-full text-left" onClick={() => handleAction(() => setMoveItems({ files: [], folders: [activeContextMenu.item as Folder] }))}>
+                        <button className="context-menu-item w-full text-right" onClick={() => handleAction(() => setMoveItems({ files: [], folders: [activeContextMenu.item as Folder] }))}>
                             <FolderInput className="w-4 h-4" />
-                            Move to...
+                            جابه‌جایی به…
                         </button>
                         <hr className="border-white/[0.08] my-1" />
                         <button
-                            className="context-menu-item w-full text-left text-red-400 hover:bg-red-500/10"
+                            className="context-menu-item w-full text-right text-red-400 hover:bg-red-500/10"
                             onClick={() => handleAction(() => setDeleteConfirm({ type: 'folder', items: [activeContextMenu.item] }))}
                         >
                             <Trash2 className="w-4 h-4" />
-                            Delete
+                            حذف
                         </button>
                     </>
                 )}
