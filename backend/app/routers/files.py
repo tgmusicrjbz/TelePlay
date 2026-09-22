@@ -67,7 +67,7 @@ async def get_text_preview(
 @router.get("", response_model=FileListResponse)
 async def list_files(
     folder_id: Optional[int] = Query(None, description="Filter by folder ID (null for root)"),
-    file_type: Optional[str] = Query(None, description="Filter by file type"),
+    file_type: Optional[str] = Query(None, description="Comma-separated file types"),
     search: Optional[str] = Query(None, description="Search by filename"),
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
@@ -86,9 +86,15 @@ async def list_files(
         query = query.where(File.folder_id.is_(None))
         
     if file_type:
-        query = query.where(File.file_type == file_type)
+        file_types = [item.strip() for item in file_type.split(",") if item.strip()]
+        if file_types:
+            query = query.where(File.file_type.in_(file_types))
     if search:
-        query = query.where(File.file_name.ilike(f"%{escape_like(search)}%", escape="\\"))
+        escaped = f"%{escape_like(search)}%"
+        query = query.where(
+            File.file_name.ilike(escaped, escape="\\") |
+            File.description.ilike(escaped, escape="\\")
+        )
     
     # Get total count
     count_query = select(func.count()).select_from(query.subquery())
@@ -196,6 +202,8 @@ async def update_file(
     # Update fields
     if update_data.file_name is not None:
         file.file_name = sanitize_filename(update_data.file_name)
+    if update_data.description is not None:
+        file.description = update_data.description.strip()[:1024] or None
     if update_data.folder_id is not None:
         target_id = update_data.folder_id or None
         if target_id is not None:

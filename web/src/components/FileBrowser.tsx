@@ -11,6 +11,7 @@ import NewFolderModal from './NewFolderModal';
 import MoveFileModal from './MoveFileModal';
 import DeleteConfirmModal from './DeleteConfirmModal';
 import RenameModal from './RenameModal';
+import DescriptionModal from './DescriptionModal';
 import Sidebar from './Sidebar';
 import Toasts from './Toasts';
 
@@ -44,6 +45,8 @@ export default function FileBrowser() {
         setRenameFile,
         renameFolder,
         setRenameFolder,
+        descriptionItem,
+        setDescriptionItem,
         clipboard,
         setClipboard,
         selectionBox,
@@ -59,7 +62,7 @@ export default function FileBrowser() {
     const [allFiles, setAllFiles] = useState<TelegramFile[]>([]);
 
     // Data Fetching
-    const { data: filesList, isLoading: filesLoading, refetch: refetchFiles } = useFiles(currentFolderId, fileTypeFilter || undefined, searchQuery || undefined, page);
+    const { data: filesList, isLoading: filesLoading, refetch: refetchFiles } = useFiles(currentFolderId, fileTypeFilter.join(',') || undefined, searchQuery || undefined, page);
     const { data: recentFiles, isLoading: recentLoading, refetch: refetchRecent } = useRecentFiles(50);
     const { data: cwFiles, isLoading: cwLoading, refetch: refetchCW } = useContinueWatching(50);
     
@@ -94,7 +97,7 @@ export default function FileBrowser() {
 
     // Folders only show in 'files' mode
     const { data: folders, isLoading: foldersLoading, refetch: refetchFolders } = useFolders(currentFolderId);
-    const showFolders = activeSection === 'files' && !searchQuery && !fileTypeFilter;
+    const showFolders = activeSection === 'files' && !searchQuery && fileTypeFilter.length === 0;
 
     // Combined loading state
     isLoading = isLoading || (activeSection === 'files' && foldersLoading);
@@ -143,6 +146,16 @@ export default function FileBrowser() {
         await updateFolderMutation.mutateAsync({ id: renameFolder.id, name: newName });
         setRenameFolder(null);
     }, [renameFolder, updateFolderMutation, setRenameFolder]);
+
+    const handleSaveDescription = useCallback(async (description: string) => {
+        if (!descriptionItem) return;
+        if (descriptionItem.type === 'file') {
+            await updateFileMutation.mutateAsync({ id: descriptionItem.item.id, description });
+        } else {
+            await updateFolderMutation.mutateAsync({ id: descriptionItem.item.id, description });
+        }
+        setDescriptionItem(null);
+    }, [descriptionItem, updateFileMutation, updateFolderMutation, setDescriptionItem]);
 
     // Navigate to folder
     const navigateToFolder = useCallback((folder: Folder | null) => {
@@ -519,7 +532,7 @@ export default function FileBrowser() {
                                 onClick={() => setFileTypeFilter(null)}
                                 title="All Files"
                                 className={`p-1.5 rounded-md transition-all ${
-                                    !fileTypeFilter ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'
+                                    fileTypeFilter.length === 0 ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'
                                 }`}
                             >
                                 <Grid className="w-4 h-4" />
@@ -528,7 +541,7 @@ export default function FileBrowser() {
                                 onClick={() => setFileTypeFilter('video')}
                                 title="Videos"
                                 className={`p-1.5 rounded-md transition-all ${
-                                    fileTypeFilter === 'video' ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'
+                                    fileTypeFilter.includes('video') ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'
                                 }`}
                             >
                                 <Film className="w-4 h-4" />
@@ -537,7 +550,7 @@ export default function FileBrowser() {
                                 onClick={() => setFileTypeFilter('audio')}
                                 title="Audio"
                                 className={`p-1.5 rounded-md transition-all ${
-                                    fileTypeFilter === 'audio' ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'
+                                    fileTypeFilter.includes('audio') ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'
                                 }`}
                             >
                                 <Music className="w-4 h-4" />
@@ -546,7 +559,7 @@ export default function FileBrowser() {
                                 onClick={() => setFileTypeFilter('image')}
                                 title="Images"
                                 className={`p-1.5 rounded-md transition-all ${
-                                    fileTypeFilter === 'image' ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'
+                                    fileTypeFilter.includes('image') ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'
                                 }`}
                             >
                                 <ImageIcon className="w-4 h-4" />
@@ -555,12 +568,12 @@ export default function FileBrowser() {
                                 onClick={() => setFileTypeFilter('document')}
                                 title="Documents"
                                 className={`p-1.5 rounded-md transition-all ${
-                                    fileTypeFilter === 'document' ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'
+                                    fileTypeFilter.includes('document') ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'
                                 }`}
                             >
                                 <FileText className="w-4 h-4" />
                             </button>
-                            <button onClick={() => setFileTypeFilter('text')} title="Notes" className={`p-1.5 rounded-md transition-all ${fileTypeFilter === 'text' ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'}`}>
+                            <button onClick={() => setFileTypeFilter('text')} title="Notes" className={`p-1.5 rounded-md transition-all ${fileTypeFilter.includes('text') ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'}`}>
                                 <FileText className="w-4 h-4" />
                             </button>
                         </div>
@@ -650,7 +663,7 @@ export default function FileBrowser() {
                                 ['All', null], ['Video', 'video'], ['Audio', 'audio'],
                                 ['Images', 'image'], ['Documents', 'document'], ['Notes', 'text'],
                             ] as const).map(([label, type]) => (
-                                <button key={label} onClick={() => setFileTypeFilter(type)} className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium border transition-colors ${fileTypeFilter === type ? 'bg-primary-600 border-primary-500 text-white' : 'bg-dark-800 border-white/10 text-dark-300'}`}>
+                                <button key={label} onClick={() => setFileTypeFilter(type)} className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium border transition-colors ${(type === null ? fileTypeFilter.length === 0 : fileTypeFilter.includes(type)) ? 'bg-primary-600 border-primary-500 text-white' : 'bg-dark-800 border-white/10 text-dark-300'}`}>
                                     {label}
                                 </button>
                             ))}
@@ -783,6 +796,14 @@ export default function FileBrowser() {
                 onRename={handleRenameFolder}
                 currentName={renameFolder?.name || ''}
                 itemType="folder"
+            />
+
+            <DescriptionModal
+                isOpen={!!descriptionItem}
+                itemType={descriptionItem?.type || 'file'}
+                currentDescription={descriptionItem?.item.description || ''}
+                onClose={() => setDescriptionItem(null)}
+                onSave={handleSaveDescription}
             />
         </div>
     );

@@ -4,6 +4,7 @@ import io
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -22,10 +23,10 @@ from sqlalchemy import select
 
 from app.database import Base, async_session, engine
 from app.models import File, Folder, User, WatchProgress
-from app.routers.files import get_text_preview
+from app.routers.files import get_text_preview, list_files, update_file
 from app.routers.folders import delete_folder_contents, update_folder
 from app.routers.streaming import stored_message_response
-from app.schemas import FolderUpdate
+from app.schemas import FileUpdate, FolderUpdate
 from app.telegram import start_one_client
 
 
@@ -54,6 +55,7 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             db.add(WatchProgress(user_id=user.id, file_id=nested.id, position=20))
             await db.commit()
             self.user_id, self.parent_id, self.folder_id, self.child_id = user.id, parent.id, folder.id, child.id
+            self.direct_file_id = direct.id
 
     async def asyncTearDown(self):
         await engine.dispose()
@@ -109,6 +111,56 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
                 await update_folder(self.folder_id, FolderUpdate(parent_id=self.child_id), db, user)
             self.assertEqual(raised.exception.status_code, 400)
 
+    async def test_folder_description_can_be_added_edited_and_removed(self):
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            updated = await update_folder(
+                self.folder_id, FolderUpdate(description="  توضیح پوشه  "), db, user
+            )
+            self.assertEqual(updated.description, "توضیح پوشه")
+            cleared = await update_folder(
+                self.folder_id, FolderUpdate(description=""), db, user
+            )
+            self.assertIsNone(cleared.description)
+
+    async def test_file_description_can_be_added_edited_and_removed(self):
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            updated = await update_file(
+                self.direct_file_id, FileUpdate(description="  توضیح فایل  "), db, user
+            )
+            self.assertEqual(updated.description, "توضیح فایل")
+            cleared = await update_file(
+                self.direct_file_id, FileUpdate(description=""), db, user
+            )
+            self.assertIsNone(cleared.description)
+
+    async def test_multiple_file_types_can_be_filtered_together(self):
+        async with async_session() as db:
+            video = self.make_file(self.user_id, None, 120)
+            video.file_type = "video"
+            db.add(video)
+            await db.commit()
+            user = await db.get(User, self.user_id)
+            result = await list_files(None, "video,text", None, 1, 20, db, user)
+            self.assertEqual([item.file_type for item in result.files], ["video"])
+
+    async def test_folder_actions_build_their_own_description_buttons(self):
+        from app.telegram import build_clients
+        build_clients()
+        from app.bot import handle_callback, settings
+        callback = SimpleNamespace(
+            data=f"folder_actions:{self.folder_id}",
+            from_user=SimpleNamespace(id=111),
+            message=SimpleNamespace(edit=AsyncMock(), chat=SimpleNamespace(id=111)),
+            answer=AsyncMock(),
+        )
+        with patch.object(settings, "auth_users_str", ""):
+            await handle_callback(None, callback)
+        markup = callback.message.edit.await_args.kwargs["reply_markup"]
+        callback_data = [button.callback_data for row in markup.inline_keyboard for button in row]
+        self.assertIn(f"folderdesc:{self.folder_id}", callback_data)
+
     async def test_saved_text_message_can_be_previewed(self):
         async with async_session() as db:
             note = self.make_file(self.user_id, None, 103)
@@ -133,6 +185,21 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 206)
         self.assertEqual(response.body, b"bcd")
         self.assertEqual(response.headers["content-range"], "bytes 1-3/5")
+
+    async def test_root_library_is_virtualized_and_paginated(self):
+        from app.telegram import build_clients
+        build_clients()
+        from app.bot import library_filters, render_folder_page
+        async with async_session() as db:
+            db.add_all([Folder(user_id=self.user_id, name=f"Root {index}") for index in range(10)])
+            await db.commit()
+        library_filters.pop(111, None)
+        message = SimpleNamespace(edit=AsyncMock())
+        await render_folder_page(message, 111)
+        markup = message.edit.await_args.kwargs["reply_markup"]
+        callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
+        self.assertIn("rootfiles:0", callbacks)
+        self.assertIn("folders:0:1", callbacks)
 
     async def test_utf8_text_document_can_be_previewed(self):
         async with async_session() as db:
@@ -166,6 +233,20 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
 
 
 class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
+    async def test_home_callback_does_not_depend_on_a_folder(self):
+        from app.telegram import build_clients
+        build_clients()
+        from app.bot import handle_callback, settings
+        callback = SimpleNamespace(
+            data="home",
+            from_user=SimpleNamespace(id=111),
+            message=SimpleNamespace(edit=AsyncMock(), chat=SimpleNamespace(id=111)),
+            answer=AsyncMock(),
+        )
+        with patch.object(settings, "auth_users_str", ""):
+            await handle_callback(None, callback)
+        callback.message.edit.assert_awaited_once()
+
     async def test_main_client_failure_aborts_startup(self):
         client = SimpleNamespace(start=AsyncMock(side_effect=RuntimeError("invalid credentials")), is_connected=False)
         with self.assertRaisesRegex(RuntimeError, "invalid credentials"):
@@ -182,6 +263,40 @@ class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(button.web_app)
         with patch.object(settings, "web_base_url", "https://example.com"):
             self.assertTrue(get_web_app_button(111).web_app.url.startswith("https://example.com/auth?token="))
+
+    async def test_bot_commands_and_description_detail(self):
+        client = SimpleNamespace(
+            start=AsyncMock(), get_me=AsyncMock(return_value=SimpleNamespace(username="teleplay_test_bot")),
+            set_bot_commands=AsyncMock(), is_connected=True,
+        )
+        await start_one_client(0, client)
+        commands = client.set_bot_commands.await_args.args[0]
+        self.assertIn("search", [command.command for command in commands])
+        self.assertTrue(all(command.description for command in commands))
+
+        from app.telegram import build_clients
+        build_clients()
+        from app.bot import file_detail_keyboard, file_detail_text, format_jalali, pagination_row, search_type_keyboard, truncate_description, type_filter_keyboard
+        file = SimpleNamespace(
+            file_type="video", file_name="clip.mp4", file_size=10,
+            duration=5, description="توضیح همراه رسانه",
+            created_at=datetime(2025, 3, 21, tzinfo=timezone.utc),
+            updated_at=datetime(2025, 3, 21, tzinfo=timezone.utc),
+            public_hash=None, id=99,
+        )
+        self.assertIn("توضیح همراه رسانه", file_detail_text(file))
+        self.assertIn("۱۴۰۴/۰۱/۰۱", format_jalali(file.created_at))
+        detail_callbacks = [button.callback_data for row in file_detail_keyboard(file, "search:2").inline_keyboard for button in row]
+        self.assertIn("search:2", detail_callbacks)
+        self.assertTrue(all(len(button.callback_data or "") <= 64 for button in pagination_row("folders:123", 1, 30)))
+        search_callbacks = [button.callback_data for row in search_type_keyboard().inline_keyboard for button in row]
+        self.assertIn("search_filter_toggle:folder", search_callbacks)
+        self.assertIn("search_filter_toggle:video", search_callbacks)
+        self.assertIn("search_filter_apply", search_callbacks)
+        library_buttons = type_filter_keyboard({"video", "image"}, "library").inline_keyboard
+        selected_buttons = [button for row in library_buttons for button in row if (button.callback_data or "").startswith("library_filter_toggle:")]
+        self.assertEqual(sum("✅" in button.text for button in selected_buttons), 2)
+        self.assertTrue(truncate_description("\n".join(["خط"] * 6)).endswith("…"))
 
 
 if __name__ == "__main__":

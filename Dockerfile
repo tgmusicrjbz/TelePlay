@@ -48,5 +48,5 @@ ENV MULTI_CONTAINER_SETUP=false
 # Expose port
 EXPOSE 8000
 
-# Run FastAPI
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run FastAPI on the port assigned by the hosting platform.
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

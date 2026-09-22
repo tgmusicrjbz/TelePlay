@@ -115,6 +115,7 @@ export default function FolderCard({ folder, viewMode, selected, onSelect, onOpe
                     <p className="text-xs text-dark-400 mt-0.5">
                         {folder.file_count} {folder.file_count === 1 ? 'file' : 'files'}
                     </p>
+                    {folder.description && <p dir="auto" className="text-xs text-dark-400 truncate mt-1" title={folder.description}>{folder.description}</p>}
                 </div>
 
                 <div className="relative flex items-center gap-2">
@@ -194,6 +195,7 @@ export default function FolderCard({ folder, viewMode, selected, onSelect, onOpe
             <p className="text-xs text-dark-500 mt-1">
                 {folder.file_count} {folder.file_count === 1 ? 'file' : 'files'}
             </p>
+            {folder.description && <p dir="auto" className="text-xs text-dark-400 truncate mt-1" title={folder.description}>{folder.description}</p>}
         </div>
     );
 }

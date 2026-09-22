@@ -31,6 +31,7 @@ class UserResponse(UserBase):
 
 class FolderBase(BaseModel):
     name: str
+    description: Optional[str] = None
     parent_id: Optional[int] = None
 
 
@@ -40,6 +41,7 @@ class FolderCreate(FolderBase):
 
 class FolderUpdate(BaseModel):
     name: Optional[str] = None
+    description: Optional[str] = None
     parent_id: Optional[int] = None
 
 
@@ -61,6 +63,7 @@ class FolderWithChildren(FolderResponse):
 
 class FileBase(BaseModel):
     file_name: str
+    description: Optional[str] = None
     file_size: int
     mime_type: Optional[str] = None
     file_type: str  # video, audio, document, image, text
@@ -79,6 +82,7 @@ class FileCreate(FileBase):
 
 class FileUpdate(BaseModel):
     file_name: Optional[str] = None
+    description: Optional[str] = None
     folder_id: Optional[int] = None
 
 

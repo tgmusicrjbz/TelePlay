@@ -19,7 +19,11 @@ Stream and manage your Telegram files on any device — TV, Mobile, or Browser �
 ### 🤖 Telegram Bot — [Full Command List](docs/SETUP.md#part-2-using-the-telegram-bot)
 
 - Save videos, audio, documents, photos, and ordinary text messages
-- Browse nested folders and manage files with inline buttons
+- Browse nested, paginated folders and manage files with inline buttons
+- Preserve media captions as searchable descriptions; add, edit, or clear file and folder descriptions in Telegram and Web
+- Select multiple content types when filtering the Web or Telegram library and when searching files, descriptions, or folders
+- Browse root files through a dedicated virtual folder, with pagination across files and folders
+- Show upload and modification timestamps in the Persian calendar and clean up Telegram previews manually or after five minutes
 - Rename, move, and delete files via chat commands
 - Search your library with `/myfiles`
 - Get an auto-login web link with `/web`

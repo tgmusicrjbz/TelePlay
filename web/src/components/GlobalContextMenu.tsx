@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../lib/store';
 import { TelegramFile, Folder, api, canPreviewText } from '../lib/api';
-import { Play, Download, Link, Edit, FolderInput, Trash2, Globe, ShieldOff, HardDriveDownload, Eye } from 'lucide-react';
+import { Play, Download, Link, Edit, FolderInput, Trash2, Globe, ShieldOff, HardDriveDownload, Eye, AlignLeft } from 'lucide-react';
 
 export default function GlobalContextMenu() {
-    const { activeContextMenu, setActiveContextMenu, setPreviewFile, setMoveItems, setMoveFiles, setDeleteConfirm, setRenameFile, setRenameFolder, selectedFileIds, selectedFiles } = useAppStore();
+    const { activeContextMenu, setActiveContextMenu, setPreviewFile, setMoveItems, setMoveFiles, setDeleteConfirm, setRenameFile, setRenameFolder, setDescriptionItem, selectedFileIds, selectedFiles } = useAppStore();
     const menuRef = useRef<HTMLDivElement>(null);
     const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -238,6 +238,10 @@ export default function GlobalContextMenu() {
                                     <Edit className="w-4 h-4" />
                                     Rename
                                 </button>
+                                <button className="context-menu-item w-full text-left" onClick={() => handleAction(() => setDescriptionItem({ type: 'file', item: activeContextMenu.item as TelegramFile }))}>
+                                    <AlignLeft className="w-4 h-4" />
+                                    {(activeContextMenu.item as TelegramFile).description ? 'Edit Description' : 'Add Description'}
+                                </button>
                                 <button className="context-menu-item w-full text-left" onClick={() => handleAction(() => setMoveItems({ files: [activeContextMenu.item as TelegramFile], folders: [] }))}>
                                     <FolderInput className="w-4 h-4" />
                                     Move to...
@@ -261,6 +265,10 @@ export default function GlobalContextMenu() {
                         >
                             <Edit className="w-4 h-4" />
                             Rename
+                        </button>
+                        <button className="context-menu-item w-full text-left" onClick={() => handleAction(() => setDescriptionItem({ type: 'folder', item: activeContextMenu.item as Folder }))}>
+                            <AlignLeft className="w-4 h-4" />
+                            {(activeContextMenu.item as Folder).description ? 'Edit Description' : 'Add Description'}
                         </button>
                         <button className="context-menu-item w-full text-left" onClick={() => handleAction(() => setMoveItems({ files: [], folders: [activeContextMenu.item as Folder] }))}>
                             <FolderInput className="w-4 h-4" />

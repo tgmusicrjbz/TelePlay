@@ -18,6 +18,7 @@ export interface User {
 export interface Folder {
     id: number;
     name: string;
+    description: string | null;
     parent_id: number | null;
     user_id: number;
     created_at: string;
@@ -33,6 +34,7 @@ export interface TelegramFile {
     file_id: string;
     file_unique_id: string;
     file_name: string;
+    description: string | null;
     file_size: number;
     mime_type: string | null;
     file_type: 'video' | 'audio' | 'document' | 'image' | 'text';
@@ -295,7 +297,7 @@ export const useFile = (fileId: number) => {
 export const useUpdateFile = () => {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async ({ id, ...data }: { id: number; file_name?: string; folder_id?: number | null }) => {
+        mutationFn: async ({ id, ...data }: { id: number; file_name?: string; description?: string; folder_id?: number | null }) => {
             const { data: result } = await api.patch<TelegramFile>(`/files/${id}`, data);
             return result;
         },
@@ -429,7 +431,7 @@ export const useFolderTree = () => {
 export const useCreateFolder = () => {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (data: { name: string; parent_id?: number | null }) => {
+        mutationFn: async (data: { name: string; description?: string; parent_id?: number | null }) => {
             const { data: result } = await api.post<Folder>('/folders', data);
             return result;
         },
@@ -443,7 +445,7 @@ export const useCreateFolder = () => {
 export const useUpdateFolder = () => {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async ({ id, ...data }: { id: number; name?: string; parent_id?: number | null }) => {
+        mutationFn: async ({ id, ...data }: { id: number; name?: string; description?: string; parent_id?: number | null }) => {
             const { data: result } = await api.patch<Folder>(`/folders/${id}`, data);
             return result;
         },
@@ -506,6 +508,14 @@ export const formatDuration = (seconds: number | null): string => {
         return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     }
     return `${minutes}:${secs.toString().padStart(2, '0')}`;
+};
+
+export const formatPersianDate = (value: string): string => {
+    const normalized = /Z$|[+-]\d{2}:\d{2}$/.test(value) ? value : `${value}Z`;
+    return new Intl.DateTimeFormat('fa-IR-u-ca-persian', {
+        timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', hour12: false,
+    }).format(new Date(normalized));
 };
 
 export const getFileIcon = (fileType: string): string => {

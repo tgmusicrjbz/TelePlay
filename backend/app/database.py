@@ -5,6 +5,7 @@ Supports both SQLite (for development) and PostgreSQL (for production).
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.engine import make_url
+from sqlalchemy import inspect, text
 from .config import get_settings
 
 settings = get_settings()
@@ -14,11 +15,12 @@ url = make_url(settings.database_url)
 
 if url.drivername == "postgresql":
     url = url.set(drivername="postgresql+asyncpg")
-    # Remove 'schema' from query params if present (asyncpg doesn't support it in connect args)
-    if "schema" in url.query:
-        query = dict(url.query)
-        del query["schema"]
-        url = url.set(query=query)
+    # Normalize provider-style query parameters for asyncpg.
+    query = dict(url.query)
+    query.pop("schema", None)
+    if "sslmode" in query and "ssl" not in query:
+        query["ssl"] = query.pop("sslmode")
+    url = url.set(query=query)
 elif url.drivername == "sqlite":
     url = url.set(drivername="sqlite+aiosqlite")
 
@@ -27,8 +29,8 @@ engine = create_async_engine(
     echo=False,
     pool_pre_ping=True,
     pool_recycle=1800,  # Recycle connections every 30 minutes
-    pool_size=40,       # Increased pool size for high concurrency
-    max_overflow=20     # Allow more overflow connections
+    pool_size=settings.db_pool_size,
+    max_overflow=settings.db_max_overflow,
 )
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -50,3 +52,13 @@ async def init_db():
     """Create all tables."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        columns = await conn.run_sync(
+            lambda sync_conn: {column["name"] for column in inspect(sync_conn).get_columns("files")}
+        )
+        if "description" not in columns:
+            await conn.execute(text("ALTER TABLE files ADD COLUMN description TEXT"))
+        folder_columns = await conn.run_sync(
+            lambda sync_conn: {column["name"] for column in inspect(sync_conn).get_columns("folders")}
+        )
+        if "description" not in folder_columns:
+            await conn.execute(text("ALTER TABLE folders ADD COLUMN description TEXT"))

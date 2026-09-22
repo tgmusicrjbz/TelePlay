@@ -3,7 +3,7 @@ PyroTGFork MTProto client for Telegram interactions.
 Handles both bot commands and file streaming via a client pool.
 """
 from .patch import Client
-from pyrogram.types import Message
+from pyrogram.types import Message, BotCommand
 from .config import get_settings
 from pathlib import Path
 import asyncio
@@ -57,6 +57,18 @@ async def start_one_client(i, c):
         me = await c.get_me()
         label = "Main" if i == 0 else "Helper"
         logger.info("Client %d (%s) started → @%s", i, label, me.username)
+        if i == 0:
+            await c.set_bot_commands([
+                BotCommand("start", "باز کردن منوی اصلی"),
+                BotCommand("myfiles", "دیدن فایل‌های ذخیره‌شده"),
+                BotCommand("folders", "مرور پوشه‌ها و کتابخانه"),
+                BotCommand("search", "جست‌وجو در فایل‌ها و پوشه‌ها"),
+                BotCommand("newfolder", "ساخت پوشهٔ جدید"),
+                BotCommand("web", "راهنمای ورود به نسخهٔ وب"),
+                BotCommand("login", "تأیید کد ورود دستگاه"),
+                BotCommand("help", "نمایش راهنمای استفاده"),
+                BotCommand("logout_all", "خروج از همهٔ دستگاه‌ها"),
+            ])
     except Exception as e:
         logger.error("Client %d failed to start: %s", i, e)
         if i == 0:

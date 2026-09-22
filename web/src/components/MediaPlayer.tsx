@@ -3,7 +3,7 @@
  */
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipBack, SkipForward, Download, ExternalLink, AlertTriangle, Copy, PictureInPicture2, Gauge, ChevronDown, ChevronUp } from 'lucide-react';
-import { TelegramFile, formatDuration, useUpdateProgress, useFile, api } from '../lib/api';
+import { TelegramFile, formatDuration, formatPersianDate, useUpdateProgress, useFile, api } from '../lib/api';
 import { useAppStore } from '../lib/store';
 
 export default function MediaPlayer() {
@@ -397,6 +397,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                                     </div>
                                 )}
                                 <p className="text-2xl font-bold text-white mb-2 drop-shadow-md">{file.file_name}</p>
+                                {file.description && <p dir="auto" className="max-w-xl mx-auto text-sm text-dark-300 mb-2 whitespace-pre-wrap">{file.description}</p>}
                                 <p className="text-primary-400 font-medium">{formatDuration(currentTime)} / {formatDuration(duration)}</p>
                             </div>
                         )}
@@ -472,6 +473,8 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                     <div className="absolute top-0 left-0 right-0 p-4 bg-gradient-to-b from-black/80 to-transparent flex items-start justify-between z-30">
                         <div>
                             <h3 className="text-lg font-medium truncate max-w-lg text-white">{file.file_name}</h3>
+                            {file.description && <p dir="auto" className="text-xs text-dark-300 max-w-lg line-clamp-2">{file.description}</p>}
+                            <p className="text-[10px] text-dark-400 mt-1">آپلود: {formatPersianDate(file.created_at)} · تغییر: {formatPersianDate(file.updated_at)}</p>
                             {((extendedFile?.last_pos || 0) > 0) && currentTime < 5 && (
                                 <p className="text-xs text-primary-400">Resumed from {formatDuration(extendedFile?.last_pos || 0)}</p>
                             )}

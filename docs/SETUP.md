@@ -42,8 +42,9 @@ The bot is your command center for uploading and managing media.
 | Command    | Description                                |
 | :--------- | :----------------------------------------- |
 | `/start`   | Open the main menu and Web Link.           |
-| `/myfiles` | List your recent 10 uploads.               |
-| `/folders` | Browse and manage your folders.            |
+| `/myfiles` | Browse your paginated file list.           |
+| `/folders` | Browse nested folders with pagination.     |
+| `/search`  | Choose a content type, then search names and descriptions. |
 | `/login`   | Get a code to log in on Android TV or Web. |
 | `/help`    | Detailed list of all features.             |
 
@@ -54,8 +55,9 @@ When you upload a file, open a recent item, or use `/file <id>`, you get interac
 - **✏️ Rename**: Change the display name.
 - **📂 Move**: Put files into folders for better organization.
 - **🗑 Delete**: Remove from both TelePlay and your channel.
+- **👁 Preview**: Send the stored photo, video, audio, document, or text back into the bot chat.
 
-Deleting a folder asks whether to keep its files and subfolders (moving them up one level) or remove the entire folder and its contents. In the web app, double-click an image or text item to preview it. UTF-8 and UTF-16 text documents up to 1 MB can be previewed.
+Captions sent with media are stored as file descriptions and appear in the bot and web app. File and folder descriptions can be added, edited, or cleared from either interface. Web and Telegram filters accept multiple content types. Telegram search uses the same multi-select flow and can include folders. Root files appear inside a dedicated virtual folder, and Telegram lists are paginated in groups of eight. Input prompts include cancel and, where relevant, clear buttons. Upload and modification timestamps are displayed in the Persian calendar. Telegram previews include a close button and are deleted automatically after five minutes. Deleting a folder asks whether to keep its files and subfolders (moving them up one level) or remove the entire folder and its contents. In the web app, double-click an image or text item to preview it. UTF-8 and UTF-16 text documents up to 1 MB can be previewed.
 
 ---
 

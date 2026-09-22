@@ -48,6 +48,7 @@ def add_urls_to_file(file: File) -> dict:
         "file_id": file.file_id,
         "file_unique_id": file.file_unique_id,
         "file_name": file.file_name,
+        "description": file.description,
         "file_size": file.file_size,
         "mime_type": file.mime_type,
         "file_type": file.file_type,

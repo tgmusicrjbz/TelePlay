@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Download, X } from 'lucide-react';
-import { api, canPreviewText } from '../lib/api';
+import { api, canPreviewText, formatPersianDate } from '../lib/api';
 import { useAppStore } from '../lib/store';
 
 export default function ContentPreview() {
@@ -40,7 +40,11 @@ export default function ContentPreview() {
         <div className="fixed inset-0 z-[100] bg-black/85 backdrop-blur-md p-3 sm:p-8 flex items-center justify-center" onClick={() => setPreviewFile(null)}>
             <section className="w-full max-w-5xl max-h-full flex flex-col rounded-2xl border border-white/10 bg-dark-900 shadow-2xl overflow-hidden" onClick={(event) => event.stopPropagation()}>
                 <header className="flex items-center gap-3 px-5 py-4 border-b border-white/10">
-                    <h2 className="flex-1 min-w-0 truncate font-semibold" title={file.file_name}>{file.file_name}</h2>
+                    <div className="flex-1 min-w-0">
+                        <h2 className="truncate font-semibold" title={file.file_name}>{file.file_name}</h2>
+                        {file.description && <p dir="auto" className="text-sm text-dark-400 mt-1 whitespace-pre-wrap">{file.description}</p>}
+                        <p className="text-xs text-dark-500 mt-1">آپلود: {formatPersianDate(file.created_at)} · آخرین تغییر: {formatPersianDate(file.updated_at)}</p>
+                    </div>
                     <a href={`${url}&download=1`} download={file.file_name} className="btn-icon" title="Download"><Download className="w-5 h-5" /></a>
                     <button onClick={() => setPreviewFile(null)} className="btn-icon" title="Close"><X className="w-5 h-5" /></button>
                 </header>

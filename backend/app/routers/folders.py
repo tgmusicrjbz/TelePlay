@@ -94,6 +94,7 @@ async def list_folders(
         FolderResponse(
             id=folder.id,
             name=folder.name,
+            description=folder.description,
             parent_id=folder.parent_id,
             user_id=folder.user_id,
             created_at=folder.created_at,
@@ -128,6 +129,7 @@ async def get_folder_tree(
         folder_map[folder.id] = {
             "id": folder.id,
             "name": folder.name,
+            "description": folder.description,
             "parent_id": folder.parent_id,
             "user_id": folder.user_id,
             "created_at": folder.created_at,
@@ -173,6 +175,7 @@ async def get_folder(
     return FolderResponse(
         id=folder.id,
         name=folder.name,
+        description=folder.description,
         parent_id=folder.parent_id,
         user_id=folder.user_id,
         created_at=folder.created_at,
@@ -213,6 +216,7 @@ async def create_folder(
     folder = Folder(
         user_id=current_user.id,
         name=folder_data.name,
+        description=folder_data.description.strip()[:1024] if folder_data.description else None,
         parent_id=folder_data.parent_id,
     )
     db.add(folder)
@@ -222,6 +226,7 @@ async def create_folder(
     return FolderResponse(
         id=folder.id,
         name=folder.name,
+        description=folder.description,
         parent_id=folder.parent_id,
         user_id=folder.user_id,
         created_at=folder.created_at,
@@ -252,6 +257,8 @@ async def update_folder(
         if not name or len(name) > 255:
             raise HTTPException(status_code=400, detail="Folder name must be 1–255 characters")
         folder.name = name
+    if update_data.description is not None:
+        folder.description = update_data.description.strip()[:1024] or None
     if update_data.parent_id is not None:
         # Prevent moving folder into itself
         if update_data.parent_id == folder_id:
@@ -295,6 +302,7 @@ async def update_folder(
     return FolderResponse(
         id=folder.id,
         name=folder.name,
+        description=folder.description,
         parent_id=folder.parent_id,
         user_id=folder.user_id,
         created_at=folder.created_at,

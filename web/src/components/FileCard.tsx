@@ -2,7 +2,7 @@
  * FileCard component - displays a single file in grid or list view
  */
 import { Play, MoreVertical, Film, Music, FileText, Image } from 'lucide-react';
-import { TelegramFile, formatFileSize, formatDuration } from '../lib/api';
+import { TelegramFile, formatFileSize, formatDuration, formatPersianDate } from '../lib/api';
 import { useAppStore } from '../lib/store';
 
 interface FileCardProps {
@@ -92,6 +92,7 @@ export default function FileCard({
 
                 <div className="flex-1 min-w-0">
                     <p className={`font-medium truncate text-sm ${selected ? 'text-primary-200' : 'text-white'}`}>{file.file_name}</p>
+                    {file.description && <p dir="auto" className="text-xs text-dark-400 line-clamp-2 mt-0.5" title={file.description}>{file.description}</p>}
                     <div className="flex items-center gap-3 text-xs text-dark-400 mt-1">
                         <span className="flex items-center gap-1">
                             {getSmallIcon()}
@@ -114,6 +115,9 @@ export default function FileCard({
                             </>
                         )}
                     </div>
+                    <p className="text-[10px] text-dark-500 mt-1" title={`آخرین تغییر: ${formatPersianDate(file.updated_at)}`}>
+                        آپلود: {formatPersianDate(file.created_at)} · تغییر: {formatPersianDate(file.updated_at)}
+                    </p>
                 </div>
 
                 <div className="relative">
@@ -194,6 +198,7 @@ export default function FileCard({
                     <p className={`font-medium text-sm truncate transition-colors ${selected ? 'text-primary-200' : 'text-white group-hover:text-primary-300'}`} title={file.file_name}>
                         {file.file_name}
                     </p>
+                    {file.description && <p dir="auto" className="text-xs text-dark-400 line-clamp-2 mt-0.5" title={file.description}>{file.description}</p>}
                     <div className="flex items-center gap-2 mt-1">
                         <span className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md border ${
                             selected 
@@ -207,6 +212,9 @@ export default function FileCard({
                             {formatFileSize(file.file_size)}
                         </p>
                     </div>
+                    <p className="text-[10px] text-dark-500 mt-1 leading-4">
+                        آپلود: {formatPersianDate(file.created_at)}<br />تغییر: {formatPersianDate(file.updated_at)}
+                    </p>
                 </div>
 
                 <div className={`${showMenu ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}>

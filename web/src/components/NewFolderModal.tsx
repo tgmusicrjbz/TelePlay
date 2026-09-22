@@ -12,6 +12,7 @@ interface NewFolderModalProps {
 
 export default function NewFolderModal({ parentId, onClose }: NewFolderModalProps) {
     const [name, setName] = useState('');
+    const [description, setDescription] = useState('');
     const [error, setError] = useState('');
     const createFolder = useCreateFolder();
 
@@ -21,7 +22,7 @@ export default function NewFolderModal({ parentId, onClose }: NewFolderModalProp
 
         setError('');
         try {
-            await createFolder.mutateAsync({ name: name.trim(), parent_id: parentId });
+            await createFolder.mutateAsync({ name: name.trim(), description: description.trim(), parent_id: parentId });
             onClose();
         } catch {
             setError('Could not create this folder. Check the name and try again.');
@@ -51,6 +52,15 @@ export default function NewFolderModal({ parentId, onClose }: NewFolderModalProp
                         autoFocus
                         className="w-full px-4 py-3 bg-dark-700 border border-dark-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500/50 mb-4"
                     />
+                    <textarea
+                        value={description}
+                        onChange={(e) => setDescription(e.target.value)}
+                        maxLength={1024}
+                        rows={4}
+                        placeholder="Description (optional)"
+                        className="w-full resize-y px-4 py-3 bg-dark-700 border border-dark-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500/50 mb-1"
+                    />
+                    <div className="mb-4 text-right text-xs text-dark-400">{description.length}/1024</div>
                     {error && <p className="mb-4 text-sm text-red-400" role="alert">{error}</p>}
 
                     <div className="flex justify-end gap-3">

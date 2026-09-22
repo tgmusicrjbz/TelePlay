@@ -37,6 +37,9 @@ interface AppState {
     renameFolder: Folder | null;
     setRenameFolder: (folder: Folder | null) => void;
 
+    descriptionItem: { type: 'file'; item: TelegramFile } | { type: 'folder'; item: Folder } | null;
+    setDescriptionItem: (item: { type: 'file'; item: TelegramFile } | { type: 'folder'; item: Folder } | null) => void;
+
     moveItems: { files: TelegramFile[], folders: Folder[] } | null;
     setMoveItems: (items: { files: TelegramFile[], folders: Folder[] } | null) => void;
     setMoveFiles: (files: TelegramFile[]) => void;
@@ -60,7 +63,7 @@ interface AppState {
     setSearchQuery: (query: string) => void;
 
     // Filter
-    fileTypeFilter: string | null;
+    fileTypeFilter: string[];
     setFileTypeFilter: (type: string | null) => void;
 
     // Context menu - only one can be open at a time, with position for fixed positioning
@@ -147,6 +150,9 @@ export const useAppStore = create<AppState>((set) => ({
     renameFolder: null,
     setRenameFolder: (folder) => set({ renameFolder: folder }),
 
+    descriptionItem: null,
+    setDescriptionItem: (item) => set({ descriptionItem: item }),
+
     moveItems: null,
     setMoveItems: (items) => set({ moveItems: items }),
     setMoveFiles: (files) => set({ moveItems: { files, folders: [] } }),
@@ -172,8 +178,15 @@ export const useAppStore = create<AppState>((set) => ({
     setSearchQuery: (query) => set({ searchQuery: query }),
 
     // Filter
-    fileTypeFilter: null,
-    setFileTypeFilter: (type) => set({ fileTypeFilter: type }),
+    fileTypeFilter: [],
+    setFileTypeFilter: (type) => set((state) => {
+        if (type === null) return { fileTypeFilter: [] };
+        return {
+            fileTypeFilter: state.fileTypeFilter.includes(type)
+                ? state.fileTypeFilter.filter((item) => item !== type)
+                : [...state.fileTypeFilter, type],
+        };
+    }),
 
     // Context menu - only one can be open at a time
     activeContextMenu: null,
