@@ -63,7 +63,6 @@ async def start_one_client(i, c):
                 BotCommand("start", "باز کردن منوی اصلی"),
                 BotCommand("myfiles", "دیدن فایل‌های ذخیره‌شده"),
                 BotCommand("folders", "مرور کشوهای کمد"),
-                BotCommand("playlists", "ساخت و پخش پلی‌لیست‌ها"),
                 BotCommand("search", "جست‌وجو در فایل‌ها و کشوها"),
                 BotCommand("newfolder", "ساخت کشوی جدید"),
                 BotCommand("web", "راهنمای ورود به نسخهٔ وب"),

@@ -120,48 +120,6 @@ class FileListResponse(BaseModel):
     per_page: int
 
 
-# ============== Playlist Schemas ==============
-
-class PlaylistCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=255)
-    description: Optional[str] = Field(default=None, max_length=1024)
-
-
-class PlaylistUpdate(BaseModel):
-    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
-    description: Optional[str] = Field(default=None, max_length=1024)
-
-
-class PlaylistAddItems(BaseModel):
-    file_ids: List[int] = Field(min_length=1, max_length=200)
-
-
-class PlaylistReorder(BaseModel):
-    file_ids: List[int] = Field(min_length=1, max_length=500)
-
-
-class PlaylistSummary(BaseModel):
-    id: int
-    name: str
-    description: Optional[str] = None
-    item_count: int = 0
-    total_duration: int = 0
-    cover_url: Optional[str] = None
-    created_at: datetime
-    updated_at: datetime
-
-
-class PlaylistItemResponse(BaseModel):
-    id: int
-    position: int
-    added_at: datetime
-    file: FileResponse
-
-
-class PlaylistResponse(PlaylistSummary):
-    items: List[PlaylistItemResponse] = []
-
-
 # ============== Watch Progress Schemas ==============
 
 class WatchProgressBase(BaseModel):

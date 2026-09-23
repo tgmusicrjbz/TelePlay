@@ -2,7 +2,6 @@
 FastAPI main application with Telegram MTProto client lifecycle.
 """
 import logging
-import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,9 +17,9 @@ import logging
 logging.getLogger("pyrogram").setLevel(logging.INFO)
 
 from .config import get_settings
-from .database import init_db, engine
+from .database import init_db
 from .telegram import start_telegram_client, stop_telegram_client
-from .routers import files_router, folders_router, streaming_router, auth_router, tv_router, playlists_router
+from .routers import files_router, folders_router, streaming_router, auth_router, tv_router
 
 settings = get_settings()
 
@@ -35,29 +34,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan - start/stop Telegram client and init DB."""
     logger.info("Starting کمد Backend...")
-    logger.info(
-        "Database target: host=%s port=%s pool=%s",
-        engine.url.host or "local",
-        engine.url.port or "default",
-        type(engine.sync_engine.pool).__name__,
-    )
-    logger.info("Runtime port: PORT=%s fallback=%s", os.getenv("PORT", "unset"), settings.server_port)
-    for attempt in range(1, 7):
-        try:
-            await init_db()
-            break
-        except Exception:
-            if attempt == 6:
-                logger.exception("Database initialization failed after 6 attempts")
-                raise
-            delay = min(2 ** attempt, 10)
-            logger.warning(
-                "Database is temporarily unavailable; retrying in %s seconds (%s/6)",
-                delay,
-                attempt,
-                exc_info=True,
-            )
-            await asyncio.sleep(delay)
+    await init_db()
     logger.info("Database initialized")
     await start_telegram_client()
     logger.info("Telegram client started")
@@ -129,7 +106,6 @@ app.include_router(files_router, prefix="/api")
 app.include_router(folders_router, prefix="/api")
 app.include_router(streaming_router, prefix="/api")
 app.include_router(tv_router, prefix="/api")
-app.include_router(playlists_router, prefix="/api")
 
 
 

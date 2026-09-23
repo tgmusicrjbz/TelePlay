@@ -3,7 +3,7 @@ Database models for TelePlay streaming app.
 """
 from datetime import datetime
 from typing import Optional, List
-from sqlalchemy import BigInteger, String, Integer, Boolean, ForeignKey, DateTime, Text, Index, UniqueConstraint
+from sqlalchemy import BigInteger, String, Integer, Boolean, ForeignKey, DateTime, Text, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .database import Base
 
@@ -25,7 +25,6 @@ class User(Base):
     folders: Mapped[List["Folder"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     files: Mapped[List["File"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     watch_progress: Mapped[List["WatchProgress"]] = relationship(back_populates="user", cascade="all, delete-orphan")
-    playlists: Mapped[List["Playlist"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class Folder(Base):
@@ -89,7 +88,6 @@ class File(Base):
     user: Mapped["User"] = relationship(back_populates="files")
     folder: Mapped[Optional["Folder"]] = relationship(back_populates="files")
     watch_progress: Mapped[List["WatchProgress"]] = relationship(back_populates="file", cascade="all, delete-orphan")
-    playlist_items: Mapped[List["PlaylistItem"]] = relationship(back_populates="file", cascade="all, delete-orphan")
     
     # Indexes
     __table_args__ = (
@@ -117,44 +115,6 @@ class WatchProgress(Base):
     # Unique constraint
     __table_args__ = (
         Index("idx_watch_user_file", user_id, file_id, unique=True),
-    )
-
-
-class Playlist(Base):
-    """An ordered collection of the user's audio and video files."""
-    __tablename__ = "playlists"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    user: Mapped["User"] = relationship(back_populates="playlists")
-    items: Mapped[List["PlaylistItem"]] = relationship(
-        back_populates="playlist", cascade="all, delete-orphan", order_by="PlaylistItem.position"
-    )
-
-    __table_args__ = (UniqueConstraint("user_id", "name", name="uq_playlist_user_name"),)
-
-
-class PlaylistItem(Base):
-    """A file and its manual position inside a playlist."""
-    __tablename__ = "playlist_items"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    playlist_id: Mapped[int] = mapped_column(ForeignKey("playlists.id", ondelete="CASCADE"), nullable=False)
-    file_id: Mapped[int] = mapped_column(ForeignKey("files.id", ondelete="CASCADE"), nullable=False)
-    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    added_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-    playlist: Mapped["Playlist"] = relationship(back_populates="items")
-    file: Mapped["File"] = relationship(back_populates="playlist_items")
-
-    __table_args__ = (
-        UniqueConstraint("playlist_id", "file_id", name="uq_playlist_file"),
-        Index("idx_playlist_position", playlist_id, position),
     )
 
 

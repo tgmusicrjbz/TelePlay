@@ -1,4 +1,4 @@
-import { Files, Clock, PlayCircle, LogOut, HardDrive, X, Users, Palette, FolderPlus, RotateCcw, ListMusic } from 'lucide-react';
+import { Files, Clock, PlayCircle, LogOut, HardDrive, X, Users, Palette, FolderPlus, RotateCcw } from 'lucide-react';
 import logo from '../assets/logo.png';
 import { useAppStore } from '../lib/store';
 import { useStorageStats, formatFileSize, useLogoutAll } from '../lib/api';
@@ -62,12 +62,12 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
         }
     };
 
-    const handleNavClick = (section: 'files' | 'recent' | 'continue_watching' | 'playlists') => {
+    const handleNavClick = (section: 'files' | 'recent' | 'continue_watching') => {
         setActiveSection(section);
         onClose();
     };
 
-    const NavItem = ({ section, icon: Icon, label }: { section: 'files' | 'recent' | 'continue_watching' | 'playlists', icon: any, label: string }) => (
+    const NavItem = ({ section, icon: Icon, label }: { section: 'files' | 'recent' | 'continue_watching', icon: any, label: string }) => (
         <button
             onClick={() => handleNavClick(section)}
             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${
@@ -121,7 +121,6 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                 {/* Navigation */}
                 <nav className="flex-1 px-3 space-y-1 overflow-y-auto">
                     <NavItem section="files" icon={Files} label="فایل‌ها و کشوها" />
-                    <NavItem section="playlists" icon={ListMusic} label="پلی‌لیست‌ها" />
                     <NavItem section="recent" icon={Clock} label="تازه اضافه‌شده‌ها" />
                     <NavItem section="continue_watching" icon={PlayCircle} label="ادامه پخش" />
 

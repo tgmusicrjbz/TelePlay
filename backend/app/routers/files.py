@@ -2,13 +2,8 @@
 File management API endpoints.
 """
 from typing import Optional
-from fastapi import APIRouter, Depends, File as FormFile, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query
 import secrets
-import logging
-import os
-import shutil
-import tempfile
-from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, delete, asc, desc
 from sqlalchemy.orm import selectinload
@@ -30,7 +25,6 @@ from ..services import (
 
 router = APIRouter(prefix="/files", tags=["Files"])
 settings = get_settings()
-logger = logging.getLogger(__name__)
 
 
 FILE_SORT_FIELDS = {
@@ -41,106 +35,6 @@ FILE_SORT_FIELDS = {
     "created": File.created_at,
     "updated": File.updated_at,
 }
-
-
-def detect_upload_type(filename: str, mime_type: str | None) -> str:
-    mime = (mime_type or "").lower()
-    extension = Path(filename).suffix.lower()
-    if mime.startswith("video/") or extension in {".mp4", ".mkv", ".mov", ".webm", ".avi"}:
-        return "video"
-    if mime.startswith("audio/") or extension in {".mp3", ".m4a", ".aac", ".wav", ".ogg", ".flac", ".opus"}:
-        return "audio"
-    if mime.startswith("image/") or extension in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}:
-        return "image"
-    return "document"
-
-
-@router.post("/upload", response_model=FileResponse, status_code=201)
-async def upload_file(
-    upload: UploadFile = FormFile(...),
-    folder_id: Optional[int] = Form(None),
-    description: Optional[str] = Form(None),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Upload a browser file into the Telegram storage channel."""
-    filename = sanitize_filename(upload.filename or "file")
-    if folder_id is not None:
-        folder = (await db.execute(select(Folder).where(Folder.id == folder_id, Folder.user_id == current_user.id))).scalar_one_or_none()
-        if folder is None:
-            raise HTTPException(status_code=404, detail="Folder not found")
-
-    temporary_dir: str | None = None
-    temporary_path: str | None = None
-    sent_message = None
-    try:
-        temporary_dir = tempfile.mkdtemp(prefix="komod-upload-")
-        temporary_path = str(Path(temporary_dir) / filename)
-        with open(temporary_path, "wb") as temporary:
-            while chunk := await upload.read(1024 * 1024):
-                temporary.write(chunk)
-        file_size = os.path.getsize(temporary_path)
-        if file_size == 0:
-            raise HTTPException(status_code=400, detail="Uploaded file is empty")
-
-        file_type = detect_upload_type(filename, upload.content_type)
-        common = {
-            "chat_id": settings.telegram_storage_channel_id,
-            "caption": (description or "").strip()[:1024] or None,
-            "parse_mode": None,
-        }
-        try:
-            if file_type == "video":
-                sent_message = await telegram.tg_client.send_video(video=temporary_path, supports_streaming=True, **common)
-            elif file_type == "audio":
-                sent_message = await telegram.tg_client.send_audio(audio=temporary_path, **common)
-            else:
-                sent_message = await telegram.tg_client.send_document(document=temporary_path, **common)
-        except Exception:
-            logger.exception("Typed Telegram upload failed; retrying as document")
-            sent_message = await telegram.tg_client.send_document(document=temporary_path, **common)
-            file_type = detect_upload_type(filename, upload.content_type)
-
-        media = sent_message.video or sent_message.audio or sent_message.document
-        if media is None:
-            raise RuntimeError("Telegram returned a message without uploaded media")
-        stored = File(
-            user_id=current_user.id,
-            folder_id=folder_id,
-            file_id=media.file_id,
-            file_unique_id=media.file_unique_id,
-            channel_message_id=sent_message.id,
-            file_name=filename,
-            description=(description or "").strip()[:1024] or None,
-            file_size=media.file_size or file_size,
-            mime_type=getattr(media, "mime_type", None) or upload.content_type,
-            file_type=file_type,
-            duration=getattr(media, "duration", None),
-            width=getattr(media, "width", None),
-            height=getattr(media, "height", None),
-            thumbnail_file_id=(media.thumbs[0].file_id if getattr(media, "thumbs", None) else None),
-        )
-        db.add(stored)
-        await db.commit()
-        stored = (await db.execute(
-            select(File).where(File.id == stored.id).options(selectinload(File.watch_progress))
-        )).scalar_one()
-        return FileResponse(**add_urls_to_file(stored))
-    except HTTPException:
-        raise
-    except Exception as error:
-        await db.rollback()
-        if sent_message is not None:
-            try:
-                await delete_from_storage_channel(sent_message.id)
-            except Exception:
-                pass
-        logger.exception("Web upload failed")
-        raise HTTPException(status_code=502, detail="Could not save this file in Telegram") from error
-    finally:
-        await upload.close()
-        if temporary_dir:
-            shutil.rmtree(temporary_dir, ignore_errors=True)
 
 
 def apply_file_sort(query, sort: Optional[str]):

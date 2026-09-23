@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.engine import make_url
 from sqlalchemy import inspect, text
-from sqlalchemy.pool import NullPool
 from .config import get_settings
 
 settings = get_settings()
@@ -21,32 +20,18 @@ if url.drivername == "postgresql":
     query.pop("schema", None)
     if "sslmode" in query and "ssl" not in query:
         query["ssl"] = query.pop("sslmode")
-    # Supabase/Supavisor uses port 6543 for transaction pooling. Connections
-    # must not be retained by a second application-side pool, and asyncpg's
-    # statement caches need to be disabled for this mode.
-    if url.port == 6543:
-        query["prepared_statement_cache_size"] = "0"
     url = url.set(query=query)
 elif url.drivername == "sqlite":
     url = url.set(drivername="sqlite+aiosqlite")
 
-engine_options = {
-    "echo": False,
-    "pool_pre_ping": True,
-}
-if url.drivername == "postgresql+asyncpg" and url.port == 6543:
-    engine_options.update(
-        poolclass=NullPool,
-        connect_args={"statement_cache_size": 0},
-    )
-else:
-    engine_options.update(
-        pool_recycle=1800,  # Recycle connections every 30 minutes
-        pool_size=settings.db_pool_size,
-        max_overflow=settings.db_max_overflow,
-    )
-
-engine = create_async_engine(url, **engine_options)
+engine = create_async_engine(
+    url, 
+    echo=False,
+    pool_pre_ping=True,
+    pool_recycle=1800,  # Recycle connections every 30 minutes
+    pool_size=settings.db_pool_size,
+    max_overflow=settings.db_max_overflow,
+)
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 

@@ -133,13 +133,11 @@ async def stream_file(
     
     headers = {
         "Content-Type": mime_type,
+        "Content-Range": f"bytes {from_bytes}-{until_bytes}/{file_size}",
         "Content-Length": str(req_length),
         "Content-Disposition": f"{disposition}; filename*=utf-8''{encoded_filename}",
         "Accept-Ranges": "bytes",
-        "Cache-Control": "private, no-transform",
     }
-    if range_header:
-        headers["Content-Range"] = f"bytes {from_bytes}-{until_bytes}/{file_size}"
     
     return StreamingResponse(
         file_streamer(),
@@ -263,13 +261,11 @@ async def stream_public_file(
     
     headers = {
         "Content-Type": mime_type,
+        "Content-Range": f"bytes {from_bytes}-{until_bytes}/{file_size}",
         "Content-Length": str(req_length),
         "Content-Disposition": f"{disposition}; filename*=utf-8''{encoded_filename}",
         "Accept-Ranges": "bytes",
-        "Cache-Control": "public, max-age=3600, no-transform",
     }
-    if range_header:
-        headers["Content-Range"] = f"bytes {from_bytes}-{until_bytes}/{file_size}"
     
     return StreamingResponse(
         file_streamer(),

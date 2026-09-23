@@ -52,9 +52,7 @@ async def parallel_stream_generator(
     chat_id = initial_message.chat.id
     message_id = initial_message.id
 
-    # Fetch the storage message independently for each client. A helper bot may
-    # not have access to the channel, so only successful client/message pairs
-    # take part in streaming.
+    # ── Pre-fetch messages for ALL clients in parallel (eliminates lag) ──
     async def fetch_msg(client, idx):
         try:
             msg = await client.get_messages(chat_id, message_id)
@@ -69,16 +67,13 @@ async def parallel_stream_generator(
 
     # Fetch all in parallel — fast!
     fetch_tasks = []
-    for i, c in enumerate(clients):
-        c_idx = getattr(c, "pool_index", i)
+    for i in range(concurrency):
+        c = clients[i % pool_size]
+        c_idx = getattr(c, "pool_index", i % pool_size)
         fetch_tasks.append(fetch_msg(c, c_idx))
 
     fetch_results = await asyncio.gather(*fetch_tasks)
-    client_messages = {
-        idx: (clients[idx], msg)
-        for idx, msg in fetch_results
-        if msg is not None and idx < len(clients)
-    }
+    client_messages = {idx: msg for idx, msg in fetch_results if msg is not None}
 
     if not client_messages:
         logger.error("No client could fetch the message")
@@ -96,44 +91,45 @@ async def parallel_stream_generator(
         for i in range(total_chunks)
     }
 
-    available = list(client_messages.items())
-
     async def worker(worker_id: int):
-        while True:
+        client = clients[worker_id % pool_size]
+        c_idx = getattr(client, "pool_index", worker_id % pool_size)
+
+        # Get semaphore for this client to ensure we don't exceed max_concurrent_transmissions
+        # This prevents the "Request refused" or internal queue buildup in Pyrogram
+        semaphore = get_client_semaphore(c_idx)
+
+        msg = client_messages.get(c_idx)
+        if msg is None:
+            return  # This client couldn't access the file
+
+        while not task_queue.empty():
             try:
                 chunk_idx = task_queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
 
             try:
-                last_error = None
-                # Retry the same chunk with every available bot before failing
-                # the HTTP stream. This prevents a single stale FILE_REFERENCE
-                # or helper-bot permission issue from breaking playback.
-                for attempt in range(len(available)):
-                    c_idx, (client, msg) = available[(worker_id + attempt) % len(available)]
-                    try:
-                        async with get_client_semaphore(c_idx):
-                            data = b""
-                            async for part in client.stream_media(msg, limit=1, offset=chunk_idx):
-                                data += part
-                        if not data:
-                            raise RuntimeError("Telegram returned an empty media chunk")
-                        if not results[chunk_idx].done():
-                            results[chunk_idx].set_result(data)
-                        break
-                    except Exception as error:
-                        last_error = error
-                        logger.warning("Bot %d failed chunk %d: %s", c_idx, chunk_idx, error)
-                else:
-                    if not results[chunk_idx].done():
-                        results[chunk_idx].set_exception(last_error or RuntimeError("No Telegram client could stream the chunk"))
+                # Wait for slot before requesting chunk
+                async with semaphore:
+                    data = b""
+                    async for part in client.stream_media(
+                        msg, limit=1, offset=chunk_idx
+                    ):
+                        data += part
+
+                if not results[chunk_idx].done():
+                    results[chunk_idx].set_result(data)
+            except Exception as e:
+                logger.error("Bot %d failed chunk %d: %s", c_idx, chunk_idx, e)
+                if not results[chunk_idx].done():
+                    results[chunk_idx].set_exception(e)
             finally:
                 task_queue.task_done()
 
     # Launch workers
     worker_tasks = [
-        asyncio.create_task(worker(i)) for i in range(min(concurrency, len(available)))
+        asyncio.create_task(worker(i)) for i in range(concurrency)
     ]
 
     # Yield results in order
@@ -147,7 +143,6 @@ async def parallel_stream_generator(
     finally:
         for w in worker_tasks:
             w.cancel()
-        await asyncio.gather(*worker_tasks, return_exceptions=True)
 
 
 async def stream_file(
