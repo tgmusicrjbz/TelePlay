@@ -43,8 +43,11 @@ class Settings(BaseSettings):
     
     # Database
     database_url: str
-    db_pool_size: int = 5
-    db_max_overflow: int = 5
+    # Keep the application pool deliberately small. Supabase's shared session
+    # pool can have a low client limit, and Railway briefly overlaps old and
+    # new containers during a deployment.
+    db_pool_size: int = 2
+    db_max_overflow: int = 0
     
     
     # JWT
