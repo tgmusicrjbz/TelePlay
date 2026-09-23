@@ -24,6 +24,14 @@ if url.drivername == "postgresql":
 elif url.drivername == "sqlite":
     url = url.set(drivername="sqlite+aiosqlite")
 
+connect_args = {}
+if url.drivername == "postgresql+asyncpg":
+    # Disable asyncpg's local prepared statement cache. Without this, a pooled
+    # connection (e.g. behind pgbouncer or a proxy) can raise
+    # DuplicatePreparedStatementError when a statement name collides with one
+    # prepared by a different logical session sharing the same physical connection.
+    connect_args["statement_cache_size"] = 0
+
 engine = create_async_engine(
     url, 
     echo=False,
@@ -31,6 +39,7 @@ engine = create_async_engine(
     pool_recycle=1800,  # Recycle connections every 30 minutes
     pool_size=settings.db_pool_size,
     max_overflow=settings.db_max_overflow,
+    connect_args=connect_args,
 )
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
