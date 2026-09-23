@@ -57,6 +57,28 @@ export interface FileListResponse {
     per_page: number;
 }
 
+export interface PlaylistItem {
+    id: number;
+    position: number;
+    added_at: string;
+    file: TelegramFile;
+}
+
+export interface PlaylistSummary {
+    id: number;
+    name: string;
+    description: string | null;
+    item_count: number;
+    total_duration: number;
+    cover_url: string | null;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface Playlist extends PlaylistSummary {
+    items: PlaylistItem[];
+}
+
 export type SortField = 'name' | 'type' | 'size' | 'duration' | 'created' | 'updated' | 'count';
 export type SortDirection = 'asc' | 'desc';
 export interface SortCriterion { field: SortField; direction: SortDirection; }
@@ -516,6 +538,83 @@ export const formatDuration = (seconds: number | null): string => {
         return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     }
     return `${minutes}:${secs.toString().padStart(2, '0')}`;
+};
+
+export const useUploadFile = () => {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async ({ file, folderId }: { file: globalThis.File; folderId: number | null }) => {
+            const form = new FormData();
+            form.append('upload', file, file.name);
+            if (folderId !== null) form.append('folder_id', String(folderId));
+            const { data } = await api.post<TelegramFile>('/files/upload', form);
+            return data;
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['files'] });
+            queryClient.invalidateQueries({ queryKey: ['folders'] });
+            queryClient.invalidateQueries({ queryKey: ['storage'] });
+        },
+    });
+};
+
+// ============== Playlist Hooks ==============
+
+export const usePlaylists = () => useQuery<PlaylistSummary[]>({
+    queryKey: ['playlists'],
+    queryFn: async () => (await api.get<PlaylistSummary[]>('/playlists')).data,
+});
+
+export const usePlaylist = (id: number | null) => useQuery<Playlist>({
+    queryKey: ['playlists', id],
+    queryFn: async () => (await api.get<Playlist>(`/playlists/${id}`)).data,
+    enabled: id !== null,
+});
+
+const usePlaylistMutation = <TVariables>(request: (variables: TVariables) => Promise<Playlist>) => {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: request,
+        onSuccess: (playlist: Playlist) => {
+            queryClient.setQueryData(['playlists', playlist.id], playlist);
+            queryClient.invalidateQueries({ queryKey: ['playlists'] });
+        },
+    });
+};
+
+export const useCreatePlaylist = () => usePlaylistMutation(async (payload: { name: string; description?: string }) =>
+    (await api.post<Playlist>('/playlists', payload)).data
+);
+
+export const useUpdatePlaylist = () => usePlaylistMutation(async ({ id, ...payload }: { id: number; name?: string; description?: string }) =>
+    (await api.patch<Playlist>(`/playlists/${id}`, payload)).data
+);
+
+export const useAddPlaylistItems = () => usePlaylistMutation(async ({ id, fileIds }: { id: number; fileIds: number[] }) =>
+    (await api.post<Playlist>(`/playlists/${id}/items`, { file_ids: fileIds })).data
+);
+
+export const useRemovePlaylistItem = () => usePlaylistMutation(async ({ id, fileId }: { id: number; fileId: number }) =>
+    (await api.delete<Playlist>(`/playlists/${id}/items/${fileId}`)).data
+);
+
+export const useReorderPlaylist = () => usePlaylistMutation(async ({ id, fileIds }: { id: number; fileIds: number[] }) =>
+    (await api.put<Playlist>(`/playlists/${id}/reorder`, { file_ids: fileIds })).data
+);
+
+export const useShufflePlaylist = () => usePlaylistMutation(async (id: number) =>
+    (await api.post<Playlist>(`/playlists/${id}/shuffle`)).data
+);
+
+export const useDeletePlaylist = () => {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async (id: number) => { await api.delete(`/playlists/${id}`); return id; },
+        onSuccess: (id) => {
+            queryClient.removeQueries({ queryKey: ['playlists', id] });
+            queryClient.invalidateQueries({ queryKey: ['playlists'] });
+        },
+    });
 };
 
 export interface BatchFileEdit {

@@ -8,19 +8,23 @@ import string
 import re
 import asyncio
 import contextlib
+import logging
+import random
 from datetime import datetime, timedelta, timezone
 from pyrogram import filters
 from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
-from sqlalchemy import select, or_
+from sqlalchemy import delete, func, select, or_
+from sqlalchemy.orm import selectinload
 
 from .telegram import tg_client, forward_to_storage_channel, delete_from_storage_channel
 from .database import async_session
-from .models import User, File, Folder, LoginCode
+from .models import User, File, Folder, LoginCode, Playlist, PlaylistItem
 from .config import get_settings
 from .auth import create_access_token
 from .services import escape_like
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 pending_input_chats: set[int] = set()
 search_queries: dict[int, str] = {}
 library_filters: dict[int, set[str]] = {}
@@ -105,6 +109,16 @@ def owned_file(file_id: int, telegram_id: int):
 def owned_folder(folder_id: int, telegram_id: int):
     return select(Folder).join(User, Folder.user_id == User.id).where(
         Folder.id == folder_id, User.telegram_id == telegram_id
+    )
+
+
+def owned_playlist(playlist_id: int, telegram_id: int):
+    return (
+        select(Playlist)
+        .join(User, Playlist.user_id == User.id)
+        .where(Playlist.id == playlist_id, User.telegram_id == telegram_id)
+        .options(selectinload(Playlist.items).selectinload(PlaylistItem.file))
+        .execution_options(populate_existing=True)
     )
 
 
@@ -558,6 +572,7 @@ def file_detail_keyboard(file: File, back_callback: str = "files:0") -> InlineKe
         description_row.append(InlineKeyboardButton("🧹 حذف توضیحات", callback_data=f"clearfiledesc:{file.id}"))
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("👁 نمایش در تلگرام", callback_data=f"preview:{file.id}")],
+        *([[InlineKeyboardButton("🎧 افزودن به پلی‌لیست", callback_data=f"fileplaylist:{file.id}:0")]] if file.file_type in ("audio", "video") else []),
         [InlineKeyboardButton("✏️ تغییر نام", callback_data=f"renamefile:{file.id}"),
          InlineKeyboardButton("🗃️ انتقال", callback_data=f"move:{file.id}")],
         description_row,
@@ -577,6 +592,7 @@ HELP_TEXT = (
     "📥 فیلم، آهنگ، عکس، سند یا متن رو بفرست تا برات نگه دارم.\n"
     "📝 کپشن هر فایل هم به‌عنوان توضیحاتش ذخیره می‌شه و بعداً می‌تونی تغییرش بدی.\n"
     "🔍 برای پیدا کردن فایل‌ها، هم عبارت جست‌وجو داری هم انتخاب چند نوع محتوا.\n"
+    "🎧 آهنگ‌ها و ویدیوها رو داخل پلی‌لیست بچین و پشت‌سرهم پخش کن.\n"
     "🗃️ کشوها می‌تونن چندلایه باشن و هر کدوم اسم و توضیحات خودشون رو داشته باشن.\n\n"
     "روی هر فایل یا کشو بزن تا گزینه‌های دیدن، ویرایش، انتقال، اشتراک و حذف رو ببینی ✨"
 )
@@ -588,6 +604,7 @@ def main_menu_keyboard(telegram_id: int) -> InlineKeyboardMarkup:
          InlineKeyboardButton("🗄️ کشوهای من", callback_data="folders:0:0")],
         [InlineKeyboardButton("🔍 بگرد تو کمد", callback_data="search_choose"),
          InlineKeyboardButton("➕ کشوی تازه", callback_data="create_folder")],
+        [InlineKeyboardButton("🎧 پلی‌لیست‌های من", callback_data="playlists:0")],
         [get_web_app_button(telegram_id, "✨ نسخهٔ وب")],
         [InlineKeyboardButton("💡 راهنمای من", callback_data="show_help")],
     ])
@@ -604,6 +621,96 @@ def recent_files_view(files: list[File], telegram_id: int) -> tuple[str, InlineK
     buttons.append([InlineKeyboardButton("🗄️ کشوها", callback_data="back_folders"),
                     get_web_app_button(telegram_id, "🌐 نسخهٔ وب")])
     return "📁 **موارد اخیر**\nبرای دیدن جزئیات و مدیریت، روی هر مورد بزنید.", InlineKeyboardMarkup(buttons)
+
+
+async def render_playlists(message: Message, telegram_id: int, page: int = 0) -> None:
+    async with async_session() as db:
+        user = (await db.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
+        playlists = (await db.execute(
+            select(Playlist)
+            .where(Playlist.user_id == user.id)
+            .options(selectinload(Playlist.items))
+            .order_by(Playlist.updated_at.desc(), Playlist.id.desc())
+        )).scalars().unique().all() if user else []
+    page = min(max(page, 0), max(0, (len(playlists) - 1) // PAGE_SIZE))
+    shown = playlists[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
+    buttons = [[InlineKeyboardButton(
+        f"🎧 {playlist.name[:32]} · {len(playlist.items)} مورد",
+        callback_data=f"playlist:{playlist.id}:0",
+    )] for playlist in shown]
+    if len(playlists) > PAGE_SIZE:
+        buttons.append(pagination_row("playlists", page, len(playlists)))
+    buttons.extend([
+        [InlineKeyboardButton("➕ پلی‌لیست تازه", callback_data="playlist_new")],
+        [InlineKeyboardButton("🚪 منوی اصلی", callback_data="home")],
+    ])
+    text = "🎧 **پلی‌لیست‌های کمد**\n\nآهنگ‌ها و ویدیوها رو با ترتیب دلخواهت کنار هم بچین و پشت‌سرهم پخش کن."
+    if not playlists:
+        text += "\n\nهنوز پلی‌لیستی نساختی؛ اولین پلی‌لیستت رو بساز ✨"
+    await message.edit(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+
+async def render_playlist_detail(message: Message, telegram_id: int, playlist_id: int, page: int = 0) -> None:
+    async with async_session() as db:
+        playlist = (await db.execute(owned_playlist(playlist_id, telegram_id))).scalar_one_or_none()
+    if playlist is None:
+        await message.edit("این پلی‌لیست پیدا نشد.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ پلی‌لیست‌ها", callback_data="playlists:0")]]))
+        return
+    items = sorted(playlist.items, key=lambda item: (item.position, item.id))
+    page_size = PAGE_SIZE
+    page = min(max(page, 0), max(0, (len(items) - 1) // page_size))
+    shown = items[page * page_size:(page + 1) * page_size]
+    buttons = [[InlineKeyboardButton(
+        f"{FILE_ICONS.get(item.file.file_type, '🎵')} {(page * page_size + index + 1)}. {item.file.file_name[:30]}",
+        callback_data=f"plitem:{playlist.id}:{item.file.id}:{page}",
+    )] for index, item in enumerate(shown)]
+    if len(items) > page_size:
+        buttons.append(pagination_row(f"playlist:{playlist.id}", page, len(items)))
+    buttons.extend([
+        [InlineKeyboardButton("▶️ پخش همه", callback_data=f"plplay:{playlist.id}:0"), InlineKeyboardButton("🔀 شافل", callback_data=f"plshuffle:{playlist.id}")],
+        [InlineKeyboardButton("➕ افزودن فایل", callback_data=f"pladd:{playlist.id}:0"), InlineKeyboardButton("✏️ ویرایش", callback_data=f"pledit:{playlist.id}")],
+        [InlineKeyboardButton("🗑 حذف پلی‌لیست", callback_data=f"pldelete:{playlist.id}"), InlineKeyboardButton("↩️ پلی‌لیست‌ها", callback_data="playlists:0")],
+        [InlineKeyboardButton("🚪 منوی اصلی", callback_data="home")],
+    ])
+    total_duration = sum(item.file.duration or 0 for item in items)
+    text = f"🎼 **{escape_markdown(playlist.name)}**\n{len(items)} مورد"
+    if total_duration:
+        text += f" · {format_duration(total_duration)}"
+    if playlist.description:
+        text += f"\n\n📝 {escape_markdown(truncate_description(playlist.description, 350))}"
+    if not items:
+        text += "\n\nاین پلی‌لیست هنوز خالیه؛ چند آهنگ یا ویدیو بهش اضافه کن."
+    await message.edit(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+
+async def send_playlist_media(client, callback: CallbackQuery, playlist_id: int, index: int) -> None:
+    async with async_session() as db:
+        playlist = (await db.execute(owned_playlist(playlist_id, callback.from_user.id))).scalar_one_or_none()
+    if playlist is None or not playlist.items:
+        await callback.answer("پلی‌لیست خالیه یا پیدا نشد.", show_alert=True)
+        return
+    items = sorted(playlist.items, key=lambda item: (item.position, item.id))
+    index %= len(items)
+    item = items[index]
+    previous_index = (index - 1) % len(items)
+    next_index = (index + 1) % len(items)
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⏮ قبلی", callback_data=f"plplay:{playlist_id}:{previous_index}"),
+         InlineKeyboardButton(f"{index + 1}/{len(items)}", callback_data="noop"),
+         InlineKeyboardButton("بعدی ⏭", callback_data=f"plplay:{playlist_id}:{next_index}")],
+        [InlineKeyboardButton("↩️ برگشت به پلی‌لیست", callback_data=f"plback:{playlist_id}:{index // PAGE_SIZE}"),
+         InlineKeyboardButton("🗑 بستن", callback_data="plclose")],
+    ])
+    try:
+        preview = await client.copy_message(callback.message.chat.id, settings.telegram_storage_channel_id, item.file.channel_message_id)
+        await preview.edit_reply_markup(keyboard)
+        asyncio.create_task(delete_preview_later(client, preview.chat.id, preview.id))
+        if callback.message.video or callback.message.audio or callback.message.document:
+            await safe_delete(callback.message)
+        await callback.answer(f"در حال پخش: {item.file.file_name[:40]}")
+    except Exception as error:
+        logger.exception("Could not preview playlist item %s: %s", item.file.id, error)
+        await callback.answer("پخش این مورد در تلگرام ممکن نشد.", show_alert=True)
 
 # ============== Authorization Middleware ==============
 
@@ -691,6 +798,13 @@ async def folders_command(client, message: Message):
     """Show folder structure."""
     panel = await message.reply("در حال آماده‌سازی کمد…")
     await render_folder_page(panel, message.from_user.id)
+
+
+@tg_client.on_message(filters.command("playlists") & filters.private)
+async def playlists_command(client, message: Message):
+    """Browse and manage audio/video playlists."""
+    panel = await message.reply("در حال آماده‌سازی پلی‌لیست‌ها…")
+    await render_playlists(panel, message.from_user.id)
 
 
 @tg_client.on_message(filters.command("newfolder") & filters.private)
@@ -904,6 +1018,11 @@ async def handle_file(client, message: Message):
     try:
         # Forward to storage channel
         forwarded = await forward_to_storage_channel(message)
+        stored_media = forwarded.video or forwarded.audio or forwarded.document
+        if forwarded.photo:
+            stored_media = forwarded.photo.sizes[-1]
+        if stored_media is not None:
+            media = stored_media
         
         # Extract file info
         raw_filename = getattr(media, "file_name", None) or (f"photo_{message.id}.jpg" if message.photo else f"{file_type}_{message.id}")
@@ -937,7 +1056,7 @@ async def handle_file(client, message: Message):
         
         response = (
             f"✅ **ذخیره شد**\n\n"
-            f"{emoji} **{file_info['file_name']}**\n"
+            f"{emoji} **{escape_markdown(file_info['file_name'])}**\n"
             f"📦 {format_size(file_info['file_size'])}\n"
         )
         
@@ -951,6 +1070,7 @@ async def handle_file(client, message: Message):
         await status_msg.edit(response, reply_markup=file_detail_keyboard(file))
         
     except Exception as e:
+        logger.exception("Telegram upload failed for user %s: %s", message.from_user.id, e)
         await status_msg.edit("❌ ذخیرهٔ فایل ناموفق بود. دوباره تلاش کنید.")
 
 
@@ -984,7 +1104,8 @@ async def handle_text_note(client, message: Message):
             f"📝 در کمد ذخیره شد: {title}",
             reply_markup=file_detail_keyboard(note),
         )
-    except Exception:
+    except Exception as error:
+        logger.exception("Telegram text upload failed for user %s: %s", message.from_user.id, error)
         await message.reply("❌ ذخیرهٔ متن ناموفق بود. دوباره تلاش کنید.")
 
 
@@ -1010,6 +1131,251 @@ async def handle_callback(client, callback: CallbackQuery):
 
     elif data == "noop":
         await callback.answer()
+
+    elif data.startswith("playlists:"):
+        await render_playlists(callback.message, callback.from_user.id, int(data.split(":")[1]))
+        await callback.answer()
+
+    elif data.startswith("playlist:"):
+        _, playlist_id, page = data.split(":")
+        await render_playlist_detail(callback.message, callback.from_user.id, int(playlist_id), int(page))
+        await callback.answer()
+
+    elif data == "playlist_new":
+        pending_input_chats.add(callback.message.chat.id)
+        prompt = await callback.message.reply(
+            "🎼 اسم پلی‌لیست رو بفرست. اگر توضیح هم می‌خوای، بعد از `|` بنویس؛ مثل:\n`رانندگی | آهنگ‌های جاده`",
+            reply_markup=input_keyboard(),
+        )
+        await callback.answer()
+        reply = None
+        try:
+            reply, action = await wait_for_input(client, callback.message.chat.id)
+            if action == "cancel" or reply is None or not reply.text:
+                await callback.message.edit("ساخت پلی‌لیست لغو شد.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ پلی‌لیست‌ها", callback_data="playlists:0")]]))
+                return
+            name, _, description = reply.text.partition("|")
+            name = name.strip()[:255]
+            if not name:
+                await callback.answer("اسم پلی‌لیست نمی‌تونه خالی باشه.", show_alert=True)
+                return
+            async with async_session() as db:
+                user = (await db.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one()
+                duplicate = (await db.execute(select(Playlist.id).where(Playlist.user_id == user.id, func.lower(Playlist.name) == name.lower()))).scalar_one_or_none()
+                if duplicate:
+                    await callback.message.edit("یه پلی‌لیست با این اسم داری.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ پلی‌لیست‌ها", callback_data="playlists:0")]]))
+                    return
+                playlist = Playlist(user_id=user.id, name=name, description=description.strip()[:1024] or None)
+                db.add(playlist)
+                await db.commit()
+                await db.refresh(playlist)
+            await render_playlist_detail(callback.message, callback.from_user.id, playlist.id)
+        finally:
+            pending_input_chats.discard(callback.message.chat.id)
+            await safe_delete(prompt)
+            await safe_delete(reply)
+
+    elif data.startswith("pledit:"):
+        playlist_id = int(data.split(":")[1])
+        async with async_session() as db:
+            playlist = (await db.execute(owned_playlist(playlist_id, callback.from_user.id))).scalar_one_or_none()
+        if playlist is None:
+            await callback.answer("پلی‌لیست پیدا نشد.", show_alert=True)
+            return
+        pending_input_chats.add(callback.message.chat.id)
+        prompt = await callback.message.reply("اسم جدید و توضیحات رو به شکل `اسم | توضیحات` بفرست.", reply_markup=input_keyboard())
+        await callback.answer()
+        reply = None
+        try:
+            reply, action = await wait_for_input(client, callback.message.chat.id)
+            if action == "cancel" or reply is None or not reply.text:
+                return
+            name, _, description = reply.text.partition("|")
+            if not name.strip():
+                return
+            async with async_session() as db:
+                playlist = (await db.execute(owned_playlist(playlist_id, callback.from_user.id))).scalar_one()
+                playlist.name = name.strip()[:255]
+                playlist.description = description.strip()[:1024] or None
+                await db.commit()
+            await render_playlist_detail(callback.message, callback.from_user.id, playlist_id)
+        finally:
+            pending_input_chats.discard(callback.message.chat.id)
+            await safe_delete(prompt)
+            await safe_delete(reply)
+
+    elif data.startswith("pladd:"):
+        _, playlist_id, page = data.split(":")
+        playlist_id, page = int(playlist_id), int(page)
+        async with async_session() as db:
+            playlist = (await db.execute(owned_playlist(playlist_id, callback.from_user.id))).scalar_one_or_none()
+            user = (await db.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one_or_none()
+            existing = {item.file_id for item in playlist.items} if playlist else set()
+            files = (await db.execute(select(File).where(File.user_id == user.id, File.file_type.in_(("audio", "video"))).order_by(File.created_at.desc()))).scalars().all() if user and playlist else []
+        files = [file for file in files if file.id not in existing]
+        page = min(max(page, 0), max(0, (len(files) - 1) // PAGE_SIZE))
+        shown = files[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
+        buttons = [[InlineKeyboardButton(f"➕ {FILE_ICONS.get(file.file_type, '🎵')} {file.file_name[:32]}", callback_data=f"pladdfile:{playlist_id}:{file.id}:{page}")] for file in shown]
+        if len(files) > PAGE_SIZE:
+            buttons.append(pagination_row(f"pladd:{playlist_id}", page, len(files)))
+        buttons.append([InlineKeyboardButton("↩️ برگشت", callback_data=f"playlist:{playlist_id}:0")])
+        await callback.message.edit("🎵 **افزودن به پلی‌لیست**\nروی هر آهنگ یا ویدیو بزن تا اضافه بشه.", reply_markup=InlineKeyboardMarkup(buttons))
+        await callback.answer()
+
+    elif data.startswith("pladdfile:"):
+        _, playlist_id, file_id, page = data.split(":")
+        playlist_id, file_id, page = int(playlist_id), int(file_id), int(page)
+        async with async_session() as db:
+            playlist = (await db.execute(owned_playlist(playlist_id, callback.from_user.id))).scalar_one_or_none()
+            file = (await db.execute(owned_file(file_id, callback.from_user.id))).scalar_one_or_none()
+            if playlist is None or file is None or file.file_type not in ("audio", "video"):
+                await callback.answer("این فایل قابل افزودن نیست.", show_alert=True)
+                return
+            if file_id not in {item.file_id for item in playlist.items}:
+                position = max((item.position for item in playlist.items), default=-1) + 1
+                db.add(PlaylistItem(playlist_id=playlist.id, file_id=file.id, position=position))
+                await db.commit()
+        await callback.answer("به پلی‌لیست اضافه شد 🎵")
+        page_value = str(page)
+        # Re-render the add list after removing the newly-added file.
+        async with async_session() as db:
+            playlist = (await db.execute(owned_playlist(playlist_id, callback.from_user.id))).scalar_one()
+            user = (await db.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one()
+            existing = {item.file_id for item in playlist.items}
+            files = (await db.execute(select(File).where(File.user_id == user.id, File.file_type.in_(("audio", "video"))).order_by(File.created_at.desc()))).scalars().all()
+        files = [item for item in files if item.id not in existing]
+        shown = files[int(page_value) * PAGE_SIZE:(int(page_value) + 1) * PAGE_SIZE]
+        buttons = [[InlineKeyboardButton(f"➕ {FILE_ICONS.get(item.file_type, '🎵')} {item.file_name[:32]}", callback_data=f"pladdfile:{playlist_id}:{item.id}:{page_value}")] for item in shown]
+        if len(files) > PAGE_SIZE:
+            buttons.append(pagination_row(f"pladd:{playlist_id}", int(page_value), len(files)))
+        buttons.append([InlineKeyboardButton("↩️ برگشت", callback_data=f"playlist:{playlist_id}:0")])
+        await callback.message.edit_reply_markup(InlineKeyboardMarkup(buttons))
+
+    elif data.startswith("plitem:"):
+        _, playlist_id, file_id, page = data.split(":")
+        playlist_id, file_id, page = int(playlist_id), int(file_id), int(page)
+        async with async_session() as db:
+            playlist = (await db.execute(owned_playlist(playlist_id, callback.from_user.id))).scalar_one_or_none()
+        items = sorted(playlist.items, key=lambda item: (item.position, item.id)) if playlist else []
+        index = next((i for i, item in enumerate(items) if item.file_id == file_id), -1)
+        if index < 0:
+            await callback.answer("این مورد پیدا نشد.", show_alert=True)
+            return
+        item = items[index]
+        await callback.message.edit(
+            f"{FILE_ICONS.get(item.file.file_type, '🎵')} **{escape_markdown(item.file.file_name)}**\nجایگاه {(index + 1)} از {len(items)}",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("▶️ پخش", callback_data=f"plplay:{playlist_id}:{index}")],
+                [InlineKeyboardButton("⬆️ بالاتر", callback_data=f"plmove:{playlist_id}:{file_id}:-1:{page}"), InlineKeyboardButton("⬇️ پایین‌تر", callback_data=f"plmove:{playlist_id}:{file_id}:1:{page}")],
+                [InlineKeyboardButton("✕ حذف از پلی‌لیست", callback_data=f"plremove:{playlist_id}:{file_id}:{page}")],
+                [InlineKeyboardButton("↩️ برگشت", callback_data=f"playlist:{playlist_id}:{page}")],
+            ]),
+        )
+        await callback.answer()
+
+    elif data.startswith("plmove:"):
+        _, playlist_id, file_id, offset, page = data.split(":")
+        playlist_id, file_id, offset, page = int(playlist_id), int(file_id), int(offset), int(page)
+        async with async_session() as db:
+            playlist = (await db.execute(owned_playlist(playlist_id, callback.from_user.id))).scalar_one_or_none()
+            items = sorted(playlist.items, key=lambda item: (item.position, item.id)) if playlist else []
+            index = next((i for i, item in enumerate(items) if item.file_id == file_id), -1)
+            target = index + offset
+            if index >= 0 and 0 <= target < len(items):
+                items[index].position, items[target].position = items[target].position, items[index].position
+                await db.commit()
+        await render_playlist_detail(callback.message, callback.from_user.id, playlist_id, page)
+        await callback.answer("ترتیب ذخیره شد.")
+
+    elif data.startswith("plremove:"):
+        _, playlist_id, file_id, page = data.split(":")
+        async with async_session() as db:
+            playlist = (await db.execute(owned_playlist(int(playlist_id), callback.from_user.id))).scalar_one_or_none()
+            if playlist:
+                await db.execute(delete(PlaylistItem).where(PlaylistItem.playlist_id == playlist.id, PlaylistItem.file_id == int(file_id)))
+                await db.flush()
+                remaining = (await db.execute(select(PlaylistItem).where(PlaylistItem.playlist_id == playlist.id).order_by(PlaylistItem.position, PlaylistItem.id))).scalars().all()
+                for position, item in enumerate(remaining):
+                    item.position = position
+                await db.commit()
+        await render_playlist_detail(callback.message, callback.from_user.id, int(playlist_id), int(page))
+        await callback.answer("از پلی‌لیست حذف شد.")
+
+    elif data.startswith("plshuffle:"):
+        playlist_id = int(data.split(":")[1])
+        async with async_session() as db:
+            playlist = (await db.execute(owned_playlist(playlist_id, callback.from_user.id))).scalar_one_or_none()
+            if playlist:
+                items = list(playlist.items)
+                random.shuffle(items)
+                for position, item in enumerate(items):
+                    item.position = position
+                await db.commit()
+        await render_playlist_detail(callback.message, callback.from_user.id, playlist_id)
+        await callback.answer("پلی‌لیست شافل شد 🔀")
+
+    elif data.startswith("plplay:"):
+        _, playlist_id, index = data.split(":")
+        await send_playlist_media(client, callback, int(playlist_id), int(index))
+
+    elif data.startswith("plback:"):
+        _, playlist_id, page = data.split(":")
+        await safe_delete(callback.message)
+        panel = await client.send_message(callback.message.chat.id, "در حال بازگشت به پلی‌لیست…")
+        await render_playlist_detail(panel, callback.from_user.id, int(playlist_id), int(page))
+        await callback.answer()
+
+    elif data == "plclose":
+        await safe_delete(callback.message)
+        await callback.answer("پخش بسته شد.")
+
+    elif data.startswith("pldelete:"):
+        playlist_id = int(data.split(":")[1])
+        await callback.message.edit("پلی‌لیست حذف بشه؟ فایل‌های اصلی داخل کمد می‌مونن.", reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("بله، حذفش کن", callback_data=f"pldeleteok:{playlist_id}")],
+            [InlineKeyboardButton("↩️ انصراف", callback_data=f"playlist:{playlist_id}:0")],
+        ]))
+        await callback.answer()
+
+    elif data.startswith("pldeleteok:"):
+        playlist_id = int(data.split(":")[1])
+        async with async_session() as db:
+            playlist = (await db.execute(owned_playlist(playlist_id, callback.from_user.id))).scalar_one_or_none()
+            if playlist:
+                await db.delete(playlist)
+                await db.commit()
+        await render_playlists(callback.message, callback.from_user.id)
+        await callback.answer("پلی‌لیست حذف شد.")
+
+    elif data.startswith("fileplaylist:"):
+        _, file_id, page = data.split(":")
+        file_id, page = int(file_id), int(page)
+        async with async_session() as db:
+            user = (await db.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one_or_none()
+            playlists = (await db.execute(select(Playlist).where(Playlist.user_id == user.id).order_by(Playlist.updated_at.desc()))).scalars().all() if user else []
+        page = min(max(page, 0), max(0, (len(playlists) - 1) // PAGE_SIZE))
+        shown = playlists[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
+        buttons = [[InlineKeyboardButton(f"🎧 {item.name[:35]}", callback_data=f"fileplaylistadd:{file_id}:{item.id}")] for item in shown]
+        if len(playlists) > PAGE_SIZE:
+            buttons.append(pagination_row(f"fileplaylist:{file_id}", page, len(playlists)))
+        buttons.extend([[InlineKeyboardButton("➕ پلی‌لیست تازه", callback_data="playlist_new")], [InlineKeyboardButton("↩️ برگشت", callback_data=f"openfile:{file_id}")]])
+        await callback.message.edit("این فایل به کدوم پلی‌لیست اضافه بشه؟", reply_markup=InlineKeyboardMarkup(buttons))
+        await callback.answer()
+
+    elif data.startswith("fileplaylistadd:"):
+        _, file_id, playlist_id = data.split(":")
+        file_id, playlist_id = int(file_id), int(playlist_id)
+        async with async_session() as db:
+            file = (await db.execute(owned_file(file_id, callback.from_user.id))).scalar_one_or_none()
+            playlist = (await db.execute(owned_playlist(playlist_id, callback.from_user.id))).scalar_one_or_none()
+            if file and playlist and file.file_type in ("audio", "video") and file.id not in {item.file_id for item in playlist.items}:
+                db.add(PlaylistItem(playlist_id=playlist.id, file_id=file.id, position=max((item.position for item in playlist.items), default=-1) + 1))
+                await db.commit()
+        await callback.answer("به پلی‌لیست اضافه شد 🎵", show_alert=True)
+        async with async_session() as db:
+            file = (await db.execute(owned_file(file_id, callback.from_user.id))).scalar_one_or_none()
+        if file:
+            await callback.message.edit(file_detail_text(file), reply_markup=file_detail_keyboard_for_user(file, callback.from_user.id))
 
     elif data.startswith("sort_open:"):
         target = data.split(":", 1)[1]

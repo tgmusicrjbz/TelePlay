@@ -19,14 +19,16 @@ os.environ["JWT_SECRET"] = "test-secret"
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from fastapi import HTTPException
+from starlette.datastructures import Headers, UploadFile
 from sqlalchemy import select
 
 from app.database import Base, async_session, engine
-from app.models import File, Folder, User, WatchProgress
-from app.routers.files import batch_update_files, get_text_preview, list_files, update_file
+from app.models import File, Folder, Playlist, PlaylistItem, User, WatchProgress
+from app.routers.files import batch_update_files, get_text_preview, list_files, update_file, upload_file
 from app.routers.folders import delete_folder_contents, update_folder
 from app.routers.streaming import stored_message_response
-from app.schemas import BatchFileUpdate, FileUpdate, FolderUpdate
+from app.routers.playlists import add_playlist_items, create_playlist, reorder_playlist, shuffle_playlist
+from app.schemas import BatchFileUpdate, FileUpdate, FolderUpdate, PlaylistAddItems, PlaylistCreate, PlaylistReorder
 from app.telegram import start_one_client
 from app import telegram
 
@@ -135,6 +137,82 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
                 self.direct_file_id, FileUpdate(description=""), db, user
             )
             self.assertIsNone(cleared.description)
+
+    async def test_playlist_add_and_manual_reorder(self):
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            first = self.make_file(user.id, None, 301)
+            first.file_type, first.file_name, first.duration = "audio", "first.mp3", 120
+            second = self.make_file(user.id, None, 302)
+            second.file_type, second.file_name, second.duration = "video", "second.mp4", 240
+            db.add_all([first, second])
+            await db.commit()
+            playlist = await create_playlist(PlaylistCreate(name="رانندگی"), db, user)
+            result = await add_playlist_items(playlist.id, PlaylistAddItems(file_ids=[first.id, second.id]), db, user)
+            self.assertEqual([item.file.id for item in result.items], [first.id, second.id])
+            reordered = await reorder_playlist(playlist.id, PlaylistReorder(file_ids=[second.id, first.id]), db, user)
+            self.assertEqual([item.file.id for item in reordered.items], [second.id, first.id])
+            self.assertEqual(reordered.total_duration, 360)
+
+    async def test_playlist_rejects_non_media_file(self):
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            playlist = await create_playlist(PlaylistCreate(name="فقط رسانه"), db, user)
+            with self.assertRaises(HTTPException) as raised:
+                await add_playlist_items(playlist.id, PlaylistAddItems(file_ids=[self.direct_file_id]), db, user)
+            self.assertEqual(raised.exception.status_code, 400)
+
+    async def test_playlist_shuffle_preserves_all_items(self):
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            media = []
+            for message_id in (401, 402, 403):
+                file = self.make_file(user.id, None, message_id)
+                file.file_type = "audio"
+                media.append(file)
+            db.add_all(media)
+            await db.commit()
+            playlist = await create_playlist(PlaylistCreate(name="شافل"), db, user)
+            await add_playlist_items(playlist.id, PlaylistAddItems(file_ids=[item.id for item in media]), db, user)
+            shuffled = await shuffle_playlist(playlist.id, db, user)
+            self.assertEqual({item.file.id for item in shuffled.items}, {item.id for item in media})
+            self.assertEqual([item.position for item in shuffled.items], [0, 1, 2])
+
+    async def test_web_upload_sends_media_to_storage_and_creates_file(self):
+        media = SimpleNamespace(
+            file_id="telegram-file",
+            file_unique_id="telegram-unique",
+            file_size=4,
+            mime_type="video/mp4",
+            duration=10,
+            width=640,
+            height=360,
+            thumbs=[],
+        )
+        sent = SimpleNamespace(id=901, video=media, audio=None, document=None)
+        fake_client = SimpleNamespace(
+            send_video=AsyncMock(return_value=sent),
+            send_audio=AsyncMock(),
+            send_document=AsyncMock(),
+        )
+        upload = UploadFile(
+            file=io.BytesIO(b"test"),
+            filename="my_video.mp4",
+            headers=Headers({"content-type": "video/mp4"}),
+        )
+
+        with patch("app.routers.files.telegram.tg_client", fake_client):
+            async with async_session() as db:
+                user = await db.get(User, self.user_id)
+                result = await upload_file(upload, None, "توضیح", db, user)
+
+                self.assertEqual(result.file_name, "my_video.mp4")
+                self.assertEqual(result.file_type, "video")
+                fake_client.send_video.assert_awaited_once()
+                saved = (
+                    await db.execute(select(File).where(File.channel_message_id == 901))
+                ).scalar_one()
+                self.assertEqual(saved.description, "توضیح")
 
     async def test_multiple_file_types_can_be_filtered_together(self):
         async with async_session() as db:

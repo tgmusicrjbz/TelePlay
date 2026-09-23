@@ -57,6 +57,16 @@ interface AppState {
     // Player state
     isPlayerMinimized: boolean;
     setPlayerMinimized: (minimized: boolean) => void;
+    playQueue: TelegramFile[];
+    queueIndex: number;
+    repeatMode: 'off' | 'all' | 'one';
+    startQueue: (files: TelegramFile[], index?: number) => void;
+    playQueueItem: (index: number) => void;
+    playNext: () => boolean;
+    playPrevious: () => boolean;
+    shuffleQueue: () => void;
+    setRepeatMode: (mode: 'off' | 'all' | 'one') => void;
+    clearQueue: () => void;
 
     // Search
     searchQuery: string;
@@ -73,8 +83,8 @@ interface AppState {
     setSelectedFiles: (files: TelegramFile[]) => void;
 
     // Navigation Section
-    activeSection: 'files' | 'recent' | 'continue_watching';
-    setActiveSection: (section: 'files' | 'recent' | 'continue_watching') => void;
+    activeSection: 'files' | 'recent' | 'continue_watching' | 'playlists';
+    setActiveSection: (section: 'files' | 'recent' | 'continue_watching' | 'playlists') => void;
 
     // Toast Notifications
     toasts: Array<{ id: string; message: string; type: 'success' | 'error' | 'info' }>;
@@ -97,7 +107,7 @@ export const useAppStore = create<AppState>((set) => ({
 
     // Navigation Section
     activeSection: 'files',
-    setActiveSection: (section) => set({ activeSection: section, currentFolderId: null, breadcrumbs: [{ id: null, name: section === 'files' ? 'کمد من' : section === 'recent' ? 'تازه اضافه‌شده‌ها' : 'ادامه پخش' }] }),
+    setActiveSection: (section) => set({ activeSection: section, currentFolderId: null, breadcrumbs: [{ id: null, name: section === 'files' ? 'کمد من' : section === 'recent' ? 'تازه اضافه‌شده‌ها' : section === 'playlists' ? 'پلی‌لیست‌ها' : 'ادامه پخش' }] }),
 
     // Selection
     selectedFileIds: new Set(),
@@ -172,6 +182,51 @@ export const useAppStore = create<AppState>((set) => ({
     // Player state
     isPlayerMinimized: false,
     setPlayerMinimized: (minimized) => set({ isPlayerMinimized: minimized }),
+    playQueue: [],
+    queueIndex: -1,
+    repeatMode: 'off',
+    startQueue: (files, index = 0) => set({ playQueue: files, queueIndex: index, previewFile: files[index] || null, isPlayerMinimized: false }),
+    playQueueItem: (index) => set((state) => ({ queueIndex: index, previewFile: state.playQueue[index] || state.previewFile })),
+    playNext: () => {
+        let changed = false;
+        set((state) => {
+            if (!state.playQueue.length) return state;
+            let next = state.queueIndex + 1;
+            if (next >= state.playQueue.length) {
+                if (state.repeatMode !== 'all') return state;
+                next = 0;
+            }
+            changed = true;
+            return { queueIndex: next, previewFile: state.playQueue[next] };
+        });
+        return changed;
+    },
+    playPrevious: () => {
+        let changed = false;
+        set((state) => {
+            if (!state.playQueue.length) return state;
+            let previous = state.queueIndex - 1;
+            if (previous < 0) {
+                if (state.repeatMode !== 'all') return state;
+                previous = state.playQueue.length - 1;
+            }
+            changed = true;
+            return { queueIndex: previous, previewFile: state.playQueue[previous] };
+        });
+        return changed;
+    },
+    shuffleQueue: () => set((state) => {
+        if (state.playQueue.length < 2) return state;
+        const current = state.playQueue[state.queueIndex];
+        const rest = state.playQueue.filter((_, index) => index !== state.queueIndex);
+        for (let index = rest.length - 1; index > 0; index--) {
+            const randomIndex = Math.floor(Math.random() * (index + 1));
+            [rest[index], rest[randomIndex]] = [rest[randomIndex], rest[index]];
+        }
+        return { playQueue: [current, ...rest], queueIndex: 0 };
+    }),
+    setRepeatMode: (repeatMode) => set({ repeatMode }),
+    clearQueue: () => set({ playQueue: [], queueIndex: -1 }),
 
     // Search
     searchQuery: '',

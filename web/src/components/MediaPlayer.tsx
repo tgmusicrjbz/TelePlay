@@ -2,16 +2,16 @@
  * MediaPlayer - full screen video/audio player
  */
 import { useRef, useEffect, useState, useCallback } from 'react';
-import { X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipBack, SkipForward, Download, ExternalLink, AlertTriangle, Copy, PictureInPicture2, Gauge, ChevronDown, ChevronUp } from 'lucide-react';
+import { X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipBack, SkipForward, Download, ExternalLink, AlertTriangle, Copy, PictureInPicture2, Gauge, ChevronDown, ChevronUp, Repeat2, Shuffle } from 'lucide-react';
 import { TelegramFile, formatDuration, formatPersianDate, useUpdateProgress, useFile, api } from '../lib/api';
 import { useAppStore } from '../lib/store';
 
 export default function MediaPlayer() {
-    const { previewFile: file, setPreviewFile, isPlayerMinimized, setPlayerMinimized } = useAppStore();
+    const { previewFile: file, setPreviewFile, isPlayerMinimized, setPlayerMinimized, clearQueue } = useAppStore();
     
     if (!file || (file.file_type !== 'video' && file.file_type !== 'audio')) return null;
 
-    return <MediaPlayerContent file={file} onClose={() => setPreviewFile(null)} isMinimized={isPlayerMinimized} setMinimized={setPlayerMinimized} />;
+    return <MediaPlayerContent file={file} onClose={() => { setPreviewFile(null); clearQueue(); }} isMinimized={isPlayerMinimized} setMinimized={setPlayerMinimized} />;
 }
 
 interface MediaPlayerContentProps {
@@ -22,6 +22,7 @@ interface MediaPlayerContentProps {
 }
 
 function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaPlayerContentProps) {
+    const { playQueue, queueIndex, repeatMode, playNext, playPrevious, shuffleQueue, setRepeatMode } = useAppStore();
     const videoRef = useRef<HTMLVideoElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const [isPlaying, setIsPlaying] = useState(false);
@@ -43,6 +44,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     const { mutate: updateProgress } = useUpdateProgress();
 
     const isVideo = file.file_type === 'video';
+    const hasQueue = playQueue.length > 0;
 
     // Auto-ensure public link exists for VLC/Download/Copy
     useEffect(() => {
@@ -171,6 +173,16 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     const handleWaiting = () => setIsLoading(true);
     const handlePlaying = () => setIsLoading(false);
 
+    const handleEnded = () => {
+        saveProgress();
+        if (repeatMode === 'one' && videoRef.current) {
+            videoRef.current.currentTime = 0;
+            videoRef.current.play();
+            return;
+        }
+        if (!playNext()) setIsPlaying(false);
+    };
+
     const handleError = () => {
         if (videoRef.current?.error) {
             const code = videoRef.current.error.code;
@@ -263,6 +275,14 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
 
     // Auto-play effect
     useEffect(() => {
+        setError(null);
+        setCurrentTime(0);
+        setDuration(0);
+        setIsLoading(true);
+        setPublicUrl(null);
+    }, [file.id]);
+
+    useEffect(() => {
         if (videoRef.current && !error) {
             videoRef.current.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
         }
@@ -299,6 +319,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
             onWaiting={handleWaiting}
             onPlaying={handlePlaying}
             onError={handleError}
+            onEnded={handleEnded}
             controls={false}
             playsInline
         />
@@ -311,6 +332,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
             onWaiting={handleWaiting}
             onPlaying={handlePlaying}
             onError={handleError}
+            onEnded={handleEnded}
         />
     );
 
@@ -433,7 +455,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                     </div>
 
                     <div className="flex items-center gap-3">
-                        <button onClick={(e) => { e.stopPropagation(); handleSkip(-10); }} className="p-2 text-dark-300 hover:text-white">
+                        <button onClick={(e) => { e.stopPropagation(); hasQueue ? playPrevious() : handleSkip(-10); }} className="p-2 text-dark-300 hover:text-white" title={hasQueue ? 'مورد قبلی' : '۱۰ ثانیه عقب'}>
                             <SkipBack className="w-5 h-5" />
                         </button>
                         <button 
@@ -442,7 +464,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                         >
                             {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
                         </button>
-                        <button onClick={(e) => { e.stopPropagation(); handleSkip(10); }} className="p-2 text-dark-300 hover:text-white">
+                        <button onClick={(e) => { e.stopPropagation(); hasQueue ? playNext() : handleSkip(10); }} className="p-2 text-dark-300 hover:text-white" title={hasQueue ? 'مورد بعدی' : '۱۰ ثانیه جلو'}>
                             <SkipForward className="w-5 h-5" />
                         </button>
                     </div>
@@ -478,6 +500,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                             {((extendedFile?.last_pos || 0) > 0) && currentTime < 5 && (
                                 <p className="text-xs text-primary-400">ادامه از {formatDuration(extendedFile?.last_pos || 0)}</p>
                             )}
+                            {hasQueue && <p className="mt-1 text-xs text-primary-300">مورد {(queueIndex + 1).toLocaleString('fa-IR')} از {playQueue.length.toLocaleString('fa-IR')}</p>}
                         </div>
                         <div className="flex items-center gap-2">
                              <button
@@ -552,6 +575,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                         {/* Control buttons */}
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
+                                {hasQueue && <button onClick={playPrevious} className="p-2 rounded-lg hover:bg-white/10 text-white/80 hover:text-white" title="مورد قبلی"><SkipBack className="h-5 w-5" /></button>}
                                 <button
                                     onClick={togglePlay}
                                     className="p-2.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-all hover:scale-105"
@@ -579,9 +603,12 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                                         />
                                     </div>
                                 </div>
+                                {hasQueue && <button onClick={playNext} className="p-2 rounded-lg hover:bg-white/10 text-white/80 hover:text-white" title="مورد بعدی"><SkipForward className="h-5 w-5" /></button>}
                             </div>
 
                             <div className="flex items-center gap-2">
+                                {hasQueue && <button onClick={shuffleQueue} className="p-2 rounded-lg hover:bg-white/10 text-white/80 hover:text-white" title="شافل صف پخش"><Shuffle className="h-5 w-5" /></button>}
+                                {hasQueue && <button onClick={() => setRepeatMode(repeatMode === 'off' ? 'all' : repeatMode === 'all' ? 'one' : 'off')} className={`relative p-2 rounded-lg transition-colors ${repeatMode !== 'off' ? 'bg-primary-500/20 text-primary-300' : 'hover:bg-white/10 text-white/80'}`} title={repeatMode === 'off' ? 'تکرار خاموش' : repeatMode === 'all' ? 'تکرار همه' : 'تکرار همین مورد'}><Repeat2 className="h-5 w-5" />{repeatMode === 'one' && <span className="absolute -left-0.5 -top-0.5 text-[9px] font-bold">۱</span>}</button>}
                                 {/* Speed */}
                                 <button
                                     onClick={cycleSpeed}

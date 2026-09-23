@@ -2,8 +2,8 @@
  * Main FileBrowser component - the core of the web interface
  */
 import { useEffect, useCallback, useRef, useState } from 'react';
-import { FolderPlus, Folder as FolderIcon, Grid, List, Search, ChevronRight, Home, RefreshCw, Clipboard, ArrowUp, ArrowRight, Film, Music, Image as ImageIcon, FileText, Menu, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ChevronDown, ChevronUp, Plus, CheckSquare, Square, MousePointer2 } from 'lucide-react';
-import { useFiles, useFolders, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useRecentFiles, useContinueWatching, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit } from '../lib/api';
+import { FolderPlus, Folder as FolderIcon, Grid, List, Search, ChevronRight, Home, RefreshCw, Clipboard, ArrowUp, ArrowRight, Film, Music, Image as ImageIcon, FileText, Menu, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ChevronDown, ChevronUp, Plus, CheckSquare, Square, ListChecks, Upload } from 'lucide-react';
+import { useFiles, useFolders, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useRecentFiles, useContinueWatching, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import FileCard from './FileCard';
 import FolderCard from './FolderCard';
@@ -15,6 +15,7 @@ import DescriptionModal from './DescriptionModal';
 import BatchEditModal from './BatchEditModal';
 import Sidebar from './Sidebar';
 import Toasts from './Toasts';
+import PlaylistBrowser from './PlaylistBrowser';
 
 const sortLabels: Record<SortField, string> = {
     name: 'نام', type: 'نوع', size: 'حجم', duration: 'مدت',
@@ -135,11 +136,30 @@ export default function FileBrowser() {
     const moveFoldersMutation = useMoveFolders();
     const updateFolderMutation = useUpdateFolder();
     const batchUpdateFilesMutation = useBatchUpdateFiles();
+    const uploadFileMutation = useUploadFile();
 
     const containerRef = useRef<HTMLDivElement>(null);
+    const uploadInputRef = useRef<HTMLInputElement>(null);
     const [isSelecting, setIsSelecting] = useState(false);
     const [isSidebarOpen, setSidebarOpen] = useState(true);
     const selectionStart = useRef({ x: 0, y: 0 });
+
+    const handleWebUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const selected = Array.from(event.target.files || []);
+        event.target.value = '';
+        if (!selected.length) return;
+        let uploaded = 0;
+        try {
+            for (const file of selected) {
+                await uploadFileMutation.mutateAsync({ file, folderId: currentFolderId });
+                uploaded += 1;
+            }
+            addToast(`${uploaded.toLocaleString('fa-IR')} فایل با موفقیت به کمد اضافه شد 📥`);
+            handleRefresh();
+        } catch {
+            addToast(uploaded ? `${uploaded.toLocaleString('fa-IR')} فایل ذخیره شد؛ ادامهٔ آپلود متوقف شد.` : 'آپلود فایل انجام نشد. اتصال ربات و کانال ذخیره‌سازی را بررسی کن.', 'error');
+        }
+    };
 
     // handle refresh
     const handleRefresh = useCallback(() => {
@@ -572,7 +592,7 @@ export default function FileBrowser() {
                         )}
 
                         {/* Search */}
-                        <div className="relative w-full max-w-[200px] sm:max-w-xs md:w-64">
+                        {activeSection !== 'playlists' && <div className="relative w-full max-w-[200px] sm:max-w-xs md:w-64">
                             <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-500" />
                             <input
                                 type="text"
@@ -581,13 +601,14 @@ export default function FileBrowser() {
                                 onChange={(e) => setSearchQuery(e.target.value)}
                                 className="w-full bg-dark-800/50 border border-white/[0.06] rounded-lg pr-9 pl-3 py-1.5 text-sm text-white focus:outline-none focus:border-primary-500/50 focus:bg-dark-800 transition-all"
                             />
-                        </div>
-                        
+                        </div>}
+                        {activeSection === 'playlists' && <span className="truncate text-sm font-semibold text-white">🎧 پلی‌لیست‌ها</span>}
+
                         {/* Vertical Div */}
                         <div className="hidden sm:block w-px h-6 bg-white/[0.1]"></div>
 
                         {/* Breadcrumbs */}
-                        <nav className="flex items-center gap-0.5 overflow-hidden hidden sm:flex">
+                        {activeSection !== 'playlists' && <nav className="flex items-center gap-0.5 overflow-hidden hidden sm:flex">
                             {breadcrumbs.map((crumb, index) => (
                                 <div key={crumb.id || 'root'} className="flex items-center min-w-0">
                                     {index > 0 && <ChevronRight className="w-4 h-4 text-dark-600 mx-1 shrink-0 rotate-180" />}
@@ -603,22 +624,12 @@ export default function FileBrowser() {
                                     </button>
                                 </div>
                             ))}
-                        </nav>
+                        </nav>}
                     </div>
 
                     {/* Right: Actions */}
                     <div className="flex items-center gap-2 sm:gap-3">
-                         <div className="hidden sm:flex items-center gap-1 bg-dark-800/50 rounded-lg p-0.5 border border-white/[0.06]">
-                             <button
-                                 onClick={handleRefresh}
-                                 disabled={isLoading}
-                                 className={`p-1.5 rounded-md text-dark-400 hover:text-white hover:bg-white/[0.05] transition-all active:scale-95 ${isLoading ? 'animate-spin' : ''}`}
-                                 title="تازه‌سازی"
-                                 aria-label="تازه‌سازی"
-                             >
-                                 <RefreshCw className="w-4 h-4" />
-                             </button>
-                             <div className="w-px h-3 bg-white/[0.1] mx-1"></div>
+                         {activeSection !== 'playlists' && <div className="hidden sm:flex items-center gap-1 bg-dark-800/50 rounded-lg p-0.5 border border-white/[0.06]">
                              <button
                                  onClick={() => setViewMode('grid')}
                                  className={`p-1.5 rounded-md transition-all ${viewMode === 'grid' ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'}`}
@@ -631,7 +642,7 @@ export default function FileBrowser() {
                              >
                                  <List className="w-4 h-4" />
                              </button>
-                         </div>
+                         </div>}
 
 
                         {clipboard && (clipboard.files.length > 0 || clipboard.folders.length > 0) && (
@@ -645,13 +656,20 @@ export default function FileBrowser() {
                         )}
 
                         {activeSection === 'files' && (
-                            <button
-                                onClick={() => setShowNewFolder(true)}
-                                className="mr-2 btn-primary py-1.5 px-3 text-sm flex items-center gap-2 shadow-lg shadow-primary-500/20"
-                            >
-                                <FolderPlus className="w-4 h-4" />
-                                <span className="hidden sm:inline">کشوی تازه</span>
-                            </button>
+                            <>
+                                <input ref={uploadInputRef} type="file" multiple className="hidden" onChange={handleWebUpload} />
+                                <button onClick={() => uploadInputRef.current?.click()} disabled={uploadFileMutation.isPending} className="mr-2 btn-secondary py-1.5 px-3 text-sm flex items-center gap-2 disabled:opacity-50" title="آپلود فایل از دستگاه">
+                                    <Upload className={`w-4 h-4 ${uploadFileMutation.isPending ? 'animate-bounce' : ''}`} />
+                                    <span className="hidden sm:inline">{uploadFileMutation.isPending ? 'در حال آپلود…' : 'آپلود'}</span>
+                                </button>
+                                <button
+                                    onClick={() => setShowNewFolder(true)}
+                                    className="btn-primary py-1.5 px-3 text-sm flex items-center gap-2 shadow-lg shadow-primary-500/20"
+                                >
+                                    <FolderPlus className="w-4 h-4" />
+                                    <span className="hidden sm:inline">کشوی تازه</span>
+                                </button>
+                            </>
                         )}
                     </div>
                 </header>
@@ -668,6 +686,7 @@ export default function FileBrowser() {
                     // Prevent default drag behaviors on container
                     onDragOver={(e) => e.preventDefault()}
                 >
+                    {activeSection === 'playlists' ? <PlaylistBrowser /> : <>
                     <div className="max-w-7xl mx-auto mb-6 sm:mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                         <div>
                             <p className="text-xs font-semibold text-primary-300 mb-2">🗄️ کمد شخصی تو</p>
@@ -687,9 +706,7 @@ export default function FileBrowser() {
                                 <button className="btn-secondary text-sm flex items-center gap-2 text-red-300" onClick={() => setDeleteConfirm({ type: selectedFoldersForActions.length && selectedFilesForActions.length ? 'multiple' : selectedFoldersForActions.length ? 'folder' : 'file', items: selectedItems })}><Trash2 className="w-4 h-4" /> حذف</button>
                                 <button className="btn-icon" title="لغو انتخاب" onClick={clearSelection}><X className="w-4 h-4" /></button>
                             </div>
-                        ) : activeSection === 'files' && (
-                            <p className="text-xs text-dark-500 hidden sm:block">فایل، عکس یا متن را برای ربات بفرست تا همین‌جا به کمدت اضافه شود.</p>
-                        )}
+                        ) : null}
                     </div>
                     {activeSection === 'files' && (
                         <div className="max-w-7xl mx-auto mb-6 rounded-2xl border border-white/[0.07] bg-dark-900/70 p-3 sm:p-4 shadow-lg shadow-black/10">
@@ -706,32 +723,31 @@ export default function FileBrowser() {
                                         </button>
                                     ))}
                                 </div>
-                                <div className="flex flex-wrap items-center gap-2">
-                                    <button onClick={() => { setShowFilters(value => !value); setShowSort(false); }} disabled={contentScope === 'folders'} className={`btn-secondary flex items-center gap-2 text-sm disabled:cursor-not-allowed disabled:opacity-40 ${fileTypeFilter.length ? 'border-primary-500/40 text-primary-200' : ''}`}>
+                                <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
+                                    <button title="فیلتر نوع فایل" onClick={() => { setShowFilters(value => !value); setShowSort(false); }} disabled={contentScope === 'folders'} className={`btn-secondary flex min-w-0 flex-col items-center justify-center gap-1 px-2 py-2 text-[11px] sm:flex-row sm:gap-2 sm:px-4 sm:text-sm disabled:cursor-not-allowed disabled:opacity-40 ${fileTypeFilter.length ? 'border-primary-500/40 text-primary-200' : ''}`}>
                                         <SlidersHorizontal className="h-4 w-4" />
-                                        نوع فایل
+                                        <span className="truncate">نوع فایل</span>
                                         {fileTypeFilter.length > 0 && <span className="rounded-full bg-primary-500 px-1.5 text-[10px] text-white">{fileTypeFilter.length.toLocaleString('fa-IR')}</span>}
                                     </button>
-                                    <button onClick={() => { setShowSort(value => !value); setShowFilters(false); }} className={`btn-secondary flex items-center gap-2 text-sm ${showSort ? 'border-primary-500/40 text-primary-200' : ''}`}>
-                                        <SlidersHorizontal className="h-4 w-4" /> مرتب‌سازی
+                                    <button title="مرتب‌سازی" onClick={() => { setShowSort(value => !value); setShowFilters(false); }} className={`btn-secondary flex min-w-0 flex-col items-center justify-center gap-1 px-2 py-2 text-[11px] sm:flex-row sm:gap-2 sm:px-4 sm:text-sm ${showSort ? 'border-primary-500/40 text-primary-200' : ''}`}>
+                                        <ArrowDown className="h-4 w-4" /> <span className="truncate">مرتب‌سازی</span>
                                     </button>
-                                    <button onClick={() => setSelectionMode(value => !value)} className={`btn-secondary flex items-center gap-2 text-sm ${selectionMode ? 'border-primary-500/40 bg-primary-500/10 text-primary-200' : ''}`}>
-                                        <MousePointer2 className="h-4 w-4" /> {selectionMode ? 'پایان انتخاب' : 'انتخاب گروهی'}
+                                    <button title="تازه‌سازی فهرست" onClick={handleRefresh} className="btn-secondary flex min-w-0 flex-col items-center justify-center gap-1 px-2 py-2 text-[11px] sm:flex-row sm:gap-2 sm:px-4 sm:text-sm">
+                                        <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} /> <span className="truncate">تازه‌سازی</span>
+                                    </button>
+                                    <button title="انتخاب چند فایل یا کشو" onClick={() => setSelectionMode(value => !value)} className={`btn-secondary flex min-w-0 flex-col items-center justify-center gap-1 px-2 py-2 text-[11px] sm:flex-row sm:gap-2 sm:px-4 sm:text-sm ${selectionMode ? 'border-primary-500/40 bg-primary-500/10 text-primary-200' : ''}`}>
+                                        <ListChecks className="h-4 w-4" /> <span className="truncate">{selectionMode ? 'پایان انتخاب' : 'انتخاب گروهی'}</span>
                                     </button>
                                     {(selectionMode || selectedItems.length > 0) && (
-                                        <button onClick={toggleSelectAll} disabled={visibleItemCount === 0} className="btn-secondary flex items-center gap-2 text-sm disabled:opacity-40">
+                                        <button onClick={toggleSelectAll} disabled={visibleItemCount === 0} className="col-span-2 btn-secondary flex items-center justify-center gap-2 text-xs sm:text-sm disabled:opacity-40">
                                             {allVisibleSelected ? <CheckSquare className="h-4 w-4 text-primary-300" /> : <Square className="h-4 w-4" />}
                                             {allVisibleSelected ? 'لغو انتخاب همه' : 'انتخاب همه'}
                                         </button>
                                     )}
-                                    <button onClick={handleRefresh} className="btn-secondary flex items-center gap-2 text-sm sm:hidden">
-                                        <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} /> تازه‌سازی
-                                    </button>
                                 </div>
                             </div>
                             {showFilters && contentScope !== 'folders' && (
                                 <div className="mt-3 border-t border-white/[0.06] pt-3">
-                                    <p className="mb-2 text-xs text-dark-400">می‌تونی چند نوع فایل را هم‌زمان انتخاب کنی:</p>
                                     <div className="flex flex-wrap gap-2">
                                         {([
                                             ['ویدیو', 'video', Film], ['موسیقی و صوت', 'audio', Music],
@@ -748,7 +764,7 @@ export default function FileBrowser() {
                             {showSort && (
                                 <div className="mt-3 border-t border-white/[0.06] pt-3">
                                     <div className="mb-3 flex items-center justify-between gap-3">
-                                        <div><p className="text-sm font-medium text-white">مرتب‌سازی چندمرحله‌ای ✨</p><p className="mt-1 text-xs text-dark-400">اولویت‌ها از راست و بالا به پایین اعمال می‌شوند و تغییرات همان لحظه نمایش داده می‌شوند.</p></div>
+                                        <p className="text-sm font-medium text-white">مرتب‌سازی چندمرحله‌ای ✨</p>
                                         <button onClick={() => setSortCriteria([{ field: 'created', direction: 'desc' }])} className="shrink-0 text-xs text-dark-400 hover:text-white">حالت پیش‌فرض</button>
                                     </div>
                                     <div className="space-y-2">
@@ -770,7 +786,6 @@ export default function FileBrowser() {
                                     </div>}
                                 </div>
                             )}
-                            <p className="mt-3 flex items-start gap-2 text-xs leading-6 text-dark-500"><span>💡</span><span>برای انتخاب چند مورد، «انتخاب گروهی» را بزن. روی رایانه می‌تونی کلید Ctrl یا Shift را هم نگه داری و روی فایل‌ها کلیک کنی.</span></p>
                         </div>
                     )}
                     {isLoading && !displayFiles ? (
@@ -856,6 +871,7 @@ export default function FileBrowser() {
                             همه فایل‌ها نمایش داده شدند
                         </div>
                     )}
+                    </>}
                 </div>
             </main>
             
