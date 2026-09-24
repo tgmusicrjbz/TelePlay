@@ -12,8 +12,10 @@ import logging
 import random
 from datetime import datetime, timedelta, timezone
 from pyrogram import filters
+from pyrogram.errors import MessageNotModified
 from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from sqlalchemy import delete, func, select, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from .telegram import tg_client, forward_to_storage_channel, delete_from_storage_channel
@@ -256,6 +258,21 @@ async def safe_delete(message: Message | None, animate: bool = False) -> None:
         pass
 
 
+async def safe_edit(message: Message, *args, **kwargs):
+    """Treat an identical Telegram edit as a successful no-op."""
+    try:
+        return await message.edit(*args, **kwargs)
+    except MessageNotModified:
+        return message
+
+
+async def safe_edit_reply_markup(message: Message, reply_markup):
+    try:
+        return await message.edit_reply_markup(reply_markup)
+    except MessageNotModified:
+        return message
+
+
 async def delete_preview_later(client, chat_id: int, message_id: int) -> None:
     await asyncio.sleep(PREVIEW_TTL_SECONDS)
     with contextlib.suppress(Exception):
@@ -407,7 +424,7 @@ async def render_folder_page(message: Message, telegram_id: int, parent_id: int 
         text += f"\n\n📝 توضیحات: {escape_markdown(parent.description[:700])}"
     if not total:
         text += "\n\nاین کشو هنوز خالیه! فایلی بفرست تا بذارمش سر جاش." if parent else "\n\nکمدت هنوز کشویی نداره؛ یکی بساز تا فایل‌هات مرتب‌تر بشن."
-    await message.edit(text, reply_markup=InlineKeyboardMarkup(buttons))
+    await safe_edit(message, text, reply_markup=InlineKeyboardMarkup(buttons))
 
 
 async def render_root_files(message: Message, telegram_id: int, page: int = 0) -> None:
@@ -438,7 +455,7 @@ async def render_root_files(message: Message, telegram_id: int, page: int = 0) -
         text += "\n☑️ نوع‌ها: " + "، ".join(TYPE_LABELS[item] for item in sorted(selected_types))
     if not files:
         text += "\n\nفایلی با این فیلتر پیدا نشد."
-    await message.edit(text, reply_markup=InlineKeyboardMarkup(buttons))
+    await safe_edit(message, text, reply_markup=InlineKeyboardMarkup(buttons))
 
 
 async def render_recent_files(message: Message, telegram_id: int, page: int = 0) -> None:
@@ -647,7 +664,7 @@ async def render_playlists(message: Message, telegram_id: int, page: int = 0) ->
     text = "🎧 **پلی‌لیست‌های کمد**\n\nآهنگ‌ها و ویدیوها رو با ترتیب دلخواهت کنار هم بچین و پشت‌سرهم پخش کن."
     if not playlists:
         text += "\n\nهنوز پلی‌لیستی نساختی؛ اولین پلی‌لیستت رو بساز ✨"
-    await message.edit(text, reply_markup=InlineKeyboardMarkup(buttons))
+    await safe_edit(message, text, reply_markup=InlineKeyboardMarkup(buttons))
 
 
 async def render_playlist_detail(message: Message, telegram_id: int, playlist_id: int, page: int = 0) -> None:
@@ -680,7 +697,7 @@ async def render_playlist_detail(message: Message, telegram_id: int, playlist_id
         text += f"\n\n📝 {escape_markdown(truncate_description(playlist.description, 350))}"
     if not items:
         text += "\n\nاین پلی‌لیست هنوز خالیه؛ چند آهنگ یا ویدیو بهش اضافه کن."
-    await message.edit(text, reply_markup=InlineKeyboardMarkup(buttons))
+    await safe_edit(message, text, reply_markup=InlineKeyboardMarkup(buttons))
 
 
 async def send_playlist_media(client, callback: CallbackQuery, playlist_id: int, index: int) -> None:
@@ -703,7 +720,7 @@ async def send_playlist_media(client, callback: CallbackQuery, playlist_id: int,
     ])
     try:
         preview = await client.copy_message(callback.message.chat.id, settings.telegram_storage_channel_id, item.file.channel_message_id)
-        await preview.edit_reply_markup(keyboard)
+        await safe_edit_reply_markup(preview, keyboard)
         asyncio.create_task(delete_preview_later(client, preview.chat.id, preview.id))
         if callback.message.video or callback.message.audio or callback.message.document:
             await safe_delete(callback.message)
@@ -1167,7 +1184,16 @@ async def handle_callback(client, callback: CallbackQuery):
                     return
                 playlist = Playlist(user_id=user.id, name=name, description=description.strip()[:1024] or None)
                 db.add(playlist)
-                await db.commit()
+                try:
+                    await db.commit()
+                except IntegrityError:
+                    await db.rollback()
+                    await safe_edit(
+                        callback.message,
+                        "یه پلی‌لیست با این اسم داری.",
+                        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ پلی‌لیست‌ها", callback_data="playlists:0")]]),
+                    )
+                    return
                 await db.refresh(playlist)
             await render_playlist_detail(callback.message, callback.from_user.id, playlist.id)
         finally:
@@ -1262,7 +1288,7 @@ async def handle_callback(client, callback: CallbackQuery):
             await callback.answer("این مورد پیدا نشد.", show_alert=True)
             return
         item = items[index]
-        await callback.message.edit(
+        await safe_edit(callback.message,
             f"{FILE_ICONS.get(item.file.file_type, '🎵')} **{escape_markdown(item.file.file_name)}**\nجایگاه {(index + 1)} از {len(items)}",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("▶️ پخش", callback_data=f"plplay:{playlist_id}:{index}")],
@@ -1595,7 +1621,7 @@ async def handle_callback(client, callback: CallbackQuery):
     elif data == "home":
         batch_selections.pop(callback.from_user.id, None)
         batch_return_targets.pop(callback.from_user.id, None)
-        await callback.message.edit(
+        await safe_edit(callback.message,
             "🗄️ **رسیدیم به کُمدت!**\n\nهمه‌چیز مرتب سر جاشه؛ می‌تونی فایل‌هات رو ببینی، کشوهاتو باز کنی یا فایلی رو پیدا کنی. از کجا ادامه بدیم؟ 👇",
             reply_markup=main_menu_keyboard(callback.from_user.id),
         )
@@ -1867,7 +1893,7 @@ async def handle_callback(client, callback: CallbackQuery):
         await callback.answer()
 
     elif data == "show_help":
-        await callback.message.edit(HELP_TEXT, reply_markup=main_menu_keyboard(callback.from_user.id))
+        await safe_edit(callback.message, HELP_TEXT, reply_markup=main_menu_keyboard(callback.from_user.id))
         await callback.answer()
 
     elif data.startswith("openfile:"):

@@ -2,6 +2,7 @@
 import os
 import io
 import sys
+import asyncio
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -29,7 +30,7 @@ from app.routers.folders import delete_folder_contents, update_folder
 from app.routers.streaming import stored_message_response
 from app.routers.playlists import add_playlist_items, create_playlist, reorder_playlist, shuffle_playlist
 from app.schemas import BatchFileUpdate, FileUpdate, FolderUpdate, PlaylistAddItems, PlaylistCreate, PlaylistReorder
-from app.telegram import start_one_client
+from app.telegram import configure_main_client, start_one_client
 from app import telegram
 
 
@@ -344,6 +345,27 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
 
 
 class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
+    async def test_optional_telegram_setup_does_not_block_web_startup(self):
+        main_client = SimpleNamespace()
+        helper_client = SimpleNamespace()
+        helper_started = asyncio.Event()
+        release_helper = asyncio.Event()
+
+        async def fake_start(index, client):
+            if index == 0:
+                return True
+            helper_started.set()
+            await release_helper.wait()
+            return True
+
+        with patch.object(telegram, "clients", [main_client, helper_client]), patch.object(
+            telegram, "start_one_client", side_effect=fake_start
+        ), patch.object(telegram, "configure_main_client", new_callable=AsyncMock):
+            await asyncio.wait_for(telegram.start_all_clients(), timeout=0.2)
+            await asyncio.wait_for(helper_started.wait(), timeout=0.2)
+            release_helper.set()
+            await asyncio.gather(*list(telegram._background_tasks), return_exceptions=True)
+
     async def test_batch_storage_delete_falls_back_to_individual_messages(self):
         client = SimpleNamespace(delete_messages=AsyncMock(side_effect=[RuntimeError("batch failed"), None, None]))
         with patch.object(telegram, "tg_client", client):
@@ -389,6 +411,7 @@ class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
             set_bot_info_short_description=AsyncMock(), set_bot_info_description=AsyncMock(), is_connected=True,
         )
         await start_one_client(0, client)
+        await configure_main_client(client)
         commands = client.set_bot_commands.await_args.args[0]
         self.assertIn("search", [command.command for command in commands])
         self.assertTrue(all(command.description for command in commands))

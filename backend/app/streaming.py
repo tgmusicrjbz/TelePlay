@@ -41,7 +41,8 @@ async def parallel_stream_generator(
     Each worker uses its own client and fetches its own Message object
     to avoid cross-bot FILE_REFERENCE_INVALID errors.
     """
-    pool_size = len(clients)
+    active_clients = [client for client in clients if getattr(client, "is_connected", False)]
+    pool_size = len(active_clients)
     if concurrency is None:
         concurrency = max(pool_size, 1)
 
@@ -55,29 +56,29 @@ async def parallel_stream_generator(
     # Fetch the storage message independently for each client. A helper bot may
     # not have access to the channel, so only successful client/message pairs
     # take part in streaming.
-    async def fetch_msg(client, idx):
+    async def fetch_msg(client, client_index, pool_index):
         try:
             msg = await client.get_messages(chat_id, message_id)
             if msg and (msg.document or msg.video or msg.audio):
-                return (idx, msg)
+                return ((client_index, pool_index), msg)
             else:
-                logger.warning("Bot %d: message %d has no media", idx, message_id)
-                return (idx, None)
+                logger.warning("Bot %d: message %d has no media", pool_index, message_id)
+                return ((client_index, pool_index), None)
         except Exception as e:
-            logger.error("Bot %d: failed to fetch message: %s", idx, e)
-            return (idx, None)
+            logger.error("Bot %d: failed to fetch message: %s", pool_index, e)
+            return ((client_index, pool_index), None)
 
     # Fetch all in parallel — fast!
     fetch_tasks = []
-    for i, c in enumerate(clients):
+    for i, c in enumerate(active_clients):
         c_idx = getattr(c, "pool_index", i)
-        fetch_tasks.append(fetch_msg(c, c_idx))
+        fetch_tasks.append(fetch_msg(c, i, c_idx))
 
     fetch_results = await asyncio.gather(*fetch_tasks)
     client_messages = {
-        idx: (clients[idx], msg)
-        for idx, msg in fetch_results
-        if msg is not None and idx < len(clients)
+        pool_index: (active_clients[client_index], msg)
+        for (client_index, pool_index), msg in fetch_results
+        if msg is not None and client_index < len(active_clients)
     }
 
     if not client_messages:

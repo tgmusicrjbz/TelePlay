@@ -25,6 +25,7 @@ def get_session_name(index: int) -> str:
 # Created in build_clients() inside the running event loop (see start_telegram_client).
 clients: list[Client] = []
 tg_client: Client | None = None
+_background_tasks: set[asyncio.Task] = set()
 
 
 def build_clients() -> None:
@@ -52,55 +53,79 @@ def build_clients() -> None:
 logger = logging.getLogger(__name__)
 
 
+def spawn_background(coro, *, name: str) -> asyncio.Task:
+    """Run optional Telegram setup without delaying FastAPI readiness."""
+    task = asyncio.create_task(coro, name=name)
+    _background_tasks.add(task)
+
+    def finished(done: asyncio.Task) -> None:
+        _background_tasks.discard(done)
+        if done.cancelled():
+            return
+        error = done.exception()
+        if error is not None:
+            logger.error("Background Telegram task %s failed: %s", name, error, exc_info=error)
+
+    task.add_done_callback(finished)
+    return task
+
+
+async def configure_main_client(c) -> None:
+    """Update commands and profile text; failures must never block the web app."""
+    try:
+        await asyncio.wait_for(c.set_bot_commands([
+            BotCommand("start", "باز کردن منوی اصلی"),
+            BotCommand("myfiles", "دیدن فایل‌های ذخیره‌شده"),
+            BotCommand("folders", "مرور کشوهای کمد"),
+            BotCommand("playlists", "ساخت و پخش پلی‌لیست‌ها"),
+            BotCommand("search", "جست‌وجو در فایل‌ها و کشوها"),
+            BotCommand("newfolder", "ساخت کشوی جدید"),
+            BotCommand("web", "راهنمای ورود به نسخهٔ وب"),
+            BotCommand("login", "تأیید کد ورود دستگاه"),
+            BotCommand("help", "نمایش راهنمای استفاده"),
+            BotCommand("logout_all", "خروج از همهٔ دستگاه‌ها"),
+        ]), timeout=20)
+        if hasattr(c, "set_bot_name"):
+            await asyncio.wait_for(c.set_bot_name("🗂 کمد | درایو ابری تلگرام"), timeout=20)
+            await asyncio.wait_for(c.set_bot_info_short_description(
+                "فایلات رو کشوبندی کن، فیلم و موزیکاتو بدون نیاز به دانلود استریم کن و همه‌چیز رو منظم نگه دار! 📦✨"
+            ), timeout=20)
+            await asyncio.wait_for(c.set_bot_info_description(
+                "به کُمُد 🗄 خوش اومدی!\n"
+                "کمد، درایو ابری و پخش‌کننده شخصی شما روی تلگرامه تا فایل‌هاتون هیچ‌وقت گم نشن.\n\n"
+                "توی کمد چه کارهایی می‌تونی بکنی؟\n"
+                "🗃 کِشوبندی و نظم: ساخت پوشه‌ها و زیرپوشه‌ها برای هر نوع فایل\n"
+                "🎬 استریم اختصاصی: تماشای مستقیم فیلم‌ها و پخش آهنگ‌ها بدون اتلاف حافظه\n"
+                "🔍 جست‌وجوی تیزبین: پیدا کردن آنی فایل‌ها بر اساس نام یا نوع (فیلم، سند، عکس، صوت)\n"
+                "🌐 نسخه وب: دسترسی سریع و راحت روی مرورگر و کامپیوتر\n"
+                "👈 دکمه Start (شروع) رو بزن تا در کمدت باز بشه!"
+            ), timeout=20)
+    except Exception as error:
+        logger.warning("Could not update Telegram bot commands/profile: %s", error)
+
+
 async def start_one_client(i, c):
     try:
-        await c.start()
-        me = await c.get_me()
+        await asyncio.wait_for(c.start(), timeout=45)
+        me = await asyncio.wait_for(c.get_me(), timeout=15)
         label = "Main" if i == 0 else "Helper"
         logger.info("Client %d (%s) started → @%s", i, label, me.username)
-        if i == 0:
-            await c.set_bot_commands([
-                BotCommand("start", "باز کردن منوی اصلی"),
-                BotCommand("myfiles", "دیدن فایل‌های ذخیره‌شده"),
-                BotCommand("folders", "مرور کشوهای کمد"),
-                BotCommand("playlists", "ساخت و پخش پلی‌لیست‌ها"),
-                BotCommand("search", "جست‌وجو در فایل‌ها و کشوها"),
-                BotCommand("newfolder", "ساخت کشوی جدید"),
-                BotCommand("web", "راهنمای ورود به نسخهٔ وب"),
-                BotCommand("login", "تأیید کد ورود دستگاه"),
-                BotCommand("help", "نمایش راهنمای استفاده"),
-                BotCommand("logout_all", "خروج از همهٔ دستگاه‌ها"),
-            ])
-            if hasattr(c, "set_bot_name"):
-                try:
-                    await c.set_bot_name("🗂 کمد | درایو ابری تلگرام")
-                    await c.set_bot_info_short_description(
-                        "فایلات رو کشوبندی کن، فیلم و موزیکاتو بدون نیاز به دانلود استریم کن و همه‌چیز رو منظم نگه دار! 📦✨"
-                    )
-                    await c.set_bot_info_description(
-                        "به کُمُد 🗄 خوش اومدی!\n"
-                        "کمد، درایو ابری و پخش‌کننده شخصی شما روی تلگرامه تا فایل‌هاتون هیچ‌وقت گم نشن.\n\n"
-                        "توی کمد چه کارهایی می‌تونی بکنی؟\n"
-                        "🗃 کِشوبندی و نظم: ساخت پوشه‌ها و زیرپوشه‌ها برای هر نوع فایل\n"
-                        "🎬 استریم اختصاصی: تماشای مستقیم فیلم‌ها و پخش آهنگ‌ها بدون اتلاف حافظه\n"
-                        "🔍 جست‌وجوی تیزبین: پیدا کردن آنی فایل‌ها بر اساس نام یا نوع (فیلم، سند، عکس، صوت)\n"
-                        "🌐 نسخه وب: دسترسی سریع و راحت روی مرورگر و کامپیوتر\n"
-                        "👈 دکمه Start (شروع) رو بزن تا در کمدت باز بشه!"
-                    )
-                except Exception as error:
-                    logger.warning("Could not update Telegram bot profile text: %s", error)
+        return True
     except Exception as e:
         logger.error("Client %d failed to start: %s", i, e)
+        await stop_one_client(c)
         if i == 0:
-            await stop_one_client(c)
             raise
+        return False
 
 
 async def start_all_clients():
     logger.info("Starting %d Telegram client(s)...", len(clients))
     await start_one_client(0, clients[0])
+    spawn_background(configure_main_client(clients[0]), name="configure-main-bot")
     if len(clients) > 1:
-        await asyncio.gather(*(start_one_client(i, c) for i, c in enumerate(clients[1:], 1)))
+        for i, client in enumerate(clients[1:], 1):
+            spawn_background(start_one_client(i, client), name=f"start-helper-{i}")
 
 
 async def stop_one_client(c):
@@ -112,6 +137,11 @@ async def stop_one_client(c):
 
 
 async def stop_all_clients():
+    pending = list(_background_tasks)
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
     await asyncio.gather(*(stop_one_client(c) for c in clients))
 
 
