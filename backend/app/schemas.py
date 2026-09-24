@@ -120,6 +120,11 @@ class FileListResponse(BaseModel):
     per_page: int
 
 
+class ActivityResponse(BaseModel):
+    continue_watching: List[FileResponse]
+    recent: List[FileResponse]
+
+
 # ============== Playlist Schemas ==============
 
 class PlaylistCreate(BaseModel):

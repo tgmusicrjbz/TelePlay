@@ -3,7 +3,7 @@
  */
 import { useEffect, useCallback, useRef, useState } from 'react';
 import { FolderPlus, Folder as FolderIcon, Grid, List, Search, ChevronRight, Home, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ChevronDown, ChevronUp, Plus, CheckSquare, Square, ListChecks, Upload } from 'lucide-react';
-import { useFiles, useFolders, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useRecentFiles, useContinueWatching, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile } from '../lib/api';
+import { useFiles, useFolders, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useActivityFeed, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import FileCard from './FileCard';
 import FolderCard from './FolderCard';
@@ -84,8 +84,7 @@ export default function FileBrowser() {
 
     // Data Fetching
     const { data: filesList, isLoading: filesLoading, refetch: refetchFiles } = useFiles(currentFolderId, fileTypeFilter.join(',') || undefined, searchQuery || undefined, page, sortValue);
-    const { data: recentFiles, isLoading: recentLoading, isError: recentError, refetch: refetchRecent } = useRecentFiles(50, sortValue);
-    const { data: cwFiles, isLoading: cwLoading, isError: cwError, refetch: refetchCW } = useContinueWatching(50, sortValue);
+    const { data: activityFeed, isLoading: activityLoading, isError: activityError, refetch: refetchActivity } = useActivityFeed(activeSection === 'activity', 50);
     
 
     // For files section, accumulate files from all pages
@@ -109,15 +108,15 @@ export default function FileBrowser() {
     const matchesActivityQuery = (item: TelegramFile) => !activityQuery
         || item.file_name.toLocaleLowerCase('fa').includes(activityQuery)
         || (item.description || '').toLocaleLowerCase('fa').includes(activityQuery);
-    const continueWatchingFiles = (cwFiles?.files || []).filter(matchesActivityQuery);
+    const continueWatchingFiles = (activityFeed?.continue_watching || []).filter(matchesActivityQuery);
     const continueWatchingIds = new Set(continueWatchingFiles.map(item => item.id));
-    const recentlyAddedFiles = (recentFiles?.files || [])
+    const recentlyAddedFiles = (activityFeed?.recent || [])
         .filter(matchesActivityQuery)
         .filter(item => !continueWatchingIds.has(item.id));
 
     if (activeSection === 'activity') {
         displayFiles = [...continueWatchingFiles, ...recentlyAddedFiles];
-        isLoading = recentLoading || cwLoading;
+        isLoading = activityLoading;
     } else {
         displayFiles = allFiles;
         isLoading = filesLoading;
@@ -187,10 +186,9 @@ export default function FileBrowser() {
             refetchFiles();
             refetchFolders();
         } else if (activeSection === 'activity') {
-            refetchRecent();
-            refetchCW();
+            refetchActivity();
         }
-    }, [activeSection, refetchFiles, refetchFolders, refetchRecent, refetchCW]);
+    }, [activeSection, refetchFiles, refetchFolders, refetchActivity]);
 
     const handlePullStart = (event: React.TouchEvent<HTMLDivElement>) => {
         if (containerRef.current?.scrollTop === 0) pullStartY.current = event.touches[0]?.clientY ?? null;
@@ -360,7 +358,7 @@ export default function FileBrowser() {
     const handleMouseDown = (e: React.MouseEvent) => {
         if (e.button !== 0) return; // Only left click
         // If clicking on a card or button, ignore
-        if ((e.target as HTMLElement).closest('.file-card') || 
+        if ((e.target as HTMLElement).closest('[data-file-id], [data-folder-id]') ||
             (e.target as HTMLElement).closest('button') ||
             (e.target as HTMLElement).closest('.sidebar')) return;
 
@@ -635,7 +633,6 @@ export default function FileBrowser() {
         const nextMode = !selectionMode;
         clearSelection();
         setSelectionMode(nextMode);
-        if (nextMode) addToast('حالا هر فایل یا کشویی را لمس کنی انتخاب می‌شود؛ نیازی به Ctrl نیست.');
     };
 
     return (
@@ -872,7 +869,7 @@ export default function FileBrowser() {
                                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
                                     {[...Array(6)].map((_, i) => <div key={i} className="aspect-video animate-pulse rounded-xl bg-dark-800/50" />)}
                                 </div>
-                            ) : recentError && cwError ? (
+                            ) : activityError ? (
                                 <div className="flex flex-col items-center justify-center rounded-3xl border border-red-500/15 bg-red-500/[0.04] px-5 py-14 text-center">
                                     <div className="mb-4 text-4xl">🧭</div>
                                     <h3 className="text-lg font-bold text-white">فعالیت‌ها بارگذاری نشد</h3>

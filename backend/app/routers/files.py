@@ -15,7 +15,7 @@ from sqlalchemy.orm import selectinload
 
 from ..database import get_db
 from ..models import File, User, WatchProgress, Folder
-from ..schemas import BatchFileUpdate, FileResponse, FileListResponse, FileUpdate, WatchProgressUpdate
+from ..schemas import ActivityResponse, BatchFileUpdate, FileResponse, FileListResponse, FileUpdate, WatchProgressUpdate
 from ..auth import get_current_user
 from ..telegram import delete_from_storage_channel, get_message_from_channel
 from .. import telegram
@@ -262,6 +262,21 @@ async def get_recent_files(
         total=len(files),
         page=1,
         per_page=limit,
+    )
+
+
+@router.get("/activity", response_model=ActivityResponse)
+async def get_activity(
+    limit: int = Query(50, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return both activity feeds in one request, ordered by their natural timestamps."""
+    continue_watching = await fetch_continue_watching_files(db, current_user.id, limit)
+    recent = await fetch_recent_files(db, current_user.id, limit)
+    return ActivityResponse(
+        continue_watching=[FileResponse(**add_urls_to_file(file)) for file in continue_watching],
+        recent=[FileResponse(**add_urls_to_file(file)) for file in recent],
     )
 
 

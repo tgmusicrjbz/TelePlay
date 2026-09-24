@@ -57,6 +57,11 @@ export interface FileListResponse {
     per_page: number;
 }
 
+export interface ActivityFeed {
+    continue_watching: TelegramFile[];
+    recent: TelegramFile[];
+}
+
 export interface PlaylistItem {
     id: number;
     position: number;
@@ -399,6 +404,18 @@ export const useContinueWatching = (limit = 20, sort = '') => {
     });
 };
 
+export const useActivityFeed = (enabled = true, limit = 50) => {
+    return useQuery<ActivityFeed>({
+        queryKey: ['activity', limit],
+        queryFn: async () => {
+            const { data } = await api.get<ActivityFeed>('/files/activity', { params: { limit } });
+            return data;
+        },
+        enabled,
+        staleTime: 15000,
+    });
+};
+
 export const useStorageStats = () => {
     return useQuery<StorageStats>({
         queryKey: ['storage'],
@@ -411,9 +428,13 @@ export const useStorageStats = () => {
 };
 
 export const useUpdateProgress = () => {
+    const queryClient = useQueryClient();
     return useMutation({
         mutationFn: async ({ fileId, position, duration }: { fileId: number; position: number; duration?: number }) => {
             await api.post(`/files/${fileId}/progress`, { position, duration });
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['activity'] });
         },
     });
 };
@@ -554,6 +575,7 @@ export const useUploadFile = () => {
             queryClient.invalidateQueries({ queryKey: ['files'] });
             queryClient.invalidateQueries({ queryKey: ['folders'] });
             queryClient.invalidateQueries({ queryKey: ['storage'] });
+            queryClient.invalidateQueries({ queryKey: ['activity'] });
         },
     });
 };
