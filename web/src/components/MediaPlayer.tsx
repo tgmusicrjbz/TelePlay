@@ -411,9 +411,9 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     return (
         <div
             ref={containerRef}
-            className={`${isMinimized ? 'mini-player' : 'video-player'} fixed transition-all duration-300 ease-in-out z-[100] ${
+            className={`${isMinimized ? 'mini-player' : 'video-player'} fixed z-[120] transition-all duration-300 ease-in-out ${
                 isMinimized 
-                    ? 'bottom-20 md:bottom-0 left-0 right-0 h-20 bg-dark-900 border-t border-white/10 shadow-2xl'
+                    ? 'bottom-[calc(5rem+env(safe-area-inset-bottom))] left-0 right-0 h-20 border-t border-white/10 bg-dark-900 shadow-2xl md:bottom-0'
                     : 'inset-0 bg-black flex items-center justify-center font-sans'
             }`}
             onMouseMove={!isMinimized ? revealControls : undefined}

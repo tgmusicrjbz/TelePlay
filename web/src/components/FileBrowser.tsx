@@ -84,8 +84,8 @@ export default function FileBrowser() {
 
     // Data Fetching
     const { data: filesList, isLoading: filesLoading, refetch: refetchFiles } = useFiles(currentFolderId, fileTypeFilter.join(',') || undefined, searchQuery || undefined, page, sortValue);
-    const { data: recentFiles, isLoading: recentLoading, refetch: refetchRecent } = useRecentFiles(50, sortValue);
-    const { data: cwFiles, isLoading: cwLoading, refetch: refetchCW } = useContinueWatching(50, sortValue);
+    const { data: recentFiles, isLoading: recentLoading, isError: recentError, refetch: refetchRecent } = useRecentFiles(50, sortValue);
+    const { data: cwFiles, isLoading: cwLoading, isError: cwError, refetch: refetchCW } = useContinueWatching(50, sortValue);
     
 
     // For files section, accumulate files from all pages
@@ -105,12 +105,18 @@ export default function FileBrowser() {
     let displayFiles: TelegramFile[] | undefined;
     let isLoading = false;
 
+    const activityQuery = searchQuery.trim().toLocaleLowerCase('fa');
+    const matchesActivityQuery = (item: TelegramFile) => !activityQuery
+        || item.file_name.toLocaleLowerCase('fa').includes(activityQuery)
+        || (item.description || '').toLocaleLowerCase('fa').includes(activityQuery);
+    const continueWatchingFiles = (cwFiles?.files || []).filter(matchesActivityQuery);
+    const continueWatchingIds = new Set(continueWatchingFiles.map(item => item.id));
+    const recentlyAddedFiles = (recentFiles?.files || [])
+        .filter(matchesActivityQuery)
+        .filter(item => !continueWatchingIds.has(item.id));
+
     if (activeSection === 'activity') {
-        const combined = [...(cwFiles?.files || []), ...(recentFiles?.files || [])];
-        const query = searchQuery.trim().toLocaleLowerCase('fa');
-        displayFiles = Array.from(new Map(combined.map(item => [item.id, item])).values()).filter(item =>
-            !query || item.file_name.toLocaleLowerCase('fa').includes(query) || (item.description || '').toLocaleLowerCase('fa').includes(query)
-        );
+        displayFiles = [...continueWatchingFiles, ...recentlyAddedFiles];
         isLoading = recentLoading || cwLoading;
     } else {
         displayFiles = allFiles;
@@ -150,6 +156,13 @@ export default function FileBrowser() {
     const [pullDistance, setPullDistance] = useState(0);
 
     useEffect(() => applyTheme(getStoredTheme()), []);
+
+    useEffect(() => {
+        if (activeSection !== 'files') {
+            setSelectionMode(false);
+            clearSelection();
+        }
+    }, [activeSection, clearSelection]);
 
     const handleWebUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
         const selected = Array.from(event.target.files || []);
@@ -252,6 +265,10 @@ export default function FileBrowser() {
         clearSelection();
     }, [breadcrumbs, clearSelection, setBreadcrumbs, setCurrentFolderId]);
 
+    const navigateToParentFolder = useCallback(() => {
+        if (breadcrumbs.length > 1) navigateToBreadcrumb(breadcrumbs.length - 2);
+    }, [breadcrumbs.length, navigateToBreadcrumb]);
+
     useEffect(() => {
         const handleBrowserBack = () => {
             if (activeSection === 'files' && breadcrumbs.length > 1) navigateToBreadcrumb(breadcrumbs.length - 2);
@@ -264,7 +281,7 @@ export default function FileBrowser() {
         const backButton = (window as Window & { Telegram?: { WebApp?: { BackButton?: { show: () => void; hide: () => void; onClick: (handler: () => void) => void; offClick: (handler: () => void) => void } } } }).Telegram?.WebApp?.BackButton;
         if (!backButton) return;
         const canGoBack = activeSection === 'files' && breadcrumbs.length > 1;
-        const goBack = () => window.history.back();
+        const goBack = navigateToParentFolder;
         if (canGoBack) {
             backButton.show();
             backButton.onClick(goBack);
@@ -274,7 +291,7 @@ export default function FileBrowser() {
         return () => {
             if (canGoBack) backButton.offClick(goBack);
         };
-    }, [activeSection, breadcrumbs.length, navigateToBreadcrumb]);
+    }, [activeSection, breadcrumbs.length, navigateToParentFolder]);
 
     // Handle delete confirmation
     const handleDeleteConfirm = async (deleteContents: boolean) => {
@@ -610,6 +627,16 @@ export default function FileBrowser() {
         if (allVisibleSelected) clearSelection();
         else selectAll(visibleFileIds, visibleFolderIds);
     };
+    const cancelSelection = () => {
+        clearSelection();
+        setSelectionMode(false);
+    };
+    const toggleSelectionMode = () => {
+        const nextMode = !selectionMode;
+        clearSelection();
+        setSelectionMode(nextMode);
+        if (nextMode) addToast('حالا هر فایل یا کشویی را لمس کنی انتخاب می‌شود؛ نیازی به Ctrl نیست.');
+    };
 
     return (
         <div dir="rtl" className="flex h-screen bg-dark-950 text-white selection:bg-primary-500/30 overflow-hidden">
@@ -619,6 +646,17 @@ export default function FileBrowser() {
                 {/* Header */}
                 <header className="h-16 border-b border-white/[0.06] flex items-center justify-between px-4 sm:px-6 bg-dark-900/50 backdrop-blur-sm z-30 sticky top-0">
                     <div className="flex items-center gap-3 md:gap-6 flex-1 min-w-0">
+                        {activeSection === 'files' && breadcrumbs.length > 1 && (
+                            <button
+                                type="button"
+                                onClick={navigateToParentFolder}
+                                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-dark-800/80 text-white active:scale-95 sm:hidden"
+                                aria-label="برگشت به کشوی قبلی"
+                                title="کشوی قبلی"
+                            >
+                                <ChevronRight className="h-5 w-5" />
+                            </button>
+                        )}
                         {/* Search */}
                         {(activeSection === 'files' || activeSection === 'activity') && <div className="relative w-full max-w-xs md:w-64">
                             <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-500" />
@@ -719,6 +757,16 @@ export default function FileBrowser() {
                     onDragOver={(e) => e.preventDefault()}
                 >
                     {pullDistance > 0 && <div className="pointer-events-none absolute inset-x-0 top-2 z-20 flex justify-center" style={{ transform: `translateY(${pullDistance - 40}px)`, opacity: pullDistance / 56 }}><div className="rounded-full border border-white/10 bg-dark-800/90 px-3 py-1.5 text-xs text-dark-200 shadow-xl">{pullDistance >= 56 ? 'رها کن تا تازه بشه ✨' : 'برای تازه‌سازی بکش پایین'}</div></div>}
+                    {(selectionMode || selectedItems.length > 0) && activeSection === 'files' && (
+                        <div className="no-scrollbar sticky top-0 z-20 mx-auto mb-3 flex min-h-14 max-w-7xl flex-nowrap items-center gap-1 overflow-x-auto rounded-2xl border border-primary-500/25 bg-dark-900/95 p-1.5 shadow-2xl backdrop-blur-xl sm:hidden">
+                            <span className="shrink-0 px-2 text-xs font-semibold text-primary-200">{selectedItems.length ? `${selectedItems.length.toLocaleString('fa-IR')} انتخاب` : 'یک کارت را لمس کن'}</span>
+                            {selectedItems.length === 1 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-200 hover:bg-white/10" aria-label="تغییر نام" title="تغییر نام" onClick={() => selectedFilesForActions[0] ? setRenameFile(selectedFilesForActions[0]) : setRenameFolder(selectedFoldersForActions[0])}><Pencil className="h-5 w-5" /></button>}
+                            {selectedFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-200 hover:bg-white/10" aria-label="ویرایش گروهی" title="ویرایش گروهی" onClick={() => setShowBatchEdit(true)}><SlidersHorizontal className="h-5 w-5" /></button>}
+                            <button disabled={!selectedItems.length} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-200 hover:bg-white/10 disabled:opacity-30" aria-label="جابه‌جایی" title="جابه‌جایی" onClick={() => setMoveItems({ files: selectedFilesForActions, folders: selectedFoldersForActions })}><FolderInput className="h-5 w-5" /></button>
+                            <button disabled={!selectedItems.length} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-red-300 hover:bg-red-500/10 disabled:opacity-30" aria-label="حذف" title="حذف" onClick={() => setDeleteConfirm({ type: selectedFoldersForActions.length && selectedFilesForActions.length ? 'multiple' : selectedFoldersForActions.length ? 'folder' : 'file', items: selectedItems })}><Trash2 className="h-5 w-5" /></button>
+                            <button className="mr-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-300 hover:bg-white/10" aria-label="پایان انتخاب گروهی" title="پایان انتخاب" onClick={cancelSelection}><X className="h-5 w-5" /></button>
+                        </div>
+                    )}
                     {activeSection === 'playlists' ? <PlaylistBrowser /> : activeSection === 'settings' ? <SettingsPage /> : <>
                     <div className="max-w-7xl mx-auto mb-6 sm:mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                         <div>
@@ -731,13 +779,13 @@ export default function FileBrowser() {
                             </p>
                         </div>
                         {selectedItems.length > 0 ? (
-                            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-primary-500/20 bg-primary-500/10 p-2">
+                            <div className="no-scrollbar hidden max-w-full flex-nowrap items-center gap-1.5 overflow-x-auto rounded-2xl border border-primary-500/20 bg-primary-500/10 p-1.5 sm:flex">
                                 <span className="text-sm font-medium text-primary-200 px-2">{selectedItems.length.toLocaleString('fa-IR')} مورد انتخاب شده</span>
-                                {selectedItems.length === 1 && <button className="btn-secondary text-sm flex items-center gap-2" onClick={() => selectedFilesForActions[0] ? setRenameFile(selectedFilesForActions[0]) : setRenameFolder(selectedFoldersForActions[0])}><Pencil className="w-4 h-4" /> تغییر نام</button>}
-                                {selectedFilesForActions.length > 0 && <button className="btn-secondary text-sm flex items-center gap-2" onClick={() => setShowBatchEdit(true)}><Pencil className="w-4 h-4" /> ویرایش گروهی</button>}
-                                <button className="btn-secondary text-sm flex items-center gap-2" onClick={() => setMoveItems({ files: selectedFilesForActions, folders: selectedFoldersForActions })}><FolderInput className="w-4 h-4" /> جابه‌جایی</button>
-                                <button className="btn-secondary text-sm flex items-center gap-2 text-red-300" onClick={() => setDeleteConfirm({ type: selectedFoldersForActions.length && selectedFilesForActions.length ? 'multiple' : selectedFoldersForActions.length ? 'folder' : 'file', items: selectedItems })}><Trash2 className="w-4 h-4" /> حذف</button>
-                                <button className="btn-icon" title="لغو انتخاب" onClick={clearSelection}><X className="w-4 h-4" /></button>
+                                {selectedItems.length === 1 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => selectedFilesForActions[0] ? setRenameFile(selectedFilesForActions[0]) : setRenameFolder(selectedFoldersForActions[0])}><Pencil className="w-4 h-4" /> تغییر نام</button>}
+                                {selectedFilesForActions.length > 0 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => setShowBatchEdit(true)}><SlidersHorizontal className="w-4 h-4" /> ویرایش گروهی</button>}
+                                <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => setMoveItems({ files: selectedFilesForActions, folders: selectedFoldersForActions })}><FolderInput className="w-4 h-4" /> جابه‌جایی</button>
+                                <button className="btn-secondary shrink-0 text-sm flex items-center gap-2 text-red-300" onClick={() => setDeleteConfirm({ type: selectedFoldersForActions.length && selectedFilesForActions.length ? 'multiple' : selectedFoldersForActions.length ? 'folder' : 'file', items: selectedItems })}><Trash2 className="w-4 h-4" /> حذف</button>
+                                <button className="btn-icon shrink-0" title="پایان انتخاب" onClick={cancelSelection}><X className="w-4 h-4" /></button>
                             </div>
                         ) : null}
                     </div>
@@ -765,7 +813,7 @@ export default function FileBrowser() {
                                     <button title="مرتب‌سازی" onClick={() => { setShowSort(value => !value); setShowFilters(false); }} className={`flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-full border border-white/10 bg-dark-900/70 px-3 text-xs text-dark-200 transition-colors ${showSort ? 'border-primary-500/40 text-primary-200' : ''}`}>
                                         <ArrowDown className="h-4 w-4" /> <span className="truncate">مرتب‌سازی</span>
                                     </button>
-                                    <button title="انتخاب چند فایل یا کشو" onClick={() => { setSelectionMode(value => !value); clearSelection(); }} className={`flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-full border border-white/10 bg-dark-900/70 px-3 text-xs text-dark-200 transition-colors ${selectionMode ? 'border-primary-500/40 bg-primary-500/10 text-primary-200' : ''}`}>
+                                    <button title="انتخاب چند فایل یا کشو" onClick={toggleSelectionMode} className={`flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-full border border-white/10 bg-dark-900/70 px-3 text-xs text-dark-200 transition-colors ${selectionMode ? 'border-primary-500/40 bg-primary-500/10 text-primary-200' : ''}`}>
                                         <ListChecks className="h-4 w-4" /> <span className="truncate">{selectionMode ? 'پایان انتخاب' : 'انتخاب گروهی'}</span>
                                     </button>
                                     {(selectionMode || selectedItems.length > 0) && (
@@ -818,7 +866,53 @@ export default function FileBrowser() {
                             )}
                         </div>
                     )}
-                    {isLoading && !displayFiles ? (
+                    {activeSection === 'activity' ? (
+                        <div className="mx-auto max-w-7xl space-y-8 pb-20">
+                            {isLoading && displayFiles?.length === 0 ? (
+                                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                                    {[...Array(6)].map((_, i) => <div key={i} className="aspect-video animate-pulse rounded-xl bg-dark-800/50" />)}
+                                </div>
+                            ) : recentError && cwError ? (
+                                <div className="flex flex-col items-center justify-center rounded-3xl border border-red-500/15 bg-red-500/[0.04] px-5 py-14 text-center">
+                                    <div className="mb-4 text-4xl">🧭</div>
+                                    <h3 className="text-lg font-bold text-white">فعالیت‌ها بارگذاری نشد</h3>
+                                    <p className="mt-2 max-w-sm text-sm leading-7 text-dark-400">ارتباط با کمد برقرار نشد. دوباره تلاش کن تا ادامه پخش و فایل‌های تازه را بیاورم.</p>
+                                    <button className="btn-primary mt-5" onClick={handleRefresh}>تلاش دوباره</button>
+                                </div>
+                            ) : displayFiles?.length === 0 ? (
+                                <div className="flex flex-col items-center justify-center px-5 py-14 text-center">
+                                    <div className="mb-4 text-5xl">⏱️</div>
+                                    <h3 className="text-xl font-bold text-white">هنوز فعالیتی ثبت نشده</h3>
+                                    <p className="mt-2 max-w-sm text-sm leading-7 text-dark-400">با باز کردن یک آهنگ یا ویدیو، ادامه پخشش اینجا می‌آید. فایل‌های تازه هم در همین صفحه دیده می‌شوند.</p>
+                                </div>
+                            ) : (
+                                <>
+                                    {continueWatchingFiles.length > 0 && (
+                                        <section>
+                                            <div className="mb-3 flex items-end justify-between gap-3">
+                                                <div><h2 className="text-lg font-bold text-white">▶️ ادامه پخش</h2><p className="mt-1 text-xs text-dark-400">از همان جایی که رها کردی ادامه بده</p></div>
+                                                <span className="text-xs text-dark-500">{continueWatchingFiles.length.toLocaleString('fa-IR')} مورد</span>
+                                            </div>
+                                            <div className={viewMode === 'grid' ? 'grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5' : 'flex flex-col gap-2'}>
+                                                {continueWatchingFiles.map(file => <FileCard key={file.id} file={file} viewMode={viewMode} selected={false} selectionMode={false} onSelect={() => undefined} onPlay={() => handleFileOpen(file)} />)}
+                                            </div>
+                                        </section>
+                                    )}
+                                    {recentlyAddedFiles.length > 0 && (
+                                        <section>
+                                            <div className="mb-3 flex items-end justify-between gap-3">
+                                                <div><h2 className="text-lg font-bold text-white">✨ تازه‌های کمد</h2><p className="mt-1 text-xs text-dark-400">فایل‌هایی که به‌تازگی اضافه شده‌اند</p></div>
+                                                <span className="text-xs text-dark-500">{recentlyAddedFiles.length.toLocaleString('fa-IR')} مورد</span>
+                                            </div>
+                                            <div className={viewMode === 'grid' ? 'grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5' : 'flex flex-col gap-2'}>
+                                                {recentlyAddedFiles.map(file => <FileCard key={file.id} file={file} viewMode={viewMode} selected={false} selectionMode={false} onSelect={() => undefined} onPlay={() => handleFileOpen(file)} />)}
+                                            </div>
+                                        </section>
+                                    )}
+                                </>
+                            )}
+                        </div>
+                    ) : isLoading && !displayFiles ? (
                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 animate-fade-in">
                             {[...Array(10)].map((_, i) => (
                                 <div key={i} className="aspect-video bg-dark-800/50 rounded-xl animate-pulse"></div>

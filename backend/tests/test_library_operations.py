@@ -25,7 +25,15 @@ from sqlalchemy import select
 
 from app.database import Base, async_session, engine
 from app.models import BotUserState, File, Folder, Playlist, PlaylistItem, User, WatchProgress
-from app.routers.files import batch_update_files, get_text_preview, list_files, update_file, upload_file
+from app.routers.files import (
+    batch_update_files,
+    get_continue_watching,
+    get_recent_files,
+    get_text_preview,
+    list_files,
+    update_file,
+    upload_file,
+)
 from app.routers.folders import delete_folder_contents, update_folder
 from app.routers.streaming import stored_message_response
 from app.routers.playlists import add_playlist_items, create_playlist, reorder_playlist, shuffle_playlist
@@ -60,6 +68,7 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             await db.commit()
             self.user_id, self.parent_id, self.folder_id, self.child_id = user.id, parent.id, folder.id, child.id
             self.direct_file_id = direct.id
+            self.nested_file_id = nested.id
 
     async def asyncTearDown(self):
         await engine.dispose()
@@ -138,6 +147,17 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
                 self.direct_file_id, FileUpdate(description=""), db, user
             )
             self.assertIsNone(cleared.description)
+
+    async def test_activity_feeds_include_recent_and_in_progress_files(self):
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            recent = await get_recent_files(limit=50, sort="created:desc", db=db, current_user=user)
+            in_progress = await get_continue_watching(limit=50, sort="created:desc", db=db, current_user=user)
+
+            self.assertEqual(recent.total, 2)
+            self.assertEqual({item.id for item in recent.files}, {self.direct_file_id, self.nested_file_id})
+            self.assertEqual(in_progress.total, 1)
+            self.assertEqual(in_progress.files[0].last_pos, 20)
 
     async def test_playlist_add_and_manual_reorder(self):
         async with async_session() as db:
