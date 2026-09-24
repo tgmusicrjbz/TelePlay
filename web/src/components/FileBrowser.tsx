@@ -396,8 +396,9 @@ export default function FileBrowser() {
     // Keyboard shortcuts
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
-            // Ignore if input/textarea is focused
-            if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+            // Never intercept typing or editing shortcuts.
+            const target = e.target as HTMLElement | null;
+            if (target && (['INPUT', 'TEXTAREA'].includes(target.tagName) || target.isContentEditable)) return;
 
             // Ctrl+Shift+N - New Folder
             if (e.ctrlKey && e.shiftKey && (e.key === 'N' || e.key === 'n')) {

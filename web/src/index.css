@@ -213,6 +213,21 @@ body {
    VIDEO PLAYER
    ============================================ */
 
+.video-player,
+.mini-player {
+  direction: ltr !important;
+}
+
+.desktop-volume-slider {
+  display: none;
+}
+
+@media (hover: hover) and (pointer: fine) and (min-width: 768px) {
+  .desktop-volume-slider {
+    display: block;
+  }
+}
+
 .video-js {
   @apply w-full h-full rounded-lg overflow-hidden;
 }

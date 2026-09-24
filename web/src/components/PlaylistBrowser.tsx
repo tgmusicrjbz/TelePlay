@@ -15,6 +15,7 @@ export default function PlaylistBrowser() {
     const { data: playlist } = usePlaylist(selectedId);
     const [showCreate, setShowCreate] = useState(false);
     const [showAdd, setShowAdd] = useState(false);
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const { startQueue, addToast } = useAppStore();
     const createPlaylist = useCreatePlaylist();
     const deletePlaylist = useDeletePlaylist();
@@ -48,6 +49,27 @@ export default function PlaylistBrowser() {
         addToast('پلی‌لیست تازه ساخته شد 🎶');
     };
 
+    const deleteCurrentPlaylist = async () => {
+        if (!playlist) return;
+        await deletePlaylist.mutateAsync(playlist.id);
+        setSelectedId(null);
+        setShowDeleteConfirm(false);
+        addToast('پلی‌لیست حذف شد.');
+    };
+
+    const requestPlaylistDelete = () => {
+        if (!playlist) return;
+        const message = `پلی‌لیست «${playlist.name}» حذف شود؟ فایل‌ها پاک نمی‌شوند.`;
+        const telegramWebApp = (window as Window & { Telegram?: { WebApp?: { showConfirm?: (message: string, callback: (confirmed: boolean) => void) => void } } }).Telegram?.WebApp;
+        if (telegramWebApp?.showConfirm) {
+            telegramWebApp.showConfirm(message, confirmed => {
+                if (confirmed) void deleteCurrentPlaylist();
+            });
+            return;
+        }
+        setShowDeleteConfirm(true);
+    };
+
     return <div className="mx-auto w-full max-w-7xl p-4 sm:p-6 lg:p-8">
         <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div><p className="text-xs font-semibold text-primary-300">🎧 پخش پشت‌سرهم</p><h1 className="mt-2 text-3xl font-bold">پلی‌لیست‌های من</h1><p className="mt-2 text-sm text-dark-400">آهنگ‌ها و ویدیوهای محبوبت را کنار هم بچین و بدون وقفه پخش کن.</p></div>
@@ -65,16 +87,28 @@ export default function PlaylistBrowser() {
             </aside>
 
             <section className="min-w-0 rounded-2xl border border-white/[0.07] bg-dark-900/60 p-4 sm:p-5">
-                {playlist ? <PlaylistDetail playlist={playlist} onPlay={play} onMove={move} onAdd={() => setShowAdd(true)} onShuffle={async () => { await shufflePlaylist.mutateAsync(playlist.id); addToast('ترتیب پلی‌لیست شافل شد 🔀'); }} onRemove={async fileId => { await removeItem.mutateAsync({ id: playlist.id, fileId }); }} onDelete={async () => { if (!window.confirm(`پلی‌لیست «${playlist.name}» حذف شود؟ فایل‌ها پاک نمی‌شوند.`)) return; await deletePlaylist.mutateAsync(playlist.id); setSelectedId(null); addToast('پلی‌لیست حذف شد.'); }} /> : <div className="flex min-h-72 flex-col items-center justify-center text-center"><div className="text-5xl">🎶</div><h2 className="mt-4 text-xl font-bold">یک پلی‌لیست بساز</h2><p className="mt-2 text-sm text-dark-400">بعد آهنگ‌ها و ویدیوها را با ترتیب دلخواهت بهش اضافه کن.</p></div>}
+                {playlist ? <PlaylistDetail playlist={playlist} onPlay={play} onMove={move} onAdd={() => setShowAdd(true)} onShuffle={async () => { await shufflePlaylist.mutateAsync(playlist.id); addToast('ترتیب پلی‌لیست شافل شد 🔀'); }} onRemove={async fileId => { await removeItem.mutateAsync({ id: playlist.id, fileId }); }} onDelete={requestPlaylistDelete} /> : <div className="flex min-h-72 flex-col items-center justify-center text-center"><div className="text-5xl">🎶</div><h2 className="mt-4 text-xl font-bold">یک پلی‌لیست بساز</h2><p className="mt-2 text-sm text-dark-400">بعد آهنگ‌ها و ویدیوها را با ترتیب دلخواهت بهش اضافه کن.</p></div>}
             </section>
         </div>
 
         {showCreate && <PlaylistEditor title="پلی‌لیست تازه" onClose={() => setShowCreate(false)} onSave={create} />}
         {showAdd && playlist && <AddItemsModal playlist={playlist} onClose={() => setShowAdd(false)} />}
+        {showDeleteConfirm && playlist && (
+            <div className="fixed inset-0 z-[170] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={() => setShowDeleteConfirm(false)}>
+                <div role="alertdialog" aria-modal="true" aria-labelledby="delete-playlist-title" className="w-full max-w-sm rounded-2xl border border-white/10 bg-dark-900 p-5 shadow-2xl" onClick={event => event.stopPropagation()}>
+                    <h2 id="delete-playlist-title" className="text-lg font-bold">حذف پلی‌لیست؟</h2>
+                    <p className="mt-2 text-sm leading-6 text-dark-300">پلی‌لیست «{playlist.name}» حذف می‌شود؛ فایل‌های داخلش سر جایشان می‌مانند.</p>
+                    <div className="mt-5 flex gap-2">
+                        <button className="flex-1 rounded-xl bg-red-500/90 px-4 py-2.5 font-medium text-white hover:bg-red-500" onClick={() => void deleteCurrentPlaylist()}>حذفش کن</button>
+                        <button className="btn-secondary flex-1" onClick={() => setShowDeleteConfirm(false)}>بی‌خیال</button>
+                    </div>
+                </div>
+            </div>
+        )}
     </div>;
 }
 
-function PlaylistDetail({ playlist, onPlay, onMove, onAdd, onShuffle, onRemove, onDelete }: { playlist: Playlist; onPlay: (index?: number) => void; onMove: (index: number, offset: number) => Promise<void>; onAdd: () => void; onShuffle: () => Promise<void>; onRemove: (fileId: number) => Promise<void>; onDelete: () => Promise<void> }) {
+function PlaylistDetail({ playlist, onPlay, onMove, onAdd, onShuffle, onRemove, onDelete }: { playlist: Playlist; onPlay: (index?: number) => void; onMove: (index: number, offset: number) => Promise<void>; onAdd: () => void; onShuffle: () => Promise<void>; onRemove: (fileId: number) => Promise<void>; onDelete: () => void | Promise<void> }) {
     const [editing, setEditing] = useState(false);
     const update = useUpdatePlaylist();
     return <>
