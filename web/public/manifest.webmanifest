@@ -14,15 +14,15 @@
   "categories": ["productivity", "utilities", "entertainment"],
   "icons": [
     {
-      "src": "/logo.png",
-      "sizes": "512x512",
-      "type": "image/png",
+      "src": "/komod.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
       "purpose": "any"
     },
     {
-      "src": "/logo.png",
-      "sizes": "512x512",
-      "type": "image/png",
+      "src": "/komod.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
       "purpose": "maskable"
     }
   ]

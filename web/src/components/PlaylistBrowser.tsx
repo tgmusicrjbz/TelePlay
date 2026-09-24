@@ -79,7 +79,7 @@ export default function PlaylistBrowser() {
         <div className="grid gap-5 lg:grid-cols-[280px_minmax(0,1fr)]">
             <aside className="rounded-2xl border border-white/[0.07] bg-dark-900/70 p-3">
                 <div className="mb-3 flex items-center gap-2 px-2 text-sm font-semibold"><ListMusic className="h-4 w-4 text-primary-300" /> فهرست پلی‌لیست‌ها</div>
-                {isLoading ? <div className="h-20 animate-pulse rounded-xl bg-dark-800" /> : playlists.length ? <div className="space-y-1">
+                {isLoading ? <div className="h-20 animate-pulse rounded-xl bg-dark-800" /> : playlists.length ? <div className="max-h-72 space-y-1 overflow-y-auto overscroll-contain pr-1 lg:max-h-[calc(100vh-15rem)]">
                     {playlists.map(item => <button key={item.id} onClick={() => setSelectedId(item.id)} className={`w-full rounded-xl px-3 py-3 text-right transition-colors ${selectedId === item.id ? 'bg-primary-500/15 text-primary-200' : 'text-dark-300 hover:bg-white/[0.05] hover:text-white'}`}>
                         <span className="block truncate font-medium">🎵 {item.name}</span><span className="mt-1 block text-xs text-dark-500">{item.item_count.toLocaleString('fa-IR')} مورد · {formatDuration(item.total_duration) || 'بدون مدت'}</span>
                     </button>)}

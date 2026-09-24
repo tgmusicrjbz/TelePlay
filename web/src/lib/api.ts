@@ -1,5 +1,5 @@
 /**
- * API client and hooks for TelePlay backend.
+ * API client and hooks for the Komod backend.
  */
 import axios from 'axios';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';

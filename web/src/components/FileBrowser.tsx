@@ -2,7 +2,7 @@
  * Main FileBrowser component - the core of the web interface
  */
 import { useEffect, useCallback, useRef, useState } from 'react';
-import { FolderPlus, Folder as FolderIcon, Grid, List, Search, ChevronRight, Home, RefreshCw, Clipboard, ArrowUp, ArrowRight, Film, Music, Image as ImageIcon, FileText, Menu, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ChevronDown, ChevronUp, Plus, CheckSquare, Square, ListChecks, Upload } from 'lucide-react';
+import { FolderPlus, Folder as FolderIcon, Grid, List, Search, ChevronRight, Home, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ChevronDown, ChevronUp, Plus, CheckSquare, Square, ListChecks, Upload } from 'lucide-react';
 import { useFiles, useFolders, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useRecentFiles, useContinueWatching, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import FileCard from './FileCard';
@@ -16,6 +16,8 @@ import BatchEditModal from './BatchEditModal';
 import Sidebar from './Sidebar';
 import Toasts from './Toasts';
 import PlaylistBrowser from './PlaylistBrowser';
+import SettingsPage from './SettingsPage';
+import { applyTheme, getStoredTheme } from '../lib/theme';
 
 const sortLabels: Record<SortField, string> = {
     name: 'نام', type: 'نوع', size: 'حجم', duration: 'مدت',
@@ -60,7 +62,8 @@ export default function FileBrowser() {
         setSelectionBox,
         activeSection,
         addToast,
-        setSelectedFiles
+        setSelectedFiles,
+        startQueue
     } = useAppStore();
 
     // Pagination state
@@ -73,7 +76,7 @@ export default function FileBrowser() {
     const [selectionMode, setSelectionMode] = useState(false);
     const [contentScope, setContentScope] = useState<'all' | 'files' | 'folders'>('all');
     const [sortCriteria, setSortCriteria] = useState<SortCriterion[]>(() => {
-        try { return JSON.parse(localStorage.getItem('teleplay-sort') || '') || [{ field: 'created', direction: 'desc' }]; }
+        try { return JSON.parse(localStorage.getItem('komod-sort') || '') || [{ field: 'created', direction: 'desc' }]; }
         catch { return [{ field: 'created', direction: 'desc' }]; }
     });
     const sortValue = serializeSort(sortCriteria.filter(item => item.field !== 'count'));
@@ -102,12 +105,13 @@ export default function FileBrowser() {
     let displayFiles: TelegramFile[] | undefined;
     let isLoading = false;
 
-    if (activeSection === 'recent') {
-        displayFiles = recentFiles?.files;
-        isLoading = recentLoading;
-    } else if (activeSection === 'continue_watching') {
-        displayFiles = cwFiles?.files;
-        isLoading = cwLoading;
+    if (activeSection === 'activity') {
+        const combined = [...(cwFiles?.files || []), ...(recentFiles?.files || [])];
+        const query = searchQuery.trim().toLocaleLowerCase('fa');
+        displayFiles = Array.from(new Map(combined.map(item => [item.id, item])).values()).filter(item =>
+            !query || item.file_name.toLocaleLowerCase('fa').includes(query) || (item.description || '').toLocaleLowerCase('fa').includes(query)
+        );
+        isLoading = recentLoading || cwLoading;
     } else {
         displayFiles = allFiles;
         isLoading = filesLoading;
@@ -141,8 +145,11 @@ export default function FileBrowser() {
     const containerRef = useRef<HTMLDivElement>(null);
     const uploadInputRef = useRef<HTMLInputElement>(null);
     const [isSelecting, setIsSelecting] = useState(false);
-    const [isSidebarOpen, setSidebarOpen] = useState(true);
     const selectionStart = useRef({ x: 0, y: 0 });
+    const pullStartY = useRef<number | null>(null);
+    const [pullDistance, setPullDistance] = useState(0);
+
+    useEffect(() => applyTheme(getStoredTheme()), []);
 
     const handleWebUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
         const selected = Array.from(event.target.files || []);
@@ -166,12 +173,24 @@ export default function FileBrowser() {
         if (activeSection === 'files') {
             refetchFiles();
             refetchFolders();
-        } else if (activeSection === 'recent') {
+        } else if (activeSection === 'activity') {
             refetchRecent();
-        } else if (activeSection === 'continue_watching') {
             refetchCW();
         }
     }, [activeSection, refetchFiles, refetchFolders, refetchRecent, refetchCW]);
+
+    const handlePullStart = (event: React.TouchEvent<HTMLDivElement>) => {
+        if (containerRef.current?.scrollTop === 0) pullStartY.current = event.touches[0]?.clientY ?? null;
+    };
+    const handlePullMove = (event: React.TouchEvent<HTMLDivElement>) => {
+        if (pullStartY.current === null || containerRef.current?.scrollTop !== 0) return;
+        setPullDistance(Math.min(88, Math.max(0, (event.touches[0].clientY - pullStartY.current) * 0.45)));
+    };
+    const handlePullEnd = () => {
+        if (pullDistance >= 56) handleRefresh();
+        pullStartY.current = null;
+        setPullDistance(0);
+    };
 
     // Handle drag-drop file to folder
     const handleFileDrop = useCallback(async (fileId: number, folderId: number) => {
@@ -209,7 +228,7 @@ export default function FileBrowser() {
     }, [addToast, batchUpdateFilesMutation, clearSelection, selectedFileIds]);
 
     useEffect(() => {
-        localStorage.setItem('teleplay-sort', JSON.stringify(sortCriteria));
+        localStorage.setItem('komod-sort', JSON.stringify(sortCriteria));
     }, [sortCriteria]);
 
     // Navigate to folder
@@ -220,6 +239,7 @@ export default function FileBrowser() {
         } else {
             setCurrentFolderId(folder.id);
             setBreadcrumbs([...breadcrumbs, { id: folder.id, name: folder.name }]);
+            window.history.pushState({ komodFolder: true }, '');
         }
         clearSelection();
     }, [breadcrumbs, clearSelection, setBreadcrumbs, setCurrentFolderId]);
@@ -231,6 +251,30 @@ export default function FileBrowser() {
         setBreadcrumbs(breadcrumbs.slice(0, index + 1));
         clearSelection();
     }, [breadcrumbs, clearSelection, setBreadcrumbs, setCurrentFolderId]);
+
+    useEffect(() => {
+        const handleBrowserBack = () => {
+            if (activeSection === 'files' && breadcrumbs.length > 1) navigateToBreadcrumb(breadcrumbs.length - 2);
+        };
+        window.addEventListener('popstate', handleBrowserBack);
+        return () => window.removeEventListener('popstate', handleBrowserBack);
+    }, [activeSection, breadcrumbs.length, navigateToBreadcrumb]);
+
+    useEffect(() => {
+        const backButton = (window as Window & { Telegram?: { WebApp?: { BackButton?: { show: () => void; hide: () => void; onClick: (handler: () => void) => void; offClick: (handler: () => void) => void } } } }).Telegram?.WebApp?.BackButton;
+        if (!backButton) return;
+        const canGoBack = activeSection === 'files' && breadcrumbs.length > 1;
+        const goBack = () => window.history.back();
+        if (canGoBack) {
+            backButton.show();
+            backButton.onClick(goBack);
+        } else {
+            backButton.hide();
+        }
+        return () => {
+            if (canGoBack) backButton.offClick(goBack);
+        };
+    }, [activeSection, breadcrumbs.length, navigateToBreadcrumb]);
 
     // Handle delete confirmation
     const handleDeleteConfirm = async (deleteContents: boolean) => {
@@ -388,7 +432,11 @@ export default function FileBrowser() {
 
     // Handle File Open / Play
     const handleFileOpen = (file: TelegramFile) => {
-        if (file.file_type === 'video' || file.file_type === 'audio' || file.file_type === 'image' || canPreviewText(file)) {
+        if (file.file_type === 'video' || file.file_type === 'audio') {
+            const queue = (displayFiles || []).filter(item => item.file_type === 'video' || item.file_type === 'audio');
+            const index = queue.findIndex(item => item.id === file.id);
+            startQueue(queue.length ? queue : [file], Math.max(0, index));
+        } else if (file.file_type === 'image' || canPreviewText(file)) {
             setPreviewFile(file);
         }
     };
@@ -526,7 +574,7 @@ export default function FileBrowser() {
     const selectedFilesForActions = displayFiles?.filter(file => selectedFileIds.has(file.id)) || [];
     const selectedFoldersForActions = folders?.filter(folder => selectedFolderIds.has(folder.id)) || [];
     const selectedItems = [...selectedFilesForActions, ...selectedFoldersForActions];
-    const sectionTitle = activeSection === 'recent' ? 'تازه اضافه‌شده‌ها' : activeSection === 'continue_watching' ? 'ادامه پخش' : (breadcrumbs[breadcrumbs.length - 1]?.name || 'کمد من');
+    const sectionTitle = activeSection === 'activity' ? 'فعالیت' : (breadcrumbs[breadcrumbs.length - 1]?.name || 'کمد من');
     const shownFolderCount = showFolders ? visibleFolders?.length || 0 : 0;
     const shownFileCount = showFiles ? displayFiles?.length || 0 : 0;
     const selectScope = (scope: 'all' | 'files' | 'folders') => {
@@ -565,35 +613,14 @@ export default function FileBrowser() {
 
     return (
         <div dir="rtl" className="flex h-screen bg-dark-950 text-white selection:bg-primary-500/30 overflow-hidden">
-            <Sidebar isOpen={isSidebarOpen} onClose={() => setSidebarOpen(false)} />
+            <Sidebar />
             
-            <main className={`flex-1 flex flex-col min-w-0 relative bg-gradient-to-br from-dark-950 to-dark-900 transition-[margin] duration-300 ease-in-out ${isSidebarOpen ? 'md:mr-64' : 'mr-0'}`}>
+            <main className="relative flex min-w-0 flex-1 flex-col bg-gradient-to-br from-dark-950 to-dark-900 md:mr-24">
                 {/* Header */}
                 <header className="h-16 border-b border-white/[0.06] flex items-center justify-between px-4 sm:px-6 bg-dark-900/50 backdrop-blur-sm z-30 sticky top-0">
-                    {/* Left: Hamburger & Search & Breadcrumbs */}
                     <div className="flex items-center gap-3 md:gap-6 flex-1 min-w-0">
-                        {/* Hamburger */}
-                        <button 
-                            onClick={() => setSidebarOpen(!isSidebarOpen)}
-                            className="p-2 -mr-2 text-dark-400 hover:text-white"
-                            aria-label="باز کردن منو"
-                        >
-                            <Menu className="w-6 h-6" />
-                        </button>
-
-                        {activeSection === 'files' && breadcrumbs.length > 1 && (
-                            <button
-                                onClick={() => navigateToBreadcrumb(breadcrumbs.length - 2)}
-                                className="sm:hidden p-2 -mr-2 rounded-lg text-dark-300 hover:text-white hover:bg-white/[0.06]"
-                                aria-label="برگشت به کشوی قبلی"
-                                title="کشوی قبلی"
-                            >
-                                <ArrowRight className="w-5 h-5" />
-                            </button>
-                        )}
-
                         {/* Search */}
-                        {activeSection !== 'playlists' && <div className="relative w-full max-w-[200px] sm:max-w-xs md:w-64">
+                        {(activeSection === 'files' || activeSection === 'activity') && <div className="relative w-full max-w-xs md:w-64">
                             <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-500" />
                             <input
                                 type="text"
@@ -604,12 +631,13 @@ export default function FileBrowser() {
                             />
                         </div>}
                         {activeSection === 'playlists' && <span className="truncate text-sm font-semibold text-white">🎧 پلی‌لیست‌ها</span>}
+                        {activeSection === 'settings' && <span className="truncate text-sm font-semibold text-white">⚙️ تنظیمات</span>}
 
                         {/* Vertical Div */}
                         <div className="hidden sm:block w-px h-6 bg-white/[0.1]"></div>
 
                         {/* Breadcrumbs */}
-                        {activeSection !== 'playlists' && <nav className="flex items-center gap-0.5 overflow-hidden hidden sm:flex">
+                        {activeSection === 'files' && <nav className="flex items-center gap-0.5 overflow-hidden hidden sm:flex">
                             {breadcrumbs.map((crumb, index) => (
                                 <div key={crumb.id || 'root'} className="flex items-center min-w-0">
                                     {index > 0 && <ChevronRight className="w-4 h-4 text-dark-600 mx-1 shrink-0 rotate-180" />}
@@ -630,7 +658,7 @@ export default function FileBrowser() {
 
                     {/* Right: Actions */}
                     <div className="flex items-center gap-2 sm:gap-3">
-                         {activeSection !== 'playlists' && <div className="hidden sm:flex items-center gap-1 bg-dark-800/50 rounded-lg p-0.5 border border-white/[0.06]">
+                         {(activeSection === 'files' || activeSection === 'activity') && <div className="hidden sm:flex items-center gap-1 bg-dark-800/50 rounded-lg p-0.5 border border-white/[0.06]">
                              <button
                                  onClick={() => setViewMode('grid')}
                                  className={`p-1.5 rounded-md transition-all ${viewMode === 'grid' ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'}`}
@@ -678,23 +706,27 @@ export default function FileBrowser() {
                 {/* Content Area */}
                 <div 
                     ref={containerRef}
-                    className="flex-1 overflow-auto p-4 sm:p-6 lg:p-8 relative outline-none"
+                    className="relative flex-1 overflow-auto p-4 pb-28 outline-none sm:p-6 md:pb-6 lg:p-8"
                     onMouseDown={handleMouseDown}
                     onMouseMove={handleMouseMove}
                     onMouseUp={handleMouseUp}
                     onMouseLeave={handleMouseUp}
+                    onTouchStart={handlePullStart}
+                    onTouchMove={handlePullMove}
+                    onTouchEnd={handlePullEnd}
                     tabIndex={0}
                     // Prevent default drag behaviors on container
                     onDragOver={(e) => e.preventDefault()}
                 >
-                    {activeSection === 'playlists' ? <PlaylistBrowser /> : <>
+                    {pullDistance > 0 && <div className="pointer-events-none absolute inset-x-0 top-2 z-20 flex justify-center" style={{ transform: `translateY(${pullDistance - 40}px)`, opacity: pullDistance / 56 }}><div className="rounded-full border border-white/10 bg-dark-800/90 px-3 py-1.5 text-xs text-dark-200 shadow-xl">{pullDistance >= 56 ? 'رها کن تا تازه بشه ✨' : 'برای تازه‌سازی بکش پایین'}</div></div>}
+                    {activeSection === 'playlists' ? <PlaylistBrowser /> : activeSection === 'settings' ? <SettingsPage /> : <>
                     <div className="max-w-7xl mx-auto mb-6 sm:mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                         <div>
                             <p className="text-xs font-semibold text-primary-300 mb-2">🗄️ کمد شخصی تو</p>
                             <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">{sectionTitle}</h1>
                             <p className="text-sm text-dark-400 mt-2">
-                                {activeSection === 'continue_watching'
-                                    ? 'از همون‌جایی که رها کردی ادامه بده.'
+                                {activeSection === 'activity'
+                                    ? 'فایل‌های نیمه‌کاره و تازه‌های کمد یک‌جا جمع شده‌اند.'
                                     : `${shownFolderCount.toLocaleString('fa-IR')} کشو و ${shownFileCount.toLocaleString('fa-IR')} فایل نمایش داده می‌شود`}
                             </p>
                         </div>
@@ -710,9 +742,9 @@ export default function FileBrowser() {
                         ) : null}
                     </div>
                     {activeSection === 'files' && (
-                        <div className="max-w-7xl mx-auto mb-6 rounded-2xl border border-white/[0.07] bg-dark-900/70 p-3 sm:p-4 shadow-lg shadow-black/10">
-                            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                                <div className="grid grid-cols-3 gap-1 rounded-xl bg-dark-950/70 p-1" aria-label="انتخاب نوع محتوا">
+                        <div className="max-w-7xl mx-auto mb-4">
+                            <div className="flex flex-col gap-2">
+                                <div className="grid grid-cols-3 gap-1 rounded-xl bg-dark-900/70 p-1" aria-label="انتخاب نوع محتوا">
                                     {([
                                         ['all', 'همه', Boxes],
                                         ['files', 'فایل‌ها', FileText],
@@ -724,23 +756,20 @@ export default function FileBrowser() {
                                         </button>
                                     ))}
                                 </div>
-                                <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
-                                    <button title="فیلتر نوع فایل" onClick={() => { setShowFilters(value => !value); setShowSort(false); }} disabled={contentScope === 'folders'} className={`btn-secondary flex min-w-0 flex-col items-center justify-center gap-1 px-2 py-2 text-[11px] sm:flex-row sm:gap-2 sm:px-4 sm:text-sm disabled:cursor-not-allowed disabled:opacity-40 ${fileTypeFilter.length ? 'border-primary-500/40 text-primary-200' : ''}`}>
+                                <div className="no-scrollbar flex items-center gap-2 overflow-x-auto py-1">
+                                    <button title="فیلتر نوع فایل" onClick={() => { setShowFilters(value => !value); setShowSort(false); }} disabled={contentScope === 'folders'} className={`flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-full border border-white/10 bg-dark-900/70 px-3 text-xs text-dark-200 transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${fileTypeFilter.length ? 'border-primary-500/40 text-primary-200' : ''}`}>
                                         <SlidersHorizontal className="h-4 w-4" />
                                         <span className="truncate">نوع فایل</span>
                                         {fileTypeFilter.length > 0 && <span className="rounded-full bg-primary-500 px-1.5 text-[10px] text-white">{fileTypeFilter.length.toLocaleString('fa-IR')}</span>}
                                     </button>
-                                    <button title="مرتب‌سازی" onClick={() => { setShowSort(value => !value); setShowFilters(false); }} className={`btn-secondary flex min-w-0 flex-col items-center justify-center gap-1 px-2 py-2 text-[11px] sm:flex-row sm:gap-2 sm:px-4 sm:text-sm ${showSort ? 'border-primary-500/40 text-primary-200' : ''}`}>
+                                    <button title="مرتب‌سازی" onClick={() => { setShowSort(value => !value); setShowFilters(false); }} className={`flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-full border border-white/10 bg-dark-900/70 px-3 text-xs text-dark-200 transition-colors ${showSort ? 'border-primary-500/40 text-primary-200' : ''}`}>
                                         <ArrowDown className="h-4 w-4" /> <span className="truncate">مرتب‌سازی</span>
                                     </button>
-                                    <button title="تازه‌سازی فهرست" onClick={handleRefresh} className="btn-secondary flex min-w-0 flex-col items-center justify-center gap-1 px-2 py-2 text-[11px] sm:flex-row sm:gap-2 sm:px-4 sm:text-sm">
-                                        <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} /> <span className="truncate">تازه‌سازی</span>
-                                    </button>
-                                    <button title="انتخاب چند فایل یا کشو" onClick={() => setSelectionMode(value => !value)} className={`btn-secondary flex min-w-0 flex-col items-center justify-center gap-1 px-2 py-2 text-[11px] sm:flex-row sm:gap-2 sm:px-4 sm:text-sm ${selectionMode ? 'border-primary-500/40 bg-primary-500/10 text-primary-200' : ''}`}>
+                                    <button title="انتخاب چند فایل یا کشو" onClick={() => { setSelectionMode(value => !value); clearSelection(); }} className={`flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-full border border-white/10 bg-dark-900/70 px-3 text-xs text-dark-200 transition-colors ${selectionMode ? 'border-primary-500/40 bg-primary-500/10 text-primary-200' : ''}`}>
                                         <ListChecks className="h-4 w-4" /> <span className="truncate">{selectionMode ? 'پایان انتخاب' : 'انتخاب گروهی'}</span>
                                     </button>
                                     {(selectionMode || selectedItems.length > 0) && (
-                                        <button onClick={toggleSelectAll} disabled={visibleItemCount === 0} className="col-span-2 btn-secondary flex items-center justify-center gap-2 text-xs sm:text-sm disabled:opacity-40">
+                                        <button onClick={toggleSelectAll} disabled={visibleItemCount === 0} className="flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-full border border-white/10 bg-dark-900/70 px-3 text-xs text-dark-200 disabled:opacity-40">
                                             {allVisibleSelected ? <CheckSquare className="h-4 w-4 text-primary-300" /> : <Square className="h-4 w-4" />}
                                             {allVisibleSelected ? 'لغو انتخاب همه' : 'انتخاب همه'}
                                         </button>

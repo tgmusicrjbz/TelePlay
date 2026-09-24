@@ -3,7 +3,6 @@ import { useEffect, useState } from 'react';
 import { useCurrentUser, useLoginWithCode, useBotInfo, useGenerateLoginCode, useVerifyLoginCode } from './lib/api';
 import FileBrowser from './components/FileBrowser';
 import GlobalContextMenu from './components/GlobalContextMenu';
-import logo from './assets/logo.png';
 import PwaManager from './components/PwaManager';
 
 function AuthCallback() {
@@ -129,7 +128,7 @@ function LoginPage() {
 
             <div className="glass-panel p-8 max-w-md w-full text-center animate-scale-in relative z-10">
                 {/* Logo */}
-                <img src={logo} alt="کمد" className="w-24 h-24 mx-auto mb-6 drop-shadow-2xl" />
+                <img src="/komod.svg" alt="کمد" className="w-24 h-24 mx-auto mb-6 drop-shadow-2xl" />
 
                 <h1 className="text-3xl font-bold mb-2 text-gradient">
                     کمد

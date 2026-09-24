@@ -1,5 +1,5 @@
-const CACHE_NAME = 'komod-shell-v1';
-const CORE_ASSETS = ['/', '/index.html', '/offline.html', '/manifest.webmanifest', '/logo.png'];
+const CACHE_NAME = 'komod-shell-v2';
+const CORE_ASSETS = ['/', '/index.html', '/offline.html', '/manifest.webmanifest', '/komod.svg'];
 
 self.addEventListener('install', event => {
   event.waitUntil(

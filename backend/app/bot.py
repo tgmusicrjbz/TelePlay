@@ -12,7 +12,7 @@ import logging
 import random
 import json
 from datetime import datetime, timedelta, timezone
-from pyrogram import filters
+from pyrogram import filters, enums
 from pyrogram.errors import MessageNotModified
 from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from sqlalchemy import delete, func, select, or_
@@ -336,12 +336,12 @@ async def get_active_drawer_id(telegram_id: int) -> int | None:
 def get_web_app_button(telegram_id: int, text: str = "🌐 Open Web") -> InlineKeyboardButton:
     """Use a Mini App for HTTPS; local HTTP needs the code login flow."""
     if not settings.web_base_url.startswith("https://"):
-        return InlineKeyboardButton(text, callback_data="get_web_link")
+        return InlineKeyboardButton(text, callback_data="get_web_link", style=enums.ButtonStyle.SUCCESS)
     from urllib.parse import quote
     token = create_access_token(telegram_id)
     encoded_token = quote(token, safe='')
     web_url = f"{settings.web_base_url}/auth?token={encoded_token}"
-    return InlineKeyboardButton(text, web_app=WebAppInfo(url=web_url))
+    return InlineKeyboardButton(text, web_app=WebAppInfo(url=web_url), style=enums.ButtonStyle.SUCCESS)
 
 
 def local_web_instructions() -> str:
@@ -442,8 +442,8 @@ def list_action_rows(telegram_id: int, target: str) -> list[list[InlineKeyboardB
         count = to_persian_digits(str(len(batch_selections.get(telegram_id, set()))))
         return [
             [InlineKeyboardButton(f"☑️ انتخاب‌شده‌ها: {count} مورد", callback_data="noop")],
-            [InlineKeyboardButton("🗃️ انتقال به کشو", callback_data="batch_move:0"), InlineKeyboardButton("✏️ ویرایش نام/متن", callback_data="batch_edit")],
-            [InlineKeyboardButton("🗑️ حذف گروهی", callback_data="batch_delete"), InlineKeyboardButton("✖️ انصراف از انتخاب", callback_data="batch_cancel")],
+            [InlineKeyboardButton("🗃️ انتقال به کشو", callback_data="batch_move:0", style=enums.ButtonStyle.PRIMARY), InlineKeyboardButton("✏️ ویرایش نام/متن", callback_data="batch_edit")],
+            [InlineKeyboardButton("🗑️ حذف گروهی", callback_data="batch_delete", style=enums.ButtonStyle.DANGER), InlineKeyboardButton("✖️ انصراف از انتخاب", callback_data="batch_cancel")],
         ]
     return [[InlineKeyboardButton("☑️ انتخاب گروهی", callback_data=f"batch_start:{target}"), InlineKeyboardButton("↕️ مرتب‌سازی", callback_data=f"sort_open:{target}")]]
 
@@ -492,13 +492,17 @@ async def render_folder_page(message: Message, telegram_id: int, parent_id: int 
     page = min(max(page, 0), max_page)
     current_items = items[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
     buttons = []
-    for kind, item in current_items:
-        if kind == "root":
-            buttons.append([InlineKeyboardButton(f"📦 فایل‌های بیرون از کشو ({to_persian_digits(str(item))})", callback_data="rootfiles:0")])
-        elif kind == "folder":
-            buttons.append([InlineKeyboardButton(f"🗃️ {item.name[:40]}", callback_data=f"folder:{item.id}:0")])
-        else:
-            buttons.append([file_list_button(item, telegram_id)])
+    root_items = [item for kind, item in current_items if kind == "root"]
+    folder_items = [item for kind, item in current_items if kind == "folder"]
+    file_items = [item for kind, item in current_items if kind == "file"]
+    for item in root_items:
+        buttons.append([InlineKeyboardButton(f"📦 فایل‌های بیرون از کشو ({to_persian_digits(str(item))})", callback_data="rootfiles:0", style=enums.ButtonStyle.PRIMARY)])
+    for index in range(0, len(folder_items), 2):
+        buttons.append([
+            InlineKeyboardButton(f"🗃️ {folder.name[:22]}", callback_data=f"folder:{folder.id}:0", style=enums.ButtonStyle.PRIMARY)
+            for folder in folder_items[index:index + 2]
+        ])
+    buttons.extend([[file_list_button(item, telegram_id)] for item in file_items])
     if total > PAGE_SIZE:
         buttons.append(pagination_row(f"folders:{parent_id or 0}", page, total))
     if telegram_id in batch_return_targets:
@@ -514,8 +518,8 @@ async def render_folder_page(message: Message, telegram_id: int, parent_id: int 
         buttons.extend([
             [InlineKeyboardButton("↕️ مرتب‌سازی کشوها", callback_data=f"sort_open:folders:0:{page}"),
              InlineKeyboardButton("☑️ فیلتر نوع", callback_data="library_filter:folders:0")],
-            [InlineKeyboardButton("➕ ساخت کشو", callback_data="create_folder"),
-             InlineKeyboardButton("🔍 جست‌وجو", callback_data="search_choose")],
+            [InlineKeyboardButton("➕ ساخت کشو", callback_data="create_folder", style=enums.ButtonStyle.SUCCESS),
+             InlineKeyboardButton("🔍 جست‌وجو", callback_data="search_choose", style=enums.ButtonStyle.PRIMARY)],
             [InlineKeyboardButton("🚪 منوی اصلی", callback_data="home")],
         ])
     if parent:
@@ -727,11 +731,11 @@ HELP_TEXT = (
 
 def main_menu_keyboard(telegram_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🗄️ کشوهای من", callback_data="folders:0:0"),
-         InlineKeyboardButton("📦 همه‌ی فایل‌ها", callback_data="files:0")],
-        [InlineKeyboardButton("➕ کشوی تازه", callback_data="create_folder"),
-         InlineKeyboardButton("🔍 بگرد تو کمد", callback_data="search_choose")],
-        [InlineKeyboardButton("🎧 پلی‌لیست‌های من", callback_data="playlists:0")],
+        [InlineKeyboardButton("🗄️ کشوهای من", callback_data="folders:0:0", style=enums.ButtonStyle.PRIMARY),
+         InlineKeyboardButton("📦 همه‌ی فایل‌ها", callback_data="files:0", style=enums.ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("➕ کشوی تازه", callback_data="create_folder", style=enums.ButtonStyle.SUCCESS),
+         InlineKeyboardButton("🔍 بگرد تو کمد", callback_data="search_choose", style=enums.ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("🎧 پلی‌لیست‌های من", callback_data="playlists:0", style=enums.ButtonStyle.PRIMARY)],
         [get_web_app_button(telegram_id, "✨ باز کردن نسخهٔ وب")],
         [InlineKeyboardButton("💡 راهنمای کمد", callback_data="show_help")],
     ])
@@ -776,7 +780,7 @@ async def render_playlists(message: Message, telegram_id: int, page: int = 0) ->
     if len(playlists) > PAGE_SIZE:
         buttons.append(pagination_row("playlists", page, len(playlists)))
     buttons.extend([
-        [InlineKeyboardButton("➕ پلی‌لیست تازه", callback_data="playlist_new")],
+        [InlineKeyboardButton("➕ پلی‌لیست تازه", callback_data="playlist_new", style=enums.ButtonStyle.SUCCESS)],
         [InlineKeyboardButton("🚪 منوی اصلی", callback_data="home")],
     ])
     text = "🎧 **پلی‌لیست‌های کمد**\n\nآهنگ‌ها و ویدیوها رو با ترتیب دلخواهت کنار هم بچین و پشت‌سرهم پخش کن."
@@ -802,9 +806,9 @@ async def render_playlist_detail(message: Message, telegram_id: int, playlist_id
     if len(items) > page_size:
         buttons.append(pagination_row(f"playlist:{playlist.id}", page, len(items)))
     buttons.extend([
-        [InlineKeyboardButton("▶️ پخش همه (از اول)", callback_data=f"plplay:{playlist.id}:0")],
-        [InlineKeyboardButton("🔀 پخش شافل", callback_data=f"plshuffle:{playlist.id}"), InlineKeyboardButton("➕ افزودن فایل", callback_data=f"pladd:{playlist.id}:0")],
-        [InlineKeyboardButton("⚙️ تنظیمات نام و توضیح", callback_data=f"plsettings:{playlist.id}"), InlineKeyboardButton("🗑️ حذف پلی‌لیست", callback_data=f"pldelete:{playlist.id}")],
+        [InlineKeyboardButton("▶️ پخش همه (از اول)", callback_data=f"plplay:{playlist.id}:0", style=enums.ButtonStyle.SUCCESS)],
+        [InlineKeyboardButton("🔀 پخش شافل", callback_data=f"plshuffle:{playlist.id}", style=enums.ButtonStyle.PRIMARY), InlineKeyboardButton("➕ افزودن فایل", callback_data=f"pladd:{playlist.id}:0", style=enums.ButtonStyle.SUCCESS)],
+        [InlineKeyboardButton("⚙️ تنظیمات نام و توضیح", callback_data=f"plsettings:{playlist.id}"), InlineKeyboardButton("🗑️ حذف پلی‌لیست", callback_data=f"pldelete:{playlist.id}", style=enums.ButtonStyle.DANGER)],
         [InlineKeyboardButton("↩️ لیست پلی‌لیست‌ها", callback_data="playlists:0"), InlineKeyboardButton("🚪 منوی اصلی", callback_data="home")],
     ])
     total_duration = sum(item.file.duration or 0 for item in items)
@@ -1537,7 +1541,7 @@ async def handle_callback(client, callback: CallbackQuery):
     elif data.startswith("pldelete:"):
         playlist_id = int(data.split(":")[1])
         await callback.message.edit("پلی‌لیست حذف بشه؟ فایل‌های اصلی داخل کمد می‌مونن.", reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🗑️ بله، حذفش کن", callback_data=f"pldeleteok:{playlist_id}"),
+            [InlineKeyboardButton("🗑️ بله، حذفش کن", callback_data=f"pldeleteok:{playlist_id}", style=enums.ButtonStyle.DANGER),
              InlineKeyboardButton("↩️ انصراف", callback_data=f"playlist:{playlist_id}:0")],
         ]))
         await callback.answer()
@@ -1656,7 +1660,7 @@ async def handle_callback(client, callback: CallbackQuery):
         await callback.message.edit(
             f"🗑️ **حذف {to_persian_digits(str(count))} فایل**\nاین فایل‌ها از کمد و کانال ذخیره‌سازی حذف می‌شن. مطمئنی؟",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🗑️ بله، حذفشون کن", callback_data="batch_delete_confirm")],
+                [InlineKeyboardButton("🗑️ بله، حذفشون کن", callback_data="batch_delete_confirm", style=enums.ButtonStyle.DANGER)],
                 [InlineKeyboardButton("↩️ برگشت", callback_data="batch_return")],
             ]),
         )
@@ -1979,11 +1983,11 @@ async def handle_callback(client, callback: CallbackQuery):
         await callback.message.edit(
             f"⚙️ **مدیریت کشوی {escape_markdown(folder.name)}**\n\n📝 توضیحات: {escape_markdown(folder.description) if folder.description else 'هنوز توضیحی نداره.'}",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("➕ ساخت زیرکشو", callback_data=f"create_folder:{folder.id}")],
+                [InlineKeyboardButton("➕ ساخت زیرکشو", callback_data=f"create_folder:{folder.id}", style=enums.ButtonStyle.SUCCESS)],
                 [InlineKeyboardButton("✏️ ویرایش نام/توضیح", callback_data=f"folder_edit:{folder.id}")],
                 [InlineKeyboardButton("🗃️ انتقال کشو", callback_data=f"movefolder:{folder.id}"),
                  InlineKeyboardButton("↕️ مرتب‌سازی", callback_data=f"sort_open:folders:{folder.id}:0")],
-                [InlineKeyboardButton("🗑️ حذف کشو", callback_data=f"delfolder:{folder.id}")],
+                [InlineKeyboardButton("🗑️ حذف کشو", callback_data=f"delfolder:{folder.id}", style=enums.ButtonStyle.DANGER)],
                 [InlineKeyboardButton("↩️ بازگشت به کشو", callback_data=f"folder:{folder.id}:0"),
                  InlineKeyboardButton("🚪 منوی اصلی", callback_data="home")],
             ]),
@@ -2459,7 +2463,7 @@ async def handle_callback(client, callback: CallbackQuery):
             f"🗑️ فایل «{display_filename(file_name)}» پاک بشه؟\nاین کار برگشت‌پذیر نیست.",
             reply_markup=InlineKeyboardMarkup([
                 [
-                    InlineKeyboardButton("🗑️ حذف فایل", callback_data=f"confirmdelfile:{file_id}"),
+                    InlineKeyboardButton("🗑️ حذف فایل", callback_data=f"confirmdelfile:{file_id}", style=enums.ButtonStyle.DANGER),
                     InlineKeyboardButton("✖️ انصراف", callback_data=f"openfile:{file_id}"),
                 ]
             ])

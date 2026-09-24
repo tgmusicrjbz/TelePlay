@@ -38,13 +38,8 @@ export default function FileCard({
 
     const handleClick = (e: React.MouseEvent) => {
         e.stopPropagation();
-        onSelect(e.ctrlKey || e.metaKey);
-    };
-
-    const handleDoubleClick = (e: React.MouseEvent) => {
-        e.stopPropagation();
-        if (selectionMode) return;
-        onPlay();
+        if (selectionMode) onSelect(true);
+        else onPlay();
     };
 
     // Generate authenticated stream URL for thumbnail
@@ -84,10 +79,9 @@ export default function FileCard({
                     }`}
                 onClick={handleClick}
                 onContextMenu={handleContextMenu}
-                onDoubleClick={handleDoubleClick}
                 data-file-id={file.id}
             >
-                {selectionMode && <div className={`absolute left-2 top-2 z-10 flex h-5 w-5 items-center justify-center rounded-md border ${selected ? 'border-primary-400 bg-primary-500 text-white' : 'border-white/30 bg-dark-900/90'}`}>{selected && <Check className="h-3.5 w-3.5" />}</div>}
+                {selectionMode && <div className="absolute left-0 top-0 z-10 flex h-11 w-11 items-center justify-center"><div className={`flex h-6 w-6 items-center justify-center rounded-md border ${selected ? 'border-primary-400 bg-primary-500 text-white' : 'border-white/30 bg-dark-900/90'}`}>{selected && <Check className="h-4 w-4" />}</div></div>}
                 <div className="w-12 h-12 rounded-lg bg-dark-800/80 flex items-center justify-center overflow-hidden shrink-0 border border-white/[0.05]">
                     {authorizedThumbnailUrl ? (
                         <img src={authorizedThumbnailUrl} alt={file.file_name} className="w-full h-full object-cover" />
@@ -156,10 +150,9 @@ export default function FileCard({
                 }`}
             onClick={handleClick}
             onContextMenu={handleContextMenu}
-            onDoubleClick={handleDoubleClick}
             data-file-id={file.id}
         >
-            {selectionMode && <div className={`absolute left-2 top-2 z-20 flex h-5 w-5 items-center justify-center rounded-md border ${selected ? 'border-primary-400 bg-primary-500 text-white' : 'border-white/30 bg-dark-900/90'}`}>{selected && <Check className="h-3.5 w-3.5" />}</div>}
+            {selectionMode && <div className="absolute left-0 top-0 z-20 flex h-11 w-11 items-center justify-center"><div className={`flex h-6 w-6 items-center justify-center rounded-md border ${selected ? 'border-primary-400 bg-primary-500 text-white' : 'border-white/30 bg-dark-900/90'}`}>{selected && <Check className="h-4 w-4" />}</div></div>}
             <div className={`aspect-video rounded-lg mb-3 overflow-hidden relative border ${selected ? 'border-primary-500/20' : 'border-white/[0.05]'} bg-dark-900/50`}>
                 {authorizedThumbnailUrl ? (
                     <>

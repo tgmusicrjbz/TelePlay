@@ -30,7 +30,7 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
     };
 
     const handleClick = (e: React.MouseEvent) => {
-        if (onSelect && (selectionMode || e.ctrlKey || e.metaKey || e.shiftKey)) {
+        if (onSelect && selectionMode) {
             e.preventDefault();
             e.stopPropagation();
             onSelect(true);
@@ -102,14 +102,14 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
                     {/* Selection indicator for list view */}
                     <div 
                         onClick={handleSelectClick}
-                        className={`absolute -top-1 -left-1 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all
+                        className={`absolute -top-2 -left-2 h-11 w-11 rounded-full flex items-center justify-center transition-all ${selectionMode ? 'pointer-events-auto' : 'pointer-events-none'}
                             ${selected 
-                                ? 'bg-primary-500 border-dark-950 scale-110 shadow-lg shadow-primary-500/20' 
+                                ? 'text-white'
                                 : selectionMode
-                                    ? 'bg-dark-800 border-white/30 opacity-100'
-                                    : 'bg-dark-800 border-white/10 opacity-0 group-hover:opacity-100 hover:border-primary-500/50'}`}
+                                    ? 'opacity-100'
+                                    : 'opacity-0 group-hover:opacity-100'}`}
                     >
-                        <div className={`w-1.5 h-1.5 rounded-full bg-white transition-transform ${selected ? 'scale-100' : 'scale-0'}`} />
+                        <div className={`flex h-6 w-6 items-center justify-center rounded-full border-2 ${selected ? 'border-dark-950 bg-primary-500 shadow-lg' : 'border-white/30 bg-dark-800'}`}><div className={`w-1.5 h-1.5 rounded-full bg-white transition-transform ${selected ? 'scale-100' : 'scale-0'}`} /></div>
                     </div>
                 </div>
 
@@ -167,14 +167,14 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
                     {/* Selection indicator for grid view */}
                     <div 
                         onClick={handleSelectClick}
-                        className={`absolute -top-1.5 -left-1.5 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all z-10
+                        className={`absolute -top-2 -left-2 h-11 w-11 rounded-full flex items-center justify-center transition-all z-10 ${selectionMode ? 'pointer-events-auto' : 'pointer-events-none'}
                             ${selected 
-                                ? 'bg-primary-500 border-dark-900 scale-110 shadow-lg shadow-primary-500/20' 
+                                ? 'text-white'
                                 : selectionMode
-                                    ? 'bg-dark-800 border-white/30 opacity-100'
-                                    : 'bg-dark-800 border-white/10 opacity-0 group-hover:opacity-100 hover:border-primary-500/50'}`}
+                                    ? 'opacity-100'
+                                    : 'opacity-0 group-hover:opacity-100'}`}
                     >
-                         <div className={`w-1.5 h-1.5 rounded-full bg-white transition-transform ${selected ? 'scale-100' : 'scale-0'}`} />
+                         <div className={`flex h-6 w-6 items-center justify-center rounded-full border-2 ${selected ? 'border-dark-900 bg-primary-500 shadow-lg' : 'border-white/30 bg-dark-800'}`}><div className={`w-1.5 h-1.5 rounded-full bg-white transition-transform ${selected ? 'scale-100' : 'scale-0'}`} /></div>
                     </div>
                 </div>
                 
