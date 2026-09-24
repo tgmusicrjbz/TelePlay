@@ -28,6 +28,25 @@ class User(Base):
     playlists: Mapped[List["Playlist"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
+class BotUserState(Base):
+    """Persistent Telegram bot UI state for one user."""
+    __tablename__ = "bot_user_states"
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    current_drawer_id: Mapped[Optional[int]] = mapped_column(Integer)
+    library_filters_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    search_filters_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    search_query: Mapped[Optional[str]] = mapped_column(String(100))
+    sort_preferences_json: Mapped[str] = mapped_column(Text, default='[["created", "desc"]]', nullable=False)
+    batch_selection_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    batch_target: Mapped[Optional[str]] = mapped_column(String(255))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
 class Folder(Base):
     """User-created folder for organizing files."""
     __tablename__ = "folders"

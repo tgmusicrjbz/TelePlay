@@ -10,6 +10,7 @@ import asyncio
 import contextlib
 import logging
 import random
+import json
 from datetime import datetime, timedelta, timezone
 from pyrogram import filters
 from pyrogram.errors import MessageNotModified
@@ -20,7 +21,7 @@ from sqlalchemy.orm import selectinload
 
 from .telegram import tg_client, forward_to_storage_channel, delete_from_storage_channel
 from .database import async_session
-from .models import User, File, Folder, LoginCode, Playlist, PlaylistItem
+from .models import User, File, Folder, LoginCode, Playlist, PlaylistItem, BotUserState
 from .config import get_settings
 from .auth import create_access_token
 from .services import escape_like
@@ -41,6 +42,8 @@ sort_drafts: dict[int, list[tuple[str, str]]] = {}
 sort_return_targets: dict[int, str] = {}
 batch_selections: dict[int, set[int]] = {}
 batch_return_targets: dict[int, str] = {}
+current_drawers: dict[int, int | None] = {}
+loaded_ui_state_users: set[int] = set()
 PAGE_SIZE = 8
 PREVIEW_TTL_SECONDS = 300
 TEHRAN_TZ = timezone(timedelta(hours=3, minutes=30))
@@ -87,12 +90,12 @@ def sort_keyboard(telegram_id: int) -> InlineKeyboardMarkup:
         row = []
         for field in fields[start:start + 2]:
             current = next(((index, direction) for index, (name, direction) in enumerate(draft) if name == field), None)
-            prefix = f"{current[0] + 1}. {'↑' if current[1] == 'asc' else '↓'} " if current else ""
+            prefix = f"{to_persian_digits(str(current[0] + 1))}. {'↑' if current[1] == 'asc' else '↓'} " if current else ""
             row.append(InlineKeyboardButton(f"{prefix}{SORT_LABELS[field]}", callback_data=f"sort_toggle:{field}"))
         buttons.append(row)
     buttons.extend([
-        [InlineKeyboardButton("اعمال مرتب‌سازی", callback_data="sort_apply"), InlineKeyboardButton("پیش‌فرض", callback_data="sort_default")],
-        [InlineKeyboardButton("لغو", callback_data="sort_cancel")],
+        [InlineKeyboardButton("💾 اعمال مرتب‌سازی", callback_data="sort_apply"), InlineKeyboardButton("↩️ حالت پیش‌فرض", callback_data="sort_default")],
+        [InlineKeyboardButton("✖️ انصراف", callback_data="sort_cancel")],
     ])
     return InlineKeyboardMarkup(buttons)
 
@@ -125,27 +128,41 @@ def owned_playlist(playlist_id: int, telegram_id: int):
 
 
 def format_size(size_bytes: int) -> str:
-    """Format bytes to human readable size."""
-    for unit in ['B', 'KB', 'MB', 'GB']:
+    """Format bytes with Persian digits and localized units."""
+    for unit in ["بایت", "کیلوبایت", "مگابایت", "گیگابایت"]:
         if size_bytes < 1024:
-            return f"{size_bytes:.1f} {unit}"
+            return to_persian_digits(f"{size_bytes:.1f}") + f" {unit}"
         size_bytes /= 1024
-    return f"{size_bytes:.1f} TB"
+    return to_persian_digits(f"{size_bytes:.1f}") + " ترابایت"
 
 
 def format_duration(seconds: int) -> str:
-    """Format seconds to human readable duration."""
+    """Format seconds as friendly Persian text."""
     if not seconds:
         return ""
     hours, remainder = divmod(seconds, 3600)
     minutes, secs = divmod(remainder, 60)
     if hours:
-        return f"{hours}h {minutes}m"
-    return f"{minutes}m {secs}s"
+        parts = [f"{to_persian_digits(str(hours))} ساعت"]
+        if minutes:
+            parts.append(f"{to_persian_digits(str(minutes))} دقیقه")
+        return " و ".join(parts)
+    if minutes:
+        parts = [f"{to_persian_digits(str(minutes))} دقیقه"]
+        if secs:
+            parts.append(f"{to_persian_digits(str(secs))} ثانیه")
+        return " و ".join(parts)
+    return f"{to_persian_digits(str(secs))} ثانیه"
 
 
 def to_persian_digits(value: str) -> str:
     return value.translate(str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹"))
+
+
+def display_filename(value: str, *, limit: int | None = None) -> str:
+    """Keep mixed Persian/Latin file names visually stable in RTL messages."""
+    shown = value[:limit] if limit else value
+    return f"\u200e{escape_markdown(shown)}\u200e"
 
 
 def gregorian_to_jalali(gy: int, gm: int, gd: int) -> tuple[int, int, int]:
@@ -230,6 +247,92 @@ async def get_or_create_user(telegram_id: int, username: str = None,
         return user
 
 
+def _json_list(value: str | None, default: list) -> list:
+    try:
+        result = json.loads(value or "")
+        return result if isinstance(result, list) else list(default)
+    except (TypeError, ValueError):
+        return list(default)
+
+
+async def load_user_ui_state(telegram_id: int, *, force: bool = False) -> None:
+    """Hydrate volatile bot dictionaries from the persistent DB state."""
+    if telegram_id in loaded_ui_state_users and not force:
+        return
+    async with async_session() as db:
+        user = (await db.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
+        if user is None:
+            return
+        state = await db.get(BotUserState, user.id)
+        if state is None:
+            state = BotUserState(user_id=user.id)
+            db.add(state)
+            await db.commit()
+        current_drawers[telegram_id] = state.current_drawer_id
+        library_filters[telegram_id] = set(_json_list(state.library_filters_json, []))
+        search_filters[telegram_id] = set(_json_list(state.search_filters_json, []))
+        if state.search_query:
+            search_queries[telegram_id] = state.search_query
+        else:
+            search_queries.pop(telegram_id, None)
+        sort_items = _json_list(state.sort_preferences_json, [["created", "desc"]])
+        sort_preferences[telegram_id] = [tuple(item) for item in sort_items if isinstance(item, list) and len(item) == 2]
+        selected = {int(item) for item in _json_list(state.batch_selection_json, []) if str(item).isdigit()}
+        if selected:
+            valid_selected = (await db.execute(
+                select(File.id).where(File.user_id == user.id, File.id.in_(selected))
+            )).scalars().all()
+            selected = set(valid_selected)
+        if state.batch_target:
+            batch_return_targets[telegram_id] = state.batch_target
+            batch_selections[telegram_id] = selected
+        else:
+            batch_return_targets.pop(telegram_id, None)
+            batch_selections.pop(telegram_id, None)
+        loaded_ui_state_users.add(telegram_id)
+
+
+async def persist_user_ui_state(telegram_id: int) -> None:
+    """Persist filters, sorting, selection and current drawer across restarts."""
+    async with async_session() as db:
+        user = (await db.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
+        if user is None:
+            return
+        state = await db.get(BotUserState, user.id)
+        if state is None:
+            state = BotUserState(user_id=user.id)
+            db.add(state)
+        state.current_drawer_id = current_drawers.get(telegram_id)
+        state.library_filters_json = json.dumps(sorted(library_filters.get(telegram_id, set())))
+        state.search_filters_json = json.dumps(sorted(search_filters.get(telegram_id, set())))
+        state.search_query = search_queries.get(telegram_id)
+        state.sort_preferences_json = json.dumps(sort_preferences.get(telegram_id, [("created", "desc")]))
+        state.batch_selection_json = json.dumps(sorted(batch_selections.get(telegram_id, set())))
+        state.batch_target = batch_return_targets.get(telegram_id)
+        await db.commit()
+
+
+async def set_current_drawer(telegram_id: int, folder_id: int | None) -> None:
+    await load_user_ui_state(telegram_id)
+    if current_drawers.get(telegram_id) == folder_id:
+        return
+    current_drawers[telegram_id] = folder_id
+    await persist_user_ui_state(telegram_id)
+
+
+async def get_active_drawer_id(telegram_id: int) -> int | None:
+    await load_user_ui_state(telegram_id)
+    folder_id = current_drawers.get(telegram_id)
+    if folder_id is None:
+        return None
+    async with async_session() as db:
+        folder = (await db.execute(owned_folder(folder_id, telegram_id))).scalar_one_or_none()
+    if folder is None:
+        await set_current_drawer(telegram_id, None)
+        return None
+    return folder_id
+
+
 def get_web_app_button(telegram_id: int, text: str = "🌐 Open Web") -> InlineKeyboardButton:
     """Use a Mini App for HTTPS; local HTTP needs the code login flow."""
     if not settings.web_base_url.startswith("https://"):
@@ -244,8 +347,8 @@ def get_web_app_button(telegram_id: int, text: str = "🌐 Open Web") -> InlineK
 def local_web_instructions() -> str:
     return (
         "🌐 **نسخهٔ وب کمد**\n\n"
-        f"در مرورگر همین کامپیوتر `{settings.web_base_url}` را باز کنید. "
-        "کد ورود صفحه را با دستور `/login CODE` برای ربات بفرستید."
+        f"توی مرورگر همین کامپیوتر `{settings.web_base_url}` رو باز کن. "
+        "کد ورود صفحه رو با دستور `/login CODE` برای ربات بفرست."
     )
 
 
@@ -321,26 +424,26 @@ def pagination_row(prefix: str, page: int, total: int) -> list[InlineKeyboardBut
     row = []
     if page > 0:
         row.append(InlineKeyboardButton("◀️ قبلی", callback_data=f"{prefix}:{page - 1}"))
-    row.append(InlineKeyboardButton(f"{page + 1} از {pages}", callback_data="noop"))
+    row.append(InlineKeyboardButton(f"صفحه {to_persian_digits(str(page + 1))} از {to_persian_digits(str(pages))}", callback_data="noop"))
     if page + 1 < pages:
-        row.append(InlineKeyboardButton("بعدی ▶️", callback_data=f"{prefix}:{page + 1}"))
+        row.append(InlineKeyboardButton("▶️ بعدی", callback_data=f"{prefix}:{page + 1}"))
     return row
 
 
 def file_list_button(file: File, telegram_id: int) -> InlineKeyboardButton:
     selected = file.id in batch_selections.get(telegram_id, set())
-    label = f"{'✅ ' if selected else ''}{FILE_ICONS.get(file.file_type, '📎')} {file.file_name[:38]}"
+    label = f"{'✅ ' if selected else ''}{FILE_ICONS.get(file.file_type, '📎')} \u200e{file.file_name[:38]}\u200e"
     callback_data = f"batch_toggle:{file.id}" if telegram_id in batch_return_targets else f"openfile:{file.id}"
     return InlineKeyboardButton(label, callback_data=callback_data)
 
 
 def list_action_rows(telegram_id: int, target: str) -> list[list[InlineKeyboardButton]]:
     if telegram_id in batch_return_targets:
-        count = len(batch_selections.get(telegram_id, set()))
+        count = to_persian_digits(str(len(batch_selections.get(telegram_id, set()))))
         return [
-            [InlineKeyboardButton(f"انتخاب‌شده‌ها: {count}", callback_data="noop")],
-            [InlineKeyboardButton("🗃️ انتقال", callback_data="batch_move:0"), InlineKeyboardButton("✏️ ویرایش", callback_data="batch_edit")],
-            [InlineKeyboardButton("🗑 حذف", callback_data="batch_delete"), InlineKeyboardButton("لغو انتخاب", callback_data="batch_cancel")],
+            [InlineKeyboardButton(f"☑️ انتخاب‌شده‌ها: {count} مورد", callback_data="noop")],
+            [InlineKeyboardButton("🗃️ انتقال به کشو", callback_data="batch_move:0"), InlineKeyboardButton("✏️ ویرایش نام/متن", callback_data="batch_edit")],
+            [InlineKeyboardButton("🗑️ حذف گروهی", callback_data="batch_delete"), InlineKeyboardButton("✖️ انصراف از انتخاب", callback_data="batch_cancel")],
         ]
     return [[InlineKeyboardButton("☑️ انتخاب گروهی", callback_data=f"batch_start:{target}"), InlineKeyboardButton("↕️ مرتب‌سازی", callback_data=f"sort_open:{target}")]]
 
@@ -355,16 +458,17 @@ async def folder_path(db, folder: Folder | None) -> str:
 
 
 async def render_folder_page(message: Message, telegram_id: int, parent_id: int | None = None, page: int = 0) -> None:
+    await load_user_ui_state(telegram_id)
     detail_back_targets[telegram_id] = f"folders:{parent_id or 0}:{page}"
     selected_types = library_filters.get(telegram_id, set())
     async with async_session() as db:
         user = (await db.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
         if not user:
-            await message.edit("برای شروع، دستور /start را بفرستید.")
+            await message.edit("برای شروع، دستور /start رو بفرست.")
             return
         parent = (await db.execute(owned_folder(parent_id, telegram_id))).scalar_one_or_none() if parent_id else None
         if parent_id and not parent:
-            await message.edit("این کشو دیگر وجود ندارد.", reply_markup=main_menu_keyboard(telegram_id))
+            await message.edit("این کشو دیگه وجود نداره.", reply_markup=main_menu_keyboard(telegram_id))
             return
         folders = (await db.execute(select(Folder).where(
             Folder.user_id == user.id,
@@ -377,6 +481,8 @@ async def render_folder_page(message: Message, telegram_id: int, parent_id: int 
         root_file_count = len(files) if parent_id is None else 0
         path = await folder_path(db, parent)
 
+    await set_current_drawer(telegram_id, parent_id)
+
     if parent_id is None:
         items = [("root", root_file_count)] + sort_library_items([("folder", item) for item in folders], telegram_id)
     else:
@@ -388,36 +494,34 @@ async def render_folder_page(message: Message, telegram_id: int, parent_id: int 
     buttons = []
     for kind, item in current_items:
         if kind == "root":
-            buttons.append([InlineKeyboardButton(f"📦 فایل‌های بیرون از کشو ({item})", callback_data="rootfiles:0")])
+            buttons.append([InlineKeyboardButton(f"📦 فایل‌های بیرون از کشو ({to_persian_digits(str(item))})", callback_data="rootfiles:0")])
         elif kind == "folder":
             buttons.append([InlineKeyboardButton(f"🗃️ {item.name[:40]}", callback_data=f"folder:{item.id}:0")])
         else:
             buttons.append([file_list_button(item, telegram_id)])
     if total > PAGE_SIZE:
         buttons.append(pagination_row(f"folders:{parent_id or 0}", page, total))
-    if parent_id is None and telegram_id not in batch_return_targets:
-        buttons.append([InlineKeyboardButton("↕️ مرتب‌سازی کشوها", callback_data=f"sort_open:folders:0:{page}")])
-    else:
+    if telegram_id in batch_return_targets:
         buttons.extend(list_action_rows(telegram_id, f"folders:{parent_id or 0}:{page}"))
-    if parent:
+    elif parent:
         buttons.extend([
-            [InlineKeyboardButton("➕ ساخت زیرکشو", callback_data=f"create_folder:{parent.id}"),
-             InlineKeyboardButton("✏️ ویرایش کشو", callback_data=f"folder_actions:{parent.id}")],
-            [InlineKeyboardButton("☑️ انتخاب نوع", callback_data=f"library_filter:folders:{parent.id}"),
-             InlineKeyboardButton("↩️ کشوی قبلی", callback_data=f"folders:{parent.parent_id or 0}:0")],
-            [InlineKeyboardButton("🚪 منوی اصلی", callback_data="home")],
+            [InlineKeyboardButton("☑️ انتخاب گروهی", callback_data=f"batch_start:folders:{parent.id}:{page}"),
+             InlineKeyboardButton("⚙️ مدیریت این کشو", callback_data=f"folder_actions:{parent.id}")],
+            [InlineKeyboardButton("↩️ کشوی قبلی", callback_data=f"folders:{parent.parent_id or 0}:0"),
+             InlineKeyboardButton("🚪 منوی اصلی", callback_data="home")],
         ])
     else:
         buttons.extend([
+            [InlineKeyboardButton("↕️ مرتب‌سازی کشوها", callback_data=f"sort_open:folders:0:{page}"),
+             InlineKeyboardButton("☑️ فیلتر نوع", callback_data="library_filter:folders:0")],
             [InlineKeyboardButton("➕ ساخت کشو", callback_data="create_folder"),
-             InlineKeyboardButton("☑️ انتخاب نوع", callback_data="library_filter:folders:0")],
-            [InlineKeyboardButton("🔍 بگرد تو کمد", callback_data="search_choose")],
+             InlineKeyboardButton("🔍 جست‌وجو", callback_data="search_choose")],
             [InlineKeyboardButton("🚪 منوی اصلی", callback_data="home")],
         ])
     if parent:
-        text = f"🗃️ **{path}**\n{len(folders)} کشو · {len(files)} فایل"
+        text = f"🗃️ **{escape_markdown(path)}**\n{to_persian_digits(str(len(folders)))} کشو · {to_persian_digits(str(len(files)))} فایل"
     else:
-        text = f"🗄️ **کشوهای کمد**\n{len(folders)} کشو · {root_file_count} فایل بیرون از کشو"
+        text = f"🗄️ **کشوهای کمد**\n{to_persian_digits(str(len(folders)))} کشو · {to_persian_digits(str(root_file_count))} فایل بیرون از کشو"
     if selected_types:
         text += "\n☑️ نوع‌ها: " + "، ".join(TYPE_LABELS[item] for item in sorted(selected_types))
     if parent and parent.description:
@@ -428,12 +532,13 @@ async def render_folder_page(message: Message, telegram_id: int, parent_id: int 
 
 
 async def render_root_files(message: Message, telegram_id: int, page: int = 0) -> None:
+    await set_current_drawer(telegram_id, None)
     detail_back_targets[telegram_id] = f"rootfiles:{page}"
     selected_types = library_filters.get(telegram_id, set())
     async with async_session() as db:
         user = (await db.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
         if not user:
-            await message.edit("برای شروع، دستور /start را بفرستید.")
+            await message.edit("برای شروع، دستور /start رو بفرست.")
             return
         query = select(File).where(File.user_id == user.id, File.folder_id.is_(None))
         if selected_types:
@@ -446,11 +551,12 @@ async def render_root_files(message: Message, telegram_id: int, page: int = 0) -
     if len(files) > PAGE_SIZE:
         buttons.append(pagination_row("rootfiles", page, len(files)))
     buttons.extend(list_action_rows(telegram_id, f"rootfiles:{page}"))
-    buttons.extend([
-        [InlineKeyboardButton("☑️ انتخاب نوع", callback_data="library_filter:rootfiles")],
-        [InlineKeyboardButton("↩️ کشوهای کمد", callback_data="folders:0:0"), InlineKeyboardButton("🚪 منوی اصلی", callback_data="home")],
-    ])
-    text = f"📦 **فایل‌های بیرون از کشو**\n{len(files)} مورد"
+    if telegram_id not in batch_return_targets:
+        buttons.extend([
+            [InlineKeyboardButton("☑️ فیلتر نوع", callback_data="library_filter:rootfiles")],
+            [InlineKeyboardButton("↩️ کشوهای کمد", callback_data="folders:0:0"), InlineKeyboardButton("🚪 منوی اصلی", callback_data="home")],
+        ])
+    text = f"📦 **فایل‌های بیرون از کشو**\n{to_persian_digits(str(len(files)))} مورد"
     if selected_types:
         text += "\n☑️ نوع‌ها: " + "، ".join(TYPE_LABELS[item] for item in sorted(selected_types))
     if not files:
@@ -459,12 +565,13 @@ async def render_root_files(message: Message, telegram_id: int, page: int = 0) -
 
 
 async def render_recent_files(message: Message, telegram_id: int, page: int = 0) -> None:
+    await set_current_drawer(telegram_id, None)
     detail_back_targets[telegram_id] = f"files:{page}"
     selected_types = library_filters.get(telegram_id, set())
     async with async_session() as db:
         user = (await db.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
         if not user:
-            await message.edit("برای شروع، دستور /start را بفرستید.")
+            await message.edit("برای شروع، دستور /start رو بفرست.")
             return
         query = select(File).where(File.user_id == user.id)
         if selected_types:
@@ -477,28 +584,29 @@ async def render_recent_files(message: Message, telegram_id: int, page: int = 0)
     if len(files) > PAGE_SIZE:
         buttons.append(pagination_row("files", page, len(files)))
     buttons.extend(list_action_rows(telegram_id, f"files:{page}"))
-    buttons.extend([[InlineKeyboardButton("☑️ انتخاب نوع", callback_data="library_filter:files"), InlineKeyboardButton("🔍 بگرد تو کمد", callback_data="search_choose")], [InlineKeyboardButton("🗄️ کشوها", callback_data="folders:0:0"), InlineKeyboardButton("🚪 منوی اصلی", callback_data="home")]])
-    text = "🗃️ **فایل‌های داخل کشو**"
+    if telegram_id not in batch_return_targets:
+        buttons.extend([[InlineKeyboardButton("🔍 جست‌وجو", callback_data="search_choose"), InlineKeyboardButton("☑️ فیلتر نوع", callback_data="library_filter:files")], [InlineKeyboardButton("🗄️ کشوهای من", callback_data="folders:0:0"), InlineKeyboardButton("🚪 منوی اصلی", callback_data="home")]])
+    text = "📦 **همه‌ی فایل‌های کمد**"
     if selected_types:
         text += "\n☑️ نوع‌ها: " + "، ".join(TYPE_LABELS[item] for item in sorted(selected_types))
     if not files:
-        text += "\n\nهنوز چیزی ذخیره نکرده‌اید. فایل، عکس یا متن بفرستید."
+        text += "\n\nهنوز چیزی ذخیره نکردی؛ یه فایل، عکس یا متن برام بفرست."
     await message.edit(text, reply_markup=InlineKeyboardMarkup(buttons))
 
 
 def type_filter_keyboard(selected: set[str], context: str, include_folder: bool = False) -> InlineKeyboardMarkup:
     types = ["video", "audio", "image", "text", "document"] + (["folder"] if include_folder else [])
     buttons = []
-    for index in range(0, len(types), 2):
+    for index in range(0, len(types), 3):
         row = []
-        for item in types[index:index + 2]:
+        for item in types[index:index + 3]:
             icon = "🗃️" if item == "folder" else FILE_ICONS[item]
             mark = "✅ " if item in selected else ""
             row.append(InlineKeyboardButton(f"{mark}{icon} {TYPE_LABELS[item]}", callback_data=f"{context}_filter_toggle:{item}"))
         buttons.append(row)
-    buttons.append([InlineKeyboardButton("همهٔ موارد", callback_data=f"{context}_filter_all"), InlineKeyboardButton("پاک‌کردن انتخاب‌ها", callback_data=f"{context}_filter_clear")])
-    apply_label = "ادامه" if context == "search" else "اعمال"
-    buttons.append([InlineKeyboardButton(apply_label, callback_data=f"{context}_filter_apply"), InlineKeyboardButton("لغو", callback_data=f"{context}_filter_cancel")])
+    buttons.append([InlineKeyboardButton("🧹 پاک‌کردن انتخاب‌ها", callback_data=f"{context}_filter_clear"), InlineKeyboardButton("✅ همهٔ موارد", callback_data=f"{context}_filter_all")])
+    apply_label = "➡️ ادامه" if context == "search" else "💾 اعمال فیلتر"
+    buttons.append([InlineKeyboardButton("↩️ انصراف", callback_data=f"{context}_filter_cancel"), InlineKeyboardButton(apply_label, callback_data=f"{context}_filter_apply")])
     return InlineKeyboardMarkup(buttons)
 
 
@@ -508,13 +616,14 @@ def search_type_keyboard(telegram_id: int | None = None) -> InlineKeyboardMarkup
 
 
 async def render_search_results(message: Message, telegram_id: int, page: int = 0) -> None:
+    await set_current_drawer(telegram_id, None)
     query = search_queries.get(telegram_id, "").strip()
     selected_types = search_filters.get(telegram_id, set())
     file_types = selected_types.intersection(FILE_ICONS)
     include_files = not selected_types or bool(file_types)
     include_folders = not selected_types or "folder" in selected_types
     if not query:
-        await message.edit("عبارت جست‌وجو در دسترس نیست. دوباره جست‌وجو کنید.", reply_markup=main_menu_keyboard(telegram_id))
+        await message.edit("عبارت جست‌وجو در دسترس نیست؛ دوباره جست‌وجو کن.", reply_markup=main_menu_keyboard(telegram_id))
         return
     async with async_session() as db:
         user = (await db.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
@@ -540,12 +649,13 @@ async def render_search_results(message: Message, telegram_id: int, page: int = 
     if len(items) > PAGE_SIZE:
         buttons.append(pagination_row("search", page, len(items)))
     buttons.extend(list_action_rows(telegram_id, f"search:{page}"))
-    buttons.extend([
-        [InlineKeyboardButton("🔍 عبارت تازه", callback_data="search_again"), InlineKeyboardButton("☑️ تغییر نوع‌ها", callback_data="search_refine")],
-        [InlineKeyboardButton("🚪 منوی اصلی", callback_data="home")],
-    ])
+    if telegram_id not in batch_return_targets:
+        buttons.extend([
+            [InlineKeyboardButton("🔍 عبارت تازه", callback_data="search_again"), InlineKeyboardButton("☑️ تغییر نوع‌ها", callback_data="search_refine")],
+            [InlineKeyboardButton("🚪 منوی اصلی", callback_data="home")],
+        ])
     selected_label = "همهٔ موارد" if not selected_types else "، ".join(TYPE_LABELS[item] for item in sorted(selected_types))
-    text = f"🔍 **نتایج «{escape_markdown(query)}»**\nنوع‌ها: {selected_label} · {len(items)} مورد"
+    text = f"🔍 **نتایج «{escape_markdown(query)}»**\nنوع‌ها: {selected_label} · {to_persian_digits(str(len(items)))} مورد"
     if not items:
         text += "\n\nکمد رو گشتم ولی چیزی پیدا نکردم! عبارتت یا دسته‌بندی رو تغییر بده 🌱"
     await message.edit(text, reply_markup=InlineKeyboardMarkup(buttons))
@@ -566,7 +676,7 @@ async def render_list_target(message: Message, telegram_id: int, target: str) ->
 
 
 def file_detail_text(file: File) -> str:
-    text = f"{FILE_ICONS.get(file.file_type, '📎')} **{escape_markdown(file.file_name)}**\n📦 حجم: {format_size(file.file_size)}"
+    text = f"{FILE_ICONS.get(file.file_type, '📎')} **{display_filename(file.file_name)}**\n📦 حجم: {format_size(file.file_size)}"
     if file.duration:
         text += f"\n⏱ مدت: {format_duration(file.duration)}"
     text += f"\n📅 آپلود: {format_jalali(file.created_at)}"
@@ -594,7 +704,7 @@ def file_detail_keyboard(file: File, back_callback: str = "files:0") -> InlineKe
          InlineKeyboardButton("🗃️ انتقال", callback_data=f"move:{file.id}")],
         description_row,
         [share_button],
-        [InlineKeyboardButton("🗑 حذف", callback_data=f"delfile:{file.id}"),
+        [InlineKeyboardButton("🗑️ حذف", callback_data=f"delfile:{file.id}"),
          InlineKeyboardButton("↩️ نتایج جست‌وجو" if back_callback.startswith("search:") else "↩️ بازگشت", callback_data=back_callback)],
         [InlineKeyboardButton("🚪 منوی اصلی", callback_data="home")],
     ])
@@ -617,30 +727,38 @@ HELP_TEXT = (
 
 def main_menu_keyboard(telegram_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📦 فایل‌های من", callback_data="files:0"),
-         InlineKeyboardButton("🗄️ کشوهای من", callback_data="folders:0:0")],
-        [InlineKeyboardButton("🔍 بگرد تو کمد", callback_data="search_choose"),
-         InlineKeyboardButton("➕ کشوی تازه", callback_data="create_folder")],
+        [InlineKeyboardButton("🗄️ کشوهای من", callback_data="folders:0:0"),
+         InlineKeyboardButton("📦 همه‌ی فایل‌ها", callback_data="files:0")],
+        [InlineKeyboardButton("➕ کشوی تازه", callback_data="create_folder"),
+         InlineKeyboardButton("🔍 بگرد تو کمد", callback_data="search_choose")],
         [InlineKeyboardButton("🎧 پلی‌لیست‌های من", callback_data="playlists:0")],
-        [get_web_app_button(telegram_id, "✨ نسخهٔ وب")],
-        [InlineKeyboardButton("💡 راهنمای من", callback_data="show_help")],
+        [get_web_app_button(telegram_id, "✨ باز کردن نسخهٔ وب")],
+        [InlineKeyboardButton("💡 راهنمای کمد", callback_data="show_help")],
+    ])
+
+
+def help_keyboard(telegram_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [get_web_app_button(telegram_id, "✨ ورود به نسخهٔ وب")],
+        [InlineKeyboardButton("🚪 بازگشت به منوی اصلی", callback_data="home")],
     ])
 
 
 def recent_files_view(files: list[File], telegram_id: int) -> tuple[str, InlineKeyboardMarkup]:
     if not files:
-        return "📭 کمد هنوز خالی است. یک فایل، عکس یا پیام متنی بفرستید.", main_menu_keyboard(telegram_id)
+        return "📭 کمد هنوز خالیه؛ یه فایل، عکس یا پیام متنی بفرست.", main_menu_keyboard(telegram_id)
     icons = {"video": "🎬", "audio": "🎵", "document": "📄", "image": "🖼", "text": "📝"}
     buttons = [
-        [InlineKeyboardButton(f"{icons.get(file.file_type, '📎')} {file.file_name[:36]}", callback_data=f"openfile:{file.id}")]
+        [InlineKeyboardButton(f"{icons.get(file.file_type, '📎')} \u200e{file.file_name[:36]}\u200e", callback_data=f"openfile:{file.id}")]
         for file in files
     ]
     buttons.append([InlineKeyboardButton("🗄️ کشوها", callback_data="back_folders"),
                     get_web_app_button(telegram_id, "🌐 نسخهٔ وب")])
-    return "📁 **موارد اخیر**\nبرای دیدن جزئیات و مدیریت، روی هر مورد بزنید.", InlineKeyboardMarkup(buttons)
+    return "📁 **موارد اخیر**\nبرای دیدن جزئیات و مدیریتش، روی هر مورد بزن.", InlineKeyboardMarkup(buttons)
 
 
 async def render_playlists(message: Message, telegram_id: int, page: int = 0) -> None:
+    await set_current_drawer(telegram_id, None)
     async with async_session() as db:
         user = (await db.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
         playlists = (await db.execute(
@@ -652,7 +770,7 @@ async def render_playlists(message: Message, telegram_id: int, page: int = 0) ->
     page = min(max(page, 0), max(0, (len(playlists) - 1) // PAGE_SIZE))
     shown = playlists[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
     buttons = [[InlineKeyboardButton(
-        f"🎧 {playlist.name[:32]} · {len(playlist.items)} مورد",
+        f"🎧 {playlist.name[:32]} · {to_persian_digits(str(len(playlist.items)))} مورد",
         callback_data=f"playlist:{playlist.id}:0",
     )] for playlist in shown]
     if len(playlists) > PAGE_SIZE:
@@ -678,19 +796,19 @@ async def render_playlist_detail(message: Message, telegram_id: int, playlist_id
     page = min(max(page, 0), max(0, (len(items) - 1) // page_size))
     shown = items[page * page_size:(page + 1) * page_size]
     buttons = [[InlineKeyboardButton(
-        f"{FILE_ICONS.get(item.file.file_type, '🎵')} {(page * page_size + index + 1)}. {item.file.file_name[:30]}",
+        f"{FILE_ICONS.get(item.file.file_type, '🎵')} {to_persian_digits(str(page * page_size + index + 1))}. \u200e{item.file.file_name[:30]}\u200e",
         callback_data=f"plitem:{playlist.id}:{item.file.id}:{page}",
     )] for index, item in enumerate(shown)]
     if len(items) > page_size:
         buttons.append(pagination_row(f"playlist:{playlist.id}", page, len(items)))
     buttons.extend([
-        [InlineKeyboardButton("▶️ پخش همه", callback_data=f"plplay:{playlist.id}:0"), InlineKeyboardButton("🔀 شافل", callback_data=f"plshuffle:{playlist.id}")],
-        [InlineKeyboardButton("➕ افزودن فایل", callback_data=f"pladd:{playlist.id}:0"), InlineKeyboardButton("✏️ ویرایش", callback_data=f"pledit:{playlist.id}")],
-        [InlineKeyboardButton("🗑 حذف پلی‌لیست", callback_data=f"pldelete:{playlist.id}"), InlineKeyboardButton("↩️ پلی‌لیست‌ها", callback_data="playlists:0")],
-        [InlineKeyboardButton("🚪 منوی اصلی", callback_data="home")],
+        [InlineKeyboardButton("▶️ پخش همه (از اول)", callback_data=f"plplay:{playlist.id}:0")],
+        [InlineKeyboardButton("🔀 پخش شافل", callback_data=f"plshuffle:{playlist.id}"), InlineKeyboardButton("➕ افزودن فایل", callback_data=f"pladd:{playlist.id}:0")],
+        [InlineKeyboardButton("⚙️ تنظیمات نام و توضیح", callback_data=f"plsettings:{playlist.id}"), InlineKeyboardButton("🗑️ حذف پلی‌لیست", callback_data=f"pldelete:{playlist.id}")],
+        [InlineKeyboardButton("↩️ لیست پلی‌لیست‌ها", callback_data="playlists:0"), InlineKeyboardButton("🚪 منوی اصلی", callback_data="home")],
     ])
     total_duration = sum(item.file.duration or 0 for item in items)
-    text = f"🎼 **{escape_markdown(playlist.name)}**\n{len(items)} مورد"
+    text = f"🎼 **{escape_markdown(playlist.name)}**\n{to_persian_digits(str(len(items)))} مورد"
     if total_duration:
         text += f" · {format_duration(total_duration)}"
     if playlist.description:
@@ -712,11 +830,11 @@ async def send_playlist_media(client, callback: CallbackQuery, playlist_id: int,
     previous_index = (index - 1) % len(items)
     next_index = (index + 1) % len(items)
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("⏮ قبلی", callback_data=f"plplay:{playlist_id}:{previous_index}"),
-         InlineKeyboardButton(f"{index + 1}/{len(items)}", callback_data="noop"),
-         InlineKeyboardButton("بعدی ⏭", callback_data=f"plplay:{playlist_id}:{next_index}")],
+        [InlineKeyboardButton("⏭️ بعدی", callback_data=f"plplay:{playlist_id}:{next_index}"),
+         InlineKeyboardButton(f"{to_persian_digits(str(index + 1))}/{to_persian_digits(str(len(items)))}", callback_data="noop"),
+         InlineKeyboardButton("⏮️ قبلی", callback_data=f"plplay:{playlist_id}:{previous_index}")],
         [InlineKeyboardButton("↩️ برگشت به پلی‌لیست", callback_data=f"plback:{playlist_id}:{index // PAGE_SIZE}"),
-         InlineKeyboardButton("🗑 بستن", callback_data="plclose")],
+         InlineKeyboardButton("✖️ بستن پیام", callback_data="plclose")],
     ])
     try:
         preview = await client.copy_message(callback.message.chat.id, settings.telegram_storage_channel_id, item.file.channel_message_id)
@@ -744,8 +862,8 @@ async def check_auth(client, message: Message):
         # But for /start, we should give a polite rejection
         if message.text and message.text.startswith("/start"):
             await message.reply(
-                "🚫 **دسترسی محدود است**\n\n"
-                "این ربات فقط برای کاربران مجاز فعال است.\n"
+                "🚫 **دسترسی محدوده**\n\n"
+                "این ربات فقط برای کاربرهای مجاز فعاله.\n"
                 f"شناسهٔ تلگرام شما: `{message.from_user.id}`"
             )
         
@@ -763,6 +881,8 @@ async def start_command(client, message: Message):
         message.from_user.first_name,
         message.from_user.last_name,
     )
+    await load_user_ui_state(message.from_user.id)
+    await set_current_drawer(message.from_user.id, None)
     
     # Check for deep-linked login codes (e.g. /start ABCDEF)
     if len(message.command) > 1:
@@ -782,14 +902,14 @@ async def start_command(client, message: Message):
                     )
                     return
                 elif login_code.telegram_id:
-                     await message.reply("⚠️ این کد قبلاً استفاده شده است.")
+                     await message.reply("⚠️ این کد قبلاً استفاده شده.")
                      return
                 else:
-                     await message.reply("❌ اعتبار این کد تمام شده است.")
+                     await message.reply("❌ اعتبار این کد تموم شده.")
                      return
 
     await message.reply(
-        f"👋 **سلام {message.from_user.first_name or 'رفیق'}! به کمدت خوش اومدی 🗄️**\n\n"
+        f"👋 **سلام {message.from_user.first_name or 'رفیق'} عزیز! به کمدت خوش اومدی 🗄️**\n\n"
         "اینجا می‌تونی 🎬 فیلم، 🎵 آهنگ، 🖼 عکس، 📄 سند و 📝 متن‌هات رو یک‌جا نگه داری. "
         "هرچی بفرستی برات ذخیره می‌کنم و کپشنش هم به‌عنوان توضیحات کنار فایل می‌مونه 😉\n\n"
         "آماده‌ای کمدتو بچینیم؟ از یکی از گزینه‌های پایین شروع کن 👇",
@@ -800,7 +920,9 @@ async def start_command(client, message: Message):
 @tg_client.on_message(filters.command("help") & filters.private)
 async def help_command(client, message: Message):
     """Show help message."""
-    await message.reply(HELP_TEXT, reply_markup=main_menu_keyboard(message.from_user.id))
+    await load_user_ui_state(message.from_user.id)
+    await set_current_drawer(message.from_user.id, None)
+    await message.reply(HELP_TEXT, reply_markup=help_keyboard(message.from_user.id))
 
 
 @tg_client.on_message(filters.command("myfiles") & filters.private)
@@ -828,12 +950,12 @@ async def playlists_command(client, message: Message):
 async def newfolder_command(client, message: Message):
     """Create a new folder."""
     if len(message.command) < 2:
-        await message.reply("نام کشو را بعد از دستور بنویسید؛ نمونه: `/newfolder فیلم‌ها`.")
+        await message.reply("اسم کشو رو بعد از دستور بنویس؛ نمونه: `/newfolder فیلم‌ها`.")
         return
     
     folder_name = " ".join(message.command[1:]).strip()
     if not folder_name or len(folder_name) > 255:
-        await message.reply("نام کشو باید بین ۱ تا ۲۵۵ نویسه باشد.")
+        await message.reply("اسم کشو باید بین ۱ تا ۲۵۵ نویسه باشه.")
         return
     
     async with async_session() as db:
@@ -844,7 +966,7 @@ async def newfolder_command(client, message: Message):
         user = user_result.scalar_one_or_none()
         
         if not user:
-            await message.reply("برای شروع، دستور /start را بفرستید.")
+            await message.reply("برای شروع، دستور /start رو بفرست.")
             return
         
         # Check if folder exists
@@ -856,7 +978,7 @@ async def newfolder_command(client, message: Message):
             )
         )
         if existing.scalar_one_or_none():
-            await message.reply(f"❌ کشویی با نام «{folder_name}» در این محل وجود دارد.")
+            await message.reply(f"❌ یه کشو با اسم «{folder_name}» همین‌جا داری.")
             return
         
         # Create folder
@@ -868,10 +990,7 @@ async def newfolder_command(client, message: Message):
         f"✅ کشوی «{folder_name}» ساخته شد.",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🗃️ باز کردن کشو", callback_data=f"folder:{folder.id}:0")],
-            [InlineKeyboardButton("✏️ تغییر نام", callback_data=f"renamefolder:{folder.id}"),
-             InlineKeyboardButton("🗑 حذف", callback_data=f"delfolder:{folder.id}")],
-            [InlineKeyboardButton("📝 افزودن توضیحات", callback_data=f"folderdesc:{folder.id}")],
-            [InlineKeyboardButton("🚪 منوی اصلی", callback_data="home")],
+            [InlineKeyboardButton("↩️ بازگشت به کشوهای کمد", callback_data="folders:0:0")],
         ]),
     )
 
@@ -881,10 +1000,13 @@ async def search_command(client, message: Message):
     """Search file names and descriptions."""
     query = " ".join(message.command[1:]).strip()
     if not query:
-        await message.reply("🔎 عبارت را بعد از دستور بنویسید؛ نمونه: `/search سفر`.")
+        await message.reply("🔎 عبارت رو بعد از دستور بنویس؛ نمونه: `/search سفر`.")
         return
+    await load_user_ui_state(message.from_user.id)
     search_queries[message.from_user.id] = query[:100]
     search_filters[message.from_user.id] = set()
+    current_drawers[message.from_user.id] = None
+    await persist_user_ui_state(message.from_user.id)
     panel = await message.reply("در حال جست‌وجو…")
     await render_search_results(panel, message.from_user.id)
 
@@ -907,7 +1029,7 @@ async def web_command(client, message: Message):
     
     await message.reply(
         "🌐 **نسخهٔ وب کمد**\n\n"
-        "با دکمهٔ زیر باز کنید یا لینک را در مرورگر خود باز کنید. این لینک را در اختیار دیگران نگذارید.\n"
+        "با دکمهٔ زیر بازش کن یا لینک رو توی مرورگرت باز کن. این لینک رو برای کسی نفرست.\n"
         f"{web_url}",
         reply_markup=InlineKeyboardMarkup([[get_web_app_button(message.from_user.id, "🌐 باز کردن نسخهٔ وب")]])
     )
@@ -937,15 +1059,15 @@ async def login_command(client, message: Message):
             login_code = result.scalar_one_or_none()
             
             if not login_code:
-                await message.reply("❌ کد معتبر نیست. کد روی دستگاه را بررسی کنید.")
+                await message.reply("❌ کد معتبر نیست؛ کد روی دستگاه رو دوباره بررسی کن.")
                 return
             
             if login_code.expires_at < datetime.utcnow():
-                await message.reply("❌ اعتبار کد تمام شده است. کد جدید بسازید.")
+                await message.reply("❌ اعتبار کد تموم شده؛ یه کد تازه بساز.")
                 return
                 
             if login_code.telegram_id:
-                await message.reply("❌ این کد قبلاً استفاده شده است.")
+                await message.reply("❌ این کد قبلاً استفاده شده.")
                 return
 
             # Claim the code
@@ -974,7 +1096,7 @@ async def login_command(client, message: Message):
     await message.reply(
         "🔑 **کد ورود شما:**\n\n"
         f"`{code}`\n\n"
-        "این کد را در صفحهٔ ورود وارد کنید. اعتبار: ۵ دقیقه."
+        "این کد رو توی صفحهٔ ورود وارد کن. اعتبارش ۵ دقیقه‌ست."
     )
 
     return
@@ -992,11 +1114,11 @@ async def logout_all_command(client, message: Message):
     )
     
     await message.reply(
-        "⚠️ از همهٔ دستگاه‌ها خارج شوید؟\nنشست نسخهٔ وب و دستگاه‌های متصل باطل می‌شود.",
+        "⚠️ از همهٔ دستگاه‌ها خارج بشی؟\nنشست نسخهٔ وب و دستگاه‌های متصل باطل می‌شه.",
         reply_markup=InlineKeyboardMarkup([
             [
                 InlineKeyboardButton("✅ خروج از همه", callback_data="logout_all_confirm"),
-                InlineKeyboardButton("انصراف", callback_data="logout_all_cancel")
+                InlineKeyboardButton("✖️ انصراف", callback_data="logout_all_cancel")
             ]
         ])
     )
@@ -1013,6 +1135,7 @@ async def handle_file(client, message: Message):
         message.from_user.first_name,
         message.from_user.last_name,
     )
+    active_drawer_id = await get_active_drawer_id(message.from_user.id)
     
     # Determine file type and extract metadata
     if message.video:
@@ -1060,6 +1183,7 @@ async def handle_file(client, message: Message):
         async with async_session() as db:
             file = File(
                 user_id=user.id,
+                folder_id=active_drawer_id,
                 channel_message_id=forwarded.id,
                 file_type=file_type,
                 **file_info
@@ -1073,22 +1197,27 @@ async def handle_file(client, message: Message):
         
         response = (
             f"✅ **ذخیره شد**\n\n"
-            f"{emoji} **{escape_markdown(file_info['file_name'])}**\n"
+            f"{emoji} **{display_filename(file_info['file_name'])}**\n"
             f"📦 {format_size(file_info['file_size'])}\n"
         )
         
         if file_info['duration']:
             response += f"⏱ {format_duration(file_info['duration'])}\n"
-        response += "\nاز دکمه‌ها برای مدیریت فایل استفاده کنید."
+        response += "\nبا دکمه‌های پایین فایل رو مدیریت کن."
         
         if file.description:
             response += f"\n📝 {escape_markdown(file.description[:250])}"
+        if active_drawer_id:
+            async with async_session() as db:
+                drawer = await db.get(Folder, active_drawer_id)
+            if drawer:
+                response += f"\n🗃️ در کشوی «{escape_markdown(drawer.name)}» ذخیره شد."
         detail_back_targets[message.from_user.id] = "files:0"
         await status_msg.edit(response, reply_markup=file_detail_keyboard(file))
         
     except Exception as e:
         logger.exception("Telegram upload failed for user %s: %s", message.from_user.id, e)
-        await status_msg.edit("❌ ذخیرهٔ فایل ناموفق بود. دوباره تلاش کنید.")
+        await status_msg.edit("❌ فایل ذخیره نشد؛ دوباره تلاش کن.")
 
 
 @tg_client.on_message(filters.private & filters.text & ~filters.regex(r"^/"))
@@ -1103,12 +1232,13 @@ async def handle_text_note(client, message: Message):
         message.from_user.id, message.from_user.username,
         message.from_user.first_name, message.from_user.last_name,
     )
+    active_drawer_id = await get_active_drawer_id(message.from_user.id)
     try:
         stored = await forward_to_storage_channel(message)
         title = sanitize_filename(content.strip().splitlines()[0][:80])
         async with async_session() as db:
             note = File(
-                user_id=user.id, channel_message_id=stored.id,
+                user_id=user.id, folder_id=active_drawer_id, channel_message_id=stored.id,
                 file_id=f"text:{stored.id}", file_unique_id=f"text:{stored.id}",
                 file_name=title, file_size=len(content.encode("utf-8")),
                 mime_type="text/plain; charset=utf-8", file_type="text",
@@ -1123,7 +1253,7 @@ async def handle_text_note(client, message: Message):
         )
     except Exception as error:
         logger.exception("Telegram text upload failed for user %s: %s", message.from_user.id, error)
-        await message.reply("❌ ذخیرهٔ متن ناموفق بود. دوباره تلاش کنید.")
+        await message.reply("❌ متن ذخیره نشد؛ دوباره تلاش کن.")
 
 
 # ============== Callback Query Handlers ==============
@@ -1132,8 +1262,9 @@ async def handle_text_note(client, message: Message):
 async def handle_callback(client, callback: CallbackQuery):
     """Handle inline button callbacks."""
     if settings.auth_users and callback.from_user.id not in settings.auth_users:
-        await callback.answer("دسترسی به این ربات مجاز نیست.", show_alert=True)
+        await callback.answer("اجازهٔ استفاده از این ربات رو نداری.", show_alert=True)
         return
+    await load_user_ui_state(callback.from_user.id)
     data = callback.data
 
     if data.startswith("input_action:"):
@@ -1161,7 +1292,7 @@ async def handle_callback(client, callback: CallbackQuery):
     elif data == "playlist_new":
         pending_input_chats.add(callback.message.chat.id)
         prompt = await callback.message.reply(
-            "🎼 اسم پلی‌لیست رو بفرست. اگر توضیح هم می‌خوای، بعد از `|` بنویس؛ مثل:\n`رانندگی | آهنگ‌های جاده`",
+            "🎼 اسم پلی‌لیست تازه رو بفرست.",
             reply_markup=input_keyboard(),
         )
         await callback.answer()
@@ -1171,8 +1302,7 @@ async def handle_callback(client, callback: CallbackQuery):
             if action == "cancel" or reply is None or not reply.text:
                 await callback.message.edit("ساخت پلی‌لیست لغو شد.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ پلی‌لیست‌ها", callback_data="playlists:0")]]))
                 return
-            name, _, description = reply.text.partition("|")
-            name = name.strip()[:255]
+            name = reply.text.strip()[:255]
             if not name:
                 await callback.answer("اسم پلی‌لیست نمی‌تونه خالی باشه.", show_alert=True)
                 return
@@ -1182,7 +1312,7 @@ async def handle_callback(client, callback: CallbackQuery):
                 if duplicate:
                     await callback.message.edit("یه پلی‌لیست با این اسم داری.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ پلی‌لیست‌ها", callback_data="playlists:0")]]))
                     return
-                playlist = Playlist(user_id=user.id, name=name, description=description.strip()[:1024] or None)
+                playlist = Playlist(user_id=user.id, name=name)
                 db.add(playlist)
                 try:
                     await db.commit()
@@ -1201,34 +1331,79 @@ async def handle_callback(client, callback: CallbackQuery):
             await safe_delete(prompt)
             await safe_delete(reply)
 
-    elif data.startswith("pledit:"):
+    elif data.startswith("plsettings:") or data.startswith("pledit:"):
         playlist_id = int(data.split(":")[1])
         async with async_session() as db:
             playlist = (await db.execute(owned_playlist(playlist_id, callback.from_user.id))).scalar_one_or_none()
         if playlist is None:
             await callback.answer("پلی‌لیست پیدا نشد.", show_alert=True)
             return
-        pending_input_chats.add(callback.message.chat.id)
-        prompt = await callback.message.reply("اسم جدید و توضیحات رو به شکل `اسم | توضیحات` بفرست.", reply_markup=input_keyboard())
+        await callback.message.edit(
+            f"⚙️ **تنظیمات پلی‌لیست {escape_markdown(playlist.name)}**",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("✏️ تغییر نام", callback_data=f"plrename:{playlist_id}"),
+                 InlineKeyboardButton("📝 ویرایش توضیحات", callback_data=f"pldesc:{playlist_id}")],
+                *([[InlineKeyboardButton("🧹 پاک‌کردن توضیحات", callback_data=f"plcleardesc:{playlist_id}")]] if playlist.description else []),
+                [InlineKeyboardButton("↩️ برگشت به پلی‌لیست", callback_data=f"playlist:{playlist_id}:0")],
+            ]),
+        )
         await callback.answer()
+
+    elif data.startswith("plrename:"):
+        playlist_id = int(data.split(":")[1])
+        pending_input_chats.add(callback.message.chat.id)
+        prompt = await callback.message.reply("✏️ اسم جدید پلی‌لیست رو بفرست.", reply_markup=input_keyboard())
         reply = None
         try:
             reply, action = await wait_for_input(client, callback.message.chat.id)
             if action == "cancel" or reply is None or not reply.text:
+                await render_playlist_detail(callback.message, callback.from_user.id, playlist_id)
                 return
-            name, _, description = reply.text.partition("|")
-            if not name.strip():
+            name = reply.text.strip()[:255]
+            if not name:
                 return
             async with async_session() as db:
                 playlist = (await db.execute(owned_playlist(playlist_id, callback.from_user.id))).scalar_one()
-                playlist.name = name.strip()[:255]
-                playlist.description = description.strip()[:1024] or None
+                playlist.name = name
                 await db.commit()
             await render_playlist_detail(callback.message, callback.from_user.id, playlist_id)
         finally:
             pending_input_chats.discard(callback.message.chat.id)
             await safe_delete(prompt)
             await safe_delete(reply)
+
+    elif data.startswith("pldesc:"):
+        playlist_id = int(data.split(":")[1])
+        pending_input_chats.add(callback.message.chat.id)
+        prompt = await callback.message.reply("📝 توضیحات جدید پلی‌لیست رو بفرست.", reply_markup=input_keyboard(allow_clear=True))
+        await callback.answer()
+        reply = None
+        try:
+            reply, action = await wait_for_input(client, callback.message.chat.id)
+            if action == "cancel" or (reply and reply.text and reply.text.startswith("/cancel")):
+                await render_playlist_detail(callback.message, callback.from_user.id, playlist_id)
+                return
+            description = None if action == "clear" else (reply.text.strip()[:1024] if reply and reply.text else None)
+            async with async_session() as db:
+                playlist = (await db.execute(owned_playlist(playlist_id, callback.from_user.id))).scalar_one_or_none()
+                if playlist:
+                    playlist.description = description or None
+                    await db.commit()
+            await render_playlist_detail(callback.message, callback.from_user.id, playlist_id)
+        finally:
+            pending_input_chats.discard(callback.message.chat.id)
+            await safe_delete(prompt)
+            await safe_delete(reply)
+
+    elif data.startswith("plcleardesc:"):
+        playlist_id = int(data.split(":")[1])
+        async with async_session() as db:
+            playlist = (await db.execute(owned_playlist(playlist_id, callback.from_user.id))).scalar_one_or_none()
+            if playlist:
+                playlist.description = None
+                await db.commit()
+        await render_playlist_detail(callback.message, callback.from_user.id, playlist_id)
+        await callback.answer("توضیحات پاک شد.")
 
     elif data.startswith("pladd:"):
         _, playlist_id, page = data.split(":")
@@ -1238,10 +1413,12 @@ async def handle_callback(client, callback: CallbackQuery):
             user = (await db.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one_or_none()
             existing = {item.file_id for item in playlist.items} if playlist else set()
             files = (await db.execute(select(File).where(File.user_id == user.id, File.file_type.in_(("audio", "video"))).order_by(File.created_at.desc()))).scalars().all() if user and playlist else []
-        files = [file for file in files if file.id not in existing]
         page = min(max(page, 0), max(0, (len(files) - 1) // PAGE_SIZE))
         shown = files[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
-        buttons = [[InlineKeyboardButton(f"➕ {FILE_ICONS.get(file.file_type, '🎵')} {file.file_name[:32]}", callback_data=f"pladdfile:{playlist_id}:{file.id}:{page}")] for file in shown]
+        buttons = [[InlineKeyboardButton(
+            f"{'✅' if file.id in existing else '➕'} {FILE_ICONS.get(file.file_type, '🎵')} \u200e{file.file_name[:32]}\u200e",
+            callback_data="noop" if file.id in existing else f"pladdfile:{playlist_id}:{file.id}:{page}",
+        )] for file in shown]
         if len(files) > PAGE_SIZE:
             buttons.append(pagination_row(f"pladd:{playlist_id}", page, len(files)))
         buttons.append([InlineKeyboardButton("↩️ برگشت", callback_data=f"playlist:{playlist_id}:0")])
@@ -1255,23 +1432,25 @@ async def handle_callback(client, callback: CallbackQuery):
             playlist = (await db.execute(owned_playlist(playlist_id, callback.from_user.id))).scalar_one_or_none()
             file = (await db.execute(owned_file(file_id, callback.from_user.id))).scalar_one_or_none()
             if playlist is None or file is None or file.file_type not in ("audio", "video"):
-                await callback.answer("این فایل قابل افزودن نیست.", show_alert=True)
+                await callback.answer("نمی‌شه این فایل رو اضافه کرد.", show_alert=True)
                 return
             if file_id not in {item.file_id for item in playlist.items}:
                 position = max((item.position for item in playlist.items), default=-1) + 1
                 db.add(PlaylistItem(playlist_id=playlist.id, file_id=file.id, position=position))
                 await db.commit()
-        await callback.answer("به پلی‌لیست اضافه شد 🎵")
+        await callback.answer("✅ به پلی‌لیست اضافه شد.")
         page_value = str(page)
-        # Re-render the add list after removing the newly-added file.
+        # Re-render in place so the plus immediately becomes a check mark.
         async with async_session() as db:
             playlist = (await db.execute(owned_playlist(playlist_id, callback.from_user.id))).scalar_one()
             user = (await db.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one()
             existing = {item.file_id for item in playlist.items}
             files = (await db.execute(select(File).where(File.user_id == user.id, File.file_type.in_(("audio", "video"))).order_by(File.created_at.desc()))).scalars().all()
-        files = [item for item in files if item.id not in existing]
         shown = files[int(page_value) * PAGE_SIZE:(int(page_value) + 1) * PAGE_SIZE]
-        buttons = [[InlineKeyboardButton(f"➕ {FILE_ICONS.get(item.file_type, '🎵')} {item.file_name[:32]}", callback_data=f"pladdfile:{playlist_id}:{item.id}:{page_value}")] for item in shown]
+        buttons = [[InlineKeyboardButton(
+            f"{'✅' if item.id in existing else '➕'} {FILE_ICONS.get(item.file_type, '🎵')} \u200e{item.file_name[:32]}\u200e",
+            callback_data="noop" if item.id in existing else f"pladdfile:{playlist_id}:{item.id}:{page_value}",
+        )] for item in shown]
         if len(files) > PAGE_SIZE:
             buttons.append(pagination_row(f"pladd:{playlist_id}", int(page_value), len(files)))
         buttons.append([InlineKeyboardButton("↩️ برگشت", callback_data=f"playlist:{playlist_id}:0")])
@@ -1289,7 +1468,7 @@ async def handle_callback(client, callback: CallbackQuery):
             return
         item = items[index]
         await safe_edit(callback.message,
-            f"{FILE_ICONS.get(item.file.file_type, '🎵')} **{escape_markdown(item.file.file_name)}**\nجایگاه {(index + 1)} از {len(items)}",
+            f"{FILE_ICONS.get(item.file.file_type, '🎵')} **{display_filename(item.file.file_name)}**\nجایگاه {to_persian_digits(str(index + 1))} از {to_persian_digits(str(len(items)))}",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("▶️ پخش", callback_data=f"plplay:{playlist_id}:{index}")],
                 [InlineKeyboardButton("⬆️ بالاتر", callback_data=f"plmove:{playlist_id}:{file_id}:-1:{page}"), InlineKeyboardButton("⬇️ پایین‌تر", callback_data=f"plmove:{playlist_id}:{file_id}:1:{page}")],
@@ -1338,7 +1517,7 @@ async def handle_callback(client, callback: CallbackQuery):
                     item.position = position
                 await db.commit()
         await render_playlist_detail(callback.message, callback.from_user.id, playlist_id)
-        await callback.answer("پلی‌لیست شافل شد 🔀")
+        await callback.answer("🔀 پلی‌لیست شافل شد.")
 
     elif data.startswith("plplay:"):
         _, playlist_id, index = data.split(":")
@@ -1358,8 +1537,8 @@ async def handle_callback(client, callback: CallbackQuery):
     elif data.startswith("pldelete:"):
         playlist_id = int(data.split(":")[1])
         await callback.message.edit("پلی‌لیست حذف بشه؟ فایل‌های اصلی داخل کمد می‌مونن.", reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("بله، حذفش کن", callback_data=f"pldeleteok:{playlist_id}")],
-            [InlineKeyboardButton("↩️ انصراف", callback_data=f"playlist:{playlist_id}:0")],
+            [InlineKeyboardButton("🗑️ بله، حذفش کن", callback_data=f"pldeleteok:{playlist_id}"),
+             InlineKeyboardButton("↩️ انصراف", callback_data=f"playlist:{playlist_id}:0")],
         ]))
         await callback.answer()
 
@@ -1397,7 +1576,7 @@ async def handle_callback(client, callback: CallbackQuery):
             if file and playlist and file.file_type in ("audio", "video") and file.id not in {item.file_id for item in playlist.items}:
                 db.add(PlaylistItem(playlist_id=playlist.id, file_id=file.id, position=max((item.position for item in playlist.items), default=-1) + 1))
                 await db.commit()
-        await callback.answer("به پلی‌لیست اضافه شد 🎵", show_alert=True)
+        await callback.answer("✅ به پلی‌لیست اضافه شد.", show_alert=True)
         async with async_session() as db:
             file = (await db.execute(owned_file(file_id, callback.from_user.id))).scalar_one_or_none()
         if file:
@@ -1434,6 +1613,7 @@ async def handle_callback(client, callback: CallbackQuery):
     elif data in ("sort_apply", "sort_cancel"):
         if data == "sort_apply":
             sort_preferences[callback.from_user.id] = list(sort_drafts.get(callback.from_user.id) or [("created", "desc")])
+            await persist_user_ui_state(callback.from_user.id)
         target = sort_return_targets.pop(callback.from_user.id, "files:0")
         sort_drafts.pop(callback.from_user.id, None)
         await render_list_target(callback.message, callback.from_user.id, target)
@@ -1443,6 +1623,7 @@ async def handle_callback(client, callback: CallbackQuery):
         target = data.split(":", 1)[1]
         batch_return_targets[callback.from_user.id] = target
         batch_selections[callback.from_user.id] = set()
+        await persist_user_ui_state(callback.from_user.id)
         await render_list_target(callback.message, callback.from_user.id, target)
         await callback.answer("فایل‌ها رو انتخاب کن.")
 
@@ -1455,6 +1636,7 @@ async def handle_callback(client, callback: CallbackQuery):
             return
         selected = batch_selections.setdefault(callback.from_user.id, set())
         selected.symmetric_difference_update({file_id})
+        await persist_user_ui_state(callback.from_user.id)
         target = batch_return_targets.get(callback.from_user.id, "files:0")
         await render_list_target(callback.message, callback.from_user.id, target)
         await callback.answer("انتخاب شد." if file_id in selected else "از انتخاب خارج شد.")
@@ -1462,6 +1644,7 @@ async def handle_callback(client, callback: CallbackQuery):
     elif data == "batch_cancel":
         target = batch_return_targets.pop(callback.from_user.id, "files:0")
         batch_selections.pop(callback.from_user.id, None)
+        await persist_user_ui_state(callback.from_user.id)
         await render_list_target(callback.message, callback.from_user.id, target)
         await callback.answer("انتخاب گروهی بسته شد.")
 
@@ -1471,9 +1654,9 @@ async def handle_callback(client, callback: CallbackQuery):
             await callback.answer("اول حداقل یک فایل انتخاب کن.", show_alert=True)
             return
         await callback.message.edit(
-            f"🗑 **حذف {count} فایل**\nاین فایل‌ها از کمد و کانال ذخیره‌سازی حذف می‌شن. مطمئنی؟",
+            f"🗑️ **حذف {to_persian_digits(str(count))} فایل**\nاین فایل‌ها از کمد و کانال ذخیره‌سازی حذف می‌شن. مطمئنی؟",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("بله، حذف شوند", callback_data="batch_delete_confirm")],
+                [InlineKeyboardButton("🗑️ بله، حذفشون کن", callback_data="batch_delete_confirm")],
                 [InlineKeyboardButton("↩️ برگشت", callback_data="batch_return")],
             ]),
         )
@@ -1494,8 +1677,9 @@ async def handle_callback(client, callback: CallbackQuery):
             await db.commit()
         target = batch_return_targets.pop(callback.from_user.id, "files:0")
         batch_selections.pop(callback.from_user.id, None)
+        await persist_user_ui_state(callback.from_user.id)
         await render_list_target(callback.message, callback.from_user.id, target)
-        await callback.answer(f"{len(files)} فایل حذف شد.")
+        await callback.answer(f"{to_persian_digits(str(len(files)))} فایل حذف شد.")
 
     elif data == "batch_return":
         await render_list_target(callback.message, callback.from_user.id, batch_return_targets.get(callback.from_user.id, "files:0"))
@@ -1535,8 +1719,9 @@ async def handle_callback(client, callback: CallbackQuery):
             await db.commit()
         return_target = batch_return_targets.pop(callback.from_user.id, "files:0")
         batch_selections.pop(callback.from_user.id, None)
+        await persist_user_ui_state(callback.from_user.id)
         await render_list_target(callback.message, callback.from_user.id, return_target)
-        await callback.answer(f"{len(files)} فایل منتقل شد.")
+        await callback.answer(f"{to_persian_digits(str(len(files)))} فایل منتقل شد.")
 
     elif data == "batch_edit":
         if not batch_selections.get(callback.from_user.id):
@@ -1565,7 +1750,7 @@ async def handle_callback(client, callback: CallbackQuery):
                     file.description = None
             await db.commit()
         await render_list_target(callback.message, callback.from_user.id, batch_return_targets.get(callback.from_user.id, "files:0"))
-        await callback.answer(f"{len(files)} فایل ویرایش شد.")
+        await callback.answer(f"{to_persian_digits(str(len(files)))} فایل ویرایش شد.")
 
     elif data.startswith("batch_edit_input:"):
         action = data.split(":", 1)[1]
@@ -1621,6 +1806,8 @@ async def handle_callback(client, callback: CallbackQuery):
     elif data == "home":
         batch_selections.pop(callback.from_user.id, None)
         batch_return_targets.pop(callback.from_user.id, None)
+        current_drawers[callback.from_user.id] = None
+        await persist_user_ui_state(callback.from_user.id)
         await safe_edit(callback.message,
             "🗄️ **رسیدیم به کُمدت!**\n\nهمه‌چیز مرتب سر جاشه؛ می‌تونی فایل‌هات رو ببینی، کشوهاتو باز کنی یا فایلی رو پیدا کنی. از کجا ادامه بدیم؟ 👇",
             reply_markup=main_menu_keyboard(callback.from_user.id),
@@ -1644,16 +1831,19 @@ async def handle_callback(client, callback: CallbackQuery):
         item = data.split(":", 1)[1]
         selected = library_filters.setdefault(callback.from_user.id, set())
         selected.symmetric_difference_update({item})
+        await persist_user_ui_state(callback.from_user.id)
         await callback.message.edit_reply_markup(type_filter_keyboard(selected, "library"))
         await callback.answer()
 
     elif data == "library_filter_all":
         library_filters[callback.from_user.id] = set(FILE_ICONS)
+        await persist_user_ui_state(callback.from_user.id)
         await callback.message.edit_reply_markup(type_filter_keyboard(library_filters[callback.from_user.id], "library"))
         await callback.answer("همهٔ نوع‌ها انتخاب شد.")
 
     elif data == "library_filter_clear":
         library_filters[callback.from_user.id] = set()
+        await persist_user_ui_state(callback.from_user.id)
         await callback.message.edit_reply_markup(type_filter_keyboard(set(), "library"))
         await callback.answer("فیلتر پاک شد.")
 
@@ -1661,6 +1851,7 @@ async def handle_callback(client, callback: CallbackQuery):
         if data.endswith("cancel"):
             library_filters[callback.from_user.id] = filter_previous.get((callback.from_user.id, "library"), set())
         filter_previous.pop((callback.from_user.id, "library"), None)
+        await persist_user_ui_state(callback.from_user.id)
         target = filter_return_targets.get(callback.from_user.id, "files")
         if target == "files":
             await render_recent_files(callback.message, callback.from_user.id)
@@ -1692,21 +1883,25 @@ async def handle_callback(client, callback: CallbackQuery):
         item = data.split(":", 1)[1]
         selected = search_filters.setdefault(callback.from_user.id, set())
         selected.symmetric_difference_update({item})
+        await persist_user_ui_state(callback.from_user.id)
         await callback.message.edit_reply_markup(search_type_keyboard(callback.from_user.id))
         await callback.answer()
 
     elif data == "search_filter_all":
         search_filters[callback.from_user.id] = set(FILE_ICONS) | {"folder"}
+        await persist_user_ui_state(callback.from_user.id)
         await callback.message.edit_reply_markup(search_type_keyboard(callback.from_user.id))
         await callback.answer("همهٔ نوع‌ها انتخاب شد.")
 
     elif data == "search_filter_clear":
         search_filters[callback.from_user.id] = set()
+        await persist_user_ui_state(callback.from_user.id)
         await callback.message.edit_reply_markup(search_type_keyboard(callback.from_user.id))
         await callback.answer("بدون محدودیت جست‌وجو می‌کنم.")
 
     elif data == "search_filter_cancel":
         search_filters[callback.from_user.id] = filter_previous.pop((callback.from_user.id, "search"), set())
+        await persist_user_ui_state(callback.from_user.id)
         if search_filter_returns.pop(callback.from_user.id, "home") == "results" and search_queries.get(callback.from_user.id):
             await render_search_results(callback.message, callback.from_user.id)
         else:
@@ -1734,10 +1929,11 @@ async def handle_callback(client, callback: CallbackQuery):
                     await callback.message.edit("جست‌وجو لغو شد.", reply_markup=main_menu_keyboard(callback.from_user.id))
                 return
             search_queries[callback.from_user.id] = reply.text.strip()[:100]
+            await persist_user_ui_state(callback.from_user.id)
             await render_search_results(callback.message, callback.from_user.id)
         except Exception as exc:
             if "timeout" in str(exc).lower():
-                await callback.message.reply("⏱ زمان جست‌وجو تمام شد؛ دوباره تلاش کنید.")
+                await callback.message.reply("⏱ وقت جست‌وجو تموم شد؛ دوباره تلاش کن.")
         finally:
             pending_input_chats.discard(callback.message.chat.id)
             await safe_delete(prompt)
@@ -1757,7 +1953,7 @@ async def handle_callback(client, callback: CallbackQuery):
         try:
             preview = await client.copy_message(callback.message.chat.id, settings.telegram_storage_channel_id, file.channel_message_id)
             await preview.edit_reply_markup(InlineKeyboardMarkup([[
-                InlineKeyboardButton("🗑 بستن پیش‌نمایش", callback_data=f"deletepreview:{preview.id}")
+                InlineKeyboardButton("✖️ بستن پیش‌نمایش", callback_data=f"deletepreview:{preview.id}")
             ]]))
             asyncio.create_task(delete_preview_later(client, callback.message.chat.id, preview.id))
             await callback.answer("پیش‌نمایش فرستاده شد و تا ۵ دقیقه دیگه خودکار پاک می‌شه.")
@@ -1780,6 +1976,27 @@ async def handle_callback(client, callback: CallbackQuery):
         if not folder:
             await callback.answer("کشو پیدا نشد.", show_alert=True)
             return
+        await callback.message.edit(
+            f"⚙️ **مدیریت کشوی {escape_markdown(folder.name)}**\n\n📝 توضیحات: {escape_markdown(folder.description) if folder.description else 'هنوز توضیحی نداره.'}",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("➕ ساخت زیرکشو", callback_data=f"create_folder:{folder.id}")],
+                [InlineKeyboardButton("✏️ ویرایش نام/توضیح", callback_data=f"folder_edit:{folder.id}")],
+                [InlineKeyboardButton("🗃️ انتقال کشو", callback_data=f"movefolder:{folder.id}"),
+                 InlineKeyboardButton("↕️ مرتب‌سازی", callback_data=f"sort_open:folders:{folder.id}:0")],
+                [InlineKeyboardButton("🗑️ حذف کشو", callback_data=f"delfolder:{folder.id}")],
+                [InlineKeyboardButton("↩️ بازگشت به کشو", callback_data=f"folder:{folder.id}:0"),
+                 InlineKeyboardButton("🚪 منوی اصلی", callback_data="home")],
+            ]),
+        )
+        await callback.answer()
+
+    elif data.startswith("folder_edit:"):
+        folder_id = int(data.split(":")[1])
+        async with async_session() as db:
+            folder = (await db.execute(owned_folder(folder_id, callback.from_user.id))).scalar_one_or_none()
+        if not folder:
+            await callback.answer("کشو پیدا نشد.", show_alert=True)
+            return
         description_row = [InlineKeyboardButton(
             "✏️ ویرایش توضیحات" if folder.description else "📝 افزودن توضیحات",
             callback_data=f"folderdesc:{folder.id}",
@@ -1787,14 +2004,11 @@ async def handle_callback(client, callback: CallbackQuery):
         if folder.description:
             description_row.append(InlineKeyboardButton("🧹 حذف توضیحات", callback_data=f"clearfolderdesc:{folder.id}"))
         await callback.message.edit(
-            f"⚙️ **مدیریت کشوی {escape_markdown(folder.name)}**\n\n📝 توضیحات: {escape_markdown(folder.description) if folder.description else 'هنوز توضیحی نداره.'}",
+            f"✏️ **ویرایش کشوی {escape_markdown(folder.name)}**",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("✏️ تغییر نام", callback_data=f"renamefolder:{folder.id}"),
-                 InlineKeyboardButton("🗃️ انتقال", callback_data=f"movefolder:{folder.id}")],
+                [InlineKeyboardButton("✏️ تغییر نام", callback_data=f"renamefolder:{folder.id}")],
                 description_row,
-                [InlineKeyboardButton("🗑 حذف", callback_data=f"delfolder:{folder.id}")],
-                [InlineKeyboardButton("↩️ بازگشت به کشو", callback_data=f"folder:{folder.id}:0"),
-                 InlineKeyboardButton("🚪 منوی اصلی", callback_data="home")],
+                [InlineKeyboardButton("↩️ مدیریت این کشو", callback_data=f"folder_actions:{folder.id}")],
             ]),
         )
         await callback.answer()
@@ -1817,7 +2031,7 @@ async def handle_callback(client, callback: CallbackQuery):
         try:
             reply, action = await wait_for_input(client, callback.message.chat.id, timeout=120)
             if action == "cancel" or (reply and reply.text and reply.text.startswith("/cancel")):
-                await callback.message.edit("ویرایش توضیحات لغو شد.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ مدیریت کشو", callback_data=f"folder_actions:{folder_id}")]]))
+                await render_folder_page(callback.message, callback.from_user.id, folder_id)
                 return
             if action == "clear":
                 description = None
@@ -1861,7 +2075,7 @@ async def handle_callback(client, callback: CallbackQuery):
                 user.auth_version += 1
                 await db.commit()
                 await callback.message.edit(
-                    "✅ از همهٔ دستگاه‌ها خارج شدید.",
+                    "✅ از همهٔ دستگاه‌ها خارج شدی.",
                     reply_markup=main_menu_keyboard(callback.from_user.id),
                 )
             else:
@@ -1878,7 +2092,7 @@ async def handle_callback(client, callback: CallbackQuery):
             token = create_access_token(callback.from_user.id)
             web_url = f"{settings.web_base_url}/auth?token={token}"
             await callback.message.reply(
-                "🌐 نسخهٔ وب کمد\nلینک را خصوصی نگه دارید:\n"
+                "🌐 نسخهٔ وب کمد\nاین لینک رو خصوصی نگه دار:\n"
                 f"{web_url}",
                 reply_markup=InlineKeyboardMarkup([
                     [get_web_app_button(callback.from_user.id, "🌐 باز کردن نسخهٔ وب")]
@@ -1893,7 +2107,8 @@ async def handle_callback(client, callback: CallbackQuery):
         await callback.answer()
 
     elif data == "show_help":
-        await safe_edit(callback.message, HELP_TEXT, reply_markup=main_menu_keyboard(callback.from_user.id))
+        await set_current_drawer(callback.from_user.id, None)
+        await safe_edit(callback.message, HELP_TEXT, reply_markup=help_keyboard(callback.from_user.id))
         await callback.answer()
 
     elif data.startswith("openfile:"):
@@ -1981,13 +2196,13 @@ async def handle_callback(client, callback: CallbackQuery):
             reply, action = await wait_for_input(client, callback.message.chat.id, timeout=60)
             
             if action == "cancel" or (reply and reply.text and reply.text.startswith("/cancel")):
-                await callback.message.edit("ساخت کشو لغو شد.", reply_markup=main_menu_keyboard(callback.from_user.id))
+                await render_folder_page(callback.message, callback.from_user.id, parent_id)
                 return
             
             folder_name = reply.text.strip() if reply.text else None
             
             if not folder_name or len(folder_name) > 255:
-                await callback.message.edit("❌ نام کشو باید بین ۱ تا ۲۵۵ نویسه باشد.", reply_markup=main_menu_keyboard(callback.from_user.id))
+                await callback.message.edit("❌ اسم کشو باید بین ۱ تا ۲۵۵ نویسه باشه.", reply_markup=main_menu_keyboard(callback.from_user.id))
                 return
             
             # Create folder
@@ -1998,13 +2213,13 @@ async def handle_callback(client, callback: CallbackQuery):
                 user = user_result.scalar_one_or_none()
                 
                 if not user:
-                    await callback.message.edit("برای شروع، دستور /start را بفرستید.")
+                    await callback.message.edit("برای شروع، دستور /start رو بفرست.")
                     return
 
                 if parent_id is not None:
                     parent = (await db.execute(owned_folder(parent_id, callback.from_user.id))).scalar_one_or_none()
                     if parent is None:
-                        await callback.message.edit("❌ کشوی والد دیگر وجود ندارد.", reply_markup=main_menu_keyboard(callback.from_user.id))
+                        await callback.message.edit("❌ کشوی قبلی دیگه وجود نداره.", reply_markup=main_menu_keyboard(callback.from_user.id))
                         return
                 
                 # Check if exists
@@ -2016,7 +2231,7 @@ async def handle_callback(client, callback: CallbackQuery):
                     )
                 )
                 if existing.scalar_one_or_none():
-                    await callback.message.edit(f"❌ کشویی با نام «{folder_name}» در این محل وجود دارد.", reply_markup=main_menu_keyboard(callback.from_user.id))
+                    await callback.message.edit(f"❌ یه کشو با اسم «{folder_name}» همین‌جا داری.", reply_markup=main_menu_keyboard(callback.from_user.id))
                     return
                 
                 folder = Folder(user_id=user.id, parent_id=parent_id, name=folder_name)
@@ -2026,20 +2241,16 @@ async def handle_callback(client, callback: CallbackQuery):
             await callback.message.edit(
                 f"✅ کشوی «{folder_name}» ساخته شد.",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🗃️ باز کردن", callback_data=f"folder:{folder.id}:0")],
-                    [InlineKeyboardButton("✏️ تغییر نام", callback_data=f"renamefolder:{folder.id}"),
-                     InlineKeyboardButton("🗑 حذف", callback_data=f"delfolder:{folder.id}")],
-                    [InlineKeyboardButton("📝 افزودن توضیحات", callback_data=f"folderdesc:{folder.id}")],
-                    [InlineKeyboardButton("↩️ کشوی قبلی", callback_data=f"folders:{parent_id or 0}:0"),
-                     InlineKeyboardButton("🚪 منوی اصلی", callback_data="home")],
+                    [InlineKeyboardButton("🗃️ باز کردن کشو", callback_data=f"folder:{folder.id}:0")],
+                    [InlineKeyboardButton("↩️ بازگشت به کشوی قبلی", callback_data=f"folders:{parent_id or 0}:0")],
                 ]),
             )
             
         except Exception as e:
             if "timeout" in str(e).lower():
-                await callback.message.edit("⏱ زمان ساخت کشو تمام شد؛ دوباره تلاش کنید.", reply_markup=main_menu_keyboard(callback.from_user.id))
+                await callback.message.edit("⏱ وقت ساخت کشو تموم شد؛ دوباره تلاش کن.", reply_markup=main_menu_keyboard(callback.from_user.id))
             else:
-                await callback.message.edit("❌ ساخت کشو انجام نشد؛ دوباره تلاش کنید.", reply_markup=main_menu_keyboard(callback.from_user.id))
+                await callback.message.edit("❌ کشو ساخته نشد؛ دوباره تلاش کن.", reply_markup=main_menu_keyboard(callback.from_user.id))
         finally:
             pending_input_chats.discard(callback.message.chat.id)
             await safe_delete(prompt)
@@ -2074,7 +2285,7 @@ async def handle_callback(client, callback: CallbackQuery):
             buttons.append(pagination_row(f"movefolder:{folder_id}", page, len(targets)))
         buttons.append([InlineKeyboardButton("📦 بیرون از کشو", callback_data=f"folderto:{folder_id}:0")])
         buttons.append([InlineKeyboardButton("↩️ بازگشت", callback_data=f"folder_actions:{folder_id}")])
-        await callback.message.edit("🗃️ مقصد کشو را انتخاب کنید:", reply_markup=InlineKeyboardMarkup(buttons))
+        await callback.message.edit("🗃️ مقصد کشو رو انتخاب کن:", reply_markup=InlineKeyboardMarkup(buttons))
         await callback.answer()
 
     elif data.startswith("folderto:"):
@@ -2089,7 +2300,7 @@ async def handle_callback(client, callback: CallbackQuery):
             ancestor = target
             while ancestor is not None:
                 if ancestor.id == folder_id:
-                    await callback.answer("کشو را نمی‌توان داخل خودش یا زیرکشوی خودش منتقل کرد.", show_alert=True)
+                    await callback.answer("نمی‌تونی کشو رو داخل خودش یا زیرکشوی خودش ببری.", show_alert=True)
                     return
                 ancestor = (await db.execute(owned_folder(ancestor.parent_id, callback.from_user.id))).scalar_one_or_none() if ancestor.parent_id else None
             duplicate = (await db.execute(select(Folder.id).where(
@@ -2120,7 +2331,7 @@ async def handle_callback(client, callback: CallbackQuery):
             user = user_result.scalar_one_or_none()
             
             if not user:
-                await callback.answer("ابتدا /start را بفرستید.", show_alert=True)
+                await callback.answer("اول /start رو بفرست.", show_alert=True)
                 return
 
             file = (await db.execute(owned_file(file_id, callback.from_user.id))).scalar_one_or_none()
@@ -2136,7 +2347,7 @@ async def handle_callback(client, callback: CallbackQuery):
             targets = [(folder, await folder_path(db, folder)) for folder in folders]
         
         if not folders:
-            await callback.answer("هنوز کشویی ندارید. با /newfolder یکی بسازید.", show_alert=True)
+            await callback.answer("هنوز کشویی نداری؛ با /newfolder یکی بساز.", show_alert=True)
             return
         
         page = min(max(page, 0), max(0, (len(targets) - 1) // PAGE_SIZE))
@@ -2189,7 +2400,7 @@ async def handle_callback(client, callback: CallbackQuery):
         
         pending_input_chats.add(callback.message.chat.id)
         prompt = await callback.message.reply(
-            f"✏️ نام فعلی: {escape_markdown(current_name)}\nنام جدید رو بفرست.",
+            f"✏️ اسم فعلی: {display_filename(current_name)}\nاسم جدید رو بفرست.",
             reply_markup=input_keyboard(),
         )
         await callback.answer()
@@ -2204,7 +2415,7 @@ async def handle_callback(client, callback: CallbackQuery):
             new_name = reply.text.strip() if reply.text else None
             
             if not new_name or len(new_name) > 255:
-                await callback.message.edit("❌ نام فایل باید بین ۱ تا ۲۵۵ نویسه باشد.", reply_markup=file_detail_keyboard_for_user(file, callback.from_user.id))
+                await callback.message.edit("❌ اسم فایل باید بین ۱ تا ۲۵۵ نویسه باشه.", reply_markup=file_detail_keyboard_for_user(file, callback.from_user.id))
                 return
             
             async with async_session() as db:
@@ -2216,7 +2427,7 @@ async def handle_callback(client, callback: CallbackQuery):
                     await db.commit()
                     await db.refresh(file)
                     await callback.message.edit(
-                        f"✅ نام فایل به «{file.file_name}» تغییر کرد.\n\n{file_detail_text(file)}",
+                        f"✅ اسم فایل به «{display_filename(file.file_name)}» تغییر کرد.\n\n{file_detail_text(file)}",
                         reply_markup=file_detail_keyboard_for_user(file, callback.from_user.id),
                     )
                 else:
@@ -2224,7 +2435,7 @@ async def handle_callback(client, callback: CallbackQuery):
                     
         except Exception as e:
             if "timeout" in str(e).lower():
-                await callback.message.edit("⏱ زمان تغییر نام تمام شد؛ دوباره تلاش کنید.", reply_markup=main_menu_keyboard(callback.from_user.id))
+                await callback.message.edit("⏱ وقت تغییر نام تموم شد؛ دوباره تلاش کن.", reply_markup=main_menu_keyboard(callback.from_user.id))
         finally:
             pending_input_chats.discard(callback.message.chat.id)
             await safe_delete(prompt)
@@ -2245,11 +2456,11 @@ async def handle_callback(client, callback: CallbackQuery):
         
         # Ask for confirmation
         await callback.message.edit(
-            f"🗑 فایل «{file_name}» حذف شود؟\nاین کار بازگشت‌پذیر نیست.",
+            f"🗑️ فایل «{display_filename(file_name)}» پاک بشه؟\nاین کار برگشت‌پذیر نیست.",
             reply_markup=InlineKeyboardMarkup([
                 [
-                    InlineKeyboardButton("🗑 حذف فایل", callback_data=f"confirmdelfile:{file_id}"),
-                    InlineKeyboardButton("انصراف", callback_data=f"openfile:{file_id}"),
+                    InlineKeyboardButton("🗑️ حذف فایل", callback_data=f"confirmdelfile:{file_id}"),
+                    InlineKeyboardButton("✖️ انصراف", callback_data=f"openfile:{file_id}"),
                 ]
             ])
         )
@@ -2270,14 +2481,14 @@ async def handle_callback(client, callback: CallbackQuery):
             channel_msg_id = file.channel_message_id
             
             if not await delete_from_storage_channel(channel_msg_id):
-                await callback.answer("حذف فایل از فضای ذخیره‌سازی انجام نشد؛ دوباره تلاش کنید.", show_alert=True)
+                await callback.answer("فایل از فضای ذخیره‌سازی پاک نشد؛ دوباره تلاش کن.", show_alert=True)
                 return
             await db.delete(file)
             await db.commit()
         
         back_target = detail_back_targets.get(callback.from_user.id, "files:0")
         back_label = "↩️ نتایج جست‌وجو" if back_target.startswith("search:") else "↩️ فایل‌ها"
-        await callback.message.edit(f"✅ فایل «{file_name}» حذف شد.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(back_label, callback_data=back_target), InlineKeyboardButton("🚪 منوی اصلی", callback_data="home")]]))
+        await callback.message.edit(f"✅ فایل «{display_filename(file_name)}» حذف شد.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(back_label, callback_data=back_target), InlineKeyboardButton("🚪 منوی اصلی", callback_data="home")]]))
         await callback.answer("فایل حذف شد.")
         
     elif data.startswith("renamefolder:"):
@@ -2304,13 +2515,13 @@ async def handle_callback(client, callback: CallbackQuery):
             reply, action = await wait_for_input(client, callback.message.chat.id, timeout=60)
             
             if action == "cancel" or (reply and reply.text and reply.text.startswith("/cancel")):
-                await callback.message.edit("تغییر نام لغو شد.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ مدیریت کشو", callback_data=f"folder_actions:{folder_id}")]]))
+                await render_folder_page(callback.message, callback.from_user.id, folder_id)
                 return
             
             new_name = reply.text.strip() if reply.text else None
             
             if not new_name or len(new_name) > 255:
-                await callback.message.edit("❌ نام کشو باید بین ۱ تا ۲۵۵ نویسه باشد.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ بازگشت", callback_data=f"folder_actions:{folder_id}")]]))
+                await callback.message.edit("❌ اسم کشو باید بین ۱ تا ۲۵۵ نویسه باشه.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ بازگشت", callback_data=f"folder_actions:{folder_id}")]]))
                 return
             
             async with async_session() as db:
@@ -2336,7 +2547,7 @@ async def handle_callback(client, callback: CallbackQuery):
                     
         except Exception as e:
             if "timeout" in str(e).lower():
-                await callback.message.edit("⏱ زمان تغییر نام تمام شد؛ دوباره تلاش کنید.", reply_markup=main_menu_keyboard(callback.from_user.id))
+                await callback.message.edit("⏱ وقت تغییر نام تموم شد؛ دوباره تلاش کن.", reply_markup=main_menu_keyboard(callback.from_user.id))
         finally:
             pending_input_chats.discard(callback.message.chat.id)
             await safe_delete(prompt)
@@ -2357,19 +2568,19 @@ async def handle_callback(client, callback: CallbackQuery):
             
         text = (
             f"🗑 **حذف کشوی {folder_name}**\n\n"
-            "با محتوای آن چه کنیم؟\n"
-            "📁 نگه‌داشتن: فایل‌ها و زیرکشوها یک سطح بالاتر می‌روند.\n"
-            "🗑 حذف کامل: تمام محتوا هم پاک می‌شود."
+            "با محتواش چی کار کنیم؟\n"
+            "📁 نگه‌داشتن: فایل‌ها و زیرکشوها یه سطح بالاتر می‌رن.\n"
+            "🗑️ حذف کامل: همهٔ محتوا هم پاک می‌شه."
         )
         
         await callback.message.edit(
             text,
             reply_markup=InlineKeyboardMarkup([
                 [
-                    InlineKeyboardButton("📁 نگه‌داشتن محتوا", callback_data=f"confirmdelfolder:{folder_id}:keep"),
+                     InlineKeyboardButton("📁 نگه‌داشتن محتوا", callback_data=f"confirmdelfolder:{folder_id}:keep"),
                 ],
-                [InlineKeyboardButton("🗑 حذف کامل", callback_data=f"confirmdelfolder:{folder_id}:delete")],
-                [InlineKeyboardButton("انصراف", callback_data=f"folder_actions:{folder_id}")]
+                [InlineKeyboardButton("🗑️ حذف کامل", callback_data=f"confirmdelfolder:{folder_id}:delete")],
+                [InlineKeyboardButton("✖️ انصراف", callback_data=f"folder_actions:{folder_id}")]
             ])
         )
         await callback.answer()
@@ -2379,7 +2590,7 @@ async def handle_callback(client, callback: CallbackQuery):
         folder_id = int(parts[1])
         mode = parts[2] if len(parts) > 2 else "keep"
         if mode not in ("keep", "delete"):
-            await callback.answer("گزینهٔ حذف معتبر نیست.", show_alert=True)
+            await callback.answer("گزینهٔ حذف درست نیست.", show_alert=True)
             return
         
         async with async_session() as db:
@@ -2399,7 +2610,7 @@ async def handle_callback(client, callback: CallbackQuery):
                 await db.commit()
             except HTTPException:
                 await db.rollback()
-                await callback.answer("حذف محتوا از فضای ذخیره‌سازی انجام نشد؛ دوباره تلاش کنید.", show_alert=True)
+                await callback.answer("محتوا از فضای ذخیره‌سازی پاک نشد؛ دوباره تلاش کن.", show_alert=True)
                 return
         
         await callback.message.edit(f"✅ کشوی «{folder_name}» حذف شد.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🗄️ بازگشت به کمد", callback_data="folders:0:0"), InlineKeyboardButton("🚪 منوی اصلی", callback_data="home")]]))
@@ -2416,7 +2627,7 @@ async def handle_callback(client, callback: CallbackQuery):
             user = user_result.scalar_one_or_none()
             
             if not user:
-                await callback.answer("ابتدا /start را بفرستید.", show_alert=True)
+                await callback.answer("اول /start رو بفرست.", show_alert=True)
                 return
             
             result = await db.execute(
@@ -2452,7 +2663,7 @@ async def handle_callback(client, callback: CallbackQuery):
             user = user_result.scalar_one_or_none()
             
             if not user:
-                await callback.answer("ابتدا /start را بفرستید.", show_alert=True)
+                await callback.answer("اول /start رو بفرست.", show_alert=True)
                 return
             
             result = await db.execute(
@@ -2484,13 +2695,13 @@ async def handle_callback(client, callback: CallbackQuery):
 async def file_command(client, message: Message):
     """Manage a specific file by ID."""
     if len(message.command) < 2:
-        await message.reply("شناسهٔ فایل را بعد از دستور وارد کنید؛ نمونه: `/file 12`.")
+        await message.reply("شناسهٔ فایل رو بعد از دستور بنویس؛ نمونه: `/file 12`.")
         return
     
     try:
         file_id = int(message.command[1])
     except ValueError:
-        await message.reply("❌ شناسهٔ فایل معتبر نیست.")
+        await message.reply("❌ شناسهٔ فایل درست نیست.")
         return
     
     async with async_session() as db:
@@ -2501,7 +2712,7 @@ async def file_command(client, message: Message):
         user = user_result.scalar_one_or_none()
         
         if not user:
-            await message.reply("ابتدا /start را بفرستید.")
+            await message.reply("اول /start رو بفرست.")
             return
         
         # Get file
@@ -2511,7 +2722,7 @@ async def file_command(client, message: Message):
         file = result.scalar_one_or_none()
     
     if not file:
-        await message.reply("❌ فایل پیدا نشد یا به آن دسترسی ندارید.")
+        await message.reply("❌ فایل پیدا نشد یا بهش دسترسی نداری.")
         return
     text = file_detail_text(file)
     if file.public_hash:
@@ -2538,7 +2749,7 @@ async def deletefolder_command(client, message: Message):
         user = user_result.scalar_one_or_none()
         
         if not user:
-            await message.reply("ابتدا /start را بفرستید.")
+            await message.reply("اول /start رو بفرست.")
             return
         
         # Find folder
@@ -2551,7 +2762,7 @@ async def deletefolder_command(client, message: Message):
         matches = result.scalars().all()
         folder = matches[0] if len(matches) == 1 else None
     if len(matches) > 1:
-        await message.reply("چند کشو با این نام دارید. برای انتخاب دقیق، /folders را باز کنید.")
+        await message.reply("چند کشو با این اسم داری؛ برای انتخاب دقیق، /folders رو باز کن.")
         return
     
     if not folder:
@@ -2561,12 +2772,12 @@ async def deletefolder_command(client, message: Message):
     # Show confirmation
     await message.reply(
         f"🗑 حذف کشوی «{folder_name}»؟\n\n"
-        "محتوا نگه داشته شود یا همه‌چیز حذف شود؟",
+        "محتوا بمونه یا همه‌چیز پاک بشه؟",
         reply_markup=InlineKeyboardMarkup([
             [
                 InlineKeyboardButton("📁 نگه‌داشتن محتوا", callback_data=f"confirmdelfolder:{folder.id}:keep"),
             ],
-            [InlineKeyboardButton("🗑 حذف کامل", callback_data=f"confirmdelfolder:{folder.id}:delete")],
-            [InlineKeyboardButton("انصراف", callback_data="canceldel")],
+            [InlineKeyboardButton("🗑️ حذف کامل", callback_data=f"confirmdelfolder:{folder.id}:delete")],
+            [InlineKeyboardButton("✖️ انصراف", callback_data="canceldel")],
         ])
     )

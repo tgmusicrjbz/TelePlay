@@ -24,7 +24,7 @@ from starlette.datastructures import Headers, UploadFile
 from sqlalchemy import select
 
 from app.database import Base, async_session, engine
-from app.models import File, Folder, Playlist, PlaylistItem, User, WatchProgress
+from app.models import BotUserState, File, Folder, Playlist, PlaylistItem, User, WatchProgress
 from app.routers.files import batch_update_files, get_text_preview, list_files, update_file, upload_file
 from app.routers.folders import delete_folder_contents, update_folder
 from app.routers.streaming import stored_message_response
@@ -155,6 +155,17 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual([item.file.id for item in reordered.items], [second.id, first.id])
             self.assertEqual(reordered.total_duration, 360)
 
+        from app.telegram import build_clients
+        build_clients()
+        from app.bot import render_playlist_detail
+        panel = SimpleNamespace(edit=AsyncMock())
+        await render_playlist_detail(panel, 111, playlist.id)
+        markup = panel.edit.await_args.kwargs["reply_markup"]
+        labels = [button.text for row in markup.inline_keyboard for button in row]
+        self.assertEqual(markup.inline_keyboard[2][0].text, "▶️ پخش همه (از اول)")
+        self.assertIn("⚙️ تنظیمات نام و توضیح", labels)
+        self.assertIn("🗑️ حذف پلی‌لیست", labels)
+
     async def test_playlist_rejects_non_media_file(self):
         async with async_session() as db:
             user = await db.get(User, self.user_id)
@@ -257,7 +268,7 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual([item.file_name for item in refreshed], ["fav-one.mp4", "fav-two.mp3"])
             self.assertEqual([item.description for item in refreshed], ["old\nnew", "new"])
 
-    async def test_folder_actions_build_their_own_description_buttons(self):
+    async def test_folder_management_groups_edit_actions(self):
         from app.telegram import build_clients
         build_clients()
         from app.bot import handle_callback, settings
@@ -271,7 +282,76 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             await handle_callback(None, callback)
         markup = callback.message.edit.await_args.kwargs["reply_markup"]
         callback_data = [button.callback_data for row in markup.inline_keyboard for button in row]
-        self.assertIn(f"folderdesc:{self.folder_id}", callback_data)
+        self.assertIn(f"folder_edit:{self.folder_id}", callback_data)
+        callback.data = f"folder_edit:{self.folder_id}"
+        callback.message.edit.reset_mock()
+        with patch.object(settings, "auth_users_str", ""):
+            await handle_callback(None, callback)
+        edit_markup = callback.message.edit.await_args.kwargs["reply_markup"]
+        edit_callbacks = [button.callback_data for row in edit_markup.inline_keyboard for button in row]
+        self.assertIn(f"folderdesc:{self.folder_id}", edit_callbacks)
+
+    async def test_bot_ui_state_persists_across_memory_reset(self):
+        from app.telegram import build_clients
+        build_clients()
+        from app.bot import (
+            batch_return_targets, batch_selections, current_drawers,
+            library_filters, load_user_ui_state, loaded_ui_state_users,
+            persist_user_ui_state, search_filters, search_queries, sort_preferences,
+        )
+        telegram_id = 111
+        current_drawers[telegram_id] = self.folder_id
+        library_filters[telegram_id] = {"video", "audio"}
+        search_filters[telegram_id] = {"folder"}
+        search_queries[telegram_id] = "سفر"
+        sort_preferences[telegram_id] = [("name", "asc"), ("type", "desc")]
+        batch_return_targets[telegram_id] = "files:0"
+        batch_selections[telegram_id] = {self.direct_file_id}
+        await persist_user_ui_state(telegram_id)
+
+        current_drawers.pop(telegram_id, None)
+        library_filters.pop(telegram_id, None)
+        search_filters.pop(telegram_id, None)
+        search_queries.pop(telegram_id, None)
+        sort_preferences.pop(telegram_id, None)
+        batch_return_targets.pop(telegram_id, None)
+        batch_selections.pop(telegram_id, None)
+        loaded_ui_state_users.discard(telegram_id)
+        await load_user_ui_state(telegram_id)
+
+        self.assertEqual(current_drawers[telegram_id], self.folder_id)
+        self.assertEqual(library_filters[telegram_id], {"video", "audio"})
+        self.assertEqual(search_filters[telegram_id], {"folder"})
+        self.assertEqual(search_queries[telegram_id], "سفر")
+        self.assertEqual(sort_preferences[telegram_id], [("name", "asc"), ("type", "desc")])
+        self.assertEqual(batch_selections[telegram_id], {self.direct_file_id})
+        async with async_session() as db:
+            self.assertIsNotNone(await db.get(BotUserState, self.user_id))
+
+    async def test_telegram_upload_uses_current_drawer(self):
+        from app.telegram import build_clients
+        build_clients()
+        from app.bot import current_drawers, handle_file, persist_user_ui_state
+        current_drawers[111] = self.folder_id
+        await persist_user_ui_state(111)
+        media = SimpleNamespace(
+            file_id="telegram-current", file_unique_id="telegram-current-unique",
+            file_name="inside.mp4", file_size=1024, mime_type="video/mp4",
+            duration=30, width=640, height=360, thumbs=[],
+        )
+        status = SimpleNamespace(edit=AsyncMock())
+        message = SimpleNamespace(
+            from_user=SimpleNamespace(id=111, username="test", first_name="Mahdi", last_name=None),
+            video=media, audio=None, document=None, photo=None,
+            caption="توضیح", id=501, reply=AsyncMock(return_value=status),
+        )
+        forwarded = SimpleNamespace(id=902, video=media, audio=None, document=None, photo=None)
+        with patch("app.bot.forward_to_storage_channel", new_callable=AsyncMock, return_value=forwarded):
+            await handle_file(None, message)
+        async with async_session() as db:
+            saved = (await db.execute(select(File).where(File.channel_message_id == 902))).scalar_one()
+            self.assertEqual(saved.folder_id, self.folder_id)
+        self.assertIn("در کشوی", status.edit.await_args.args[0])
 
     async def test_saved_text_message_can_be_previewed(self):
         async with async_session() as db:
@@ -425,7 +505,7 @@ class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
 
         from app.telegram import build_clients
         build_clients()
-        from app.bot import file_detail_keyboard, file_detail_text, format_jalali, main_menu_keyboard, pagination_row, search_type_keyboard, sort_keyboard, sort_drafts, truncate_description, type_filter_keyboard
+        from app.bot import file_detail_keyboard, file_detail_text, format_duration, format_jalali, format_size, help_keyboard, main_menu_keyboard, pagination_row, search_type_keyboard, sort_keyboard, sort_drafts, truncate_description, type_filter_keyboard
         file = SimpleNamespace(
             file_type="video", file_name="clip.mp4", file_size=10,
             duration=5, description="توضیح همراه رسانه",
@@ -442,18 +522,27 @@ class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("search_filter_toggle:folder", search_callbacks)
         self.assertIn("search_filter_toggle:video", search_callbacks)
         self.assertIn("search_filter_apply", search_callbacks)
+        search_rows = search_type_keyboard().inline_keyboard
+        self.assertEqual([len(row) for row in search_rows[:2]], [3, 3])
         library_buttons = type_filter_keyboard({"video", "image"}, "library").inline_keyboard
         selected_buttons = [button for row in library_buttons for button in row if (button.callback_data or "").startswith("library_filter_toggle:")]
         self.assertEqual(sum("✅" in button.text for button in selected_buttons), 2)
         self.assertTrue(truncate_description("\n".join(["خط"] * 6)).endswith("…"))
         sort_drafts[111] = [("name", "asc"), ("type", "desc")]
         sort_buttons = [button for row in sort_keyboard(111).inline_keyboard for button in row]
-        self.assertTrue(any("1. ↑" in button.text for button in sort_buttons))
+        self.assertTrue(any("۱. ↑" in button.text for button in sort_buttons))
         self.assertTrue(all(len(button.callback_data or "") <= 64 for button in sort_buttons))
         menu_labels = [button.text for row in main_menu_keyboard(111).inline_keyboard for button in row]
-        self.assertIn("📦 فایل‌های من", menu_labels)
+        self.assertIn("📦 همه‌ی فایل‌ها", menu_labels)
         self.assertIn("🗄️ کشوهای من", menu_labels)
         self.assertIn("🔍 بگرد تو کمد", menu_labels)
+        self.assertEqual(
+            [button.text for row in help_keyboard(111).inline_keyboard for button in row],
+            ["✨ ورود به نسخهٔ وب", "🚪 بازگشت به منوی اصلی"],
+        )
+        self.assertIn("صفحه ۲ از ۴", [button.text for button in pagination_row("files", 1, 25)])
+        self.assertEqual(format_size(1024 * 1024), "۱.۰ مگابایت")
+        self.assertEqual(format_duration(3660), "۱ ساعت و ۱ دقیقه")
 
 
 if __name__ == "__main__":
