@@ -8,7 +8,7 @@ import { useAppStore } from '../lib/store';
 
 interface FolderCardProps {
     folder: Folder;
-    viewMode: 'grid' | 'list';
+    viewMode: 'grid' | 'dense' | 'list';
     selected?: boolean;
     selectionMode?: boolean;
     onSelect?: (multi: boolean) => void;
@@ -143,9 +143,10 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
     }
 
     // Grid view
+    const dense = viewMode === 'dense';
     return (
         <div
-            className={`p-4 rounded-xl cursor-pointer transition-all duration-300 group relative animate-scale-in select-none
+            className={`${dense ? 'p-2.5' : 'p-4'} rounded-xl cursor-pointer transition-all duration-300 group relative animate-scale-in select-none
                 glass-card hover:bg-dark-800/60 hover:shadow-xl hover:shadow-black/20 hover:-translate-y-1
                 ${dropStyles} ${selectedStyles}`}
             onClick={handleClick}
@@ -155,7 +156,7 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
             onDrop={handleDrop}
             data-folder-id={folder.id}
         >
-            <div className="flex items-start justify-between mb-3">
+            <div className={`flex items-start justify-between ${dense ? 'mb-2' : 'mb-3'}`}>
                 <div 
                     className={`w-10 h-10 rounded-lg flex items-center justify-center border group-hover:scale-110 transition-all duration-300 relative
                         ${selected 
@@ -200,7 +201,7 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
             <p className="text-xs text-dark-500 mt-1">
                 {folder.file_count.toLocaleString('fa-IR')} فایل
             </p>
-            {folder.description && <p dir="auto" className="text-xs text-dark-400 truncate mt-1" title={folder.description}>{folder.description}</p>}
+            {!dense && folder.description && <p dir="auto" className="text-xs text-dark-400 truncate mt-1" title={folder.description}>{folder.description}</p>}
         </div>
     );
 }

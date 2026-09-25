@@ -31,8 +31,8 @@ export default function GlobalContextMenu() {
     // Adjust position to keep within viewport
     const getMenuPosition = () => {
         const menuWidth = 220;
-        const menuHeight = 350; 
         const padding = 10;
+        const menuHeight = Math.min(window.innerHeight * 0.82, 620);
 
         let posX = x;
         let posY = y;
@@ -40,14 +40,13 @@ export default function GlobalContextMenu() {
         if (posX + menuWidth > window.innerWidth - padding) {
             posX = window.innerWidth - menuWidth - padding;
         }
-        if (posY + menuHeight > window.innerHeight - padding) {
-            posY = window.innerHeight - menuHeight - padding;
-        }
+        posY = Math.min(Math.max(padding, posY), Math.max(padding, window.innerHeight - menuHeight - padding));
 
         return { left: posX, top: posY };
     };
 
     const position = getMenuPosition();
+    const isMobile = window.innerWidth < 640;
 
     const handleAction = (action: () => void) => {
         action();
@@ -147,12 +146,8 @@ export default function GlobalContextMenu() {
             <div
                 ref={menuRef}
                 dir="rtl"
-                className="fixed bg-dark-800/95 backdrop-blur-xl border border-white/[0.08] rounded-xl shadow-2xl py-1.5 min-w-[220px] z-[99999] animate-scale-in text-right"
-                style={{
-                    left: position.left,
-                    top: position.top,
-                    transformOrigin: 'top left'
-                }}
+                className={`fixed z-[99999] max-h-[82vh] overflow-y-auto border border-white/[0.08] bg-dark-800/95 py-1.5 text-right shadow-2xl backdrop-blur-xl ${isMobile ? 'inset-x-0 bottom-0 rounded-t-3xl px-2 pb-[calc(.5rem+env(safe-area-inset-bottom))] animate-slide-up' : 'min-w-[220px] rounded-xl animate-scale-in'}`}
+                style={isMobile ? undefined : { left: position.left, top: position.top, transformOrigin: 'top left' }}
                 onClick={(e) => e.stopPropagation()}
                 onContextMenu={(e) => e.preventDefault()}
             >

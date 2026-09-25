@@ -235,6 +235,7 @@ async def list_files(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     sort: Optional[str] = None,
+    favorite_only: bool = False,
 ):
     """List user's files with optional filtering."""
     query = select(File).where(File.user_id == current_user.id).options(selectinload(File.watch_progress))
@@ -251,6 +252,8 @@ async def list_files(
         file_types = [item.strip() for item in file_type.split(",") if item.strip()]
         if file_types:
             query = query.where(File.file_type.in_(file_types))
+    if favorite_only:
+        query = query.where(File.is_favorite.is_(True))
     if search:
         escaped = f"%{escape_like(search)}%"
         query = query.where(

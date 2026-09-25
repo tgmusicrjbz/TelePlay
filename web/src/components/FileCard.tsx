@@ -1,13 +1,13 @@
 /**
  * FileCard component - displays a single file in grid or list view
  */
-import { Play, MoreVertical, Film, Music, FileText, Image, Check } from 'lucide-react';
-import { TelegramFile, formatFileSize, formatDuration, formatPersianDate } from '../lib/api';
+import { Play, MoreVertical, Film, Music, FileText, Image, Check, Star } from 'lucide-react';
+import { TelegramFile, formatFileSize, formatDuration, formatPersianDate, useUpdateFile } from '../lib/api';
 import { useAppStore } from '../lib/store';
 
 interface FileCardProps {
     file: TelegramFile;
-    viewMode: 'grid' | 'list';
+    viewMode: 'grid' | 'dense' | 'list';
     selected: boolean;
     selectionMode?: boolean;
     onSelect: (multi: boolean) => void;
@@ -22,7 +22,13 @@ export default function FileCard({
     onSelect,
     onPlay
 }: FileCardProps) {
-    const { activeContextMenu, setActiveContextMenu } = useAppStore();
+    const { activeContextMenu, setActiveContextMenu, addToast } = useAppStore();
+    const updateFile = useUpdateFile();
+    const toggleFavorite = async (event: React.MouseEvent) => {
+        event.stopPropagation();
+        await updateFile.mutateAsync({ id: file.id, is_favorite: !file.is_favorite });
+        addToast(file.is_favorite ? 'از نشان‌شده‌ها برداشته شد' : 'به نشان‌شده‌ها اضافه شد ⭐');
+    };
 
     // Check if this file's context menu is active
     const showMenu = activeContextMenu?.type === 'file' && activeContextMenu?.item.id === file.id;
@@ -81,7 +87,8 @@ export default function FileCard({
                 onContextMenu={handleContextMenu}
                 data-file-id={file.id}
             >
-                {selectionMode && <div className="absolute left-0 top-0 z-10 flex h-11 w-11 items-center justify-center"><div className={`flex h-6 w-6 items-center justify-center rounded-md border ${selected ? 'border-primary-400 bg-primary-500 text-white' : 'border-white/30 bg-dark-900/90'}`}>{selected && <Check className="h-4 w-4" />}</div></div>}
+            {selectionMode && <div className="absolute left-0 top-0 z-10 flex h-11 w-11 items-center justify-center"><div className={`flex h-6 w-6 items-center justify-center rounded-md border ${selected ? 'border-primary-400 bg-primary-500 text-white' : 'border-white/30 bg-dark-900/90'}`}>{selected && <Check className="h-4 w-4" />}</div></div>}
+            <button onClick={toggleFavorite} disabled={updateFile.isPending} className={`absolute right-2 top-2 z-10 rounded-full p-1.5 ${file.is_favorite ? 'bg-amber-400/15 text-amber-300' : 'text-dark-500 opacity-0 group-hover:opacity-100'}`} title={file.is_favorite ? 'برداشتن نشان' : 'نشان کردن'}><Star className={`h-3.5 w-3.5 ${file.is_favorite ? 'fill-current' : ''}`}/></button>
                 <div className="w-12 h-12 rounded-lg bg-dark-800/80 flex items-center justify-center overflow-hidden shrink-0 border border-white/[0.05]">
                     {authorizedThumbnailUrl ? (
                         <img src={authorizedThumbnailUrl} alt={file.file_name} className="w-full h-full object-cover" />
@@ -141,9 +148,10 @@ export default function FileCard({
     }
 
     // Grid view
+    const dense = viewMode === 'dense';
     return (
         <div
-            className={`p-3 rounded-xl cursor-pointer transition-all duration-300 group relative animate-scale-in select-none
+            className={`${dense ? 'p-2' : 'p-3'} rounded-xl cursor-pointer transition-all duration-300 group relative animate-scale-in select-none
                 ${selected
                     ? 'bg-primary-500/10 border border-primary-500/30 shadow-lg shadow-primary-500/5'
                     : 'glass-card hover:bg-dark-800/60 hover:shadow-xl hover:shadow-black/20 hover:-translate-y-1'
@@ -153,7 +161,8 @@ export default function FileCard({
             data-file-id={file.id}
         >
             {selectionMode && <div className="absolute left-0 top-0 z-20 flex h-11 w-11 items-center justify-center"><div className={`flex h-6 w-6 items-center justify-center rounded-md border ${selected ? 'border-primary-400 bg-primary-500 text-white' : 'border-white/30 bg-dark-900/90'}`}>{selected && <Check className="h-4 w-4" />}</div></div>}
-            <div className={`aspect-video rounded-lg mb-3 overflow-hidden relative border ${selected ? 'border-primary-500/20' : 'border-white/[0.05]'} bg-dark-900/50`}>
+            <button onClick={toggleFavorite} disabled={updateFile.isPending} className={`absolute right-2 top-2 z-20 flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-dark-950/75 backdrop-blur ${file.is_favorite ? 'text-amber-300' : 'text-white/65 opacity-0 group-hover:opacity-100'}`} title={file.is_favorite ? 'برداشتن نشان' : 'نشان کردن'}><Star className={`h-4 w-4 ${file.is_favorite ? 'fill-current' : ''}`}/></button>
+            <div className={`aspect-video rounded-lg ${dense ? 'mb-2' : 'mb-3'} overflow-hidden relative border ${selected ? 'border-primary-500/20' : 'border-white/[0.05]'} bg-dark-900/50`}>
                 {authorizedThumbnailUrl ? (
                     <>
                         <img src={authorizedThumbnailUrl} alt={file.file_name} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
@@ -198,7 +207,7 @@ export default function FileCard({
                     <p className={`font-medium text-sm truncate transition-colors ${selected ? 'text-primary-200' : 'text-white group-hover:text-primary-300'}`} title={file.file_name}>
                         {file.file_name}
                     </p>
-                    {file.description && <p dir="auto" className="text-xs text-dark-400 line-clamp-2 mt-0.5" title={file.description}>{file.description}</p>}
+                    {!dense && file.description && <p dir="auto" className="text-xs text-dark-400 line-clamp-2 mt-0.5" title={file.description}>{file.description}</p>}
                     <div className="flex items-center gap-2 mt-1">
                         <span className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md border ${
                             selected 
@@ -212,9 +221,9 @@ export default function FileCard({
                             {formatFileSize(file.file_size)}
                         </p>
                     </div>
-                    <p className="text-[10px] text-dark-500 mt-1 leading-4">
+                    {!dense && <p className="text-[10px] text-dark-500 mt-1 leading-4">
                         آپلود: {formatPersianDate(file.created_at)}<br />تغییر: {formatPersianDate(file.updated_at)}
-                    </p>
+                    </p>}
                 </div>
 
                 <div className={`${showMenu ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}>
