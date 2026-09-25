@@ -306,9 +306,9 @@ export const useVerifyLoginCode = () => {
 
 // ============== Files Hooks ==============
 
-export const useFiles = (folderId?: number | null, fileType?: string, search?: string, page = 1, sort = '', favoriteOnly = false) => {
+export const useFiles = (folderId?: number | null, fileType?: string, search?: string, page = 1, sort = '', favoriteOnly = false, includePlaylistCovers = false) => {
     return useQuery({
-        queryKey: ['files', folderId, fileType, search, page, sort, favoriteOnly],
+        queryKey: ['files', folderId, fileType, search, page, sort, favoriteOnly, includePlaylistCovers],
         queryFn: async () => {
             const params: Record<string, any> = {};
             if (folderId !== undefined) params.folder_id = folderId;
@@ -318,6 +318,7 @@ export const useFiles = (folderId?: number | null, fileType?: string, search?: s
             params.per_page = 50; // Load 50 files per page
             if (sort) params.sort = sort;
             if (favoriteOnly) params.favorite_only = true;
+            if (includePlaylistCovers) params.include_playlist_covers = true;
             const { data } = await api.get<FileListResponse>('/files', { params });
             return data;
         },

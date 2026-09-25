@@ -680,31 +680,6 @@ export default function FileBrowser() {
 
                     {/* Right: Actions */}
                     <div className="flex shrink-0 items-center gap-1 sm:gap-2">
-                         {(activeSection === 'files' || activeSection === 'activity') && <div className="ml-1 flex items-center gap-0.5 rounded-lg border border-white/[0.06] bg-dark-800/50 p-0.5 sm:ml-2">
-                             <button
-                                 title="نمای کارتی بزرگ"
-                                 onClick={() => setViewMode('grid')}
-                                 className={`p-1 rounded-md transition-all ${viewMode === 'grid' ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'}`}
-                             >
-                                 <Grid className="w-4 h-4" />
-                             </button>
-                             <button
-                                 title="نمای کاشی متراکم"
-                                 onClick={() => setViewMode('dense')}
-                                 className={`p-1 rounded-md transition-all ${viewMode === 'dense' ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'}`}
-                             >
-                                 <LayoutGrid className="w-4 h-4" />
-                             </button>
-                             <button
-                                 title="نمای لیستی"
-                                 onClick={() => setViewMode('list')}
-                                 className={`p-1 rounded-md transition-all ${viewMode === 'list' ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'}`}
-                             >
-                                 <List className="w-4 h-4" />
-                             </button>
-                         </div>}
-
-
                         {clipboard && (clipboard.files.length > 0 || clipboard.folders.length > 0) && (
                             <button
                                 onClick={handlePaste}
@@ -789,7 +764,7 @@ export default function FileBrowser() {
                                         </button>
                                     ))}
                                 </div>
-                                <div className="flex flex-wrap items-center gap-1 py-1">
+                                <div className="flex flex-wrap items-center gap-1 rounded-xl border border-white/[0.06] bg-dark-900/50 p-1 py-1">
                                     <button title="فیلتر نوع فایل" aria-label="فیلتر نوع فایل" onClick={() => { setShowFilters(value => !value); setShowSort(false); }} disabled={contentScope === 'folders'} className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-dark-900/70 text-xs text-dark-200 transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${fileTypeFilter.length ? 'border-primary-500/40 text-primary-200' : ''}`}>
                                         <SlidersHorizontal className="h-4 w-4" />
                                         {fileTypeFilter.length > 0 && <span className="rounded-full bg-primary-500 px-1.5 text-[10px] text-white">{fileTypeFilter.length.toLocaleString('fa-IR')}</span>}
@@ -806,6 +781,10 @@ export default function FileBrowser() {
                                             {allVisibleSelected ? <CheckSquare className="h-4 w-4 text-primary-300" /> : <Square className="h-4 w-4" />}
                                         </button>
                                     )}
+                                    <span className="mx-1 hidden h-5 w-px bg-white/10 sm:block" />
+                                    <button title="نمای کارتی بزرگ" aria-label="نمای کارتی بزرگ" onClick={() => setViewMode('grid')} className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${viewMode === 'grid' ? 'bg-primary-600 text-white' : 'text-dark-400 hover:bg-white/[0.05] hover:text-white'}`}><Grid className="h-4 w-4" /></button>
+                                    <button title="نمای کاشی متراکم" aria-label="نمای کاشی متراکم" onClick={() => setViewMode('dense')} className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${viewMode === 'dense' ? 'bg-primary-600 text-white' : 'text-dark-400 hover:bg-white/[0.05] hover:text-white'}`}><LayoutGrid className="h-4 w-4" /></button>
+                                    <button title="نمای لیستی" aria-label="نمای لیستی" onClick={() => setViewMode('list')} className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${viewMode === 'list' ? 'bg-primary-600 text-white' : 'text-dark-400 hover:bg-white/[0.05] hover:text-white'}`}><List className="h-4 w-4" /></button>
                                 </div>
                             </div>
                             {showFilters && contentScope !== 'folders' && (
@@ -848,6 +827,15 @@ export default function FileBrowser() {
                                     </div>}
                                 </div>
                             )}
+                        </div>
+                    )}
+                    {activeSection === 'activity' && (
+                        <div className="mx-auto mb-4 flex max-w-7xl justify-end">
+                            <div className="flex items-center gap-1 rounded-xl border border-white/[0.06] bg-dark-900/50 p-1" aria-label="تغییر نمای فعالیت">
+                                <button title="نمای کارتی بزرگ" aria-label="نمای کارتی بزرگ" onClick={() => setViewMode('grid')} className={`flex h-9 w-9 items-center justify-center rounded-full ${viewMode === 'grid' ? 'bg-primary-600 text-white' : 'text-dark-400 hover:bg-white/[0.05] hover:text-white'}`}><Grid className="h-4 w-4" /></button>
+                                <button title="نمای کاشی متراکم" aria-label="نمای کاشی متراکم" onClick={() => setViewMode('dense')} className={`flex h-9 w-9 items-center justify-center rounded-full ${viewMode === 'dense' ? 'bg-primary-600 text-white' : 'text-dark-400 hover:bg-white/[0.05] hover:text-white'}`}><LayoutGrid className="h-4 w-4" /></button>
+                                <button title="نمای لیستی" aria-label="نمای لیستی" onClick={() => setViewMode('list')} className={`flex h-9 w-9 items-center justify-center rounded-full ${viewMode === 'list' ? 'bg-primary-600 text-white' : 'text-dark-400 hover:bg-white/[0.05] hover:text-white'}`}><List className="h-4 w-4" /></button>
+                            </div>
                         </div>
                     )}
                     {activeSection === 'activity' ? (

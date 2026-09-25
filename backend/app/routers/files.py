@@ -10,13 +10,13 @@ import shutil
 import tempfile
 from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, delete, asc, desc
+from sqlalchemy import select, func, delete, asc, desc, exists
 from sqlalchemy.orm import selectinload
 from pydantic import BaseModel, Field
 from datetime import datetime
 
 from ..database import get_db
-from ..models import File, User, WatchProgress, Folder
+from ..models import File, User, WatchProgress, Folder, Playlist
 from ..schemas import ActivityResponse, BatchFileUpdate, FileResponse, FileListResponse, FileUpdate, WatchProgressUpdate
 from ..auth import get_current_user
 from ..telegram import delete_from_storage_channel, get_message_from_channel
@@ -236,9 +236,13 @@ async def list_files(
     current_user: User = Depends(get_current_user),
     sort: Optional[str] = None,
     favorite_only: bool = False,
+    include_playlist_covers: bool = False,
 ):
     """List user's files with optional filtering."""
     query = select(File).where(File.user_id == current_user.id).options(selectinload(File.watch_progress))
+
+    if not include_playlist_covers:
+        query = query.where(~exists().where(Playlist.cover_file_id == File.id, Playlist.user_id == current_user.id))
     
     
     # Apply filters
