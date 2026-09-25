@@ -102,7 +102,7 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
                     {/* Selection indicator for list view */}
                     <div 
                         onClick={handleSelectClick}
-                        className={`absolute top-2 left-2 h-11 w-11 rounded-full flex items-center justify-center transition-all z-10 ${selectionMode ? 'pointer-events-auto' : 'pointer-events-none'}
+                        className={`absolute left-14 top-1/2 h-11 w-11 -translate-y-1/2 rounded-full flex items-center justify-center transition-all z-10 ${selectionMode ? 'pointer-events-auto' : 'pointer-events-none'}
                             ${selected 
                                 ? 'text-white'
                                 : selectionMode
@@ -168,7 +168,7 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
                     {/* Selection indicator for grid view */}
                     <div 
                         onClick={handleSelectClick}
-                        className={`absolute top-2 left-2 h-11 w-11 rounded-full flex items-center justify-center transition-all z-10 ${selectionMode ? 'pointer-events-auto' : 'pointer-events-none'}
+                        className={`absolute bottom-2 left-2 h-11 w-11 rounded-full flex items-center justify-center transition-all z-10 ${selectionMode ? 'pointer-events-auto' : 'pointer-events-none'}
                             ${selected 
                                 ? 'text-white'
                                 : selectionMode

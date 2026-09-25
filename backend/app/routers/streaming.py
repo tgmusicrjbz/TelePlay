@@ -189,11 +189,11 @@ async def get_thumbnail(
         # Extract thumbnail object
         thumbnail = None
         if message.video and message.video.thumbs:
-            thumbnail = message.video.thumbs[0]
+            thumbnail = message.video.thumbs[-1]
         elif message.document and message.document.thumbs:
-            thumbnail = message.document.thumbs[0]
+            thumbnail = message.document.thumbs[-1]
         elif message.audio and message.audio.thumbs:
-            thumbnail = message.audio.thumbs[0]
+            thumbnail = message.audio.thumbs[-1]
         elif message.photo:
             thumbnail = message.photo.sizes[-1]
             

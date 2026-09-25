@@ -618,6 +618,8 @@ const usePlaylistMutation = <TVariables>(request: (variables: TVariables) => Pro
         onSuccess: (playlist: Playlist) => {
             queryClient.setQueryData(['playlists', playlist.id], playlist);
             queryClient.invalidateQueries({ queryKey: ['playlists'] });
+            queryClient.invalidateQueries({ queryKey: ['files'] });
+            queryClient.invalidateQueries({ queryKey: ['activity'] });
         },
     });
 };

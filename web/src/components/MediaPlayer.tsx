@@ -39,6 +39,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     const hideControlsTimeout = useRef<ReturnType<typeof setTimeout>>();
     const singleTapTimeout = useRef<ReturnType<typeof setTimeout>>();
     const feedbackTimeout = useRef<ReturnType<typeof setTimeout>>();
+    const backgroundPlaybackRequested = useRef(false);
     const lastTap = useRef<{ at: number; side: 'left' | 'right' } | null>(null);
     const [publicUrl, setPublicUrl] = useState<string | null>(null);
     const [showSpeedMenu, setShowSpeedMenu] = useState(false);
@@ -47,7 +48,6 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     const sleepTimeout = useRef<ReturnType<typeof setTimeout>>();
     const [videoFit, setVideoFit] = useState<'contain' | 'cover'>('contain');
     const [audioOnly, setAudioOnly] = useState(false);
-    const [videoOrientation, setVideoOrientation] = useState<'landscape' | 'portrait'>('landscape');
     const [skipFeedback, setSkipFeedback] = useState<'backward' | 'forward' | null>(null);
 
     // Fetch fresh file details to get latest progress
@@ -118,16 +118,18 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
         return () => saveProgress();
     }, [saveProgress]);
 
-    const togglePlay = (e?: any) => {
+    const togglePlay = (e?: React.SyntheticEvent) => {
         e?.stopPropagation();
-        if (videoRef.current) {
-            if (isPlaying) {
-                videoRef.current.pause();
+        const media = videoRef.current;
+        if (media) {
+            if (!media.paused) {
+                backgroundPlaybackRequested.current = false;
+                media.pause();
                 saveProgress();
             } else {
-                videoRef.current.play();
+                backgroundPlaybackRequested.current = true;
+                void media.play();
             }
-            setIsPlaying(!isPlaying);
         }
     };
 
@@ -185,7 +187,8 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     };
 
     const handleWaiting = () => setIsLoading(true);
-    const handlePlaying = () => setIsLoading(false);
+    const handlePlaying = () => { backgroundPlaybackRequested.current = true; setIsLoading(false); setIsPlaying(true); };
+    const handlePause = () => { if (!document.hidden) backgroundPlaybackRequested.current = false; setIsPlaying(false); };
 
     const handleEnded = () => {
         saveProgress();
@@ -244,6 +247,20 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     useEffect(() => () => {
         if (sleepTimeout.current) clearTimeout(sleepTimeout.current);
     }, []);
+
+    useEffect(() => {
+        const keepPlaybackAlive = () => {
+            const media = videoRef.current;
+            if (!media || !backgroundPlaybackRequested.current || !media.paused || media.ended) return;
+            void media.play().catch(() => undefined);
+        };
+        document.addEventListener('visibilitychange', keepPlaybackAlive);
+        window.addEventListener('pageshow', keepPlaybackAlive);
+        return () => {
+            document.removeEventListener('visibilitychange', keepPlaybackAlive);
+            window.removeEventListener('pageshow', keepPlaybackAlive);
+        };
+    }, [file.id]);
 
     const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (videoRef.current) {
@@ -418,8 +435,8 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
             artwork: authorizedThumbnailUrl ? [{ src: authorizedThumbnailUrl }] : undefined,
         });
         const actions: Array<[MediaSessionAction, MediaSessionActionHandler | null]> = [
-            ['play', () => { const media = videoRef.current; if (media) { void media.play(); setIsPlaying(true); } }],
-            ['pause', () => { videoRef.current?.pause(); setIsPlaying(false); }],
+            ['play', async () => { backgroundPlaybackRequested.current = true; const media = videoRef.current; if (media?.paused) await media.play(); }],
+            ['pause', () => { backgroundPlaybackRequested.current = false; const media = videoRef.current; if (media && !media.paused) media.pause(); }],
             ['previoustrack', hasQueue ? () => { playPrevious(); } : null],
             ['nexttrack', hasQueue ? () => { playNext(); } : null],
             ['seekbackward', details => handleSkip(-(details.seekOffset || 10))],
@@ -444,11 +461,11 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
             ref={videoRef}
             src={authorizedStreamUrl}
             className={`max-w-full max-h-full w-full h-full ${videoFit === 'cover' ? 'object-cover' : 'object-contain'} ${isMinimized ? 'hidden' : ''} ${audioOnly ? 'invisible' : 'visible'}`}
-            style={videoOrientation === 'portrait' ? { transform: 'rotate(90deg)' } : undefined}
             onTimeUpdate={handleTimeUpdate}
             onLoadedMetadata={handleLoadedMetadata}
             onWaiting={handleWaiting}
             onPlaying={handlePlaying}
+            onPause={handlePause}
             onError={handleError}
             onEnded={handleEnded}
             controls={false}
@@ -464,6 +481,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
             onLoadedMetadata={handleLoadedMetadata}
             onWaiting={handleWaiting}
             onPlaying={handlePlaying}
+            onPause={handlePause}
             onError={handleError}
             onEnded={handleEnded}
             preload="auto"
@@ -656,20 +674,23 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
 
                     {/* Secondary tools stay away from the transport controls. */}
                     <div data-player-controls className="absolute left-1/2 top-20 z-40 flex max-w-[calc(100%-1rem)] -translate-x-1/2 items-center gap-1 rounded-2xl border border-white/10 bg-black/45 p-1.5 shadow-xl backdrop-blur-md">
+                        {isVideo && hasQueue && <button onClick={shuffleQueue} className="rounded-lg p-2 text-white/80 hover:bg-white/10" title="شافل صف پخش"><Shuffle className="h-5 w-5" /></button>}
+                        {isVideo && <button onClick={() => setRepeatMode(repeatMode === 'off' ? 'all' : repeatMode === 'all' ? 'one' : 'off')} className={`relative rounded-lg p-2 ${repeatMode !== 'off' ? 'bg-primary-500/20 text-primary-300' : 'text-white/80 hover:bg-white/10'}`} title="حالت تکرار"><Repeat2 className="h-5 w-5" />{repeatMode === 'one' && <span className="absolute -left-0.5 -top-0.5 text-[9px] font-bold">۱</span>}</button>}
                         {!isVideo && <button onClick={() => setPlaylistFile(file)} className="rounded-lg p-2 text-white/80 hover:bg-white/10" title="افزودن به پلی‌لیست"><ListPlus className="h-5 w-5" /></button>}
-                        {!isVideo && <><button onClick={() => handleSkip(-10)} className="rounded-lg p-2 text-white/80 hover:bg-white/10" title="۱۰ ثانیه عقب"><RotateCcw className="h-5 w-5" /></button><button onClick={() => handleSkip(10)} className="rounded-lg p-2 text-white/80 hover:bg-white/10" title="۱۰ ثانیه جلو"><RotateCw className="h-5 w-5" /></button></>}
+                        {!isVideo && <button onClick={() => handleSkip(-10)} className="rounded-lg p-2 text-white/80 hover:bg-white/10" title="۱۰ ثانیه عقب"><RotateCcw className="h-5 w-5" /></button>}
                         <div className="relative">
                             <button onClick={() => setShowSpeedMenu(open => !open)} className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-sm font-medium transition-all ${playbackSpeed !== 1 ? 'border-primary-500/40 bg-primary-500/30 text-primary-300' : 'border-white/10 bg-white/10 text-white/80 hover:bg-white/20'}`} title="انتخاب سرعت پخش" aria-expanded={showSpeedMenu}><Gauge className="w-4 h-4" /><span>{playbackSpeed === 1 ? '1.0' : playbackSpeed}x</span></button>
                             {showSpeedMenu && <div role="menu" aria-label="سرعت پخش" className="absolute left-1/2 top-full mt-2 w-32 -translate-x-1/2 overflow-hidden rounded-xl border border-white/10 bg-dark-900/95 p-1.5 shadow-2xl backdrop-blur-md">{[0.75, 1, 1.25, 1.5, 2].map(speed => <button key={speed} role="menuitem" onClick={() => setSpeed(speed)} className={`block w-full rounded-lg px-3 py-2 text-center text-sm transition-colors ${playbackSpeed === speed ? 'bg-primary-500/25 text-primary-200' : 'text-white/80 hover:bg-white/10'}`}>{speed === 1 ? '1.0' : speed}x</button>)}</div>}
                         </div>
+                        {!isVideo && <button onClick={() => handleSkip(10)} className="rounded-lg p-2 text-white/80 hover:bg-white/10" title="۱۰ ثانیه جلو"><RotateCw className="h-5 w-5" /></button>}
                         <div className="relative">
                             <button onClick={() => setShowSleepMenu(open => !open)} className={`p-2 rounded-lg transition-all ${sleepMode !== 'off' ? 'bg-primary-500/30 text-primary-300' : 'hover:bg-white/10 text-white/80'}`} title="تایمر خواب"><Clock3 className="h-5 w-5" /></button>
                             {showSleepMenu && <div role="menu" aria-label="تایمر خواب" className="absolute left-1/2 top-full mt-2 w-48 -translate-x-1/2 overflow-hidden rounded-xl border border-white/10 bg-dark-900/95 p-1.5 text-right shadow-2xl backdrop-blur-md">
                                 <p className="px-3 py-2 text-xs text-dark-400">توقف خودکار پخش</p>
-                                <button className="context-menu-item w-full" onClick={() => setSleepTimer('15')}>۱۵ دقیقه دیگر</button>
-                                <button className="context-menu-item w-full" onClick={() => setSleepTimer('30')}>۳۰ دقیقه دیگر</button>
-                                <button className="context-menu-item w-full" onClick={() => setSleepTimer('45')}>۴۵ دقیقه دیگر</button>
-                                <button className="context-menu-item w-full" onClick={() => setSleepTimer('60')}>۱ ساعت دیگر</button>
+                                <button className="context-menu-item w-full" onClick={() => setSleepTimer('15')}>۱۵ دقیقه</button>
+                                <button className="context-menu-item w-full" onClick={() => setSleepTimer('30')}>۳۰ دقیقه</button>
+                                <button className="context-menu-item w-full" onClick={() => setSleepTimer('45')}>۴۵ دقیقه</button>
+                                <button className="context-menu-item w-full" onClick={() => setSleepTimer('60')}>۱ ساعت</button>
                                 <button className="context-menu-item w-full" onClick={() => setSleepTimer('track')}>پایان این ترک</button>
                                 <button className="context-menu-item w-full" onClick={() => setSleepTimer('end')}>پایان پلی‌لیست</button>
                                 {sleepMode !== 'off' && <button className="context-menu-item w-full text-red-300" onClick={() => setSleepTimer('off')}>لغو تایمر</button>}
@@ -677,13 +698,12 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                         </div>
                         {isVideo && <button onClick={() => setVideoFit(current => current === 'contain' ? 'cover' : 'contain')} className={`p-2 rounded-lg transition-all ${videoFit === 'cover' ? 'bg-primary-500/30 text-primary-300' : 'hover:bg-white/10 text-white/80'}`} title={videoFit === 'contain' ? 'پر کردن قاب ویدیو' : 'نمایش کامل ویدیو'}><Scaling className="w-5 h-5" /></button>}
                         {isVideo && <button onClick={() => setAudioOnly(current => !current)} className={`p-2 rounded-lg transition-all ${audioOnly ? 'bg-primary-500/30 text-primary-300' : 'hover:bg-white/10 text-white/80'}`} title={audioOnly ? 'بازگشت به پخش ویدیو' : 'پخش فقط صدا'}><Headphones className="w-5 h-5" /></button>}
-                        {isVideo && <button onClick={() => setVideoOrientation(current => current === 'landscape' ? 'portrait' : 'landscape')} className={`p-2 rounded-lg transition-all ${videoOrientation === 'portrait' ? 'bg-primary-500/30 text-primary-300' : 'hover:bg-white/10 text-white/80'}`} title="تغییر جهت ویدیو"><RotateCw className="w-5 h-5" /></button>}
                         {isVideo && document.pictureInPictureEnabled && <button onClick={togglePiP} className={`p-2 rounded-lg transition-all ${isPiP ? 'bg-primary-500/30 text-primary-300' : 'hover:bg-white/10 text-white/80'}`} title="تصویر در تصویر"><PictureInPicture2 className="w-5 h-5" /></button>}
                         <button onClick={toggleFullscreen} className="p-2 rounded-lg hover:bg-white/10 text-white/80" title={isFullscreen ? 'خروج از تمام‌صفحه' : 'تمام‌صفحه'}>{isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}</button>
                     </div>
 
                     {/* Transport controls: queue navigation for music, seeking for video. */}
-                    <div data-player-controls dir="ltr" className="absolute bottom-32 left-1/2 z-30 flex -translate-x-1/2 items-center gap-8 sm:gap-12">
+                    <div data-player-controls dir="ltr" className={`absolute left-1/2 z-30 flex -translate-x-1/2 items-center gap-8 sm:gap-12 ${isVideo ? 'top-1/2 -translate-y-1/2' : 'bottom-32'}`}>
                         <button disabled={isVideo ? false : !hasQueue} onClick={(e) => { e.stopPropagation(); isVideo ? handleSkip(-10) : playPrevious(); }} className="rounded-full p-3 text-white/70 transition hover:bg-white/10 hover:text-white disabled:opacity-30" title={isVideo ? '۱۰ ثانیه عقب' : 'ترک قبلی'}>{isVideo ? <RotateCcw className="h-7 w-7"/> : <SkipBack className="h-7 w-7"/>}</button>
                         <button onClick={(e) => { e.stopPropagation(); togglePlay(); }} className="flex h-20 w-20 items-center justify-center rounded-full bg-primary-500 text-white shadow-xl shadow-primary-500/30 transition hover:scale-105 hover:bg-primary-400">{isPlaying ? <Pause className="h-9 w-9"/> : <Play className="ml-1 h-9 w-9"/>}</button>
                         <button disabled={isVideo ? false : !hasQueue} onClick={(e) => { e.stopPropagation(); isVideo ? handleSkip(10) : playNext(); }} className="rounded-full p-3 text-white/70 transition hover:bg-white/10 hover:text-white disabled:opacity-30" title={isVideo ? '۱۰ ثانیه جلو' : 'ترک بعدی'}>{isVideo ? <RotateCw className="h-7 w-7"/> : <SkipForward className="h-7 w-7"/>}</button>
@@ -716,7 +736,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
 
                         {/* Control buttons */}
                         <div dir="ltr" className="flex items-center justify-between gap-3">
-                            <div className="flex items-center gap-1"><button disabled={!hasQueue} onClick={shuffleQueue} className="rounded-full p-2 text-white/75 hover:bg-white/10 disabled:opacity-30" title="شافل"><Shuffle className="h-5 w-5"/></button><button onClick={() => setRepeatMode(repeatMode === 'off' ? 'all' : repeatMode === 'all' ? 'one' : 'off')} className={`rounded-full p-2 ${repeatMode !== 'off' ? 'bg-primary-500/25 text-primary-200' : 'text-white/75 hover:bg-white/10'}`} title="تکرار"><Repeat2 className="h-5 w-5"/></button></div>
+                            {!isVideo ? <div className="flex items-center gap-1"><button disabled={!hasQueue} onClick={shuffleQueue} className="rounded-full p-2 text-white/75 hover:bg-white/10 disabled:opacity-30" title="شافل"><Shuffle className="h-5 w-5"/></button><button onClick={() => setRepeatMode(repeatMode === 'off' ? 'all' : repeatMode === 'all' ? 'one' : 'off')} className={`rounded-full p-2 ${repeatMode !== 'off' ? 'bg-primary-500/25 text-primary-200' : 'text-white/75 hover:bg-white/10'}`} title="تکرار"><Repeat2 className="h-5 w-5"/></button></div> : <div className="flex items-center gap-1 rounded-2xl bg-black/30 p-1"><button disabled={!hasQueue} onClick={playPrevious} className="rounded-lg p-2 text-white/80 hover:bg-white/10 disabled:opacity-30" title="فایل قبلی"><SkipBack className="h-5 w-5"/></button><button onClick={togglePlay} className="rounded-lg bg-white/10 p-2.5 text-white hover:bg-white/20">{isPlaying ? <Pause className="h-6 w-6"/> : <Play className="h-6 w-6"/>}</button><button disabled={!hasQueue} onClick={playNext} className="rounded-lg p-2 text-white/80 hover:bg-white/10 disabled:opacity-30" title="فایل بعدی"><SkipForward className="h-5 w-5"/></button></div>}
                             <div className="flex items-center gap-3">
                             <div className="flex items-center gap-2 group/vol">
                                 <button

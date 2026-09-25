@@ -1179,7 +1179,7 @@ async def handle_file(client, message: Message):
             "duration": getattr(media, "duration", None),
             "width": getattr(media, "width", None),
             "height": getattr(media, "height", None),
-            "thumbnail_file_id": media.file_id if message.photo else (media.thumbs[0].file_id if getattr(media, "thumbs", None) else None),
+            "thumbnail_file_id": media.file_id if message.photo else (media.thumbs[-1].file_id if getattr(media, "thumbs", None) else None),
             "description": message.caption.strip()[:1024] if message.caption else None,
         }
         

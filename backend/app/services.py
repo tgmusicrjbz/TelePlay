@@ -4,10 +4,10 @@ Shared business logic and database queries.
 import re
 from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, exists
 from sqlalchemy.orm import selectinload
 
-from .models import File, WatchProgress, Folder
+from .models import File, WatchProgress, Folder, Playlist
 
 def escape_like(value: str) -> str:
     """Escape special LIKE/ILIKE characters to prevent SQL injection."""
@@ -73,7 +73,7 @@ async def fetch_recent_files(db: AsyncSession, user_id: int, limit: int) -> List
     """Get recently added files across all folders."""
     query = (
         select(File)
-        .where(File.user_id == user_id)
+        .where(File.user_id == user_id, ~exists().where(Playlist.cover_file_id == File.id, Playlist.user_id == user_id))
         .options(selectinload(File.watch_progress))
         .order_by(desc(File.created_at))
         .limit(limit)

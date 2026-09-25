@@ -124,7 +124,7 @@ async def upload_file(
             duration=getattr(media, "duration", None),
             width=getattr(media, "width", None),
             height=getattr(media, "height", None),
-            thumbnail_file_id=(media.thumbs[0].file_id if getattr(media, "thumbs", None) else None),
+            thumbnail_file_id=(media.thumbs[-1].file_id if getattr(media, "thumbs", None) else None),
         )
         db.add(stored)
         await db.commit()
@@ -292,7 +292,7 @@ async def get_recent_files(
     current_user: User = Depends(get_current_user),
 ):
     """Get recently added files across all folders."""
-    query = select(File).where(File.user_id == current_user.id).options(selectinload(File.watch_progress))
+    query = select(File).where(File.user_id == current_user.id, ~exists().where(Playlist.cover_file_id == File.id, Playlist.user_id == current_user.id)).options(selectinload(File.watch_progress))
     files = (await db.execute(apply_file_sort(query, sort).limit(limit))).scalars().all()
     
     return FileListResponse(
@@ -314,7 +314,7 @@ async def get_activity(
     recent = await fetch_recent_files(db, current_user.id, limit)
     favorites = (await db.execute(
         select(File)
-        .where(File.user_id == current_user.id, File.is_favorite.is_(True))
+        .where(File.user_id == current_user.id, File.is_favorite.is_(True), ~exists().where(Playlist.cover_file_id == File.id, Playlist.user_id == current_user.id))
         .options(selectinload(File.watch_progress))
         .order_by(File.updated_at.desc(), File.id.desc())
         .limit(limit)

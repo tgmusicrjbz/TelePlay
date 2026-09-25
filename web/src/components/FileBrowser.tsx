@@ -2,7 +2,7 @@
  * Main FileBrowser component - the core of the web interface
  */
 import { useEffect, useCallback, useRef, useState } from 'react';
-import { FolderPlus, Folder as FolderIcon, Grid, LayoutGrid, List, Search, ChevronRight, Home, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, StickyNote, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ChevronDown, ChevronUp, Plus, CheckSquare, Square, ListChecks, Upload, Star } from 'lucide-react';
+import { FolderPlus, Folder as FolderIcon, Grid, LayoutGrid, List, Search, ChevronRight, Home, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, StickyNote, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ChevronDown, ChevronUp, Plus, CheckSquare, Square, ListChecks, Upload, Star, RefreshCw } from 'lucide-react';
 import { useFiles, useFolders, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useActivityFeed, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import FileCard from './FileCard';
@@ -84,7 +84,7 @@ export default function FileBrowser() {
     const folderSortValue = serializeSort(sortCriteria.filter(item => ['name', 'created', 'updated', 'count'].includes(item.field)));
 
     // Data Fetching
-    const { data: filesList, isLoading: filesLoading, refetch: refetchFiles } = useFiles(currentFolderId, fileTypeFilter.join(',') || undefined, searchQuery || undefined, page, sortValue, favoriteOnly);
+    const { data: filesList, isLoading: filesLoading, isFetching: filesFetching, refetch: refetchFiles } = useFiles(currentFolderId, fileTypeFilter.join(',') || undefined, searchQuery || undefined, page, sortValue, favoriteOnly);
     const { data: activityFeed, isLoading: activityLoading, isError: activityError, refetch: refetchActivity } = useActivityFeed(activeSection === 'activity', 50);
     
 
@@ -764,7 +764,9 @@ export default function FileBrowser() {
                                         </button>
                                     ))}
                                 </div>
-                                <div className="flex flex-wrap items-center gap-1 rounded-xl border border-white/[0.06] bg-dark-900/50 p-1 py-1">
+                                <div className="flex items-center justify-between gap-2 rounded-2xl border border-white/[0.06] bg-dark-900/55 p-1.5 shadow-sm">
+                                    <div className="flex min-w-0 flex-wrap items-center gap-1">
+                                    <button title="تازه‌سازی" aria-label="تازه‌سازی" onClick={handleRefresh} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-dark-300 hover:bg-white/[.06] hover:text-white"><RefreshCw className={`h-4 w-4 ${filesFetching ? 'animate-spin' : ''}`}/></button>
                                     <button title="فیلتر نوع فایل" aria-label="فیلتر نوع فایل" onClick={() => { setShowFilters(value => !value); setShowSort(false); }} disabled={contentScope === 'folders'} className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-dark-900/70 text-xs text-dark-200 transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${fileTypeFilter.length ? 'border-primary-500/40 text-primary-200' : ''}`}>
                                         <SlidersHorizontal className="h-4 w-4" />
                                         {fileTypeFilter.length > 0 && <span className="rounded-full bg-primary-500 px-1.5 text-[10px] text-white">{fileTypeFilter.length.toLocaleString('fa-IR')}</span>}
@@ -781,10 +783,12 @@ export default function FileBrowser() {
                                             {allVisibleSelected ? <CheckSquare className="h-4 w-4 text-primary-300" /> : <Square className="h-4 w-4" />}
                                         </button>
                                     )}
-                                    <span className="mx-1 hidden h-5 w-px bg-white/10 sm:block" />
-                                    <button title="نمای کارتی بزرگ" aria-label="نمای کارتی بزرگ" onClick={() => setViewMode('grid')} className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${viewMode === 'grid' ? 'bg-primary-600 text-white' : 'text-dark-400 hover:bg-white/[0.05] hover:text-white'}`}><Grid className="h-4 w-4" /></button>
-                                    <button title="نمای کاشی متراکم" aria-label="نمای کاشی متراکم" onClick={() => setViewMode('dense')} className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${viewMode === 'dense' ? 'bg-primary-600 text-white' : 'text-dark-400 hover:bg-white/[0.05] hover:text-white'}`}><LayoutGrid className="h-4 w-4" /></button>
-                                    <button title="نمای لیستی" aria-label="نمای لیستی" onClick={() => setViewMode('list')} className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${viewMode === 'list' ? 'bg-primary-600 text-white' : 'text-dark-400 hover:bg-white/[0.05] hover:text-white'}`}><List className="h-4 w-4" /></button>
+                                    </div>
+                                    <div className="flex shrink-0 items-center rounded-xl border border-white/[.07] bg-dark-950/60 p-1">
+                                    <button title="نمای کارتی بزرگ" aria-label="نمای کارتی بزرگ" onClick={() => setViewMode('grid')} className={`flex h-8 w-8 items-center justify-center rounded-lg ${viewMode === 'grid' ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:text-white'}`}><Grid className="h-4 w-4" /></button>
+                                    <button title="نمای کاشی متراکم" aria-label="نمای کاشی متراکم" onClick={() => setViewMode('dense')} className={`flex h-8 w-8 items-center justify-center rounded-lg ${viewMode === 'dense' ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:text-white'}`}><LayoutGrid className="h-4 w-4" /></button>
+                                    <button title="نمای لیستی" aria-label="نمای لیستی" onClick={() => setViewMode('list')} className={`flex h-8 w-8 items-center justify-center rounded-lg ${viewMode === 'list' ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:text-white'}`}><List className="h-4 w-4" /></button>
+                                    </div>
                                 </div>
                             </div>
                             {showFilters && contentScope !== 'folders' && (
