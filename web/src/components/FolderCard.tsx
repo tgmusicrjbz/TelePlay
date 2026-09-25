@@ -81,7 +81,7 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
     if (viewMode === 'list') {
         return (
             <div
-                className={`flex items-center gap-4 p-3 rounded-xl cursor-pointer transition-all duration-200 animate-slide-up active:scale-[0.99]
+                className={`relative flex items-center gap-4 p-3 rounded-xl cursor-pointer transition-all duration-200 animate-slide-up active:scale-[0.99]
                     glass-card hover:bg-white/[0.03] border-white/[0.05] group
                     ${dropStyles} ${selectedStyles}`}
                 onClick={handleClick}
@@ -92,7 +92,7 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
                 data-folder-id={folder.id}
             >
                 <div 
-                    className={`w-12 h-12 rounded-lg flex items-center justify-center shrink-0 border transition-colors relative
+                    className={`w-12 h-12 rounded-lg flex items-center justify-center shrink-0 border transition-colors
                         ${selected 
                             ? 'bg-primary-500/20 border-primary-500/40' 
                             : 'bg-primary-500/10 border-primary-500/20 group-hover:bg-primary-500/20'}`}
@@ -102,7 +102,7 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
                     {/* Selection indicator for list view */}
                     <div 
                         onClick={handleSelectClick}
-                        className={`absolute -top-2 -left-2 h-11 w-11 rounded-full flex items-center justify-center transition-all ${selectionMode ? 'pointer-events-auto' : 'pointer-events-none'}
+                        className={`absolute top-2 left-2 h-11 w-11 rounded-full flex items-center justify-center transition-all z-10 ${selectionMode ? 'pointer-events-auto' : 'pointer-events-none'}
                             ${selected 
                                 ? 'text-white'
                                 : selectionMode
@@ -158,7 +158,7 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
         >
             <div className={`flex items-start justify-between ${dense ? 'mb-2' : 'mb-3'}`}>
                 <div 
-                    className={`w-10 h-10 rounded-lg flex items-center justify-center border group-hover:scale-110 transition-all duration-300 relative
+                    className={`w-10 h-10 rounded-lg flex items-center justify-center border group-hover:scale-110 transition-all duration-300
                         ${selected 
                             ? 'bg-gradient-to-br from-primary-500/20 to-primary-500/10 border-primary-500/40' 
                             : 'bg-gradient-to-br from-primary-500/10 to-primary-500/5 border-primary-500/20 group-hover:border-primary-500/30'}`}
@@ -168,7 +168,7 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
                     {/* Selection indicator for grid view */}
                     <div 
                         onClick={handleSelectClick}
-                        className={`absolute -top-2 -left-2 h-11 w-11 rounded-full flex items-center justify-center transition-all z-10 ${selectionMode ? 'pointer-events-auto' : 'pointer-events-none'}
+                        className={`absolute top-2 left-2 h-11 w-11 rounded-full flex items-center justify-center transition-all z-10 ${selectionMode ? 'pointer-events-auto' : 'pointer-events-none'}
                             ${selected 
                                 ? 'text-white'
                                 : selectionMode

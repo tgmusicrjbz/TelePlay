@@ -2,7 +2,7 @@
  * Main FileBrowser component - the core of the web interface
  */
 import { useEffect, useCallback, useRef, useState } from 'react';
-import { FolderPlus, Folder as FolderIcon, Grid, LayoutGrid, List, Search, ChevronRight, Home, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ChevronDown, ChevronUp, Plus, CheckSquare, Square, ListChecks, Upload, Star } from 'lucide-react';
+import { FolderPlus, Folder as FolderIcon, Grid, LayoutGrid, List, Search, ChevronRight, Home, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, StickyNote, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ChevronDown, ChevronUp, Plus, CheckSquare, Square, ListChecks, Upload, Star } from 'lucide-react';
 import { useFiles, useFolders, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useActivityFeed, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import FileCard from './FileCard';
@@ -792,13 +792,13 @@ export default function FileBrowser() {
                                     <div className="flex flex-wrap gap-2">
                                         {([
                                             ['ویدیو', 'video', Film], ['موسیقی و صوت', 'audio', Music],
-                                            ['عکس', 'image', ImageIcon], ['سند', 'document', FileText], ['متن و یادداشت', 'text', FileText],
+                                            ['عکس', 'image', ImageIcon], ['سند', 'document', FileText], ['متن و یادداشت', 'text', StickyNote],
                                         ] as const).map(([label, type, Icon]) => (
-                                            <button key={type} onClick={() => toggleFileType(type)} className={`flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-medium transition-colors ${fileTypeFilter.includes(type) ? 'border-primary-500 bg-primary-600 text-white' : 'border-white/10 bg-dark-800 text-dark-300 hover:border-white/20 hover:text-white'}`}>
-                                                <Icon className="h-4 w-4" /> {label}
+                                            <button key={type} title={label} aria-label={label} onClick={() => toggleFileType(type)} className={`flex h-9 w-9 items-center justify-center rounded-full border transition-colors ${fileTypeFilter.includes(type) ? 'border-primary-500 bg-primary-600 text-white' : 'border-white/10 bg-dark-800 text-dark-300 hover:border-white/20 hover:text-white'}`}>
+                                                <Icon className="h-4 w-4" />
                                             </button>
                                         ))}
-                                        {fileTypeFilter.length > 0 && <button onClick={() => toggleFileType(null)} className="rounded-full px-3 py-2 text-xs text-red-300 hover:bg-red-500/10">پاک‌کردن فیلترها</button>}
+                                        {fileTypeFilter.length > 0 && <button title="پاک‌کردن فیلترها" aria-label="پاک‌کردن فیلترها" onClick={() => toggleFileType(null)} className="flex h-9 w-9 items-center justify-center rounded-full text-red-300 hover:bg-red-500/10"><X className="h-4 w-4"/></button>}
                                     </div>
                                 </div>
                             )}
