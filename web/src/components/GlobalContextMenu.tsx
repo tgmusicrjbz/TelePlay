@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../lib/store';
-import { TelegramFile, Folder, api, canPreviewText } from '../lib/api';
-import { Play, Download, Link, Edit, FolderInput, Trash2, Globe, ShieldOff, HardDriveDownload, Eye, AlignLeft } from 'lucide-react';
+import { TelegramFile, Folder, api, canPreviewText, useUpdateFile } from '../lib/api';
+import { Play, Download, Link, Edit, FolderInput, Trash2, Globe, ShieldOff, HardDriveDownload, Eye, AlignLeft, ListPlus, Heart } from 'lucide-react';
 
 export default function GlobalContextMenu() {
-    const { activeContextMenu, setActiveContextMenu, setPreviewFile, setMoveItems, setMoveFiles, setDeleteConfirm, setRenameFile, setRenameFolder, setDescriptionItem, selectedFileIds, selectedFiles } = useAppStore();
+    const { activeContextMenu, setActiveContextMenu, setPreviewFile, setMoveItems, setMoveFiles, setDeleteConfirm, setRenameFile, setRenameFolder, setDescriptionItem, selectedFileIds, selectedFiles, setPlaylistFile, addToast } = useAppStore();
+    const updateFile = useUpdateFile();
     const menuRef = useRef<HTMLDivElement>(null);
     const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -175,11 +176,12 @@ export default function GlobalContextMenu() {
                         ) : (
                             <>
                                 {(activeContextMenu.item.file_type === 'video' || activeContextMenu.item.file_type === 'audio') && (
-                                    <button className="context-menu-item w-full text-right" onClick={() => handleAction(() => handlePlay(activeContextMenu.item as TelegramFile))}>
+                                    <><button className="context-menu-item w-full text-right" onClick={() => handleAction(() => handlePlay(activeContextMenu.item as TelegramFile))}>
                                         <Play className="w-4 h-4" />
                                         پخش
-                                    </button>
+                                    </button><button className="context-menu-item w-full text-right" onClick={() => handleAction(() => setPlaylistFile(activeContextMenu.item as TelegramFile))}><ListPlus className="h-4 w-4"/> افزودن به پلی‌لیست</button></>
                                 )}
+                                <button className="context-menu-item w-full text-right" onClick={async () => { const file=activeContextMenu.item as TelegramFile; await updateFile.mutateAsync({id:file.id,is_favorite:!file.is_favorite}); addToast(file.is_favorite?'از نشان‌شده‌ها برداشته شد':'به نشان‌شده‌ها اضافه شد ⭐'); setActiveContextMenu(null); }}><Heart className={`h-4 w-4 ${(activeContextMenu.item as TelegramFile).is_favorite?'fill-current text-pink-400':''}`}/>{(activeContextMenu.item as TelegramFile).is_favorite?'برداشتن نشان':'نشان کردن'}</button>
                                 {(activeContextMenu.item.file_type === 'image' || canPreviewText(activeContextMenu.item as TelegramFile)) && (
                                     <button className="context-menu-item w-full text-right" onClick={() => handleAction(() => setPreviewFile(activeContextMenu.item as TelegramFile))}>
                                         <Eye className="w-4 h-4" />

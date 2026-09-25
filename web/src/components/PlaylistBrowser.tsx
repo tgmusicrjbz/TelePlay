@@ -1,170 +1,98 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowDown, ArrowUp, Film, ListMusic, Music, Pencil, Play, Plus, Save, Search, Shuffle, Trash2, X } from 'lucide-react';
-import {
-    formatDuration, Playlist, useAddPlaylistItems, useCreatePlaylist, useDeletePlaylist,
-    useFiles, usePlaylist, usePlaylists, useRemovePlaylistItem, useReorderPlaylist,
-    useShufflePlaylist, useUpdatePlaylist,
-} from '../lib/api';
+import { DndContext, DragEndEvent, PointerSensor, TouchSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core';
+import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { Film, GripVertical, ListMusic, MoreVertical, Music, Pencil, Play, Plus, Save, Search, Shuffle, Trash2, X } from 'lucide-react';
+import { formatDuration, Playlist, PlaylistItem, PlaylistSummary, useActivityFeed, useAddPlaylistItems, useCreatePlaylist, useDeletePlaylist, useFiles, useFolders, usePlaylist, usePlaylists, useRemovePlaylistItem, useReorderPlaylist, useShufflePlaylist, useUpdatePlaylist } from '../lib/api';
 import { useAppStore } from '../lib/store';
 
-const mediaIcon = (type: string) => type === 'video' ? <Film className="h-4 w-4 text-blue-300" /> : <Music className="h-4 w-4 text-pink-300" />;
+type Kind = 'all' | 'audio' | 'video';
+const telegram = () => (window as Window & { Telegram?: { WebApp?: any } }).Telegram?.WebApp;
+const openPath = (path: string) => { if (location.pathname !== path) history.pushState({}, '', path); window.dispatchEvent(new PopStateEvent('popstate')); };
 
 export default function PlaylistBrowser() {
-    const { data: playlists = [], isLoading } = usePlaylists();
-    const [selectedId, setSelectedId] = useState<number | null>(null);
-    const { data: playlist } = usePlaylist(selectedId);
-    const [showCreate, setShowCreate] = useState(false);
-    const [showAdd, setShowAdd] = useState(false);
-    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-    const { startQueue, addToast } = useAppStore();
-    const createPlaylist = useCreatePlaylist();
-    const deletePlaylist = useDeletePlaylist();
-    const reorderPlaylist = useReorderPlaylist();
-    const shufflePlaylist = useShufflePlaylist();
-    const removeItem = useRemovePlaylistItem();
-
+    const [path, setPath] = useState(location.pathname);
+    const selectedId = Number(path.match(/^\/playlist\/(\d+)/)?.[1]) || null;
+    useEffect(() => { const sync = () => setPath(location.pathname); addEventListener('popstate', sync); return () => removeEventListener('popstate', sync); }, []);
     useEffect(() => {
-        if (selectedId === null && playlists.length) setSelectedId(playlists[0].id);
-        if (selectedId !== null && playlists.length && !playlists.some(item => item.id === selectedId)) setSelectedId(playlists[0]?.id ?? null);
-    }, [playlists, selectedId]);
+        const back = telegram()?.BackButton;
+        if (!back || !selectedId) return;
+        const handler = () => openPath('/playlists');
+        back.show(); back.onClick(handler);
+        return () => { back.offClick(handler); back.hide(); };
+    }, [selectedId]);
+    return selectedId ? <PlaylistDetail id={selectedId} onBack={() => openPath('/playlists')} /> : <PlaylistIndex />;
+}
 
-    const move = async (index: number, offset: number) => {
-        if (!playlist) return;
-        const target = index + offset;
-        if (target < 0 || target >= playlist.items.length) return;
-        const ids = playlist.items.map(item => item.file.id);
-        [ids[index], ids[target]] = [ids[target], ids[index]];
-        await reorderPlaylist.mutateAsync({ id: playlist.id, fileIds: ids });
-    };
-
-    const play = (index = 0) => {
-        if (!playlist?.items.length) return;
-        startQueue(playlist.items.map(item => item.file), index);
-    };
-
-    const create = async (name: string, description: string) => {
-        const result = await createPlaylist.mutateAsync({ name, description });
-        setSelectedId(result.id);
-        setShowCreate(false);
-        addToast('پلی‌لیست تازه ساخته شد 🎶');
-    };
-
-    const deleteCurrentPlaylist = async () => {
-        if (!playlist) return;
-        await deletePlaylist.mutateAsync(playlist.id);
-        setSelectedId(null);
-        setShowDeleteConfirm(false);
-        addToast('پلی‌لیست حذف شد.');
-    };
-
-    const requestPlaylistDelete = () => {
-        if (!playlist) return;
-        const message = `پلی‌لیست «${playlist.name}» حذف شود؟ فایل‌ها پاک نمی‌شوند.`;
-        const telegramWebApp = (window as Window & { Telegram?: { WebApp?: { showConfirm?: (message: string, callback: (confirmed: boolean) => void) => void } } }).Telegram?.WebApp;
-        if (telegramWebApp?.showConfirm) {
-            telegramWebApp.showConfirm(message, confirmed => {
-                if (confirmed) void deleteCurrentPlaylist();
-            });
-            return;
-        }
-        setShowDeleteConfirm(true);
-    };
-
-    return <div className="mx-auto w-full max-w-7xl p-4 sm:p-6 lg:p-8">
-        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-            <div><p className="text-xs font-semibold text-primary-300">🎧 پخش پشت‌سرهم</p><h1 className="mt-2 text-3xl font-bold">پلی‌لیست‌های من</h1><p className="mt-2 text-sm text-dark-400">آهنگ‌ها و ویدیوهای محبوبت را کنار هم بچین و بدون وقفه پخش کن.</p></div>
-            <button className="btn-primary flex items-center justify-center gap-2" onClick={() => setShowCreate(true)}><Plus className="h-4 w-4" /> پلی‌لیست تازه</button>
-        </div>
-
-        <div className="grid gap-5 lg:grid-cols-[280px_minmax(0,1fr)]">
-            <aside className="rounded-2xl border border-white/[0.07] bg-dark-900/70 p-3">
-                <div className="mb-3 flex items-center gap-2 px-2 text-sm font-semibold"><ListMusic className="h-4 w-4 text-primary-300" /> فهرست پلی‌لیست‌ها</div>
-                {isLoading ? <div className="h-20 animate-pulse rounded-xl bg-dark-800" /> : playlists.length ? <div className="max-h-72 space-y-1 overflow-y-auto overscroll-contain pr-1 lg:max-h-[calc(100vh-15rem)]">
-                    {playlists.map(item => <button key={item.id} onClick={() => setSelectedId(item.id)} className={`w-full rounded-xl px-3 py-3 text-right transition-colors ${selectedId === item.id ? 'bg-primary-500/15 text-primary-200' : 'text-dark-300 hover:bg-white/[0.05] hover:text-white'}`}>
-                        <span className="block truncate font-medium">🎵 {item.name}</span><span className="mt-1 block text-xs text-dark-500">{item.item_count.toLocaleString('fa-IR')} مورد · {formatDuration(item.total_duration) || 'بدون مدت'}</span>
-                    </button>)}
-                </div> : <div className="rounded-xl border border-dashed border-white/10 p-5 text-center text-sm text-dark-400">هنوز پلی‌لیستی نساختی.</div>}
-            </aside>
-
-            <section className="min-w-0 rounded-2xl border border-white/[0.07] bg-dark-900/60 p-4 sm:p-5">
-                {playlist ? <PlaylistDetail playlist={playlist} onPlay={play} onMove={move} onAdd={() => setShowAdd(true)} onShuffle={async () => { await shufflePlaylist.mutateAsync(playlist.id); addToast('ترتیب پلی‌لیست شافل شد 🔀'); }} onRemove={async fileId => { await removeItem.mutateAsync({ id: playlist.id, fileId }); }} onDelete={requestPlaylistDelete} /> : <div className="flex min-h-72 flex-col items-center justify-center text-center"><div className="text-5xl">🎶</div><h2 className="mt-4 text-xl font-bold">یک پلی‌لیست بساز</h2><p className="mt-2 text-sm text-dark-400">بعد آهنگ‌ها و ویدیوها را با ترتیب دلخواهت بهش اضافه کن.</p></div>}
-            </section>
-        </div>
-
-        {showCreate && <PlaylistEditor title="پلی‌لیست تازه" onClose={() => setShowCreate(false)} onSave={create} />}
-        {showAdd && playlist && <AddItemsModal playlist={playlist} onClose={() => setShowAdd(false)} />}
-        {showDeleteConfirm && playlist && (
-            <div className="fixed inset-0 z-[170] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={() => setShowDeleteConfirm(false)}>
-                <div role="alertdialog" aria-modal="true" aria-labelledby="delete-playlist-title" className="w-full max-w-sm rounded-2xl border border-white/10 bg-dark-900 p-5 shadow-2xl" onClick={event => event.stopPropagation()}>
-                    <h2 id="delete-playlist-title" className="text-lg font-bold">حذف پلی‌لیست؟</h2>
-                    <p className="mt-2 text-sm leading-6 text-dark-300">پلی‌لیست «{playlist.name}» حذف می‌شود؛ فایل‌های داخلش سر جایشان می‌مانند.</p>
-                    <div className="mt-5 flex gap-2">
-                        <button className="flex-1 rounded-xl bg-red-500/90 px-4 py-2.5 font-medium text-white hover:bg-red-500" onClick={() => void deleteCurrentPlaylist()}>حذفش کن</button>
-                        <button className="btn-secondary flex-1" onClick={() => setShowDeleteConfirm(false)}>بی‌خیال</button>
-                    </div>
-                </div>
-            </div>
-        )}
+function PlaylistIndex() {
+    const { data: playlists = [], isLoading } = usePlaylists();
+    const { data: activity } = useActivityFeed(true, 50);
+    const [kind, setKind] = useState<Kind>('all');
+    const [creating, setCreating] = useState(false);
+    const create = useCreatePlaylist();
+    const { startQueue, addToast } = useAppStore();
+    const visible = playlists.filter(p => kind === 'all' || (kind === 'audio' ? p.audio_count > 0 : p.video_count > 0));
+    const filter = (files: NonNullable<typeof activity>['recent']) => files.filter(file => kind === 'all' || file.file_type === kind);
+    const smart = [
+        { title: '⭐ نشان‌شده‌ها', subtitle: 'فایل‌هایی که دوستشان داری', files: filter(activity?.favorites || []) },
+        { title: '⏱️ ادامه تماشا', subtitle: 'ادامه از همان‌جایی که ماند', files: filter(activity?.continue_watching || []) },
+        { title: '🕒 تازه اضافه‌شده‌ها', subtitle: 'تازه‌های کمد', files: filter(activity?.recent || []) },
+    ];
+    return <div className="mx-auto w-full max-w-7xl p-4 pb-28 sm:p-6 md:pb-8 lg:p-8">
+        <header className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-semibold text-primary-300">🎧 پخش پشت‌سرهم</p><h1 className="mt-1 text-3xl font-bold">پلی‌لیست‌ها</h1><p className="mt-2 text-sm text-dark-400">آهنگ‌ها و ویدیوهایت را هر طور دوست داری بچین.</p></div><button className="btn-primary flex items-center gap-2" onClick={() => setCreating(true)}><Plus className="h-4 w-4" /> پلی‌لیست تازه</button></header>
+        <div className="mt-5 flex w-fit rounded-xl border border-white/10 bg-dark-900 p-1">{([['all','همه'],['audio','🎵 صوتی'],['video','🎬 ویدیویی']] as [Kind,string][]).map(([id,label]) => <button key={id} onClick={() => setKind(id)} className={`rounded-lg px-4 py-2 text-sm ${kind === id ? 'bg-primary-500/20 text-primary-200' : 'text-dark-400'}`}>{label}</button>)}</div>
+        <section className="mt-8"><h2 className="mb-3 text-lg font-bold">پلی‌لیست‌های هوشمند ✨</h2><div className="grid gap-3 sm:grid-cols-3">{smart.map(item => <button key={item.title} disabled={!item.files.length} onClick={() => startQueue(item.files, 0)} className="rounded-2xl border border-white/[.07] bg-dark-900/70 p-4 text-right disabled:opacity-55"><span className="font-bold">{item.title}</span><span className="mt-2 block text-xs text-dark-400">{item.files.length.toLocaleString('fa-IR')} مورد · {item.subtitle}</span></button>)}</div></section>
+        <section className="mt-8"><div className="mb-3 flex items-center gap-2"><ListMusic className="h-5 w-5 text-primary-300"/><h2 className="text-lg font-bold">ساخته‌های من</h2></div>{isLoading ? <div className="h-36 animate-pulse rounded-2xl bg-dark-800"/> : visible.length ? <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{visible.map(p => <PlaylistCard key={p.id} playlist={p} />)}</div> : <div className="rounded-2xl border border-dashed border-white/10 py-12 text-center text-dark-400">هنوز پلی‌لیستی اینجا نیست.</div>}</section>
+        {creating && <PlaylistEditor title="پلی‌لیست تازه" onClose={() => setCreating(false)} onSave={async (name, description) => { const p = await create.mutateAsync({ name, description }); setCreating(false); addToast('پلی‌لیست ساخته شد 🎶'); openPath(`/playlist/${p.id}`); }} />}
     </div>;
 }
 
-function PlaylistDetail({ playlist, onPlay, onMove, onAdd, onShuffle, onRemove, onDelete }: { playlist: Playlist; onPlay: (index?: number) => void; onMove: (index: number, offset: number) => Promise<void>; onAdd: () => void; onShuffle: () => Promise<void>; onRemove: (fileId: number) => Promise<void>; onDelete: () => void | Promise<void> }) {
-    const [editing, setEditing] = useState(false);
-    const update = useUpdatePlaylist();
-    return <>
-        <div className="flex flex-col gap-4 border-b border-white/[0.06] pb-5 sm:flex-row sm:items-start sm:justify-between">
-            <div className="min-w-0"><h2 className="truncate text-2xl font-bold">{playlist.name}</h2>{playlist.description && <p className="mt-2 whitespace-pre-wrap text-sm text-dark-400">{playlist.description}</p>}<p className="mt-2 text-xs text-dark-500">{playlist.item_count.toLocaleString('fa-IR')} مورد · {formatDuration(playlist.total_duration) || 'مدتی ثبت نشده'}</p></div>
-            <div className="flex flex-wrap gap-2">
-                <button className="btn-primary flex items-center gap-2" disabled={!playlist.items.length} onClick={() => onPlay(0)}><Play className="h-4 w-4" /> پخش همه</button>
-                <button className="btn-secondary flex items-center gap-2" disabled={playlist.items.length < 2} onClick={onShuffle}><Shuffle className="h-4 w-4" /> شافل</button>
-                <button className="btn-secondary flex items-center gap-2" onClick={onAdd}><Plus className="h-4 w-4" /> افزودن</button>
-                <button className="btn-icon" title="ویرایش" onClick={() => setEditing(true)}><Pencil className="h-4 w-4" /></button>
-                <button className="btn-icon text-red-300" title="حذف پلی‌لیست" onClick={onDelete}><Trash2 className="h-4 w-4" /></button>
-            </div>
-        </div>
-        <div className="mt-4 space-y-2">
-            {playlist.items.map((item, index) => <div key={item.id} className="group flex items-center gap-3 rounded-xl border border-white/[0.06] bg-dark-800/50 p-2.5 hover:border-white/[0.12]">
-                <button className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary-500/15 text-primary-200" onClick={() => onPlay(index)}><Play className="h-4 w-4" /></button>
-                <span className="w-6 text-center text-xs text-dark-500">{(index + 1).toLocaleString('fa-IR')}</span>
-                <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{item.file.file_name}</p><p className="mt-1 flex items-center gap-2 text-xs text-dark-500">{mediaIcon(item.file.file_type)} {item.file.file_type === 'video' ? 'ویدیو' : 'آهنگ'} {item.file.duration ? `· ${formatDuration(item.file.duration)}` : ''}</p></div>
-                <button className="btn-icon p-1.5" disabled={index === 0} title="بالاتر" onClick={() => onMove(index, -1)}><ArrowUp className="h-4 w-4" /></button>
-                <button className="btn-icon p-1.5" disabled={index === playlist.items.length - 1} title="پایین‌تر" onClick={() => onMove(index, 1)}><ArrowDown className="h-4 w-4" /></button>
-                <button className="btn-icon p-1.5 text-red-300 opacity-70 sm:opacity-0 sm:group-hover:opacity-100" title="حذف از پلی‌لیست" onClick={() => onRemove(item.file.id)}><X className="h-4 w-4" /></button>
-            </div>)}
-            {!playlist.items.length && <div className="rounded-xl border border-dashed border-white/10 py-12 text-center text-sm text-dark-400">این پلی‌لیست هنوز خالیه؛ چند آهنگ یا ویدیو بهش اضافه کن 🎵</div>}
-        </div>
-        {editing && <PlaylistEditor title="ویرایش پلی‌لیست" initialName={playlist.name} initialDescription={playlist.description || ''} onClose={() => setEditing(false)} onSave={async (name, description) => { await update.mutateAsync({ id: playlist.id, name, description }); setEditing(false); }} />}
-    </>;
+function PlaylistCard({ playlist }: { playlist: PlaylistSummary }) {
+    return <button onClick={() => openPath(`/playlist/${playlist.id}`)} className="group flex gap-4 rounded-2xl border border-white/[.07] bg-dark-900/65 p-3 text-right hover:border-primary-500/30"><Collage urls={playlist.cover_urls} /><span className="min-w-0 flex-1 self-center"><strong className="block truncate text-base">{playlist.name}</strong><span className="mt-2 block text-xs text-dark-400">{playlist.item_count.toLocaleString('fa-IR')} مورد · {formatDuration(playlist.total_duration) || 'بدون مدت'}</span><span className="mt-1 block text-[11px] text-dark-500">{playlist.audio_count.toLocaleString('fa-IR')} صوت · {playlist.video_count.toLocaleString('fa-IR')} ویدیو</span></span></button>;
 }
 
-function PlaylistEditor({ title, initialName = '', initialDescription = '', onClose, onSave }: { title: string; initialName?: string; initialDescription?: string; onClose: () => void; onSave: (name: string, description: string) => Promise<void> }) {
-    const [name, setName] = useState(initialName);
-    const [description, setDescription] = useState(initialDescription);
-    const [saving, setSaving] = useState(false);
-    return <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={onClose}><form className="w-full max-w-md rounded-2xl border border-white/10 bg-dark-900 p-5" onClick={event => event.stopPropagation()} onSubmit={async event => { event.preventDefault(); if (!name.trim()) return; setSaving(true); try { await onSave(name.trim(), description.trim()); } finally { setSaving(false); } }}>
-        <div className="flex items-center justify-between"><h2 className="text-lg font-bold">{title} 🎼</h2><button type="button" className="btn-icon" onClick={onClose}><X className="h-5 w-5" /></button></div>
-        <input className="input mt-5 w-full" maxLength={255} autoFocus placeholder="نام پلی‌لیست" value={name} onChange={event => setName(event.target.value)} />
-        <textarea className="input mt-3 min-h-24 w-full resize-y" maxLength={1024} placeholder="توضیحات (اختیاری)" value={description} onChange={event => setDescription(event.target.value)} />
-        <div className="mt-4 flex gap-2"><button className="btn-primary flex flex-1 items-center justify-center gap-2" disabled={saving || !name.trim()}><Save className="h-4 w-4" /> {saving ? 'در حال ذخیره…' : 'ذخیره'}</button><button type="button" className="btn-secondary" onClick={onClose}>لغو</button></div>
+function Collage({ urls }: { urls: string[] }) {
+    return <span className="grid h-24 w-24 shrink-0 grid-cols-2 overflow-hidden rounded-xl bg-gradient-to-br from-primary-500/30 to-pink-500/20">{urls.length ? urls.slice(0,4).map((url,i) => <img key={i} src={url} className="h-full w-full object-cover" />) : <span className="col-span-2 flex items-center justify-center text-3xl">🎶</span>}</span>;
+}
+
+function PlaylistDetail({ id, onBack }: { id: number; onBack: () => void }) {
+    const { data: playlist, isLoading } = usePlaylist(id);
+    const reorder = useReorderPlaylist(); const shuffle = useShufflePlaylist(); const remove = useRemovePlaylistItem(); const del = useDeletePlaylist();
+    const { startQueue, addToast } = useAppStore();
+    const [adding, setAdding] = useState(false); const [editing, setEditing] = useState(false); const [menu, setMenu] = useState(false);
+    const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 8 } }));
+    if (isLoading || !playlist) return <div className="m-6 h-52 animate-pulse rounded-3xl bg-dark-800"/>;
+    const play = (index = 0) => startQueue(playlist.items.map(x => x.file), index);
+    const dragEnd = async ({ active, over }: DragEndEvent) => { if (!over || active.id === over.id) return; const old = playlist.items.findIndex(x => x.id === active.id); const next = playlist.items.findIndex(x => x.id === over.id); await reorder.mutateAsync({ id, itemIds: arrayMove(playlist.items, old, next).map(x => x.id) }); };
+    const requestDelete = () => { const run = async () => { await del.mutateAsync(id); addToast('پلی‌لیست حذف شد'); onBack(); }; const message=`پلی‌لیست «${playlist.name}» حذف شود؟ فایل‌ها باقی می‌مانند.`; telegram()?.showConfirm ? telegram().showConfirm(message, (yes: boolean) => yes && void run()) : confirm(message) && void run(); };
+    return <div className="mx-auto w-full max-w-5xl p-4 pb-28 sm:p-6 md:pb-8 lg:p-8">
+        <button className="mb-4 text-sm text-dark-400 md:hidden" onClick={onBack}>‹ برگشت به پلی‌لیست‌ها</button>
+        <header className="relative flex flex-col gap-5 rounded-3xl border border-white/[.08] bg-gradient-to-bl from-primary-500/15 to-dark-900 p-5 sm:flex-row"><Collage urls={playlist.cover_urls}/><div className="min-w-0 flex-1"><h1 className="truncate text-3xl font-black">{playlist.name}</h1>{playlist.description && <p className="mt-2 text-sm leading-6 text-dark-300">{playlist.description}</p>}<p className="mt-3 text-xs text-dark-400">{playlist.item_count.toLocaleString('fa-IR')} مورد · {formatDuration(playlist.total_duration) || 'بدون مدت'}</p><div className="mt-5 flex flex-wrap gap-2"><button disabled={!playlist.items.length} className="btn-primary flex items-center gap-2" onClick={() => play()}><Play className="h-4 w-4"/> پخش همه</button><button disabled={playlist.items.length < 2} className="btn-secondary flex items-center gap-2" onClick={async () => { await shuffle.mutateAsync(id); addToast('ترتیب شافل شد 🔀'); }}><Shuffle className="h-4 w-4"/> شافل</button><button className="btn-secondary flex items-center gap-2" onClick={() => setAdding(true)}><Plus className="h-4 w-4"/> افزودن فایل</button></div></div>
+            <div className="absolute left-4 top-4"><button className="btn-icon" onClick={() => setMenu(!menu)}><MoreVertical className="h-5 w-5"/></button>{menu && <div className="absolute left-0 z-20 mt-1 w-44 rounded-xl border border-white/10 bg-dark-800 p-1 shadow-2xl"><button className="context-menu-item w-full" onClick={() => {setEditing(true);setMenu(false)}}><Pencil className="h-4 w-4"/> ویرایش مشخصات</button><button className="context-menu-item w-full text-red-300" onClick={requestDelete}><Trash2 className="h-4 w-4"/> حذف پلی‌لیست</button></div>}</div>
+        </header>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={dragEnd}><SortableContext items={playlist.items.map(x => x.id)} strategy={verticalListSortingStrategy}><div className="mt-5 space-y-2">{playlist.items.map((item,index) => <TrackRow key={item.id} item={item} index={index} onPlay={() => play(index)} onRemove={() => remove.mutateAsync({ id, itemId: item.id })}/>)}</div></SortableContext></DndContext>
+        {!playlist.items.length && <button onClick={() => setAdding(true)} className="mt-5 w-full rounded-2xl border border-dashed border-white/10 py-14 text-dark-300">این پلی‌لیست هنوز خالیه! <span className="mt-2 block text-primary-300">➕ افزودن اولین آهنگ یا ویدیو</span></button>}
+        {adding && <BulkAdd playlist={playlist} onClose={() => setAdding(false)}/>} {editing && <EditPlaylist playlist={playlist} close={() => setEditing(false)}/>}
+    </div>;
+}
+
+function TrackRow({ item, index, onPlay, onRemove }: { item: PlaylistItem; index: number; onPlay: () => void; onRemove: () => void }) {
+    const [menu,setMenu] = useState(false); const sortable = useSortable({ id: item.id });
+    return <div ref={sortable.setNodeRef} style={{ transform: CSS.Transform.toString(sortable.transform), transition: sortable.transition }} className="flex items-center gap-2 rounded-xl border border-white/[.06] bg-dark-900/65 p-2.5"><button className="h-10 w-10 shrink-0 rounded-lg bg-primary-500/15" onClick={onPlay}><Play className="mx-auto h-4 w-4"/></button><span className="w-6 text-center text-xs text-dark-500">{(index+1).toLocaleString('fa-IR')}</span><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{item.file.file_name}</p><p className="mt-1 text-xs text-dark-500">{item.file.file_type === 'video' ? 'ویدیو' : 'صوت'} {item.file.duration ? `· ${formatDuration(item.file.duration)}` : ''}</p></div><button className="relative btn-icon" onClick={() => setMenu(!menu)}><MoreVertical className="h-4 w-4"/>{menu && <span className="absolute left-0 top-full z-20 mt-1 w-36 rounded-xl border border-white/10 bg-dark-800 p-1"><span role="button" onClick={e => {e.stopPropagation();onRemove()}} className="context-menu-item text-red-300"><Trash2 className="h-4 w-4"/> حذف از فهرست</span></span>}</button><button {...sortable.attributes} {...sortable.listeners} className="flex h-11 w-11 touch-none items-center justify-center rounded-lg text-dark-400" title="برای جابه‌جایی بکش"><GripVertical className="h-5 w-5"/></button></div>;
+}
+
+function BulkAdd({ playlist, onClose }: { playlist: Playlist; onClose: () => void }) {
+    const [query,setQuery] = useState(''); const [folder,setFolder] = useState<number|null>(null); const [selected,setSelected] = useState<Set<number>>(new Set());
+    const { data } = useFiles(folder, 'audio,video', query || undefined, 1, 'name:asc'); const { data: folders=[] } = useFolders(null); const add = useAddPlaylistItems();
+    const existing = useMemo(() => new Set(playlist.items.map(x => x.file.id)), [playlist]);
+    const submit = async () => { const ids=[...selected]; const duplicates=ids.filter(fileId => existing.has(fileId)); const run=async(allowDuplicates:boolean)=>{await add.mutateAsync({id:playlist.id,fileIds:ids,allowDuplicates});onClose()}; if (!duplicates.length) return run(false); const message='بعضی فایل‌ها قبلاً اضافه شده‌اند؛ دوباره هم اضافه شوند؟'; if(telegram()?.showConfirm) telegram().showConfirm(message,(yes:boolean)=>void run(yes)); else void run(confirm(message)); };
+    return <div className="fixed inset-0 z-[150] flex items-end bg-black/70 backdrop-blur-sm" onClick={onClose}><div className="mx-auto flex max-h-[88vh] w-full max-w-2xl flex-col rounded-t-3xl border border-white/10 bg-dark-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]" onClick={e=>e.stopPropagation()}><div className="mx-auto mb-3 h-1 w-12 rounded-full bg-white/20"/><div className="flex items-center justify-between"><h2 className="text-lg font-bold">افزودن فایل‌ها</h2><button className="btn-icon" onClick={onClose}><X className="h-5 w-5"/></button></div><div className="relative mt-4"><Search className="absolute right-3 top-3 h-4 w-4 text-dark-500"/><input className="input w-full pr-9" placeholder="جست‌وجوی آهنگ یا ویدیو…" value={query} onChange={e=>setQuery(e.target.value)}/></div><div className="mt-3 flex gap-2 overflow-x-auto pb-2"><button onClick={()=>setFolder(null)} className={`shrink-0 rounded-full px-3 py-2 text-xs ${folder===null?'bg-primary-500/20 text-primary-200':'bg-dark-800 text-dark-400'}`}>همه کشوها</button>{folders.map(f=><button key={f.id} onClick={()=>setFolder(f.id)} className={`shrink-0 rounded-full px-3 py-2 text-xs ${folder===f.id?'bg-primary-500/20 text-primary-200':'bg-dark-800 text-dark-400'}`}>{f.name}</button>)}</div><div className="min-h-0 flex-1 space-y-1 overflow-y-auto">{(data?.files||[]).map(file=><button key={file.id} onClick={()=>setSelected(prev=>{const n=new Set(prev);n.has(file.id)?n.delete(file.id):n.add(file.id);return n})} className={`flex w-full items-center gap-3 rounded-xl border p-3 text-right ${selected.has(file.id)?'border-primary-500/40 bg-primary-500/10':'border-transparent hover:bg-white/[.04]'}`}><span className={`h-5 w-5 rounded border ${selected.has(file.id)?'border-primary-400 bg-primary-500':'border-white/20'}`}/><span>{file.file_type==='video'?<Film className="h-4 w-4"/>:<Music className="h-4 w-4"/>}</span><span className="min-w-0 flex-1 truncate text-sm">{file.file_name}</span>{existing.has(file.id)&&<span className="text-[10px] text-amber-300">قبلاً افزوده شده</span>}</button>)}</div><button disabled={!selected.size||add.isPending} className="btn-primary mt-4" onClick={submit}>افزودن ({selected.size.toLocaleString('fa-IR')})</button></div></div>;
+}
+
+function EditPlaylist({ playlist, close }: { playlist: Playlist; close: () => void }) { const update=useUpdatePlaylist(); return <PlaylistEditor title="ویرایش پلی‌لیست" initialName={playlist.name} initialDescription={playlist.description||''} onClose={close} onSave={async(name,description)=>{await update.mutateAsync({id:playlist.id,name,description});close()}}/>; }
+function PlaylistEditor({ title, initialName='', initialDescription='', onClose, onSave }: { title:string; initialName?:string; initialDescription?:string; onClose:()=>void; onSave:(name:string,description:string)=>Promise<void> }) {
+    const [name,setName]=useState(initialName); const [description,setDescription]=useState(initialDescription); const [saving,setSaving]=useState(false);
+    return <div className="fixed inset-0 z-[170] flex items-center justify-center bg-black/70 p-4" onClick={onClose}><form className="w-full max-w-md rounded-2xl border border-white/10 bg-dark-900 p-5" onClick={e=>e.stopPropagation()} onSubmit={async e=>{e.preventDefault();if(!name.trim())return;setSaving(true);try{await onSave(name.trim(),description.trim())}finally{setSaving(false)}}}>
+        <div className="flex items-center justify-between"><h2 className="text-lg font-bold">{title}</h2><button type="button" className="btn-icon" onClick={onClose}><X className="h-5 w-5"/></button></div><input autoFocus maxLength={255} className="input mt-4 w-full" placeholder="نام پلی‌لیست" value={name} onChange={e=>setName(e.target.value)}/><textarea maxLength={1024} className="input mt-3 min-h-24 w-full" placeholder="توضیحات (اختیاری)" value={description} onChange={e=>setDescription(e.target.value)}/><button disabled={saving||!name.trim()} className="btn-primary mt-4 flex w-full items-center justify-center gap-2"><Save className="h-4 w-4"/>{saving?'در حال ذخیره…':'ذخیره'}</button>
     </form></div>;
-}
-
-function AddItemsModal({ playlist, onClose }: { playlist: Playlist; onClose: () => void }) {
-    const [query, setQuery] = useState('');
-    const [selected, setSelected] = useState<Set<number>>(new Set());
-    const { data } = useFiles(null, 'audio,video', query || undefined, 1, 'name:asc');
-    const addItems = useAddPlaylistItems();
-    const existing = useMemo(() => new Set(playlist.items.map(item => item.file.id)), [playlist.items]);
-    const files = data?.files.filter(file => !existing.has(file.id)) || [];
-    return <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={onClose}><div className="flex max-h-[85vh] w-full max-w-xl flex-col rounded-2xl border border-white/10 bg-dark-900 p-5" onClick={event => event.stopPropagation()}>
-        <div className="flex items-center justify-between"><div><h2 className="text-lg font-bold">افزودن به «{playlist.name}»</h2><p className="mt-1 text-xs text-dark-400">آهنگ و ویدیو را می‌تونی با هم انتخاب کنی.</p></div><button className="btn-icon" onClick={onClose}><X className="h-5 w-5" /></button></div>
-        <div className="relative mt-4"><Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-dark-500" /><input className="input w-full pr-9" placeholder="جست‌وجوی آهنگ یا ویدیو…" value={query} onChange={event => setQuery(event.target.value)} /></div>
-        <div className="mt-3 flex-1 space-y-1 overflow-y-auto">
-            {files.map(file => <button key={file.id} onClick={() => setSelected(previous => { const next = new Set(previous); if (next.has(file.id)) next.delete(file.id); else next.add(file.id); return next; })} className={`flex w-full items-center gap-3 rounded-xl border p-3 text-right ${selected.has(file.id) ? 'border-primary-500/40 bg-primary-500/10' : 'border-transparent hover:bg-white/[0.04]'}`}>
-                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-dark-800">{mediaIcon(file.file_type)}</span><span className="min-w-0 flex-1 truncate text-sm">{file.file_name}</span><span className="text-xs text-dark-500">{file.duration ? formatDuration(file.duration) : ''}</span>
-            </button>)}
-            {!files.length && <p className="py-10 text-center text-sm text-dark-400">فایل تازه‌ای برای افزودن پیدا نشد.</p>}
-        </div>
-        <button className="btn-primary mt-4" disabled={!selected.size || addItems.isPending} onClick={async () => { await addItems.mutateAsync({ id: playlist.id, fileIds: Array.from(selected) }); onClose(); }}>{addItems.isPending ? 'در حال افزودن…' : `افزودن ${selected.size.toLocaleString('fa-IR')} مورد`}</button>
-    </div></div>;
 }

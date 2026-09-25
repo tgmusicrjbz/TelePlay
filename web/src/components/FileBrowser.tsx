@@ -276,6 +276,7 @@ export default function FileBrowser() {
     }, [activeSection, breadcrumbs.length, navigateToBreadcrumb]);
 
     useEffect(() => {
+        if (activeSection === 'playlists') return;
         const backButton = (window as Window & { Telegram?: { WebApp?: { BackButton?: { show: () => void; hide: () => void; onClick: (handler: () => void) => void; offClick: (handler: () => void) => void } } } }).Telegram?.WebApp?.BackButton;
         if (!backButton) return;
         const canGoBack = activeSection === 'files' && breadcrumbs.length > 1;

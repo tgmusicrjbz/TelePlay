@@ -2,7 +2,7 @@
  * MediaPlayer - full screen video/audio player
  */
 import { useRef, useEffect, useState, useCallback } from 'react';
-import { X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipBack, SkipForward, Download, ExternalLink, AlertTriangle, Copy, PictureInPicture2, Gauge, ChevronDown, ChevronUp, Repeat2, Shuffle, Headphones, Scaling, RotateCcw, RotateCw } from 'lucide-react';
+import { X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipBack, SkipForward, Download, ExternalLink, AlertTriangle, Copy, PictureInPicture2, Gauge, ChevronDown, ChevronUp, Repeat2, Shuffle, Headphones, Scaling, RotateCcw, RotateCw, Clock3 } from 'lucide-react';
 import { TelegramFile, formatDuration, useUpdateProgress, useFile, api } from '../lib/api';
 import { useAppStore } from '../lib/store';
 
@@ -42,6 +42,9 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     const lastTap = useRef<{ at: number; side: 'left' | 'right' } | null>(null);
     const [publicUrl, setPublicUrl] = useState<string | null>(null);
     const [showSpeedMenu, setShowSpeedMenu] = useState(false);
+    const [showSleepMenu, setShowSleepMenu] = useState(false);
+    const [sleepMode, setSleepMode] = useState<'off' | '15' | '30' | 'end'>('off');
+    const sleepTimeout = useRef<ReturnType<typeof setTimeout>>();
     const [videoFit, setVideoFit] = useState<'contain' | 'cover'>('contain');
     const [audioOnly, setAudioOnly] = useState(false);
     const [skipFeedback, setSkipFeedback] = useState<'backward' | 'forward' | null>(null);
@@ -185,6 +188,11 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
 
     const handleEnded = () => {
         saveProgress();
+        if (sleepMode === 'end' && (!hasQueue || queueIndex >= playQueue.length - 1)) {
+            setIsPlaying(false);
+            setSleepMode('off');
+            return;
+        }
         if (repeatMode === 'one' && videoRef.current) {
             videoRef.current.currentTime = 0;
             videoRef.current.play();
@@ -197,9 +205,9 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
         if (videoRef.current?.error) {
             const code = videoRef.current.error.code;
             if (code === 3 || code === 4) { // MEDIA_ERR_DECODE or MEDIA_ERR_SRC_NOT_SUPPORTED
-                setError('مرورگر نمی‌تواند فرمت این ویدیو را پخش کند.');
+                setError(`مرورگر نمی‌تواند فرمت این ${isVideo ? 'ویدیو' : 'فایل صوتی'} را پخش کند.`);
             } else {
-                setError('هنگام پخش ویدیو مشکلی پیش آمد.');
+                setError('هنگام دریافت یا پخش فایل مشکلی پیش آمد.');
             }
             setIsLoading(false);
         }
@@ -213,6 +221,23 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
             setCurrentTime(nextTime);
         }
     };
+
+    const setSleepTimer = (mode: 'off' | '15' | '30' | 'end') => {
+        if (sleepTimeout.current) clearTimeout(sleepTimeout.current);
+        setSleepMode(mode);
+        setShowSleepMenu(false);
+        if (mode === '15' || mode === '30') {
+            sleepTimeout.current = setTimeout(() => {
+                videoRef.current?.pause();
+                setIsPlaying(false);
+                setSleepMode('off');
+            }, Number(mode) * 60 * 1000);
+        }
+    };
+
+    useEffect(() => () => {
+        if (sleepTimeout.current) clearTimeout(sleepTimeout.current);
+    }, []);
 
     const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (videoRef.current) {
@@ -370,18 +395,47 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
         return `${window.location.origin}${url}`;
     };
 
-    const relativeStreamUrl = `${file.stream_url}?token=${token}`;
+    const relativeStreamUrl = `${file.stream_url}?token=${encodeURIComponent(token || '')}`;
     const authorizedStreamUrl = getAbsoluteUrl(relativeStreamUrl);
     const externalUrl = publicUrl || authorizedStreamUrl;
     const vlcUrl = `vlc://${externalUrl}`;
 
     // Authorized Thumbnail URL
-    const relativeThumbnailUrl = file.thumbnail_url ? `${file.thumbnail_url}?token=${token}` : null;
+    const relativeThumbnailUrl = file.thumbnail_url ? `${file.thumbnail_url}?token=${encodeURIComponent(token || '')}` : null;
     const authorizedThumbnailUrl = relativeThumbnailUrl ? getAbsoluteUrl(relativeThumbnailUrl) : null;
+
+    useEffect(() => {
+        if (!('mediaSession' in navigator)) return;
+        navigator.mediaSession.metadata = new MediaMetadata({
+            title: cleanFileName,
+            artist: 'کمد',
+            album: hasQueue ? `صف پخش · ${queuePosition.toLocaleString('fa-IR')} از ${queueLength.toLocaleString('fa-IR')}` : 'کمد',
+            artwork: authorizedThumbnailUrl ? [{ src: authorizedThumbnailUrl }] : undefined,
+        });
+        const actions: Array<[MediaSessionAction, MediaSessionActionHandler | null]> = [
+            ['play', () => { void videoRef.current?.play(); }],
+            ['pause', () => videoRef.current?.pause()],
+            ['previoustrack', hasQueue ? () => { playPrevious(); } : null],
+            ['nexttrack', hasQueue ? () => { playNext(); } : null],
+            ['seekbackward', details => handleSkip(-(details.seekOffset || 10))],
+            ['seekforward', details => handleSkip(details.seekOffset || 10)],
+        ];
+        actions.forEach(([action, handler]) => {
+            try { navigator.mediaSession.setActionHandler(action, handler); } catch { /* unsupported action */ }
+        });
+        return () => actions.forEach(([action]) => {
+            try { navigator.mediaSession.setActionHandler(action, null); } catch { /* unsupported action */ }
+        });
+    }, [file.id, cleanFileName, authorizedThumbnailUrl, hasQueue, queuePosition, queueLength]);
+
+    useEffect(() => {
+        if ('mediaSession' in navigator) navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+    }, [isPlaying]);
 
     // Common Media Element
     const MediaElement = isVideo ? (
         <video
+            key={file.id}
             ref={videoRef}
             src={authorizedStreamUrl}
             className={`max-w-full max-h-full w-full h-full ${videoFit === 'cover' ? 'object-cover' : 'object-contain'} ${isMinimized ? 'hidden' : ''} ${audioOnly ? 'invisible' : 'visible'}`}
@@ -393,9 +447,11 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
             onEnded={handleEnded}
             controls={false}
             playsInline
+            preload="metadata"
         />
     ) : (
         <audio
+            key={file.id}
             ref={videoRef as React.RefObject<HTMLAudioElement>}
             src={authorizedStreamUrl}
             onTimeUpdate={handleTimeUpdate}
@@ -404,6 +460,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
             onPlaying={handlePlaying}
             onError={handleError}
             onEnded={handleEnded}
+            preload="metadata"
         />
     );
 
@@ -599,6 +656,16 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                         <div className="relative">
                             <button onClick={() => setShowSpeedMenu(open => !open)} className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-sm font-medium transition-all ${playbackSpeed !== 1 ? 'border-primary-500/40 bg-primary-500/30 text-primary-300' : 'border-white/10 bg-white/10 text-white/80 hover:bg-white/20'}`} title="انتخاب سرعت پخش" aria-expanded={showSpeedMenu}><Gauge className="w-4 h-4" /><span>{playbackSpeed === 1 ? '1.0' : playbackSpeed}x</span></button>
                             {showSpeedMenu && <div role="menu" aria-label="سرعت پخش" className="absolute left-1/2 top-full mt-2 w-32 -translate-x-1/2 overflow-hidden rounded-xl border border-white/10 bg-dark-900/95 p-1.5 shadow-2xl backdrop-blur-md">{[0.75, 1, 1.25, 1.5, 2].map(speed => <button key={speed} role="menuitem" onClick={() => setSpeed(speed)} className={`block w-full rounded-lg px-3 py-2 text-center text-sm transition-colors ${playbackSpeed === speed ? 'bg-primary-500/25 text-primary-200' : 'text-white/80 hover:bg-white/10'}`}>{speed === 1 ? '1.0' : speed}x</button>)}</div>}
+                        </div>
+                        <div className="relative">
+                            <button onClick={() => setShowSleepMenu(open => !open)} className={`p-2 rounded-lg transition-all ${sleepMode !== 'off' ? 'bg-primary-500/30 text-primary-300' : 'hover:bg-white/10 text-white/80'}`} title="تایمر خواب"><Clock3 className="h-5 w-5" /></button>
+                            {showSleepMenu && <div role="menu" aria-label="تایمر خواب" className="absolute left-1/2 top-full mt-2 w-44 -translate-x-1/2 overflow-hidden rounded-xl border border-white/10 bg-dark-900/95 p-1.5 text-right shadow-2xl backdrop-blur-md">
+                                <p className="px-3 py-2 text-xs text-dark-400">توقف خودکار پخش</p>
+                                <button className="context-menu-item w-full" onClick={() => setSleepTimer('15')}>۱۵ دقیقه دیگر</button>
+                                <button className="context-menu-item w-full" onClick={() => setSleepTimer('30')}>۳۰ دقیقه دیگر</button>
+                                <button className="context-menu-item w-full" onClick={() => setSleepTimer('end')}>پایان پلی‌لیست</button>
+                                {sleepMode !== 'off' && <button className="context-menu-item w-full text-red-300" onClick={() => setSleepTimer('off')}>لغو تایمر</button>}
+                            </div>}
                         </div>
                         {isVideo && <button onClick={() => setVideoFit(current => current === 'contain' ? 'cover' : 'contain')} className={`p-2 rounded-lg transition-all ${videoFit === 'cover' ? 'bg-primary-500/30 text-primary-300' : 'hover:bg-white/10 text-white/80'}`} title={videoFit === 'contain' ? 'پر کردن قاب ویدیو' : 'نمایش کامل ویدیو'}><Scaling className="w-5 h-5" /></button>}
                         {isVideo && <button onClick={() => setAudioOnly(current => !current)} className={`p-2 rounded-lg transition-all ${audioOnly ? 'bg-primary-500/30 text-primary-300' : 'hover:bg-white/10 text-white/80'}`} title={audioOnly ? 'بازگشت به پخش ویدیو' : 'پخش فقط صدا'}><Headphones className="w-5 h-5" /></button>}

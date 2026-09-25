@@ -1,16 +1,16 @@
-const CACHE_NAME = 'komod-shell-v2';
+const CACHE_NAME = 'komod-shell-v3';
 const CORE_ASSETS = ['/', '/index.html', '/offline.html', '/manifest.webmanifest', '/komod.svg'];
 
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME).then(async cache => {
       await cache.addAll(CORE_ASSETS);
-      const response = await fetch('/index.html');
+      const response = await fetch('/index.html', { cache: 'no-store' });
       const html = await response.clone().text();
       await cache.put('/index.html', response);
       const assetPaths = [...html.matchAll(/(?:src|href)="(\/assets\/[^\"]+)"/g)].map(match => match[1]);
       if (assetPaths.length) await cache.addAll([...new Set(assetPaths)]);
-    })
+    }).then(() => self.skipWaiting())
   );
 });
 
@@ -35,7 +35,7 @@ self.addEventListener('fetch', event => {
 
   if (request.mode === 'navigate') {
     event.respondWith(
-      fetch(request)
+      fetch(request, { cache: 'no-store' })
         .then(response => {
           const copy = response.clone();
           caches.open(CACHE_NAME).then(cache => cache.put('/index.html', copy));

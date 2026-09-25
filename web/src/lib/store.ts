@@ -81,6 +81,8 @@ interface AppState {
     setActiveContextMenu: (menu: { type: 'file'; item: TelegramFile; x: number; y: number } | { type: 'folder'; item: Folder; x: number; y: number } | null) => void;
     selectedFiles: TelegramFile[];
     setSelectedFiles: (files: TelegramFile[]) => void;
+    playlistFile: TelegramFile | null;
+    setPlaylistFile: (file: TelegramFile | null) => void;
 
     // Navigation Section
     activeSection: 'files' | 'playlists' | 'activity' | 'settings';
@@ -106,8 +108,16 @@ export const useAppStore = create<AppState>((set) => ({
     setBreadcrumbs: (breadcrumbs) => set({ breadcrumbs }),
 
     // Navigation Section
-    activeSection: 'files',
-    setActiveSection: (section) => set({ activeSection: section, currentFolderId: null, breadcrumbs: [{ id: null, name: section === 'files' ? 'کمد من' : section === 'playlists' ? 'پلی‌لیست‌ها' : section === 'activity' ? 'فعالیت' : 'تنظیمات' }] }),
+    activeSection: window.location.pathname.startsWith('/playlist') ? 'playlists' : 'files',
+    setActiveSection: (section) => set({
+        activeSection: section,
+        currentFolderId: null,
+        breadcrumbs: [{ id: null, name: section === 'files' ? 'کمد من' : section === 'playlists' ? 'پلی‌لیست‌ها' : section === 'activity' ? 'فعالیت' : 'تنظیمات' }],
+        searchQuery: '',
+        fileTypeFilter: [],
+        selectedFileIds: new Set(),
+        selectedFolderIds: new Set(),
+    }),
 
     // Selection
     selectedFileIds: new Set(),
@@ -168,6 +178,8 @@ export const useAppStore = create<AppState>((set) => ({
     setMoveFiles: (files) => set({ moveItems: { files, folders: [] } }),
     selectedFiles: [],
     setSelectedFiles: (files) => set({ selectedFiles: files }),
+    playlistFile: null,
+    setPlaylistFile: (file) => set({ playlistFile: file }),
 
     showNewFolder: false,
     setShowNewFolder: (show) => set({ showNewFolder: show }),

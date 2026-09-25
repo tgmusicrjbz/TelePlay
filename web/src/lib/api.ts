@@ -48,6 +48,7 @@ export interface TelegramFile {
     last_pos?: number;
     public_hash?: string;
     public_stream_url?: string;
+    is_favorite?: boolean;
 }
 
 export interface FileListResponse {
@@ -60,6 +61,7 @@ export interface FileListResponse {
 export interface ActivityFeed {
     continue_watching: TelegramFile[];
     recent: TelegramFile[];
+    favorites: TelegramFile[];
 }
 
 export interface PlaylistItem {
@@ -76,6 +78,9 @@ export interface PlaylistSummary {
     item_count: number;
     total_duration: number;
     cover_url: string | null;
+    cover_urls: string[];
+    audio_count: number;
+    video_count: number;
     created_at: string;
     updated_at: string;
 }
@@ -331,7 +336,7 @@ export const useFile = (fileId: number) => {
 export const useUpdateFile = () => {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async ({ id, ...data }: { id: number; file_name?: string; description?: string; folder_id?: number | null }) => {
+        mutationFn: async ({ id, ...data }: { id: number; file_name?: string; description?: string; folder_id?: number | null; is_favorite?: boolean }) => {
             const { data: result } = await api.patch<TelegramFile>(`/files/${id}`, data);
             return result;
         },
@@ -340,6 +345,7 @@ export const useUpdateFile = () => {
             queryClient.invalidateQueries({ queryKey: ['files'] });
             queryClient.invalidateQueries({ queryKey: ['folders'] });
             queryClient.invalidateQueries({ queryKey: ['folderTree'] });
+            queryClient.invalidateQueries({ queryKey: ['activity'] });
         },
     });
 };
@@ -408,8 +414,16 @@ export const useActivityFeed = (enabled = true, limit = 50) => {
     return useQuery<ActivityFeed>({
         queryKey: ['activity', limit],
         queryFn: async () => {
-            const { data } = await api.get<ActivityFeed>('/files/activity', { params: { limit } });
-            return data;
+            try {
+                const { data } = await api.get<ActivityFeed>('/files/activity', { params: { limit } });
+                return data;
+            } catch {
+                const [recent, watching] = await Promise.all([
+                    api.get<FileListResponse>('/files/recent', { params: { limit } }),
+                    api.get<FileListResponse>('/files/continue-watching', { params: { limit } }),
+                ]);
+                return { recent: recent.data.files, continue_watching: watching.data.files, favorites: [] };
+            }
         },
         enabled,
         staleTime: 15000,
@@ -612,16 +626,16 @@ export const useUpdatePlaylist = () => usePlaylistMutation(async ({ id, ...paylo
     (await api.patch<Playlist>(`/playlists/${id}`, payload)).data
 );
 
-export const useAddPlaylistItems = () => usePlaylistMutation(async ({ id, fileIds }: { id: number; fileIds: number[] }) =>
-    (await api.post<Playlist>(`/playlists/${id}/items`, { file_ids: fileIds })).data
+export const useAddPlaylistItems = () => usePlaylistMutation(async ({ id, fileIds, allowDuplicates = false }: { id: number; fileIds: number[]; allowDuplicates?: boolean }) =>
+    (await api.post<Playlist>(`/playlists/${id}/items`, { file_ids: fileIds, allow_duplicates: allowDuplicates })).data
 );
 
-export const useRemovePlaylistItem = () => usePlaylistMutation(async ({ id, fileId }: { id: number; fileId: number }) =>
-    (await api.delete<Playlist>(`/playlists/${id}/items/${fileId}`)).data
+export const useRemovePlaylistItem = () => usePlaylistMutation(async ({ id, itemId }: { id: number; itemId: number }) =>
+    (await api.delete<Playlist>(`/playlists/${id}/items/item/${itemId}`)).data
 );
 
-export const useReorderPlaylist = () => usePlaylistMutation(async ({ id, fileIds }: { id: number; fileIds: number[] }) =>
-    (await api.put<Playlist>(`/playlists/${id}/reorder`, { file_ids: fileIds })).data
+export const useReorderPlaylist = () => usePlaylistMutation(async ({ id, itemIds }: { id: number; itemIds: number[] }) =>
+    (await api.put<Playlist>(`/playlists/${id}/reorder`, { item_ids: itemIds })).data
 );
 
 export const useShufflePlaylist = () => usePlaylistMutation(async (id: number) =>

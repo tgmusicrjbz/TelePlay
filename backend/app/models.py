@@ -87,6 +87,7 @@ class File(Base):
     # File metadata
     file_name: Mapped[str] = mapped_column(String(500), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
+    is_favorite: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     file_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
     mime_type: Mapped[Optional[str]] = mapped_column(String(100))
     file_type: Mapped[str] = mapped_column(String(50), nullable=False)  # video, audio, document, image, text
@@ -172,7 +173,6 @@ class PlaylistItem(Base):
     file: Mapped["File"] = relationship(back_populates="playlist_items")
 
     __table_args__ = (
-        UniqueConstraint("playlist_id", "file_id", name="uq_playlist_file"),
         Index("idx_playlist_position", playlist_id, position),
     )
 

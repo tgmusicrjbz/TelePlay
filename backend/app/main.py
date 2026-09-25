@@ -160,11 +160,15 @@ async def serve_spa(full_path: str):
     # Check if the file exists in static directory (e.g. logo.png, favicon.ico)
     static_file_path = f"app/static/{full_path}"
     if os.path.exists(static_file_path) and os.path.isfile(static_file_path):
-        return FileResponse(static_file_path)
+        headers = {"Cache-Control": "no-cache, no-store, must-revalidate"} if full_path in {"sw.js", "index.html"} else None
+        return FileResponse(static_file_path, headers=headers)
         
     # Serve index.html for generic SPA routes
     if os.path.exists("app/static/index.html"):
-        return FileResponse("app/static/index.html")
+        return FileResponse(
+            "app/static/index.html",
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
         
     return {"message": "Backend running. Frontend not built/mounted (dev mode)."}
 

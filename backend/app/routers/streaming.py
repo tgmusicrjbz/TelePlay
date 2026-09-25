@@ -3,6 +3,7 @@ Streaming API endpoints for media playback.
 """
 import re
 import logging
+import mimetypes
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,17 +27,37 @@ limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(prefix="/stream", tags=["Streaming"])
 
 
+def media_type_for(file: File) -> str:
+    """Return a browser-friendly media type for legacy rows with generic MIME data."""
+    stored = (file.mime_type or "").strip().lower()
+    if stored and stored not in {"application/octet-stream", "binary/octet-stream"}:
+        return stored
+    guessed, _ = mimetypes.guess_type(file.file_name)
+    if guessed:
+        return guessed
+    if file.file_type == "audio":
+        return "audio/mpeg"
+    if file.file_type == "video":
+        return "video/mp4"
+    return "application/octet-stream"
+
+
 def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
     """Parse HTTP Range header for video seeking support."""
     if not range_header:
         return 0, file_size - 1
     
-    match = re.match(r'bytes=(\d+)-(\d*)', range_header)
+    match = re.fullmatch(r'bytes=(\d*)-(\d*)', range_header.strip())
     if not match:
         return 0, file_size - 1
-    
-    start = int(match.group(1))
-    end = int(match.group(2)) if match.group(2) else file_size - 1
+    start_raw, end_raw = match.groups()
+    if not start_raw:
+        suffix_length = int(end_raw or 0)
+        if suffix_length <= 0:
+            return 0, file_size - 1
+        return max(0, file_size - suffix_length), file_size - 1
+    start = int(start_raw)
+    end = int(end_raw) if end_raw else file_size - 1
     
     return start, min(end, file_size - 1)
 
@@ -67,7 +88,7 @@ async def stored_message_response(file: File, message, range_header: str | None,
         headers["Content-Range"] = f"bytes {start}-{end}/{size}"
     return Response(
         content=content[start:end + 1],
-        media_type=file.mime_type or "application/octet-stream",
+        media_type=media_type_for(file),
         status_code=206 if range_header else 200,
         headers=headers,
     )
@@ -91,28 +112,22 @@ async def stream_file(
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
     
-    file_size = file.file_size
-    
-    # Parse range header
-    range_header = request.headers.get("range")
-    from_bytes, until_bytes = parse_range_header(range_header, file_size)
-    
-    # Validate range
-    if (until_bytes > file_size) or (from_bytes < 0) or (until_bytes < from_bytes):
-        return Response(
-            status_code=416,
-            content="416: Range not satisfiable",
-            headers={"Content-Range": f"bytes */{file_size}"},
-        )
-    
-    req_length = until_bytes - from_bytes + 1
-    
     # Get message from channel
     message = await get_message_from_channel(file.channel_message_id)
     if not message:
         raise HTTPException(status_code=404, detail="Message not found in channel")
     if file.file_type == "text" or message.photo:
-        return await stored_message_response(file, message, range_header, download)
+        return await stored_message_response(file, message, request.headers.get("range"), download)
+
+    media = message.video or message.audio or message.document
+    file_size = getattr(media, "file_size", None) or file.file_size
+    range_header = request.headers.get("range")
+    from_bytes, until_bytes = parse_range_header(range_header, file_size)
+    if from_bytes >= file_size or from_bytes < 0 or until_bytes < from_bytes:
+        return Response(status_code=416, headers={"Content-Range": f"bytes */{file_size}"})
+    req_length = until_bytes - from_bytes + 1
+    if not any(getattr(client, "is_connected", False) for client in telegram.clients):
+        raise HTTPException(status_code=503, detail="Telegram storage is temporarily unavailable")
     
     async def file_streamer():
         """Generator that streams file chunks from Telegram MTProto."""
@@ -125,7 +140,7 @@ async def stream_file(
             yield chunk
     
     # Determine content disposition
-    mime_type = file.mime_type or "application/octet-stream"
+    mime_type = media_type_for(file)
     disposition = "attachment" if download else ("inline" if mime_type.startswith(("video/", "audio/", "image/", "text/")) else "attachment")
     
     from urllib.parse import quote
@@ -255,7 +270,7 @@ async def stream_public_file(
             yield chunk
     
     # Determine content disposition
-    mime_type = file.mime_type or "application/octet-stream"
+    mime_type = media_type_for(file)
     disposition = "attachment" if download else ("inline" if mime_type.startswith(("video/", "audio/", "image/", "text/")) else "attachment")
     
     from urllib.parse import quote

@@ -24,14 +24,17 @@ def _file_response(file: File) -> FileResponse:
 
 def _playlist_response(playlist: Playlist) -> PlaylistResponse:
     ordered = sorted(playlist.items, key=lambda item: (item.position, item.id))
-    cover = next((f"/api/stream/{item.file.id}/thumbnail" for item in ordered if item.file.thumbnail_file_id), None)
+    covers = [f"/api/stream/{item.file.id}/thumbnail" for item in ordered if item.file.thumbnail_file_id][:4]
     return PlaylistResponse(
         id=playlist.id,
         name=playlist.name,
         description=playlist.description,
         item_count=len(ordered),
         total_duration=sum(item.file.duration or 0 for item in ordered),
-        cover_url=cover,
+        cover_url=covers[0] if covers else None,
+        cover_urls=covers,
+        audio_count=sum(item.file.file_type == "audio" for item in ordered),
+        video_count=sum(item.file.file_type == "video" for item in ordered),
         created_at=playlist.created_at,
         updated_at=playlist.updated_at,
         items=[PlaylistItemResponse(id=item.id, position=index, added_at=item.added_at, file=_file_response(item.file)) for index, item in enumerate(ordered)],
@@ -109,15 +112,16 @@ async def delete_playlist(playlist_id: int, db: AsyncSession = Depends(get_db), 
 @router.post("/{playlist_id}/items", response_model=PlaylistResponse)
 async def add_playlist_items(playlist_id: int, payload: PlaylistAddItems, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     playlist = await _owned_playlist(db, playlist_id, current_user.id)
-    unique_ids = list(dict.fromkeys(payload.file_ids))
+    requested_ids = payload.file_ids if payload.allow_duplicates else list(dict.fromkeys(payload.file_ids))
+    unique_ids = list(dict.fromkeys(requested_ids))
     files = (await db.execute(select(File).where(File.user_id == current_user.id, File.id.in_(unique_ids), File.file_type.in_(("audio", "video"))))).scalars().all()
     found = {file.id for file in files}
     if found != set(unique_ids):
         raise HTTPException(status_code=400, detail="Only owned audio and video files can be added")
     existing = {item.file_id for item in playlist.items}
     position = max((item.position for item in playlist.items), default=-1) + 1
-    for file_id in unique_ids:
-        if file_id not in existing:
+    for file_id in requested_ids:
+        if payload.allow_duplicates or file_id not in existing:
             db.add(PlaylistItem(playlist_id=playlist.id, file_id=file_id, position=position))
             position += 1
     await db.commit()
@@ -146,13 +150,40 @@ async def _normalize_positions(db: AsyncSession, playlist_id: int, file_ids: lis
         item.position = position
 
 
+async def _normalize_item_positions(db: AsyncSession, playlist_id: int, item_ids: list[int]):
+    items_by_id = {item.id: item for item in (await db.execute(select(PlaylistItem).where(PlaylistItem.playlist_id == playlist_id))).scalars().all()}
+    for position, item_id in enumerate(item_ids):
+        items_by_id[item_id].position = position
+
+
 @router.put("/{playlist_id}/reorder", response_model=PlaylistResponse)
 async def reorder_playlist(playlist_id: int, payload: PlaylistReorder, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     playlist = await _owned_playlist(db, playlist_id, current_user.id)
-    current_ids = [item.file_id for item in playlist.items]
-    if len(payload.file_ids) != len(set(payload.file_ids)) or set(payload.file_ids) != set(current_ids):
-        raise HTTPException(status_code=400, detail="Reorder must include every playlist file exactly once")
-    await _normalize_positions(db, playlist.id, payload.file_ids)
+    if payload.item_ids is not None:
+        current_ids = [item.id for item in playlist.items]
+        if len(payload.item_ids) != len(set(payload.item_ids)) or set(payload.item_ids) != set(current_ids):
+            raise HTTPException(status_code=400, detail="Reorder must include every playlist item exactly once")
+        await _normalize_item_positions(db, playlist.id, payload.item_ids)
+    elif payload.file_ids is not None:
+        current_ids = [item.file_id for item in playlist.items]
+        if len(payload.file_ids) != len(set(payload.file_ids)) or set(payload.file_ids) != set(current_ids):
+            raise HTTPException(status_code=400, detail="Reorder must include every playlist file exactly once")
+        await _normalize_positions(db, playlist.id, payload.file_ids)
+    else:
+        raise HTTPException(status_code=400, detail="No playlist order supplied")
+    await db.commit()
+    return _playlist_response(await _owned_playlist(db, playlist_id, current_user.id))
+
+
+@router.delete("/{playlist_id}/items/item/{item_id}", response_model=PlaylistResponse)
+async def remove_playlist_item_by_id(playlist_id: int, item_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    playlist = await _owned_playlist(db, playlist_id, current_user.id)
+    item = next((candidate for candidate in playlist.items if candidate.id == item_id), None)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Playlist item not found")
+    await db.delete(item)
+    await db.flush()
+    await _normalize_positions(db, playlist.id)
     await db.commit()
     return _playlist_response(await _owned_playlist(db, playlist_id, current_user.id))
 

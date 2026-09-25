@@ -274,9 +274,17 @@ async def get_activity(
     """Return both activity feeds in one request, ordered by their natural timestamps."""
     continue_watching = await fetch_continue_watching_files(db, current_user.id, limit)
     recent = await fetch_recent_files(db, current_user.id, limit)
+    favorites = (await db.execute(
+        select(File)
+        .where(File.user_id == current_user.id, File.is_favorite.is_(True))
+        .options(selectinload(File.watch_progress))
+        .order_by(File.updated_at.desc(), File.id.desc())
+        .limit(limit)
+    )).scalars().all()
     return ActivityResponse(
         continue_watching=[FileResponse(**add_urls_to_file(file)) for file in continue_watching],
         recent=[FileResponse(**add_urls_to_file(file)) for file in recent],
+        favorites=[FileResponse(**add_urls_to_file(file)) for file in favorites],
     )
 
 
@@ -367,6 +375,8 @@ async def update_file(
         file.file_name = sanitize_filename(update_data.file_name)
     if update_data.description is not None:
         file.description = update_data.description.strip()[:1024] or None
+    if update_data.is_favorite is not None:
+        file.is_favorite = update_data.is_favorite
     if update_data.folder_id is not None:
         target_id = update_data.folder_id or None
         if target_id is not None:

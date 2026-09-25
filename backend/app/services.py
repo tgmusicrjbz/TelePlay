@@ -57,6 +57,7 @@ def add_urls_to_file(file: File) -> dict:
         "height": file.height,
         "created_at": file.created_at,
         "updated_at": file.updated_at,
+        "is_favorite": bool(file.is_favorite),
         "stream_url": f"/api/stream/{file.id}",
         "thumbnail_url": f"/api/stream/{file.id}/thumbnail" if file.thumbnail_file_id else None,
         "last_pos": file.watch_progress[0].position if file.watch_progress else 0,

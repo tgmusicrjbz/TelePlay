@@ -84,6 +84,7 @@ class FileUpdate(BaseModel):
     file_name: Optional[str] = None
     description: Optional[str] = None
     folder_id: Optional[int] = None
+    is_favorite: Optional[bool] = None
 
 
 class BatchFileUpdate(BaseModel):
@@ -109,6 +110,7 @@ class FileResponse(FileBase):
     public_hash: Optional[str] = None
     public_stream_url: Optional[str] = None
     last_pos: int = 0
+    is_favorite: bool = False
     
     model_config = ConfigDict(from_attributes=True)
 
@@ -123,6 +125,7 @@ class FileListResponse(BaseModel):
 class ActivityResponse(BaseModel):
     continue_watching: List[FileResponse]
     recent: List[FileResponse]
+    favorites: List[FileResponse] = Field(default_factory=list)
 
 
 # ============== Playlist Schemas ==============
@@ -139,10 +142,12 @@ class PlaylistUpdate(BaseModel):
 
 class PlaylistAddItems(BaseModel):
     file_ids: List[int] = Field(min_length=1, max_length=200)
+    allow_duplicates: bool = False
 
 
 class PlaylistReorder(BaseModel):
-    file_ids: List[int] = Field(min_length=1, max_length=500)
+    item_ids: Optional[List[int]] = Field(default=None, min_length=1, max_length=500)
+    file_ids: Optional[List[int]] = Field(default=None, min_length=1, max_length=500)
 
 
 class PlaylistSummary(BaseModel):
@@ -152,6 +157,9 @@ class PlaylistSummary(BaseModel):
     item_count: int = 0
     total_duration: int = 0
     cover_url: Optional[str] = None
+    cover_urls: List[str] = Field(default_factory=list)
+    audio_count: int = 0
+    video_count: int = 0
     created_at: datetime
     updated_at: datetime
 
@@ -164,7 +172,7 @@ class PlaylistItemResponse(BaseModel):
 
 
 class PlaylistResponse(PlaylistSummary):
-    items: List[PlaylistItemResponse] = []
+    items: List[PlaylistItemResponse] = Field(default_factory=list)
 
 
 # ============== Watch Progress Schemas ==============
