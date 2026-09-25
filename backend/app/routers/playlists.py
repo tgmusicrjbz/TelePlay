@@ -25,14 +25,16 @@ def _file_response(file: File) -> FileResponse:
 def _playlist_response(playlist: Playlist) -> PlaylistResponse:
     ordered = sorted(playlist.items, key=lambda item: (item.position, item.id))
     covers = [f"/api/stream/{item.file.id}/thumbnail" for item in ordered if item.file.thumbnail_file_id][:4]
+    cover_url = f"/api/stream/{playlist.cover_file_id}" if playlist.cover_file_id else (covers[0] if covers else None)
     return PlaylistResponse(
         id=playlist.id,
         name=playlist.name,
         description=playlist.description,
         item_count=len(ordered),
         total_duration=sum(item.file.duration or 0 for item in ordered),
-        cover_url=covers[0] if covers else None,
-        cover_urls=covers,
+        cover_url=cover_url,
+        cover_file_id=playlist.cover_file_id,
+        cover_urls=([cover_url] + covers)[:4] if cover_url else covers,
         audio_count=sum(item.file.file_type == "audio" for item in ordered),
         video_count=sum(item.file.file_type == "video" for item in ordered),
         created_at=playlist.created_at,
@@ -45,7 +47,7 @@ async def _owned_playlist(db: AsyncSession, playlist_id: int, user_id: int) -> P
     playlist = (await db.execute(
         select(Playlist)
         .where(Playlist.id == playlist_id, Playlist.user_id == user_id)
-        .options(selectinload(Playlist.items).selectinload(PlaylistItem.file).selectinload(File.watch_progress))
+        .options(selectinload(Playlist.items).selectinload(PlaylistItem.file).selectinload(File.watch_progress), selectinload(Playlist.cover_file))
         .execution_options(populate_existing=True)
     )).scalar_one_or_none()
     if playlist is None:
@@ -58,7 +60,7 @@ async def list_playlists(db: AsyncSession = Depends(get_db), current_user: User 
     playlists = (await db.execute(
         select(Playlist)
         .where(Playlist.user_id == current_user.id)
-        .options(selectinload(Playlist.items).selectinload(PlaylistItem.file).selectinload(File.watch_progress))
+        .options(selectinload(Playlist.items).selectinload(PlaylistItem.file).selectinload(File.watch_progress), selectinload(Playlist.cover_file))
         .order_by(Playlist.updated_at.desc(), Playlist.id.desc())
     )).scalars().unique().all()
     return [PlaylistSummary(**_playlist_response(playlist).model_dump(exclude={"items"})) for playlist in playlists]
@@ -97,6 +99,13 @@ async def update_playlist(playlist_id: int, payload: PlaylistUpdate, db: AsyncSe
         playlist.name = name
     if "description" in changes:
         playlist.description = (changes["description"] or "").strip() or None
+    if "cover_file_id" in changes:
+        cover_id = changes["cover_file_id"]
+        if cover_id is not None:
+            cover = (await db.execute(select(File).where(File.id == cover_id, File.user_id == current_user.id, File.file_type == "image"))).scalar_one_or_none()
+            if cover is None:
+                raise HTTPException(status_code=400, detail="Cover must be one of your image files")
+        playlist.cover_file_id = cover_id
     await db.commit()
     return _playlist_response(await _owned_playlist(db, playlist_id, current_user.id))
 

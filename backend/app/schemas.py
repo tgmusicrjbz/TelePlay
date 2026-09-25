@@ -138,6 +138,7 @@ class PlaylistCreate(BaseModel):
 class PlaylistUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=255)
     description: Optional[str] = Field(default=None, max_length=1024)
+    cover_file_id: Optional[int] = None
 
 
 class PlaylistAddItems(BaseModel):
@@ -157,6 +158,7 @@ class PlaylistSummary(BaseModel):
     item_count: int = 0
     total_duration: int = 0
     cover_url: Optional[str] = None
+    cover_file_id: Optional[int] = None
     cover_urls: List[str] = Field(default_factory=list)
     audio_count: int = 0
     video_count: int = 0

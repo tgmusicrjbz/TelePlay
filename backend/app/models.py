@@ -148,6 +148,7 @@ class Playlist(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
+    cover_file_id: Mapped[Optional[int]] = mapped_column(ForeignKey("files.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -155,6 +156,7 @@ class Playlist(Base):
     items: Mapped[List["PlaylistItem"]] = relationship(
         back_populates="playlist", cascade="all, delete-orphan", order_by="PlaylistItem.position"
     )
+    cover_file: Mapped[Optional["File"]] = relationship(foreign_keys="Playlist.cover_file_id")
 
     __table_args__ = (UniqueConstraint("user_id", "name", name="uq_playlist_user_name"),)
 

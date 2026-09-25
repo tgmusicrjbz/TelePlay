@@ -74,7 +74,13 @@ async def init_db():
             await conn.execute(text("ALTER TABLE files ADD COLUMN description TEXT"))
         if "is_favorite" not in columns:
             favorite_type = "BOOLEAN" if url.drivername.startswith("postgresql") else "INTEGER"
-            await conn.execute(text(f"ALTER TABLE files ADD COLUMN is_favorite {favorite_type} NOT NULL DEFAULT 0"))
+            favorite_default = "FALSE" if url.drivername.startswith("postgresql") else "0"
+            await conn.execute(text(f"ALTER TABLE files ADD COLUMN is_favorite {favorite_type} NOT NULL DEFAULT {favorite_default}"))
+        playlist_columns = await conn.run_sync(
+            lambda sync_conn: {column["name"] for column in inspect(sync_conn).get_columns("playlists")}
+        )
+        if "cover_file_id" not in playlist_columns:
+            await conn.execute(text("ALTER TABLE playlists ADD COLUMN cover_file_id INTEGER REFERENCES files(id) ON DELETE SET NULL"))
         if url.drivername.startswith("postgresql"):
             await conn.execute(text("ALTER TABLE playlist_items DROP CONSTRAINT IF EXISTS uq_playlist_file"))
         folder_columns = await conn.run_sync(

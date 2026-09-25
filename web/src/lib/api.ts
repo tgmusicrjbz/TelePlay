@@ -78,6 +78,7 @@ export interface PlaylistSummary {
     item_count: number;
     total_duration: number;
     cover_url: string | null;
+    cover_file_id: number | null;
     cover_urls: string[];
     audio_count: number;
     video_count: number;
@@ -622,7 +623,7 @@ export const useCreatePlaylist = () => usePlaylistMutation(async (payload: { nam
     (await api.post<Playlist>('/playlists', payload)).data
 );
 
-export const useUpdatePlaylist = () => usePlaylistMutation(async ({ id, ...payload }: { id: number; name?: string; description?: string }) =>
+export const useUpdatePlaylist = () => usePlaylistMutation(async ({ id, ...payload }: { id: number; name?: string; description?: string; cover_file_id?: number | null }) =>
     (await api.patch<Playlist>(`/playlists/${id}`, payload)).data
 );
 
