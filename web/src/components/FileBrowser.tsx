@@ -152,8 +152,6 @@ export default function FileBrowser() {
     const uploadInputRef = useRef<HTMLInputElement>(null);
     const [isSelecting, setIsSelecting] = useState(false);
     const selectionStart = useRef({ x: 0, y: 0 });
-    const pullStartY = useRef<number | null>(null);
-    const [pullDistance, setPullDistance] = useState(0);
 
     useEffect(() => applyTheme(getStoredTheme()), []);
 
@@ -190,24 +188,6 @@ export default function FileBrowser() {
             refetchActivity();
         }
     }, [activeSection, refetchFiles, refetchFolders, refetchActivity]);
-
-    const handlePullStart = (event: React.TouchEvent<HTMLDivElement>) => {
-        const target = event.target as HTMLElement;
-        if (target.closest('button, input, textarea, select, [role="button"]')) return;
-        if ((containerRef.current?.scrollTop || 0) <= 0) pullStartY.current = event.touches[0]?.clientY ?? null;
-    };
-    const handlePullMove = (event: React.TouchEvent<HTMLDivElement>) => {
-        if (pullStartY.current === null || (containerRef.current?.scrollTop || 0) > 0) return;
-        const distance = (event.touches[0]?.clientY || 0) - pullStartY.current;
-        if (distance <= 0) { setPullDistance(0); return; }
-        event.preventDefault();
-        setPullDistance(Math.min(80, distance * 0.32));
-    };
-    const handlePullEnd = () => {
-        if (pullDistance >= 56) handleRefresh();
-        pullStartY.current = null;
-        setPullDistance(0);
-    };
 
     // Handle drag-drop file to folder
     const handleFileDrop = useCallback(async (fileId: number, folderId: number) => {
@@ -662,7 +642,7 @@ export default function FileBrowser() {
                             </button>
                         )}
                         {/* Search */}
-                        {(activeSection === 'files' || activeSection === 'activity') && <div className="relative w-full max-w-xs md:w-64">
+                        {(activeSection === 'files' || activeSection === 'activity') && <div className="relative min-w-0 flex-1 max-w-[24rem]">
                             <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-500" />
                             <input
                                 type="text"
@@ -699,26 +679,26 @@ export default function FileBrowser() {
                     </div>
 
                     {/* Right: Actions */}
-                    <div className="flex items-center gap-2 sm:gap-3">
-                         {(activeSection === 'files' || activeSection === 'activity') && <div className="flex items-center gap-0.5 rounded-lg border border-white/[0.06] bg-dark-800/50 p-0.5">
+                    <div className="flex shrink-0 items-center gap-1 sm:gap-2">
+                         {(activeSection === 'files' || activeSection === 'activity') && <div className="ml-1 flex items-center gap-0.5 rounded-lg border border-white/[0.06] bg-dark-800/50 p-0.5 sm:ml-2">
                              <button
                                  title="نمای کارتی بزرگ"
                                  onClick={() => setViewMode('grid')}
-                                 className={`p-1.5 rounded-md transition-all ${viewMode === 'grid' ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'}`}
+                                 className={`p-1 rounded-md transition-all ${viewMode === 'grid' ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'}`}
                              >
                                  <Grid className="w-4 h-4" />
                              </button>
                              <button
                                  title="نمای کاشی متراکم"
                                  onClick={() => setViewMode('dense')}
-                                 className={`p-1.5 rounded-md transition-all ${viewMode === 'dense' ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'}`}
+                                 className={`p-1 rounded-md transition-all ${viewMode === 'dense' ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'}`}
                              >
                                  <LayoutGrid className="w-4 h-4" />
                              </button>
                              <button
                                  title="نمای لیستی"
                                  onClick={() => setViewMode('list')}
-                                 className={`p-1.5 rounded-md transition-all ${viewMode === 'list' ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'}`}
+                                 className={`p-1 rounded-md transition-all ${viewMode === 'list' ? 'bg-primary-600 text-white shadow-sm' : 'text-dark-400 hover:text-white hover:bg-white/[0.05]'}`}
                              >
                                  <List className="w-4 h-4" />
                              </button>
@@ -762,15 +742,10 @@ export default function FileBrowser() {
                     onMouseMove={handleMouseMove}
                     onMouseUp={handleMouseUp}
                     onMouseLeave={handleMouseUp}
-                    onTouchStart={handlePullStart}
-                    onTouchMove={handlePullMove}
-                    onTouchEnd={handlePullEnd}
-                    onTouchCancel={handlePullEnd}
                     tabIndex={0}
                     // Prevent default drag behaviors on container
                     onDragOver={(e) => e.preventDefault()}
                 >
-                    {pullDistance > 0 && <div className="pointer-events-none absolute inset-x-0 top-2 z-20 flex justify-center" style={{ transform: `translateY(${pullDistance - 40}px)`, opacity: pullDistance / 56 }}><div className="rounded-full border border-white/10 bg-dark-800/90 px-3 py-1.5 text-xs text-dark-200 shadow-xl">{pullDistance >= 56 ? 'رها کن تا تازه بشه ✨' : 'برای تازه‌سازی بکش پایین'}</div></div>}
                     {(selectionMode || selectedItems.length > 0) && activeSection === 'files' && (
                         <div className="sticky top-0 z-20 mx-auto mb-3 flex min-h-14 max-w-7xl flex-wrap items-center gap-1 rounded-2xl border border-primary-500/25 bg-dark-900/95 p-1.5 shadow-2xl backdrop-blur-xl sm:hidden">
                             <span className="shrink-0 px-2 text-xs font-semibold text-primary-200">{selectedItems.length ? `${selectedItems.length.toLocaleString('fa-IR')} انتخاب` : 'یک کارت را لمس کن'}</span>
@@ -814,23 +789,21 @@ export default function FileBrowser() {
                                         </button>
                                     ))}
                                 </div>
-                                <div className="flex flex-wrap items-center gap-2 py-1">
-                                    <button title="فیلتر نوع فایل" onClick={() => { setShowFilters(value => !value); setShowSort(false); }} disabled={contentScope === 'folders'} className={`flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-full border border-white/10 bg-dark-900/70 px-3 text-xs text-dark-200 transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${fileTypeFilter.length ? 'border-primary-500/40 text-primary-200' : ''}`}>
+                                <div className="flex flex-wrap items-center gap-1 py-1">
+                                    <button title="فیلتر نوع فایل" aria-label="فیلتر نوع فایل" onClick={() => { setShowFilters(value => !value); setShowSort(false); }} disabled={contentScope === 'folders'} className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-dark-900/70 text-xs text-dark-200 transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${fileTypeFilter.length ? 'border-primary-500/40 text-primary-200' : ''}`}>
                                         <SlidersHorizontal className="h-4 w-4" />
-                                        <span className="truncate">نوع فایل</span>
                                         {fileTypeFilter.length > 0 && <span className="rounded-full bg-primary-500 px-1.5 text-[10px] text-white">{fileTypeFilter.length.toLocaleString('fa-IR')}</span>}
                                     </button>
-                                    <button title="مرتب‌سازی" onClick={() => { setShowSort(value => !value); setShowFilters(false); }} className={`flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-full border border-white/10 bg-dark-900/70 px-3 text-xs text-dark-200 transition-colors ${showSort ? 'border-primary-500/40 text-primary-200' : ''}`}>
-                                        <ArrowDown className="h-4 w-4" /> <span className="truncate">مرتب‌سازی</span>
+                                    <button title="مرتب‌سازی" aria-label="مرتب‌سازی" onClick={() => { setShowSort(value => !value); setShowFilters(false); }} className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-dark-900/70 text-xs text-dark-200 transition-colors ${showSort ? 'border-primary-500/40 text-primary-200' : ''}`}>
+                                        <ArrowDown className="h-4 w-4" />
                                     </button>
-                                    <button title="انتخاب چند فایل یا کشو" onClick={toggleSelectionMode} className={`flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-full border border-white/10 bg-dark-900/70 px-3 text-xs text-dark-200 transition-colors ${selectionMode ? 'border-primary-500/40 bg-primary-500/10 text-primary-200' : ''}`}>
-                                        <ListChecks className="h-4 w-4" /> <span className="truncate">{selectionMode ? 'پایان انتخاب' : 'انتخاب گروهی'}</span>
+                                    <button title="انتخاب گروهی" aria-label="انتخاب گروهی" onClick={toggleSelectionMode} className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-dark-900/70 text-xs text-dark-200 transition-colors ${selectionMode ? 'border-primary-500/40 bg-primary-500/10 text-primary-200' : ''}`}>
+                                        <ListChecks className="h-4 w-4" />
                                     </button>
-                                    <button title="فقط نشان‌شده‌ها" disabled={contentScope === 'folders'} onClick={() => { setFavoriteOnly(value => !value); setPage(1); setAllFiles([]); }} className={`flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-full border px-3 text-xs transition-colors disabled:opacity-40 ${favoriteOnly ? 'border-amber-400/40 bg-amber-400/10 text-amber-200' : 'border-white/10 bg-dark-900/70 text-dark-200'}`}><Star className={`h-4 w-4 ${favoriteOnly ? 'fill-current' : ''}`}/> نشان‌شده‌ها</button>
+                                    <button title="فقط نشان‌شده‌ها" aria-label="فقط نشان‌شده‌ها" disabled={contentScope === 'folders'} onClick={() => { setFavoriteOnly(value => !value); setPage(1); setAllFiles([]); }} className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border text-xs transition-colors disabled:opacity-40 ${favoriteOnly ? 'border-amber-400/40 bg-amber-400/10 text-amber-200' : 'border-white/10 bg-dark-900/70 text-dark-200'}`}><Star className={`h-4 w-4 ${favoriteOnly ? 'fill-current' : ''}`}/></button>
                                     {(selectionMode || selectedItems.length > 0) && (
-                                        <button onClick={toggleSelectAll} disabled={visibleItemCount === 0} className="flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-full border border-white/10 bg-dark-900/70 px-3 text-xs text-dark-200 disabled:opacity-40">
+                                        <button onClick={toggleSelectAll} disabled={visibleItemCount === 0} title={allVisibleSelected ? 'لغو انتخاب همه' : 'انتخاب همه'} aria-label={allVisibleSelected ? 'لغو انتخاب همه' : 'انتخاب همه'} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-dark-900/70 text-xs text-dark-200 disabled:opacity-40">
                                             {allVisibleSelected ? <CheckSquare className="h-4 w-4 text-primary-300" /> : <Square className="h-4 w-4" />}
-                                            {allVisibleSelected ? 'لغو انتخاب همه' : 'انتخاب همه'}
                                         </button>
                                     )}
                                 </div>

@@ -37,6 +37,7 @@ def _playlist_response(playlist: Playlist) -> PlaylistResponse:
         cover_urls=([cover_url] + covers)[:4] if cover_url else covers,
         audio_count=sum(item.file.file_type == "audio" for item in ordered),
         video_count=sum(item.file.file_type == "video" for item in ordered),
+        preview_names=[item.file.file_name for item in ordered[:2]],
         created_at=playlist.created_at,
         updated_at=playlist.updated_at,
         items=[PlaylistItemResponse(id=item.id, position=index, added_at=item.added_at, file=_file_response(item.file)) for index, item in enumerate(ordered)],

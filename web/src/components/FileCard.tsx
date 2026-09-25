@@ -2,7 +2,7 @@
  * FileCard component - displays a single file in grid or list view
  */
 import { Play, MoreVertical, Film, Music, FileText, Image, Check, Star } from 'lucide-react';
-import { TelegramFile, formatFileSize, formatDuration, formatPersianDate, useUpdateFile } from '../lib/api';
+import { TelegramFile, formatFileSize, formatDuration, useUpdateFile } from '../lib/api';
 import { useAppStore } from '../lib/store';
 
 interface FileCardProps {
@@ -122,9 +122,6 @@ export default function FileCard({
                             </>
                         )}
                     </div>
-                    <p className="text-[10px] text-dark-500 mt-1" title={`آخرین تغییر: ${formatPersianDate(file.updated_at)}`}>
-                        آپلود: {formatPersianDate(file.created_at)} · تغییر: {formatPersianDate(file.updated_at)}
-                    </p>
                 </div>
 
                 <div className="relative">
@@ -138,7 +135,7 @@ export default function FileCard({
                                 setActiveContextMenu({ type: 'file', item: file, x: rect.right, y: rect.bottom });
                             }
                         }}
-                        className={`p-2 rounded-lg transition-colors ${showMenu ? 'bg-white/10 text-white' : 'hover:bg-white/[0.08] text-dark-400'}`}
+                        className={`p-2 rounded-lg transition-colors ${showMenu ? 'bg-white/10 text-white' : 'hover:bg-white/[0.08] text-dark-300'}`}
                     >
                         <MoreVertical className="w-4 h-4" />
                     </button>
@@ -221,12 +218,9 @@ export default function FileCard({
                             {formatFileSize(file.file_size)}
                         </p>
                     </div>
-                    {!dense && <p className="text-[10px] text-dark-500 mt-1 leading-4">
-                        آپلود: {formatPersianDate(file.created_at)}<br />تغییر: {formatPersianDate(file.updated_at)}
-                    </p>}
                 </div>
 
-                <div className={`${showMenu ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}>
+                <div className="transition-opacity">
                    <button
                         onClick={(e) => {
                             e.stopPropagation();
@@ -237,7 +231,7 @@ export default function FileCard({
                                 setActiveContextMenu({ type: 'file', item: file, x: rect.right, y: rect.bottom });
                             }
                         }}
-                        className={`p-1.5 rounded-lg transition-colors ${showMenu ? 'bg-white/10 text-white' : 'hover:bg-white/[0.08] text-dark-400'}`}
+                        className={`p-1.5 rounded-lg transition-colors ${showMenu ? 'bg-white/10 text-white' : 'hover:bg-white/[0.08] text-dark-300'}`}
                     >
                         <MoreVertical className="w-4 h-4" />
                     </button> 

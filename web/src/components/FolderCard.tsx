@@ -132,7 +132,7 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
                                 setActiveContextMenu({ type: 'folder', item: folder, x: rect.right, y: rect.bottom });
                             }
                         }}
-                        className={`p-2 rounded-lg transition-colors ${showMenu ? 'bg-white/10 text-white' : 'hover:bg-white/[0.08] text-dark-400 opacity-0 group-hover:opacity-100'}`}
+                        className={`p-2 rounded-lg transition-colors ${showMenu ? 'bg-white/10 text-white' : 'hover:bg-white/[0.08] text-dark-300'}`}
                     >
                         <MoreVertical className="w-4 h-4" />
                     </button>
@@ -189,7 +189,7 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
                             setActiveContextMenu({ type: 'folder', item: folder, x: rect.right, y: rect.bottom });
                         }
                     }}
-                    className={`p-1.5 rounded-lg transition-colors ${showMenu ? 'bg-white/10 text-white' : 'hover:bg-white/[0.08] text-dark-400 opacity-0 group-hover:opacity-100'}`}
+                    className={`p-1.5 rounded-lg transition-colors ${showMenu ? 'bg-white/10 text-white' : 'hover:bg-white/[0.08] text-dark-300'}`}
                 >
                     <MoreVertical className="w-4 h-4" />
                 </button>

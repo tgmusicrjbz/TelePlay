@@ -82,6 +82,7 @@ export interface PlaylistSummary {
     cover_urls: string[];
     audio_count: number;
     video_count: number;
+    preview_names: string[];
     created_at: string;
     updated_at: string;
 }

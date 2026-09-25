@@ -162,6 +162,7 @@ class PlaylistSummary(BaseModel):
     cover_urls: List[str] = Field(default_factory=list)
     audio_count: int = 0
     video_count: int = 0
+    preview_names: List[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
