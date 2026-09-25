@@ -376,8 +376,8 @@ async def safe_edit_reply_markup(message: Message, reply_markup):
         return message
 
 
-async def delete_preview_later(client, chat_id: int, message_id: int) -> None:
-    await asyncio.sleep(PREVIEW_TTL_SECONDS)
+async def delete_preview_later(client, chat_id: int, message_id: int, delay: int = PREVIEW_TTL_SECONDS) -> None:
+    await asyncio.sleep(delay)
     with contextlib.suppress(Exception):
         await client.delete_messages(chat_id, message_id)
 
@@ -1218,6 +1218,7 @@ async def handle_file(client, message: Message):
                 response += f"\n🗃️ در کشوی «{escape_markdown(drawer.name)}» ذخیره شد."
         detail_back_targets[message.from_user.id] = "files:0"
         await status_msg.edit(response, reply_markup=file_detail_keyboard(file))
+        asyncio.create_task(delete_preview_later(client, status_msg.chat.id, status_msg.id, 30))
         
     except Exception as e:
         logger.exception("Telegram upload failed for user %s: %s", message.from_user.id, e)
@@ -1251,10 +1252,11 @@ async def handle_text_note(client, message: Message):
             await db.commit()
             await db.refresh(note)
         detail_back_targets[message.from_user.id] = "files:0"
-        await message.reply(
+        management_message = await message.reply(
             f"📝 در کمد ذخیره شد: {title}",
             reply_markup=file_detail_keyboard(note),
         )
+        asyncio.create_task(delete_preview_later(client, management_message.chat.id, management_message.id, 30))
     except Exception as error:
         logger.exception("Telegram text upload failed for user %s: %s", message.from_user.id, error)
         await message.reply("❌ متن ذخیره نشد؛ دوباره تلاش کن.")
@@ -2677,6 +2679,10 @@ async def handle_callback(client, callback: CallbackQuery):
             
             if not file:
                 await callback.answer("فایل پیدا نشد.", show_alert=True)
+                return
+            if not file.public_hash:
+                await callback.answer("این فایل لینک عمومی فعالی ندارد.", show_alert=True)
+                await callback.message.edit(file_detail_text(file), reply_markup=file_detail_keyboard_for_user(file, callback.from_user.id))
                 return
             
             file.public_hash = None

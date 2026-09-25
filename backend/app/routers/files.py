@@ -12,6 +12,8 @@ from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, delete, asc, desc
 from sqlalchemy.orm import selectinload
+from pydantic import BaseModel, Field
+from datetime import datetime
 
 from ..database import get_db
 from ..models import File, User, WatchProgress, Folder
@@ -31,6 +33,10 @@ from ..services import (
 router = APIRouter(prefix="/files", tags=["Files"])
 settings = get_settings()
 logger = logging.getLogger(__name__)
+
+
+class TextContentUpdate(BaseModel):
+    content: str = Field(min_length=1, max_length=1_000_000)
 
 
 FILE_SORT_FIELDS = {
@@ -192,6 +198,31 @@ async def get_text_preview(
         return {"content": raw.decode(encoding)}
     except UnicodeDecodeError:
         raise HTTPException(status_code=415, detail="Only UTF-8 and UTF-16 text preview is supported")
+
+
+@router.patch("/{file_id}/text")
+async def update_text_content(
+    file_id: int,
+    payload: TextContentUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Edit a saved Telegram text note and keep the file metadata in sync."""
+    file = (await db.execute(select(File).where(File.id == file_id, File.user_id == current_user.id))).scalar_one_or_none()
+    if file is None:
+        raise HTTPException(status_code=404, detail="File not found")
+    if file.file_type != "text":
+        raise HTTPException(status_code=415, detail="Only saved text notes can be edited")
+    try:
+        await telegram.tg_client.edit_message_text(settings.telegram_storage_channel_id, file.channel_message_id, payload.content)
+    except Exception as error:
+        logger.exception("Could not edit text note %s", file_id)
+        raise HTTPException(status_code=502, detail="Could not update text in Telegram") from error
+    file.file_name = sanitize_filename(payload.content.strip().splitlines()[0][:80])
+    file.file_size = len(payload.content.encode("utf-8"))
+    file.updated_at = datetime.utcnow()
+    await db.commit()
+    return {"content": payload.content, "file": add_urls_to_file(file)}
 
 
 @router.get("", response_model=FileListResponse)
