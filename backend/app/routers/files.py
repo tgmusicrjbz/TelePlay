@@ -27,7 +27,8 @@ from ..services import (
     sanitize_filename, 
     add_urls_to_file, 
     fetch_recent_files, 
-    fetch_continue_watching_files
+    fetch_continue_watching_files,
+    select_best_thumbnail,
 )
 
 router = APIRouter(prefix="/files", tags=["Files"])
@@ -124,7 +125,7 @@ async def upload_file(
             duration=getattr(media, "duration", None),
             width=getattr(media, "width", None),
             height=getattr(media, "height", None),
-            thumbnail_file_id=(media.thumbs[-1].file_id if getattr(media, "thumbs", None) else None),
+            thumbnail_file_id=(select_best_thumbnail(getattr(media, "thumbs", None)).file_id if select_best_thumbnail(getattr(media, "thumbs", None)) else None),
         )
         db.add(stored)
         await db.commit()

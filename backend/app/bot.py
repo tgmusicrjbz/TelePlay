@@ -24,7 +24,7 @@ from .database import async_session
 from .models import User, File, Folder, LoginCode, Playlist, PlaylistItem, BotUserState
 from .config import get_settings
 from .auth import create_access_token
-from .services import escape_like
+from .services import escape_like, select_best_thumbnail
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -1179,7 +1179,7 @@ async def handle_file(client, message: Message):
             "duration": getattr(media, "duration", None),
             "width": getattr(media, "width", None),
             "height": getattr(media, "height", None),
-            "thumbnail_file_id": media.file_id if message.photo else (media.thumbs[-1].file_id if getattr(media, "thumbs", None) else None),
+            "thumbnail_file_id": media.file_id if message.photo else (select_best_thumbnail(getattr(media, "thumbs", None)).file_id if select_best_thumbnail(getattr(media, "thumbs", None)) else None),
             "description": message.caption.strip()[:1024] if message.caption else None,
         }
         

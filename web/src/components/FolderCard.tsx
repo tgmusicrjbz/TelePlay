@@ -2,7 +2,7 @@
  * FolderCard component - displays a folder in grid or list view with drag-drop support
  */
 import { useState } from 'react';
-import { Folder as FolderIcon, MoreVertical, ChevronRight } from 'lucide-react';
+import { Check, Folder as FolderIcon, MoreVertical, ChevronRight } from 'lucide-react';
 import { Folder } from '../lib/api';
 import { useAppStore } from '../lib/store';
 
@@ -91,6 +91,7 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
                 onDrop={handleDrop}
                 data-folder-id={folder.id}
             >
+                {selectionMode && <button onClick={handleSelectClick} className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border transition-colors ${selected ? 'border-primary-400 bg-primary-500/15 text-primary-200' : 'border-white/10 bg-dark-800 text-dark-500'}`} aria-label={selected ? 'لغو انتخاب کشو' : 'انتخاب کشو'}><span className={`flex h-6 w-6 items-center justify-center rounded-full border-2 ${selected ? 'border-primary-400 bg-primary-500 text-white' : 'border-white/30'}`}>{selected && <Check className="h-4 w-4"/>}</span></button>}
                 <div 
                     className={`w-12 h-12 rounded-lg flex items-center justify-center shrink-0 border transition-colors
                         ${selected 
@@ -99,18 +100,6 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
                 >
                     <FolderIcon className={`w-6 h-6 transition-colors ${selected ? 'text-primary-300' : 'text-primary-400 group-hover:text-primary-300'}`} />
                     
-                    {/* Selection indicator for list view */}
-                    <div 
-                        onClick={handleSelectClick}
-                        className={`absolute left-14 top-1/2 h-11 w-11 -translate-y-1/2 rounded-full flex items-center justify-center transition-all z-10 ${selectionMode ? 'pointer-events-auto' : 'pointer-events-none'}
-                            ${selected 
-                                ? 'text-white'
-                                : selectionMode
-                                    ? 'opacity-100'
-                                    : 'opacity-0 group-hover:opacity-100'}`}
-                    >
-                        <div className={`flex h-6 w-6 items-center justify-center rounded-full border-2 ${selected ? 'border-dark-950 bg-primary-500 shadow-lg' : 'border-white/30 bg-dark-800'}`}><div className={`w-1.5 h-1.5 rounded-full bg-white transition-transform ${selected ? 'scale-100' : 'scale-0'}`} /></div>
-                    </div>
                 </div>
 
                 <div className="flex-1 min-w-0">
@@ -165,21 +154,10 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
                 >
                     <FolderIcon className={`w-5 h-5 transition-colors ${selected ? 'text-primary-300' : 'text-primary-400'}`} />
                     
-                    {/* Selection indicator for grid view */}
-                    <div 
-                        onClick={handleSelectClick}
-                        className={`absolute bottom-2 left-2 h-11 w-11 rounded-full flex items-center justify-center transition-all z-10 ${selectionMode ? 'pointer-events-auto' : 'pointer-events-none'}
-                            ${selected 
-                                ? 'text-white'
-                                : selectionMode
-                                    ? 'opacity-100'
-                                    : 'opacity-0 group-hover:opacity-100'}`}
-                    >
-                         <div className={`flex h-6 w-6 items-center justify-center rounded-full border-2 ${selected ? 'border-dark-900 bg-primary-500 shadow-lg' : 'border-white/30 bg-dark-800'}`}><div className={`w-1.5 h-1.5 rounded-full bg-white transition-transform ${selected ? 'scale-100' : 'scale-0'}`} /></div>
-                    </div>
                 </div>
-                
-                <button
+                <div className="flex items-center gap-1">
+                {selectionMode && <button onClick={handleSelectClick} className={`flex h-9 w-9 items-center justify-center rounded-lg border ${selected ? 'border-primary-400 bg-primary-500/15 text-primary-200' : 'border-white/10 bg-dark-800 text-dark-500'}`} aria-label={selected ? 'لغو انتخاب کشو' : 'انتخاب کشو'}><span className={`flex h-5 w-5 items-center justify-center rounded-full border-2 ${selected ? 'border-primary-400 bg-primary-500 text-white' : 'border-white/30'}`}>{selected && <Check className="h-3.5 w-3.5"/>}</span></button>}
+                {!selectionMode && <button
                     onClick={(e) => {
                         e.stopPropagation();
                         if (showMenu) {
@@ -192,7 +170,8 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
                     className={`p-1.5 rounded-lg transition-colors ${showMenu ? 'bg-white/10 text-white' : 'hover:bg-white/[0.08] text-dark-300'}`}
                 >
                     <MoreVertical className="w-4 h-4" />
-                </button>
+                </button>}
+                </div>
             </div>
 
             <p className={`font-medium text-sm truncate transition-colors ${selected ? 'text-primary-300' : 'text-white group-hover:text-primary-300'}`} title={folder.name}>

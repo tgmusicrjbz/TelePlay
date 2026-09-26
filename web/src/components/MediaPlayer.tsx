@@ -2,7 +2,7 @@
  * MediaPlayer - full screen video/audio player
  */
 import { useRef, useEffect, useState, useCallback } from 'react';
-import { X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipBack, SkipForward, Download, ExternalLink, AlertTriangle, Copy, PictureInPicture2, Gauge, ChevronDown, ChevronUp, Repeat2, Shuffle, Headphones, Scaling, RotateCcw, RotateCw, Clock3, ListPlus } from 'lucide-react';
+import { X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipBack, SkipForward, Download, ExternalLink, AlertTriangle, Copy, PictureInPicture2, Gauge, ChevronDown, ChevronUp, Repeat2, Shuffle, Headphones, Scaling, RotateCcw, RotateCw, Clock3, ListPlus, RectangleHorizontal } from 'lucide-react';
 import { TelegramFile, formatDuration, useUpdateProgress, useFile, api } from '../lib/api';
 import { useAppStore } from '../lib/store';
 
@@ -22,7 +22,7 @@ interface MediaPlayerContentProps {
 }
 
 function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaPlayerContentProps) {
-    const { playQueue, queueIndex, repeatMode, playNext, playPrevious, shuffleQueue, setRepeatMode, setPlaylistFile } = useAppStore();
+    const { playQueue, queueIndex, repeatMode, playNext, playPrevious, shuffleQueue, setRepeatMode, setPlaylistFile, addToast } = useAppStore();
     const videoRef = useRef<HTMLVideoElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const [isPlaying, setIsPlaying] = useState(false);
@@ -48,7 +48,11 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     const sleepTimeout = useRef<ReturnType<typeof setTimeout>>();
     const [videoFit, setVideoFit] = useState<'contain' | 'cover'>('contain');
     const [audioOnly, setAudioOnly] = useState(false);
+    const [videoOrientation, setVideoOrientation] = useState<'portrait' | 'landscape'>('portrait');
     const [skipFeedback, setSkipFeedback] = useState<'backward' | 'forward' | null>(null);
+    const [thumbnailFailed, setThumbnailFailed] = useState(false);
+
+    useEffect(() => setThumbnailFailed(false), [file.id]);
 
     // Fetch fresh file details to get latest progress
     const { data: extendedFile } = useFile(file.id);
@@ -167,6 +171,29 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
         }
         setShowSpeedMenu(false);
     };
+
+    const toggleVideoOrientation = async () => {
+        const next = videoOrientation === 'portrait' ? 'landscape' : 'portrait';
+        const orientation = screen.orientation as ScreenOrientation & { lock?: (value: string) => Promise<void>; unlock?: () => void };
+        if (!orientation?.lock) {
+            addToast('چرخش خودکار صفحه در این مرورگر پشتیبانی نمی‌شود.', 'error');
+            return;
+        }
+        try {
+            (window as Window & { Telegram?: { WebApp?: { requestFullscreen?: () => void } } }).Telegram?.WebApp?.requestFullscreen?.();
+            if (!document.fullscreenElement) await containerRef.current?.requestFullscreen();
+            await orientation.lock(next === 'landscape' ? 'landscape-primary' : 'portrait-primary');
+            setVideoOrientation(next);
+            setIsFullscreen(Boolean(document.fullscreenElement));
+        } catch {
+            addToast('برای چرخش صفحه، اجازهٔ تمام‌صفحه را فعال کن.', 'error');
+        }
+    };
+
+    useEffect(() => () => {
+        const orientation = screen.orientation as ScreenOrientation & { unlock?: () => void };
+        orientation?.unlock?.();
+    }, []);
 
     const handleTimeUpdate = () => {
         if (videoRef.current) {
@@ -423,7 +450,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     const vlcUrl = `vlc://${externalUrl}`;
 
     // Authorized Thumbnail URL
-    const relativeThumbnailUrl = file.thumbnail_url ? `${file.thumbnail_url}?token=${encodeURIComponent(token || '')}` : null;
+    const relativeThumbnailUrl = file.thumbnail_url ? `${file.thumbnail_url}${file.thumbnail_url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token || '')}` : null;
     const authorizedThumbnailUrl = relativeThumbnailUrl ? getAbsoluteUrl(relativeThumbnailUrl) : null;
 
     useEffect(() => {
@@ -551,16 +578,13 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                         {/* Audio Visualization / Thumbnail for non-video files in Fullscreen */}
                         {(!isVideo || audioOnly) && !isMinimized && (
                             <div className="absolute inset-x-4 top-16 bottom-44 z-10 flex flex-col items-center justify-center text-center animate-scale-in">
-                                {authorizedThumbnailUrl && !audioOnly ? (
+                                {authorizedThumbnailUrl && !audioOnly && !thumbnailFailed ? (
                                     <div className="mb-6 h-48 w-48 overflow-hidden rounded-2xl bg-dark-800 shadow-[0_12px_30px_rgba(0,0,0,.35)] sm:h-56 sm:w-56">
                                          <img 
                                             src={authorizedThumbnailUrl} 
                                             alt={file.file_name} 
                                             className="h-full w-full object-cover"
-                                            onError={(e) => {
-                                                e.currentTarget.style.display = 'none';
-                                                e.currentTarget.parentElement?.classList.add('hidden');
-                                            }}
+                                            onError={() => setThumbnailFailed(true)}
                                          />
                                     </div>
                                 ) : (
@@ -598,8 +622,8 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                     <div className="flex items-center gap-3 overflow-hidden flex-1 cursor-pointer" onClick={() => setMinimized(false)}>
                          {/* Thumbnail/Icon */}
                         <div className="w-12 h-12 rounded-lg bg-dark-800 flex items-center justify-center flex-shrink-0 overflow-hidden border border-white/5 relative">
-                            {authorizedThumbnailUrl ? (
-                                <img src={authorizedThumbnailUrl} alt="Thumb" className="w-full h-full object-cover" />
+                            {authorizedThumbnailUrl && !thumbnailFailed ? (
+                                <img src={authorizedThumbnailUrl} alt="Thumb" className="w-full h-full object-cover" onError={() => setThumbnailFailed(true)} />
                             ) : (
                                 isVideo ? <span className="text-2xl">🎬</span> : <span className="text-2xl">🎵</span>
                             )}
@@ -698,15 +722,16 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                         </div>
                         {isVideo && <button onClick={() => setVideoFit(current => current === 'contain' ? 'cover' : 'contain')} className={`p-2 rounded-lg transition-all ${videoFit === 'cover' ? 'bg-primary-500/30 text-primary-300' : 'hover:bg-white/10 text-white/80'}`} title={videoFit === 'contain' ? 'پر کردن قاب ویدیو' : 'نمایش کامل ویدیو'}><Scaling className="w-5 h-5" /></button>}
                         {isVideo && <button onClick={() => setAudioOnly(current => !current)} className={`p-2 rounded-lg transition-all ${audioOnly ? 'bg-primary-500/30 text-primary-300' : 'hover:bg-white/10 text-white/80'}`} title={audioOnly ? 'بازگشت به پخش ویدیو' : 'پخش فقط صدا'}><Headphones className="w-5 h-5" /></button>}
+                        {isVideo && <button onClick={() => void toggleVideoOrientation()} className={`rounded-lg p-2 transition-all ${videoOrientation === 'landscape' ? 'bg-primary-500/30 text-primary-300' : 'text-white/80 hover:bg-white/10'}`} title={videoOrientation === 'portrait' ? 'چرخش واقعی به حالت افقی' : 'بازگشت به حالت عمودی'}><RectangleHorizontal className="h-5 w-5"/></button>}
                         {isVideo && document.pictureInPictureEnabled && <button onClick={togglePiP} className={`p-2 rounded-lg transition-all ${isPiP ? 'bg-primary-500/30 text-primary-300' : 'hover:bg-white/10 text-white/80'}`} title="تصویر در تصویر"><PictureInPicture2 className="w-5 h-5" /></button>}
                         <button onClick={toggleFullscreen} className="p-2 rounded-lg hover:bg-white/10 text-white/80" title={isFullscreen ? 'خروج از تمام‌صفحه' : 'تمام‌صفحه'}>{isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}</button>
                     </div>
 
                     {/* Transport controls: queue navigation for music, seeking for video. */}
-                    <div data-player-controls dir="ltr" className={`absolute left-1/2 z-30 flex -translate-x-1/2 items-center gap-8 sm:gap-12 ${isVideo ? 'top-1/2 -translate-y-1/2' : 'bottom-32'}`}>
-                        <button disabled={isVideo ? false : !hasQueue} onClick={(e) => { e.stopPropagation(); isVideo ? handleSkip(-10) : playPrevious(); }} className="rounded-full p-3 text-white/70 transition hover:bg-white/10 hover:text-white disabled:opacity-30" title={isVideo ? '۱۰ ثانیه عقب' : 'ترک قبلی'}>{isVideo ? <RotateCcw className="h-7 w-7"/> : <SkipBack className="h-7 w-7"/>}</button>
-                        <button onClick={(e) => { e.stopPropagation(); togglePlay(); }} className="flex h-20 w-20 items-center justify-center rounded-full bg-primary-500 text-white shadow-xl shadow-primary-500/30 transition hover:scale-105 hover:bg-primary-400">{isPlaying ? <Pause className="h-9 w-9"/> : <Play className="ml-1 h-9 w-9"/>}</button>
-                        <button disabled={isVideo ? false : !hasQueue} onClick={(e) => { e.stopPropagation(); isVideo ? handleSkip(10) : playNext(); }} className="rounded-full p-3 text-white/70 transition hover:bg-white/10 hover:text-white disabled:opacity-30" title={isVideo ? '۱۰ ثانیه جلو' : 'ترک بعدی'}>{isVideo ? <RotateCw className="h-7 w-7"/> : <SkipForward className="h-7 w-7"/>}</button>
+                    <div data-player-controls dir="ltr" className={`absolute left-1/2 z-30 flex -translate-x-1/2 items-center ${isVideo ? 'top-1/2 -translate-y-1/2 gap-24' : 'bottom-32 gap-8 sm:gap-12'}`}>
+                        <button disabled={!isVideo && !hasQueue} onClick={(e) => { e.stopPropagation(); isVideo ? handleSkip(-10) : playPrevious(); }} className="rounded-full p-3 text-white/70 transition hover:bg-white/10 hover:text-white disabled:opacity-30" title={isVideo ? '۱۰ ثانیه عقب' : 'ترک قبلی'}>{isVideo ? <RotateCcw className="h-7 w-7"/> : <SkipBack className="h-7 w-7"/>}</button>
+                        {!isVideo && <button onClick={(e) => { e.stopPropagation(); togglePlay(e); }} className="flex h-20 w-20 items-center justify-center rounded-full bg-primary-500 text-white shadow-xl shadow-primary-500/30 transition hover:scale-105 hover:bg-primary-400">{isPlaying ? <Pause className="h-9 w-9"/> : <Play className="ml-1 h-9 w-9"/>}</button>}
+                        <button disabled={!isVideo && !hasQueue} onClick={(e) => { e.stopPropagation(); isVideo ? handleSkip(10) : playNext(); }} className="rounded-full p-3 text-white/70 transition hover:bg-white/10 hover:text-white disabled:opacity-30" title={isVideo ? '۱۰ ثانیه جلو' : 'ترک بعدی'}>{isVideo ? <RotateCw className="h-7 w-7"/> : <SkipForward className="h-7 w-7"/>}</button>
                     </div>
 
                     {/* Bottom controls */}
@@ -736,7 +761,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
 
                         {/* Control buttons */}
                         <div dir="ltr" className="flex items-center justify-between gap-3">
-                            {!isVideo ? <div className="flex items-center gap-1"><button disabled={!hasQueue} onClick={shuffleQueue} className="rounded-full p-2 text-white/75 hover:bg-white/10 disabled:opacity-30" title="شافل"><Shuffle className="h-5 w-5"/></button><button onClick={() => setRepeatMode(repeatMode === 'off' ? 'all' : repeatMode === 'all' ? 'one' : 'off')} className={`rounded-full p-2 ${repeatMode !== 'off' ? 'bg-primary-500/25 text-primary-200' : 'text-white/75 hover:bg-white/10'}`} title="تکرار"><Repeat2 className="h-5 w-5"/></button></div> : <div className="flex items-center gap-1 rounded-2xl bg-black/30 p-1"><button disabled={!hasQueue} onClick={playPrevious} className="rounded-lg p-2 text-white/80 hover:bg-white/10 disabled:opacity-30" title="فایل قبلی"><SkipBack className="h-5 w-5"/></button><button onClick={togglePlay} className="rounded-lg bg-white/10 p-2.5 text-white hover:bg-white/20">{isPlaying ? <Pause className="h-6 w-6"/> : <Play className="h-6 w-6"/>}</button><button disabled={!hasQueue} onClick={playNext} className="rounded-lg p-2 text-white/80 hover:bg-white/10 disabled:opacity-30" title="فایل بعدی"><SkipForward className="h-5 w-5"/></button></div>}
+                            {!isVideo ? <div className="flex items-center gap-1"><button disabled={!hasQueue} onClick={shuffleQueue} className="rounded-full p-2 text-white/75 hover:bg-white/10 disabled:opacity-30" title="شافل"><Shuffle className="h-5 w-5"/></button><button onClick={() => setRepeatMode(repeatMode === 'off' ? 'all' : repeatMode === 'all' ? 'one' : 'off')} className={`rounded-full p-2 ${repeatMode !== 'off' ? 'bg-primary-500/25 text-primary-200' : 'text-white/75 hover:bg-white/10'}`} title="تکرار"><Repeat2 className="h-5 w-5"/></button></div> : <div className="absolute left-1/2 flex -translate-x-1/2 items-center gap-3 rounded-2xl bg-black/45 p-1.5 backdrop-blur"><button disabled={!hasQueue} onClick={playPrevious} className="rounded-lg p-2.5 text-white/80 hover:bg-white/10 disabled:opacity-30" title="فایل قبلی"><SkipBack className="h-6 w-6"/></button><button onClick={togglePlay} className="flex h-12 w-12 items-center justify-center rounded-full bg-primary-500 text-white shadow-lg">{isPlaying ? <Pause className="h-6 w-6"/> : <Play className="ml-0.5 h-6 w-6"/>}</button><button disabled={!hasQueue} onClick={playNext} className="rounded-lg p-2.5 text-white/80 hover:bg-white/10 disabled:opacity-30" title="فایل بعدی"><SkipForward className="h-6 w-6"/></button></div>}
                             <div className="flex items-center gap-3">
                             <div className="flex items-center gap-2 group/vol">
                                 <button

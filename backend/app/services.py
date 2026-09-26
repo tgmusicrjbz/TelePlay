@@ -9,6 +9,17 @@ from sqlalchemy.orm import selectinload
 
 from .models import File, WatchProgress, Folder, Playlist
 
+def select_best_thumbnail(thumbnails):
+    """Pick the largest Telegram thumbnail instead of relying on list order."""
+    return max(
+        thumbnails or [],
+        key=lambda thumb: (
+            (getattr(thumb, "width", 0) or 0) * (getattr(thumb, "height", 0) or 0),
+            getattr(thumb, "file_size", 0) or 0,
+        ),
+        default=None,
+    )
+
 def escape_like(value: str) -> str:
     """Escape special LIKE/ILIKE characters to prevent SQL injection."""
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -59,7 +70,7 @@ def add_urls_to_file(file: File) -> dict:
         "updated_at": file.updated_at,
         "is_favorite": bool(file.is_favorite),
         "stream_url": f"/api/stream/{file.id}",
-        "thumbnail_url": f"/api/stream/{file.id}/thumbnail" if file.thumbnail_file_id else None,
+        "thumbnail_url": f"/api/stream/{file.id}/thumbnail?quality=best" if file.thumbnail_file_id else None,
         "last_pos": file.watch_progress[0].position if file.watch_progress else 0,
     }
     

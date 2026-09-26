@@ -17,6 +17,7 @@ from ..auth import get_current_user
 from .. import telegram
 from ..telegram import get_message_from_channel
 from ..streaming import stream_file as stream_file_generator
+from ..services import select_best_thumbnail
 
 # Logger for internal debugging (not exposed to users)
 logger = logging.getLogger(__name__)
@@ -189,13 +190,13 @@ async def get_thumbnail(
         # Extract thumbnail object
         thumbnail = None
         if message.video and message.video.thumbs:
-            thumbnail = message.video.thumbs[-1]
+            thumbnail = select_best_thumbnail(message.video.thumbs)
         elif message.document and message.document.thumbs:
-            thumbnail = message.document.thumbs[-1]
+            thumbnail = select_best_thumbnail(message.document.thumbs)
         elif message.audio and message.audio.thumbs:
-            thumbnail = message.audio.thumbs[-1]
+            thumbnail = select_best_thumbnail(message.audio.thumbs)
         elif message.photo:
-            thumbnail = message.photo.sizes[-1]
+            thumbnail = select_best_thumbnail(message.photo.sizes)
             
         if not thumbnail:
             # Try using the file_id directly if stored (fallback)
@@ -212,7 +213,8 @@ async def get_thumbnail(
         
         return Response(
             content=thumb_bytes.getvalue(),
-            media_type="image/jpeg"
+            media_type="image/jpeg",
+            headers={"Cache-Control": "private, no-cache"},
         )
     except Exception as e:
         # Log error internally, don't expose details to users
