@@ -86,7 +86,7 @@ export default function PwaManager() {
 
     return <>
         {!online && <div className="fixed inset-x-0 top-0 z-[200] flex items-center justify-center gap-2 bg-amber-500 px-4 py-2 text-center text-xs font-semibold text-black shadow-lg" role="status">
-            <WifiOff className="h-4 w-4" /> آفلاینی؛ برای دیدن فایل‌ها دوباره به اینترنت وصل شو.
+            <WifiOff className="h-4 w-4" /> آفلاینی؛ فایل‌های ذخیره‌شده در بخش دانلودها آمادهٔ پخش‌اند.
         </div>}
 
         {(showInstall || waitingWorker) && <div className="pwa-safe-bottom fixed bottom-4 left-4 z-[190] flex max-w-[calc(100vw-2rem)] flex-col gap-2 sm:flex-row" dir="rtl">

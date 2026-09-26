@@ -87,8 +87,8 @@ interface AppState {
     setPlaylistFile: (file: TelegramFile | null) => void;
 
     // Navigation Section
-    activeSection: 'files' | 'playlists' | 'activity' | 'settings';
-    setActiveSection: (section: 'files' | 'playlists' | 'activity' | 'settings') => void;
+    activeSection: 'files' | 'playlists' | 'activity' | 'downloads' | 'settings';
+    setActiveSection: (section: 'files' | 'playlists' | 'activity' | 'downloads' | 'settings') => void;
 
     // Toast Notifications
     toasts: Array<{ id: string; message: string; type: 'success' | 'error' | 'info' }>;
@@ -110,11 +110,11 @@ export const useAppStore = create<AppState>((set) => ({
     setBreadcrumbs: (breadcrumbs) => set({ breadcrumbs }),
 
     // Navigation Section
-    activeSection: window.location.pathname.startsWith('/playlist') ? 'playlists' : 'files',
+    activeSection: window.location.pathname.startsWith('/playlist') ? 'playlists' : window.location.pathname.startsWith('/downloads') ? 'downloads' : 'files',
     setActiveSection: (section) => set({
         activeSection: section,
         currentFolderId: null,
-        breadcrumbs: [{ id: null, name: section === 'files' ? 'کمد من' : section === 'playlists' ? 'پلی‌لیست‌ها' : section === 'activity' ? 'فعالیت' : 'تنظیمات' }],
+        breadcrumbs: [{ id: null, name: section === 'files' ? 'کمد من' : section === 'playlists' ? 'پلی‌لیست‌ها' : section === 'activity' ? 'فعالیت' : section === 'downloads' ? 'دانلودها' : 'تنظیمات' }],
         searchQuery: '',
         fileTypeFilter: [],
         selectedFileIds: new Set(),

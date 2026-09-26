@@ -17,6 +17,7 @@ import Sidebar from './Sidebar';
 import Toasts from './Toasts';
 import PlaylistBrowser from './PlaylistBrowser';
 import SettingsPage from './SettingsPage';
+import DownloadsPage from './DownloadsPage';
 import { applyTheme, getStoredTheme } from '../lib/theme';
 
 const sortLabels: Record<SortField, string> = {
@@ -654,6 +655,7 @@ export default function FileBrowser() {
                         </div>}
                         {activeSection === 'playlists' && <span className="truncate text-sm font-semibold text-white">🎧 پلی‌لیست‌ها</span>}
                         {activeSection === 'settings' && <span className="truncate text-sm font-semibold text-white">⚙️ تنظیمات</span>}
+                        {activeSection === 'downloads' && <span className="truncate text-sm font-semibold text-white">📥 دانلودها</span>}
 
                         {/* Vertical Div */}
                         <div className="hidden sm:block w-px h-6 bg-white/[0.1]"></div>
@@ -731,7 +733,7 @@ export default function FileBrowser() {
                             <button className="mr-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-300 hover:bg-white/10" aria-label="پایان انتخاب گروهی" title="پایان انتخاب" onClick={cancelSelection}><X className="h-5 w-5" /></button>
                         </div>
                     )}
-                    {activeSection === 'playlists' ? <PlaylistBrowser /> : activeSection === 'settings' ? <SettingsPage /> : <>
+                    {activeSection === 'playlists' ? <PlaylistBrowser /> : activeSection === 'settings' ? <SettingsPage /> : activeSection === 'downloads' ? <DownloadsPage /> : <>
                     <div className="max-w-7xl mx-auto mb-6 sm:mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                         <div>
                             <p className="text-xs font-semibold text-primary-300 mb-2">🗄️ کمد شخصی تو</p>

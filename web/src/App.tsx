@@ -249,18 +249,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
         return <Navigate to="/login" replace />;
     }
 
-    if (!online) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-dark-950 p-4" dir="rtl">
-                <div className="glass-panel w-full max-w-sm p-7 text-center">
-                    <div className="text-5xl mb-4">🗄️</div>
-                    <h2 className="text-xl font-bold text-white">کمد فعلاً آفلاینه</h2>
-                    <p className="mt-3 text-sm leading-7 text-dark-400">برای بررسی حساب، دیدن فایل‌ها و پخش محتوا باید دوباره به اینترنت وصل بشی.</p>
-                    <button className="btn-primary mt-6 w-full" onClick={() => window.location.reload()}>تلاش دوباره</button>
-                </div>
-            </div>
-        );
-    }
+    if (!online) return <>{children}</>;
 
     if (isLoading) {
         return (

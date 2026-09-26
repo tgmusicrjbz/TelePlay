@@ -444,8 +444,9 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
         return `${window.location.origin}${url}`;
     };
 
-    const relativeStreamUrl = `${file.stream_url}?token=${encodeURIComponent(token || '')}`;
-    const authorizedStreamUrl = getAbsoluteUrl(relativeStreamUrl);
+    const isOfflineSource = file.stream_url.startsWith('blob:');
+    const relativeStreamUrl = isOfflineSource ? file.stream_url : `${file.stream_url}${file.stream_url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token || '')}`;
+    const authorizedStreamUrl = isOfflineSource ? relativeStreamUrl : getAbsoluteUrl(relativeStreamUrl);
     const externalUrl = publicUrl || authorizedStreamUrl;
     const vlcUrl = `vlc://${externalUrl}`;
 

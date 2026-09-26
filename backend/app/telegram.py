@@ -3,7 +3,7 @@ PyroTGFork MTProto client for Telegram interactions.
 Handles both bot commands and file streaming via a client pool.
 """
 from .patch import Client
-from pyrogram.types import Message, BotCommand
+from pyrogram.types import Message, BotCommand, MenuButtonWebApp, WebAppInfo
 from pyrogram.errors import MessageIdInvalid
 from .config import get_settings
 from pathlib import Path
@@ -85,6 +85,19 @@ async def configure_main_client(c) -> None:
             BotCommand("help", "نمایش راهنمای استفاده"),
             BotCommand("logout_all", "خروج از همهٔ دستگاه‌ها"),
         ]), timeout=20)
+        web_url = settings.web_base_url.rstrip("/")
+        if web_url.startswith("https://"):
+            try:
+                await asyncio.wait_for(c.set_chat_menu_button(
+                    menu_button=MenuButtonWebApp(
+                        text="🗄️ باز کردن کمد",
+                        web_app=WebAppInfo(url=web_url),
+                    )
+                ), timeout=20)
+            except Exception as error:
+                logger.warning("Could not update Telegram menu button: %s", error)
+        else:
+            logger.warning("Telegram menu button requires an HTTPS WEB_BASE_URL; skipped %s", web_url)
         if hasattr(c, "set_bot_name"):
             await asyncio.wait_for(c.set_bot_name("🗂 کمد | درایو ابری تلگرام"), timeout=20)
             await asyncio.wait_for(c.set_bot_info_short_description(
