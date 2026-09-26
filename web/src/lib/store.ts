@@ -30,6 +30,8 @@ interface AppState {
     // Modals
     previewFile: TelegramFile | null;
     setPreviewFile: (file: TelegramFile | null) => void;
+    detailsFile: TelegramFile | null;
+    setDetailsFile: (file: TelegramFile | null) => void;
 
     renameFile: TelegramFile | null;
     setRenameFile: (file: TelegramFile | null) => void;
@@ -163,6 +165,8 @@ export const useAppStore = create<AppState>((set) => ({
     // Modals
     previewFile: null,
     setPreviewFile: (file) => set({ previewFile: file }),
+    detailsFile: null,
+    setDetailsFile: (file) => set({ detailsFile: file }),
 
     renameFile: null,
     setRenameFile: (file) => set({ renameFile: file }),

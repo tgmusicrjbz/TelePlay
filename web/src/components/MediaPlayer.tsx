@@ -677,8 +677,8 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                     <div data-player-controls className="absolute top-0 left-0 right-0 p-3 sm:p-4 bg-gradient-to-b from-black/80 to-transparent flex items-center justify-between gap-3 z-30">
                         <div className="min-w-0 flex-1">
                             <h3 dir="auto" className="text-base sm:text-lg font-medium truncate text-white">{cleanFileName}</h3>
-                            <p dir="rtl" className="mt-1 text-xs text-primary-300">ترک {queuePosition.toLocaleString('fa-IR')} از {queueLength.toLocaleString('fa-IR')}</p>
                         </div>
+                        {hasQueue && <p dir="rtl" className="absolute left-1/2 top-3 -translate-x-1/2 whitespace-nowrap rounded-full border border-white/10 bg-black/35 px-3 py-1.5 text-xs font-semibold tracking-wide text-primary-200 backdrop-blur sm:top-4">ترک <span className="text-white">{queuePosition.toLocaleString('fa-IR')}</span> از <span className="text-white">{queueLength.toLocaleString('fa-IR')}</span></p>}
                         <div className="flex items-center gap-2">
                              <button
                                 onClick={() => setMinimized(true)}

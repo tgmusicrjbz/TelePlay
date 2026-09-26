@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../lib/store';
 import { TelegramFile, Folder, api, canPreviewText, useUpdateFile } from '../lib/api';
-import { Play, Download, Link, Edit, FolderInput, Trash2, Globe, ShieldOff, HardDriveDownload, Eye, AlignLeft, ListPlus, Heart } from 'lucide-react';
+import { Play, Download, Link, Edit, FolderInput, Trash2, Globe, ShieldOff, HardDriveDownload, Eye, AlignLeft, ListPlus, Heart, Info } from 'lucide-react';
 
 export default function GlobalContextMenu() {
-    const { activeContextMenu, setActiveContextMenu, setPreviewFile, setMoveItems, setMoveFiles, setDeleteConfirm, setRenameFile, setRenameFolder, setDescriptionItem, selectedFileIds, selectedFiles, setPlaylistFile, addToast } = useAppStore();
+    const { activeContextMenu, setActiveContextMenu, setPreviewFile, setDetailsFile, setMoveItems, setMoveFiles, setDeleteConfirm, setRenameFile, setRenameFolder, setDescriptionItem, selectedFileIds, selectedFiles, setPlaylistFile, addToast } = useAppStore();
     const updateFile = useUpdateFile();
     const menuRef = useRef<HTMLDivElement>(null);
     const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -183,6 +183,7 @@ export default function GlobalContextMenu() {
                                         پیش‌نمایش
                                     </button>
                                 )}
+                                <button className="context-menu-item w-full text-right" onClick={() => handleAction(() => setDetailsFile(activeContextMenu.item as TelegramFile))}><Info className="h-4 w-4"/> جزئیات فایل</button>
                                 <button
                                     className="context-menu-item w-full text-right"
                                     onClick={() => { handleDownload(activeContextMenu.item as TelegramFile); setActiveContextMenu(null); }}

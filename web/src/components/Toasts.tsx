@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { X, CheckCircle, AlertCircle, Info } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 
@@ -15,13 +15,16 @@ export default function Toasts() {
 }
 
 function ToastItem({ toast, onDismiss }: { toast: { id: string; message: string; type: 'success' | 'error' | 'info' }; onDismiss: () => void }) {
+    const [leaving, setLeaving] = useState(false);
+    const dismiss = useCallback(() => {
+        setLeaving(true);
+        setTimeout(onDismiss, 180);
+    }, [onDismiss]);
     useEffect(() => {
-        const timer = setTimeout(() => {
-            onDismiss();
-        }, 5000); // Auto dismiss after 5s
+        const timer = setTimeout(dismiss, 2800);
 
         return () => clearTimeout(timer);
-    }, [onDismiss]);
+    }, [dismiss]);
 
     const getIcon = () => {
         switch (toast.type) {
@@ -40,11 +43,11 @@ function ToastItem({ toast, onDismiss }: { toast: { id: string; message: string;
     };
 
     return (
-        <div className={`pointer-events-auto flex items-center gap-3 pl-4 pr-3 py-3 rounded-xl border shadow-xl backdrop-blur-md animate-slide-up sm:min-w-[300px] max-w-md ${getBgColor()}`}>
+        <div className={`pointer-events-auto flex items-center gap-3 pl-4 pr-3 py-3 rounded-xl border shadow-xl backdrop-blur-md sm:min-w-[300px] max-w-md transition-all duration-200 ease-out ${leaving ? 'translate-y-2 opacity-0 scale-[.98]' : 'animate-slide-up opacity-100'} ${getBgColor()}`}>
             {getIcon()}
             <p className="flex-1 text-sm font-medium text-white">{toast.message}</p>
             <button 
-                onClick={onDismiss}
+                onClick={dismiss}
                 className="p-1 rounded-lg hover:bg-white/10 text-dark-400 hover:text-white transition-colors"
             >
                 <X className="w-4 h-4" />

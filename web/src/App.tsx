@@ -301,6 +301,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 import MediaPlayer from './components/MediaPlayer';
 import ContentPreview from './components/ContentPreview';
 import AddToPlaylistDialog from './components/AddToPlaylistDialog';
+import FileDetailsSheet from './components/FileDetailsSheet';
 
 function App() {
     return (
@@ -310,6 +311,7 @@ function App() {
             <MediaPlayer />
             <ContentPreview />
             <AddToPlaylistDialog />
+            <FileDetailsSheet />
             <Routes>
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/auth" element={<AuthCallback />} />

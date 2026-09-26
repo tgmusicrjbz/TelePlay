@@ -765,19 +765,19 @@ export default function FileBrowser() {
                                     ))}
                                 </div>
                                 <div className="flex items-center justify-between gap-2 rounded-2xl border border-white/[0.06] bg-dark-900/55 p-1.5 shadow-sm">
-                                    <div className="flex min-w-0 flex-wrap items-center gap-1">
-                                    <button title="تازه‌سازی" aria-label="تازه‌سازی" onClick={handleRefresh} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-dark-300 hover:bg-white/[.06] hover:text-white"><RefreshCw className={`h-4 w-4 ${filesFetching ? 'animate-spin' : ''}`}/></button>
-                                    <button title="فیلتر نوع فایل" aria-label="فیلتر نوع فایل" onClick={() => { setShowFilters(value => !value); setShowSort(false); }} disabled={contentScope === 'folders'} className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-dark-900/70 text-xs text-dark-200 transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${fileTypeFilter.length ? 'border-primary-500/40 text-primary-200' : ''}`}>
+                                    <div className="flex min-w-0 flex-wrap items-center gap-1 rounded-xl border border-white/[.07] bg-dark-950/60 p-1">
+                                    <button title="تازه‌سازی" aria-label="تازه‌سازی" onClick={handleRefresh} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-dark-400 hover:text-white"><RefreshCw className={`h-4 w-4 ${filesFetching ? 'animate-spin' : ''}`}/></button>
+                                    <button title="فیلتر نوع فایل" aria-label="فیلتر نوع فایل" onClick={() => { setShowFilters(value => !value); setShowSort(false); }} disabled={contentScope === 'folders'} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${fileTypeFilter.length || showFilters ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:text-white'}`}>
                                         <SlidersHorizontal className="h-4 w-4" />
                                         {fileTypeFilter.length > 0 && <span className="rounded-full bg-primary-500 px-1.5 text-[10px] text-white">{fileTypeFilter.length.toLocaleString('fa-IR')}</span>}
                                     </button>
-                                    <button title="مرتب‌سازی" aria-label="مرتب‌سازی" onClick={() => { setShowSort(value => !value); setShowFilters(false); }} className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-dark-900/70 text-xs text-dark-200 transition-colors ${showSort ? 'border-primary-500/40 text-primary-200' : ''}`}>
+                                    <button title="مرتب‌سازی" aria-label="مرتب‌سازی" onClick={() => { setShowSort(value => !value); setShowFilters(false); }} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs transition-colors ${showSort ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:text-white'}`}>
                                         <ArrowDown className="h-4 w-4" />
                                     </button>
-                                    <button title="انتخاب گروهی" aria-label="انتخاب گروهی" onClick={toggleSelectionMode} className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-dark-900/70 text-xs text-dark-200 transition-colors ${selectionMode ? 'border-primary-500/40 bg-primary-500/10 text-primary-200' : ''}`}>
+                                    <button title="فقط نشان‌شده‌ها" aria-label="فقط نشان‌شده‌ها" disabled={contentScope === 'folders'} onClick={() => { setFavoriteOnly(value => !value); setPage(1); setAllFiles([]); }} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs transition-colors disabled:opacity-40 ${favoriteOnly ? 'bg-amber-400/15 text-amber-200' : 'text-dark-400 hover:text-white'}`}><Star className={`h-4 w-4 ${favoriteOnly ? 'fill-current' : ''}`}/></button>
+                                    <button title="انتخاب گروهی" aria-label="انتخاب گروهی" onClick={toggleSelectionMode} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs transition-colors ${selectionMode ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:text-white'}`}>
                                         <ListChecks className="h-4 w-4" />
                                     </button>
-                                    <button title="فقط نشان‌شده‌ها" aria-label="فقط نشان‌شده‌ها" disabled={contentScope === 'folders'} onClick={() => { setFavoriteOnly(value => !value); setPage(1); setAllFiles([]); }} className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border text-xs transition-colors disabled:opacity-40 ${favoriteOnly ? 'border-amber-400/40 bg-amber-400/10 text-amber-200' : 'border-white/10 bg-dark-900/70 text-dark-200'}`}><Star className={`h-4 w-4 ${favoriteOnly ? 'fill-current' : ''}`}/></button>
                                     {(selectionMode || selectedItems.length > 0) && (
                                         <button onClick={toggleSelectAll} disabled={visibleItemCount === 0} title={allVisibleSelected ? 'لغو انتخاب همه' : 'انتخاب همه'} aria-label={allVisibleSelected ? 'لغو انتخاب همه' : 'انتخاب همه'} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-dark-900/70 text-xs text-dark-200 disabled:opacity-40">
                                             {allVisibleSelected ? <CheckSquare className="h-4 w-4 text-primary-300" /> : <Square className="h-4 w-4" />}
@@ -793,7 +793,7 @@ export default function FileBrowser() {
                             </div>
                             {showFilters && contentScope !== 'folders' && (
                                 <div className="mt-3 border-t border-white/[0.06] pt-3">
-                                    <div className="flex flex-wrap gap-2">
+                                    <div className="grid grid-cols-5 gap-2">
                                         {([
                                             ['ویدیو', 'video', Film], ['موسیقی و صوت', 'audio', Music],
                                             ['عکس', 'image', ImageIcon], ['سند', 'document', FileText], ['متن و یادداشت', 'text', StickyNote],
