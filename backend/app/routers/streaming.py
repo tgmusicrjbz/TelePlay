@@ -18,6 +18,7 @@ from .. import telegram
 from ..telegram import get_message_from_channel
 from ..streaming import stream_file as stream_file_generator
 from ..services import select_best_thumbnail
+from ..media_metadata import extract_embedded_cover
 
 # Logger for internal debugging (not exposed to users)
 logger = logging.getLogger(__name__)
@@ -189,6 +190,11 @@ async def get_thumbnail(
 
         # Extract thumbnail object
         thumbnail = None
+        if message.audio:
+            audio_bytes = await telegram.tg_client.download_media(message, in_memory=True)
+            embedded_cover = extract_embedded_cover(audio_bytes) if audio_bytes else None
+            if embedded_cover:
+                return Response(content=embedded_cover, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
         if message.video and message.video.thumbs:
             thumbnail = select_best_thumbnail(message.video.thumbs)
         elif message.document and message.document.thumbs:

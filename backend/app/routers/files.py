@@ -22,6 +22,7 @@ from ..auth import get_current_user
 from ..telegram import delete_from_storage_channel, get_message_from_channel
 from .. import telegram
 from ..config import get_settings
+from ..media_metadata import extract_embedded_cover
 from ..services import (
     escape_like, 
     sanitize_filename, 
@@ -91,11 +92,19 @@ async def upload_file(
             raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
         file_type = detect_upload_type(filename, upload.content_type)
+        embedded_cover_path: str | None = None
+        if file_type == "audio" and Path(filename).suffix.lower() == ".mp3":
+            cover_bytes = extract_embedded_cover(temporary_path)
+            if cover_bytes:
+                embedded_cover_path = str(Path(temporary_dir) / "embedded-cover.jpg")
+                Path(embedded_cover_path).write_bytes(cover_bytes)
         common = {
             "chat_id": settings.telegram_storage_channel_id,
             "caption": (description or "").strip()[:1024] or None,
             "parse_mode": None,
         }
+        if embedded_cover_path:
+            common["thumb"] = embedded_cover_path
         try:
             if file_type == "video":
                 sent_message = await telegram.tg_client.send_video(video=temporary_path, supports_streaming=True, **common)
@@ -105,6 +114,7 @@ async def upload_file(
                 sent_message = await telegram.tg_client.send_document(document=temporary_path, **common)
         except Exception:
             logger.exception("Typed Telegram upload failed; retrying as document")
+            common.pop("thumb", None)
             sent_message = await telegram.tg_client.send_document(document=temporary_path, **common)
             file_type = detect_upload_type(filename, upload.content_type)
 

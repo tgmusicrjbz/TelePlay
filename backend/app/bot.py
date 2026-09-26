@@ -1164,7 +1164,7 @@ async def handle_file(client, message: Message):
         forwarded = await forward_to_storage_channel(message)
         stored_media = forwarded.video or forwarded.audio or forwarded.document
         if forwarded.photo:
-            stored_media = forwarded.photo.sizes[-1]
+            stored_media = select_best_thumbnail(forwarded.photo.sizes)
         if stored_media is not None:
             media = stored_media
         

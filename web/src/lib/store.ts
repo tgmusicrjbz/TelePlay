@@ -85,6 +85,8 @@ interface AppState {
     setSelectedFiles: (files: TelegramFile[]) => void;
     playlistFile: TelegramFile | null;
     setPlaylistFile: (file: TelegramFile | null) => void;
+    playlistFiles: TelegramFile[];
+    setPlaylistFiles: (files: TelegramFile[]) => void;
 
     // Navigation Section
     activeSection: 'files' | 'playlists' | 'activity' | 'downloads' | 'settings';
@@ -183,7 +185,9 @@ export const useAppStore = create<AppState>((set) => ({
     selectedFiles: [],
     setSelectedFiles: (files) => set({ selectedFiles: files }),
     playlistFile: null,
-    setPlaylistFile: (file) => set({ playlistFile: file }),
+    setPlaylistFile: (file) => set({ playlistFile: file, playlistFiles: file ? [file] : [] }),
+    playlistFiles: [],
+    setPlaylistFiles: (files) => set({ playlistFiles: files, playlistFile: files[0] || null }),
 
     showNewFolder: false,
     setShowNewFolder: (show) => set({ showNewFolder: show }),
