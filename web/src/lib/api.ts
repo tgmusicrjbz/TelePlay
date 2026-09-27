@@ -120,21 +120,6 @@ export interface StorageStats {
     limit: number;
 }
 
-export interface StorageStats {
-    total_size: number;
-    limit: number;
-}
-
-export interface StorageStats {
-    total_size: number;
-    limit: number;
-}
-
-export interface StorageStats {
-    total_size: number;
-    limit: number;
-}
-
 export interface AuthResponse {
     access_token: string;
     refresh_token: string;
@@ -186,7 +171,9 @@ api.interceptors.response.use(
                 localStorage.removeItem('access_token');
                 localStorage.removeItem('refresh_token');
                 localStorage.removeItem('user');
-                window.location.href = '/login';
+                if (!window.location.pathname.startsWith('/login') && !window.location.pathname.startsWith('/auth')) {
+                    window.location.href = '/login';
+                }
                 return Promise.reject(error);
             }
 
@@ -231,7 +218,12 @@ api.interceptors.response.use(
                 localStorage.removeItem('access_token');
                 localStorage.removeItem('refresh_token');
                 localStorage.removeItem('user');
-                window.location.href = '/login';
+                
+                // فقط اگر در صفحه لاگین یا کال‌بک نیستیم ریدایرکت کن
+                if (!window.location.pathname.startsWith('/login') && !window.location.pathname.startsWith('/auth')) {
+                    window.location.href = '/login';
+                }
+                
                 return Promise.reject(err);
             } finally {
                 isRefreshing = false;
@@ -254,6 +246,7 @@ export const useCurrentUser = () => {
             const { data } = await api.get<User>('/auth/me');
             return data;
         },
+        enabled: !!localStorage.getItem('access_token'),
         retry: false,
     });
 };
@@ -282,7 +275,7 @@ export const useBotInfo = () => {
             const { data } = await api.get<BotInfo>('/auth/bot/info');
             return data;
         },
-        staleTime: Infinity, // Bot info doesn't change during session
+        staleTime: Infinity,
     });
 };
 
@@ -315,14 +308,14 @@ export const useFiles = (folderId?: number | null, fileType?: string, search?: s
             if (fileType) params.file_type = fileType;
             if (search) params.search = search;
             params.page = page;
-            params.per_page = 50; // Load 50 files per page
+            params.per_page = 50;
             if (sort) params.sort = sort;
             if (favoriteOnly) params.favorite_only = true;
             if (includePlaylistCovers) params.include_playlist_covers = true;
             const { data } = await api.get<FileListResponse>('/files', { params });
             return data;
         },
-        staleTime: 30000, // Keep data fresh for 30s to avoid over-fetching
+        staleTime: 30000,
     });
 };
 
@@ -345,7 +338,6 @@ export const useUpdateFile = () => {
             return result;
         },
         onSuccess: () => {
-            // Invalidate both files and folders to ensure UI updates for moves
             queryClient.invalidateQueries({ queryKey: ['files'] });
             queryClient.invalidateQueries({ queryKey: ['folders'] });
             queryClient.invalidateQueries({ queryKey: ['folderTree'] });
@@ -370,12 +362,12 @@ export const useDeleteFiles = () => {
     const queryClient = useQueryClient();
     return useMutation({
         mutationFn: async (ids: number[]) => {
-            await api.post('/files/batch-delete', ids as any); // Axios automatically handles array as JSON body
+            await api.post('/files/batch-delete', ids as any);
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['files'] });
-             queryClient.invalidateQueries({ queryKey: ['folders'] }); // Files might be inside folders affecting counts
-             queryClient.invalidateQueries({ queryKey: ['storage'] });
+            queryClient.invalidateQueries({ queryKey: ['folders'] });
+            queryClient.invalidateQueries({ queryKey: ['storage'] });
         },
     });
 };
@@ -482,7 +474,7 @@ export const useFolders = (parentId?: number | null, sort = '') => {
             const { data } = await api.get<Folder[]>('/folders', { params });
             return data;
         },
-        staleTime: 60000, // Folders change less often
+        staleTime: 60000,
     });
 };
 

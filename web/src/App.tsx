@@ -4,6 +4,10 @@ import { useCurrentUser, useLoginWithCode, useBotInfo, useGenerateLoginCode, use
 import FileBrowser from './components/FileBrowser';
 import GlobalContextMenu from './components/GlobalContextMenu';
 import PwaManager from './components/PwaManager';
+import MediaPlayer from './components/MediaPlayer';
+import ContentPreview from './components/ContentPreview';
+import AddToPlaylistDialog from './components/AddToPlaylistDialog';
+import FileDetailsSheet from './components/FileDetailsSheet';
 
 function AuthCallback() {
     const [searchParams] = useSearchParams();
@@ -287,20 +291,10 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
 }
 
-import MediaPlayer from './components/MediaPlayer';
-import ContentPreview from './components/ContentPreview';
-import AddToPlaylistDialog from './components/AddToPlaylistDialog';
-import FileDetailsSheet from './components/FileDetailsSheet';
-
 function App() {
     return (
         <>
             <PwaManager />
-            <GlobalContextMenu />
-            <MediaPlayer />
-            <ContentPreview />
-            <AddToPlaylistDialog />
-            <FileDetailsSheet />
             <Routes>
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/auth" element={<AuthCallback />} />
@@ -308,6 +302,11 @@ function App() {
                     path="/*"
                     element={
                         <ProtectedRoute>
+                            <GlobalContextMenu />
+                            <MediaPlayer />
+                            <ContentPreview />
+                            <AddToPlaylistDialog />
+                            <FileDetailsSheet />
                             <FileBrowser />
                         </ProtectedRoute>
                     }
