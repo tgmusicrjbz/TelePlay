@@ -245,6 +245,10 @@ class AuthResponse(Token):
     user: UserResponse
 
 
+class TelegramWebAppRequest(BaseModel):
+    init_data: str = Field(min_length=1)
+
+
 class SessionResponse(BaseModel):
     id: str
     device_name: str

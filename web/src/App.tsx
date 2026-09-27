@@ -23,7 +23,7 @@ function AuthCallback() {
                 localStorage.setItem('access_token', token);
                 const check = localStorage.getItem('access_token');
                 if (check === token) {
-                    const { data } = await api.post<AuthResponse>('/auth/session');
+                    const { data } = await api.post<AuthResponse>('/auth/session', undefined, { headers: { Authorization: `Bearer ${token}` } });
                     saveAuthenticatedAccount(data);
                     setStatus('✅ ورود انجام شد؛ در حال باز کردن کمد…');
                     setSaved(true);
@@ -61,6 +61,30 @@ function AuthCallback() {
             </div>
         </div>
     );
+}
+
+function TelegramWebAppBootstrap() {
+    useEffect(() => {
+        let syncing = false;
+        const sync = () => {
+            const webApp = (window as Window & { Telegram?: { WebApp?: { initData?: string } } }).Telegram?.WebApp;
+            const initData = webApp?.initData;
+            if (!initData || syncing || localStorage.getItem('komod-telegram-init-data') === initData) return;
+            syncing = true;
+            void api.post<AuthResponse>('/auth/telegram-webapp', { init_data: initData })
+                .then(({ data }) => {
+                    saveAuthenticatedAccount(data);
+                    localStorage.setItem('komod-telegram-init-data', initData);
+                    window.location.reload();
+                })
+                .catch(() => { syncing = false; });
+        };
+        sync();
+        const timer = window.setInterval(sync, 1500);
+        document.addEventListener('visibilitychange', sync);
+        return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', sync); };
+    }, []);
+    return null;
 }
 
 function LoginPage() {
@@ -296,6 +320,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 function App() {
     return (
         <>
+            <TelegramWebAppBootstrap />
             <PwaManager />
             <Routes>
                 <Route path="/login" element={<LoginPage />} />

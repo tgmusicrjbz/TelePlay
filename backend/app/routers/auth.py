@@ -3,6 +3,11 @@ Authentication API endpoints.
 """
 from datetime import datetime
 import uuid
+import hashlib
+import hmac
+import json
+import time
+from urllib.parse import parse_qsl
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -19,7 +24,7 @@ from ..schemas import (
     VerifyCodeRequest, 
     AuthResponse,
     RefreshTokenRequest,
-    BotInfoResponse, SessionResponse
+    BotInfoResponse, SessionResponse, TelegramWebAppRequest
 )
 from ..auth import (
     create_access_token,
@@ -36,6 +41,28 @@ limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 settings = get_settings()
+
+
+def _telegram_webapp_user(init_data: str) -> dict:
+    pairs = dict(parse_qsl(init_data, keep_blank_values=True))
+    received_hash = pairs.pop("hash", None)
+    if not received_hash:
+        raise HTTPException(status_code=401, detail="Telegram session is missing")
+    check_string = "\n".join(f"{key}={pairs[key]}" for key in sorted(pairs))
+    secret = hmac.new(b"WebAppData", settings.telegram_bot_token.encode(), hashlib.sha256).digest()
+    expected_hash = hmac.new(secret, check_string.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected_hash, received_hash):
+        raise HTTPException(status_code=401, detail="Invalid Telegram session")
+    try:
+        auth_date = int(pairs.get("auth_date", "0"))
+        user = json.loads(pairs["user"])
+    except (ValueError, KeyError, json.JSONDecodeError):
+        raise HTTPException(status_code=401, detail="Invalid Telegram session data")
+    if auth_date <= 0 or time.time() - auth_date > 86400:
+        raise HTTPException(status_code=401, detail="Telegram session has expired")
+    if not isinstance(user, dict) or not user.get("id"):
+        raise HTTPException(status_code=401, detail="Telegram user is missing")
+    return user
 
 
 def _device_name(user_agent: str) -> str:
@@ -187,6 +214,49 @@ async def register_current_session(
             display_name=current_user.display_name, is_active=current_user.is_active,
             is_admin=current_user.telegram_id in settings.admin_users,
             created_at=current_user.created_at, last_active=current_user.last_active,
+        ),
+    )
+
+
+@router.post("/telegram-webapp", response_model=AuthResponse)
+async def login_from_telegram_webapp(
+    request: Request,
+    payload: TelegramWebAppRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Authenticate the Telegram account that opened the persistent Mini App button."""
+    tg_user = _telegram_webapp_user(payload.init_data)
+    telegram_id = int(tg_user["id"])
+    if settings.auth_users and telegram_id not in settings.auth_users:
+        raise HTTPException(status_code=403, detail="This Telegram account is not authorized")
+    user = (await db.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
+    if user is None:
+        user = User(
+            telegram_id=telegram_id,
+            username=tg_user.get("username"),
+            first_name=tg_user.get("first_name"),
+            last_name=tg_user.get("last_name"),
+        )
+        db.add(user)
+        await db.flush()
+    else:
+        user.username = tg_user.get("username")
+        user.first_name = tg_user.get("first_name")
+        user.last_name = tg_user.get("last_name")
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="User account is inactive")
+    session = _new_session(request, user)
+    db.add(session)
+    await db.commit()
+    return AuthResponse(
+        access_token=create_access_token(user.telegram_id, user.auth_version, session.id),
+        refresh_token=create_refresh_token(user.telegram_id, user.auth_version, session.id),
+        user=UserResponse(
+            id=user.id, telegram_id=user.telegram_id, username=user.username,
+            first_name=user.first_name, last_name=user.last_name,
+            display_name=user.display_name, is_active=user.is_active,
+            is_admin=user.telegram_id in settings.admin_users,
+            created_at=user.created_at, last_active=user.last_active,
         ),
     )
 
