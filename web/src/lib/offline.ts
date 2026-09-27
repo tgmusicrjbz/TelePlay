@@ -8,8 +8,9 @@ const TEXT_STORE = 'texts';
 export const OFFLINE_CHANGED_EVENT = 'komod-offline-changed';
 
 export interface OfflineMedia { id: number; file: TelegramFile; blob: Blob; savedAt: string; }
-export interface OfflinePlaylist { id: number; name: string; description?: string | null; fileIds: number[]; totalCount: number; savedAt: string; }
+export interface OfflinePlaylist { id: number; name: string; description?: string | null; fileIds: number[]; totalCount: number; failedCount?: number; savedAt: string; }
 export interface OfflineText { id: number; file: TelegramFile; content: string; savedAt: string; }
+export interface OfflineDownloadProgress { done: number; total: number; failed: number; currentName: string; loaded: number; size: number; }
 
 function openDatabase(): Promise<IDBDatabase> {
     return new Promise((resolve, reject) => {
@@ -42,31 +43,39 @@ export const getOfflineMedia = (id: number) => transaction<OfflineMedia | undefi
 export const listOfflinePlaylists = () => transaction<OfflinePlaylist[]>(PLAYLIST_STORE, 'readonly', store => store.getAll());
 export const getOfflineText = (id: number) => transaction<OfflineText | undefined>(TEXT_STORE, 'readonly', store => store.get(id));
 
-export async function saveFileOffline(file: TelegramFile): Promise<void> {
+export async function saveFileOffline(file: TelegramFile, onProgress?: (loaded: number, total: number) => void): Promise<void> {
     if (!navigator.onLine) throw new Error('برای ذخیره اولیه باید آنلاین باشی.');
-    if (await getOfflineMedia(file.id)) return;
-    const token = localStorage.getItem('access_token') || '';
-    const source = `${file.stream_url}${file.stream_url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`;
-    const response = await fetch(source);
-    if (!response.ok) throw new Error('دریافت فایل انجام نشد.');
-    const blob = await response.blob();
+    if (await getOfflineMedia(file.id)) { onProgress?.(file.file_size, file.file_size); return; }
+    const source = file.stream_url.replace(/^\/api/, '');
+    const response = await api.get<Blob>(source, {
+        responseType: 'blob',
+        onDownloadProgress: event => onProgress?.(event.loaded, event.total || file.file_size || 0),
+    });
+    const blob = response.data;
     if (!blob.size) throw new Error('فایل خالی دریافت شد.');
     await transaction<IDBValidKey>(MEDIA_STORE, 'readwrite', store => store.put({ id: file.id, file, blob, savedAt: new Date().toISOString() } satisfies OfflineMedia));
     window.dispatchEvent(new Event(OFFLINE_CHANGED_EVENT));
 }
 
-export async function savePlaylistOffline(playlist: Playlist, onProgress?: (done: number, total: number) => void): Promise<OfflinePlaylist> {
+export async function savePlaylistOffline(playlist: Playlist, onProgress?: (progress: OfflineDownloadProgress) => void): Promise<OfflinePlaylist> {
     const playable = playlist.items.map(item => item.file).filter(file => file.file_type === 'audio' || file.file_type === 'video');
-    let cursor = 0; let done = 0; const savedIds: number[] = [];
+    if (!playable.length) throw new Error('این پلی‌لیست فایل صوتی یا ویدیویی قابل دانلود ندارد.');
+    let cursor = 0; let done = 0; let failed = 0; const savedIds: number[] = [];
     const worker = async () => {
         while (cursor < playable.length) {
             const file = playable[cursor++];
-            try { await saveFileOffline(file); savedIds.push(file.id); } catch { /* unavailable items are omitted */ }
-            done += 1; onProgress?.(done, playable.length);
+            onProgress?.({ done, total: playable.length, failed, currentName: file.file_name, loaded: 0, size: file.file_size });
+            try {
+                await saveFileOffline(file, (loaded, size) => onProgress?.({ done, total: playable.length, failed, currentName: file.file_name, loaded, size }));
+                savedIds.push(file.id);
+            } catch { failed += 1; }
+            done += 1;
+            onProgress?.({ done, total: playable.length, failed, currentName: file.file_name, loaded: file.file_size, size: file.file_size });
         }
     };
     await Promise.all(Array.from({ length: Math.min(2, playable.length) }, worker));
-    const record: OfflinePlaylist = { id: playlist.id, name: playlist.name, description: playlist.description, fileIds: savedIds, totalCount: playable.length, savedAt: new Date().toISOString() };
+    if (!savedIds.length) throw new Error('هیچ‌کدام از فایل‌های پلی‌لیست دانلود نشدند؛ اتصال ربات به کانال ذخیره‌سازی را بررسی کن.');
+    const record: OfflinePlaylist = { id: playlist.id, name: playlist.name, description: playlist.description, fileIds: savedIds, totalCount: playable.length, failedCount: failed, savedAt: new Date().toISOString() };
     await transaction<IDBValidKey>(PLAYLIST_STORE, 'readwrite', store => store.put(record));
     window.dispatchEvent(new Event(OFFLINE_CHANGED_EVENT));
     return record;
