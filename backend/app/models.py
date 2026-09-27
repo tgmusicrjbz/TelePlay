@@ -17,6 +17,8 @@ class User(Base):
     username: Mapped[Optional[str]] = mapped_column(String(255))
     first_name: Mapped[Optional[str]] = mapped_column(String(255))
     last_name: Mapped[Optional[str]] = mapped_column(String(255))
+    display_name: Mapped[Optional[str]] = mapped_column(String(255))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     auth_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     last_active: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -26,6 +28,33 @@ class User(Base):
     files: Mapped[List["File"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     watch_progress: Mapped[List["WatchProgress"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     playlists: Mapped[List["Playlist"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+
+
+class AuthSession(Base):
+    """One revocable browser or Mini App login session."""
+    __tablename__ = "auth_sessions"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    device_name: Mapped[str] = mapped_column(String(255), default="دستگاه ناشناس", nullable=False)
+    user_agent: Mapped[Optional[str]] = mapped_column(Text)
+    ip_address: Mapped[Optional[str]] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+
+class WorkspaceGrant(Base):
+    """Permission for one user to open another user's Komod space."""
+    __tablename__ = "workspace_grants"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    member_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    permission: Mapped[str] = mapped_column(String(16), default="read", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("owner_user_id", "member_user_id", name="uq_workspace_grant"),)
 
 
 class BotUserState(Base):

@@ -12,7 +12,7 @@ from sqlalchemy import select
 
 from .config import get_settings
 from .database import get_db
-from .models import User
+from .models import AuthSession, User, WorkspaceGrant
 from .schemas import TokenPayload
 
 settings = get_settings()
@@ -20,7 +20,7 @@ security = HTTPBearer(auto_error=False)
 
 
 
-def create_access_token(telegram_id: int, version: int = 0) -> str:
+def create_access_token(telegram_id: int, version: int = 0, session_id: str | None = None) -> str:
     """Create a JWT access token."""
     expire = datetime.utcnow() + timedelta(minutes=settings.jwt_expiry_minutes)
     payload = {
@@ -29,10 +29,12 @@ def create_access_token(telegram_id: int, version: int = 0) -> str:
         "type": "access",
         "ver": version
     }
+    if session_id:
+        payload["sid"] = session_id
     return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
 
 
-def create_refresh_token(telegram_id: int, version: int = 0) -> str:
+def create_refresh_token(telegram_id: int, version: int = 0, session_id: str | None = None) -> str:
     """Create a JWT refresh token (longer expiry)."""
     expire = datetime.utcnow() + timedelta(days=90)
     payload = {
@@ -41,6 +43,8 @@ def create_refresh_token(telegram_id: int, version: int = 0) -> str:
         "type": "refresh",
         "ver": version
     }
+    if session_id:
+        payload["sid"] = session_id
     return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
 
 
@@ -113,6 +117,8 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found",
         )
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="User account is inactive")
     
     # Check token version for global logout
     if token_version is not None and token_version < user.auth_version:
@@ -121,5 +127,38 @@ async def get_current_user(
             detail="Session has been invalidated",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
+    session_id = payload.get("sid") if payload else None
+    if session_id:
+        session = (await db.execute(select(AuthSession).where(
+            AuthSession.id == session_id, AuthSession.user_id == user.id
+        ))).scalar_one_or_none()
+        if session is None or session.revoked_at is not None:
+            raise HTTPException(status_code=401, detail="Session has been revoked")
+        if session.last_seen_at < datetime.utcnow() - timedelta(minutes=5):
+            session.last_seen_at = datetime.utcnow()
+            await db.commit()
+
+    # Auth and administration always operate on the signed-in identity.
+    if request and not request.url.path.startswith(("/api/auth", "/api/admin", "/api/accounts")):
+        workspace_raw = request.headers.get("X-Workspace-User") or request.query_params.get("workspace")
+        if workspace_raw:
+            try:
+                workspace_user_id = int(workspace_raw)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid workspace")
+            if workspace_user_id != user.id:
+                grant = (await db.execute(select(WorkspaceGrant).where(
+                    WorkspaceGrant.owner_user_id == workspace_user_id,
+                    WorkspaceGrant.member_user_id == user.id,
+                ))).scalar_one_or_none()
+                if grant is None:
+                    raise HTTPException(status_code=403, detail="Workspace access was not granted")
+                if request.method not in {"GET", "HEAD", "OPTIONS"} and grant.permission != "write":
+                    raise HTTPException(status_code=403, detail="This workspace is read-only")
+                owner = await db.get(User, workspace_user_id)
+                if owner is None or not owner.is_active:
+                    raise HTTPException(status_code=404, detail="Workspace is unavailable")
+                return owner
+
     return user

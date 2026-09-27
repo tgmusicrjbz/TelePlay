@@ -67,6 +67,15 @@ async def init_db():
     """Create all tables."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        user_columns = await conn.run_sync(
+            lambda sync_conn: {column["name"] for column in inspect(sync_conn).get_columns("users")}
+        )
+        if "display_name" not in user_columns:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN display_name VARCHAR(255)"))
+        if "is_active" not in user_columns:
+            active_type = "BOOLEAN" if url.drivername.startswith("postgresql") else "INTEGER"
+            active_default = "TRUE" if url.drivername.startswith("postgresql") else "1"
+            await conn.execute(text(f"ALTER TABLE users ADD COLUMN is_active {active_type} NOT NULL DEFAULT {active_default}"))
         columns = await conn.run_sync(
             lambda sync_conn: {column["name"] for column in inspect(sync_conn).get_columns("files")}
         )

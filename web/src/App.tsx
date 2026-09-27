@@ -1,6 +1,6 @@
 import { Routes, Route, Navigate, useSearchParams, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import { useCurrentUser, useLoginWithCode, useBotInfo, useGenerateLoginCode, useVerifyLoginCode } from './lib/api';
+import { api, AuthResponse, useCurrentUser, useLoginWithCode, useBotInfo, useGenerateLoginCode, useVerifyLoginCode } from './lib/api';
 import FileBrowser from './components/FileBrowser';
 import GlobalContextMenu from './components/GlobalContextMenu';
 import PwaManager from './components/PwaManager';
@@ -8,6 +8,7 @@ import MediaPlayer from './components/MediaPlayer';
 import ContentPreview from './components/ContentPreview';
 import AddToPlaylistDialog from './components/AddToPlaylistDialog';
 import FileDetailsSheet from './components/FileDetailsSheet';
+import { saveAuthenticatedAccount } from './lib/accounts';
 
 function AuthCallback() {
     const [searchParams] = useSearchParams();
@@ -18,10 +19,12 @@ function AuthCallback() {
 
     useEffect(() => {
         if (token) {
-            try {
+            void (async () => { try {
                 localStorage.setItem('access_token', token);
                 const check = localStorage.getItem('access_token');
                 if (check === token) {
+                    const { data } = await api.post<AuthResponse>('/auth/session');
+                    saveAuthenticatedAccount(data);
                     setStatus('✅ ورود انجام شد؛ در حال باز کردن کمد…');
                     setSaved(true);
                     setTimeout(() => {
@@ -32,7 +35,7 @@ function AuthCallback() {
                 }
             } catch {
                 setStatus('❌ ورود انجام نشد. دوباره از ربات وارد شو.');
-            }
+            } })();
         } else {
             setStatus('❌ اطلاعات ورود در این پیوند وجود ندارد.');
         }
@@ -89,8 +92,7 @@ function LoginPage() {
             timer = setInterval(() => {
                 verifyCode(code, {
                     onSuccess: (data) => {
-                        localStorage.setItem('access_token', data.access_token);
-                        localStorage.setItem('refresh_token', data.refresh_token);
+                        saveAuthenticatedAccount(data);
                         setIsPolling(false);
                         window.location.href = '/';
                     },
@@ -111,8 +113,7 @@ function LoginPage() {
 
         loginByCode(code, {
             onSuccess: (data) => {
-                localStorage.setItem('access_token', data.access_token);
-                localStorage.setItem('refresh_token', data.refresh_token);
+                saveAuthenticatedAccount(data);
                 window.location.href = '/';
             },
             onError: (err: any) => {

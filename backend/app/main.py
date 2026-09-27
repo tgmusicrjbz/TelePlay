@@ -20,7 +20,7 @@ logging.getLogger("pyrogram").setLevel(logging.INFO)
 from .config import get_settings
 from .database import init_db, engine
 from .telegram import start_telegram_client, stop_telegram_client
-from .routers import files_router, folders_router, streaming_router, auth_router, tv_router, playlists_router
+from .routers import files_router, folders_router, streaming_router, auth_router, tv_router, playlists_router, accounts_router
 
 settings = get_settings()
 
@@ -95,7 +95,7 @@ app.add_middleware(
     allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Accept", "Range"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "Range", "X-Workspace-User"],
     expose_headers=["Content-Range", "Accept-Ranges", "Content-Length"],
 )
 
@@ -130,6 +130,7 @@ app.include_router(folders_router, prefix="/api")
 app.include_router(streaming_router, prefix="/api")
 app.include_router(tv_router, prefix="/api")
 app.include_router(playlists_router, prefix="/api")
+app.include_router(accounts_router, prefix="/api")
 
 
 

@@ -45,6 +45,7 @@ export const getOfflineText = (id: number) => transaction<OfflineText | undefine
 
 export async function saveFileOffline(file: TelegramFile, onProgress?: (loaded: number, total: number) => void): Promise<void> {
     if (!navigator.onLine) throw new Error('برای ذخیره اولیه باید آنلاین باشی.');
+    await navigator.storage?.persist?.();
     if (await getOfflineMedia(file.id)) { onProgress?.(file.file_size, file.file_size); return; }
     const source = file.stream_url.replace(/^\/api/, '');
     const response = await api.get<Blob>(source, {

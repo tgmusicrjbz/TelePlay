@@ -859,11 +859,10 @@ async def send_playlist_media(client, callback: CallbackQuery, playlist_id: int,
 async def check_auth(client, message: Message):
     """Check if the user is authorized to use the bot."""
     auth_users = settings.auth_users
-    if not auth_users:
-        # Open to everyone
-        return
-    
-    if message.from_user.id not in auth_users:
+    async with async_session() as db:
+        known_user = (await db.execute(select(User).where(User.telegram_id == message.from_user.id))).scalar_one_or_none()
+    blocked = known_user is not None and not known_user.is_active
+    if blocked or (auth_users and message.from_user.id not in auth_users):
         # Ignore if it's a command we don't want to reply to (to avoid spamming unauthorized users)
         # But for /start, we should give a polite rejection
         if message.text and message.text.startswith("/start"):
@@ -1272,7 +1271,9 @@ async def handle_text_note(client, message: Message):
 @tg_client.on_callback_query()
 async def handle_callback(client, callback: CallbackQuery):
     """Handle inline button callbacks."""
-    if settings.auth_users and callback.from_user.id not in settings.auth_users:
+    async with async_session() as db:
+        known_user = (await db.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one_or_none()
+    if (known_user is not None and not known_user.is_active) or (settings.auth_users and callback.from_user.id not in settings.auth_users):
         await callback.answer("اجازهٔ استفاده از این ربات رو نداری.", show_alert=True)
         return
     await load_user_ui_state(callback.from_user.id)

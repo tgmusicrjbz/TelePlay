@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     
     # Authorized Users (optional - comma separated IDs)
     auth_users_str: str = Field("", alias="AUTH_USERS")
+    admin_users_str: str = Field("", alias="ADMIN_USERS")
     
     @property
     def auth_users(self) -> list[int]:
@@ -27,6 +28,16 @@ class Settings(BaseSettings):
             return [int(u.strip()) for u in v.split(",") if u.strip()]
         except ValueError:
             return []
+
+    @property
+    def admin_users(self) -> list[int]:
+        value = self.admin_users_str.strip()
+        if value:
+            try:
+                return [int(item.strip()) for item in value.split(",") if item.strip()]
+            except ValueError:
+                return []
+        return self.auth_users[:1]
     
     @property
     def telegram_helper_bot_tokens(self) -> list[str]:

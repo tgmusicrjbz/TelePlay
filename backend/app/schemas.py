@@ -23,6 +23,9 @@ class UserResponse(UserBase):
     id: int
     created_at: datetime
     last_active: datetime
+    display_name: Optional[str] = None
+    is_active: bool = True
+    is_admin: bool = False
     
     model_config = ConfigDict(from_attributes=True)
 
@@ -240,6 +243,40 @@ class VerifyCodeRequest(BaseModel):
 
 class AuthResponse(Token):
     user: UserResponse
+
+
+class SessionResponse(BaseModel):
+    id: str
+    device_name: str
+    user_agent: Optional[str] = None
+    ip_address: Optional[str] = None
+    created_at: datetime
+    last_seen_at: datetime
+    current: bool = False
+
+
+class WorkspaceGrantCreate(BaseModel):
+    telegram_id: int
+    permission: Literal["read", "write"] = "read"
+
+
+class WorkspaceResponse(BaseModel):
+    user_id: int
+    telegram_id: int
+    name: str
+    username: Optional[str] = None
+    permission: Literal["owner", "read", "write"]
+
+
+class AdminUserUpdate(BaseModel):
+    display_name: Optional[str] = Field(default=None, max_length=255)
+    is_active: Optional[bool] = None
+
+
+class AdminUserResponse(UserResponse):
+    total_size: int = 0
+    file_count: int = 0
+    session_count: int = 0
 
 
 class BotInfoResponse(BaseModel):

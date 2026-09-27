@@ -13,7 +13,14 @@ export interface User {
     last_name: string | null;
     created_at: string;
     last_active: string;
+    display_name?: string | null;
+    is_active?: boolean;
+    is_admin?: boolean;
 }
+
+export interface AuthSession { id: string; device_name: string; user_agent?: string | null; ip_address?: string | null; created_at: string; last_seen_at: string; current: boolean; }
+export interface Workspace { user_id: number; telegram_id: number; name: string; username?: string | null; permission: 'owner' | 'read' | 'write'; }
+export interface AdminUser extends User { total_size: number; file_count: number; session_count: number; }
 
 export interface Folder {
     id: number;
@@ -140,6 +147,10 @@ api.interceptors.request.use((config) => {
     if (token) {
         config.headers.Authorization = `Bearer ${token}`;
     }
+    const workspace = localStorage.getItem('komod-active-workspace');
+    if (workspace && !String(config.url || '').startsWith('/auth') && !String(config.url || '').startsWith('/accounts') && !String(config.url || '').startsWith('/admin')) {
+        config.headers['X-Workspace-User'] = workspace;
+    }
     return config;
 });
 
@@ -257,7 +268,7 @@ export const useCurrentUser = () => {
 export const useLoginWithCode = () => {
     return useMutation({
         mutationFn: async (code: string) => {
-            const { data } = await api.post<{ access_token: string; refresh_token: string }>('/auth/code', { code });
+            const { data } = await api.post<AuthResponse>('/auth/code', { code });
             return data;
         },
     });
@@ -694,4 +705,25 @@ export const getFileIcon = (fileType: string): string => {
         case 'document': return '📄';
         default: return '📎';
     }
+};
+
+export const useSessions = () => useQuery({ queryKey: ['sessions'], queryFn: async () => (await api.get<AuthSession[]>('/auth/sessions')).data });
+export const useRevokeSession = () => {
+    const queryClient = useQueryClient();
+    return useMutation({ mutationFn: async (id: string) => api.delete(`/auth/sessions/${id}`), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['sessions'] }) });
+};
+export const useWorkspaces = () => useQuery({ queryKey: ['workspaces'], queryFn: async () => (await api.get<Workspace[]>('/accounts/workspaces')).data });
+export const useWorkspaceGrants = () => useQuery({ queryKey: ['workspaceGrants'], queryFn: async () => (await api.get<Workspace[]>('/accounts/grants')).data });
+export const useGrantWorkspace = () => {
+    const queryClient = useQueryClient();
+    return useMutation({ mutationFn: async (payload: { telegram_id: number; permission: 'read' | 'write' }) => (await api.post<Workspace>('/accounts/grants', payload)).data, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['workspaceGrants'] }) });
+};
+export const useRevokeWorkspace = () => {
+    const queryClient = useQueryClient();
+    return useMutation({ mutationFn: async (id: number) => api.delete(`/accounts/grants/${id}`), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['workspaceGrants'] }) });
+};
+export const useAdminUsers = (enabled: boolean) => useQuery({ queryKey: ['adminUsers'], queryFn: async () => (await api.get<AdminUser[]>('/admin/users')).data, enabled, retry: false });
+export const useUpdateAdminUser = () => {
+    const queryClient = useQueryClient();
+    return useMutation({ mutationFn: async ({ id, ...payload }: { id: number; display_name?: string; is_active?: boolean }) => (await api.patch<AdminUser>(`/admin/users/${id}`, payload)).data, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['adminUsers'] }) });
 };

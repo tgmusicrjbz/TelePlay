@@ -24,8 +24,8 @@ def _file_response(file: File) -> FileResponse:
 
 def _playlist_response(playlist: Playlist) -> PlaylistResponse:
     ordered = sorted(playlist.items, key=lambda item: (item.position, item.id))
-    covers = [f"/api/stream/{item.file.id}/thumbnail?quality=best" for item in ordered if item.file.thumbnail_file_id][:4]
-    cover_url = f"/api/stream/{playlist.cover_file_id}" if playlist.cover_file_id else (covers[0] if covers else None)
+    covers = [f"/api/stream/{item.file.id}/thumbnail?quality=best&workspace={playlist.user_id}" for item in ordered if item.file.thumbnail_file_id][:4]
+    cover_url = f"/api/stream/{playlist.cover_file_id}?workspace={playlist.user_id}" if playlist.cover_file_id else (covers[0] if covers else None)
     return PlaylistResponse(
         id=playlist.id,
         name=playlist.name,

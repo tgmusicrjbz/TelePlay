@@ -70,8 +70,8 @@ def add_urls_to_file(file: File) -> dict:
         "updated_at": file.updated_at,
         "is_favorite": bool(file.is_favorite),
         "is_pinned": bool(file.is_pinned),
-        "stream_url": f"/api/stream/{file.id}",
-        "thumbnail_url": f"/api/stream/{file.id}/thumbnail?quality=best" if file.thumbnail_file_id else None,
+        "stream_url": f"/api/stream/{file.id}?workspace={file.user_id}",
+        "thumbnail_url": f"/api/stream/{file.id}/thumbnail?quality=best&workspace={file.user_id}" if file.thumbnail_file_id else None,
         "last_pos": file.watch_progress[0].position if file.watch_progress else 0,
     }
     
