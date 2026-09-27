@@ -1,7 +1,7 @@
 /**
  * FileCard component - displays a single file in grid or list view
  */
-import { Play, MoreVertical, Film, Music, FileText, Image, Check, Star } from 'lucide-react';
+import { Play, MoreVertical, Film, Music, FileText, Image, Check, Star, Pin } from 'lucide-react';
 import { TelegramFile, formatFileSize, formatDuration, useUpdateFile } from '../lib/api';
 import { useAppStore } from '../lib/store';
 
@@ -88,6 +88,7 @@ export default function FileCard({
                 data-file-id={file.id}
             >
             {selectionMode && <div className="absolute left-0 top-0 z-10 flex h-11 w-11 items-center justify-center"><div className={`flex h-6 w-6 items-center justify-center rounded-md border ${selected ? 'border-primary-400 bg-primary-500 text-white' : 'border-white/30 bg-dark-900/90'}`}>{selected && <Check className="h-4 w-4" />}</div></div>}
+            {file.is_pinned && <span className="absolute left-10 top-2 z-10 text-primary-300" title="پین‌شده"><Pin className="h-3.5 w-3.5 fill-current"/></span>}
             <button onClick={toggleFavorite} disabled={updateFile.isPending} className={`absolute right-2 top-2 z-10 rounded-full p-1.5 ${file.is_favorite ? 'bg-amber-400/15 text-amber-300' : 'text-dark-500 opacity-0 group-hover:opacity-100'}`} title={file.is_favorite ? 'برداشتن نشان' : 'نشان کردن'}><Star className={`h-3.5 w-3.5 ${file.is_favorite ? 'fill-current' : ''}`}/></button>
                 <div className="w-12 h-12 rounded-lg bg-dark-800/80 flex items-center justify-center overflow-hidden shrink-0 border border-white/[0.05]">
                     {authorizedThumbnailUrl ? (
@@ -158,6 +159,7 @@ export default function FileCard({
             data-file-id={file.id}
         >
             {selectionMode && <div className="absolute left-0 top-0 z-20 flex h-11 w-11 items-center justify-center"><div className={`flex h-6 w-6 items-center justify-center rounded-md border ${selected ? 'border-primary-400 bg-primary-500 text-white' : 'border-white/30 bg-dark-900/90'}`}>{selected && <Check className="h-4 w-4" />}</div></div>}
+            {file.is_pinned && <span className="absolute left-10 top-2 z-20 rounded-full bg-dark-950/75 p-1.5 text-primary-300" title="پین‌شده"><Pin className="h-3.5 w-3.5 fill-current"/></span>}
             <button onClick={toggleFavorite} disabled={updateFile.isPending} className={`absolute right-2 top-2 z-20 flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-dark-950/75 backdrop-blur ${file.is_favorite ? 'text-amber-300' : 'text-white/65 opacity-0 group-hover:opacity-100'}`} title={file.is_favorite ? 'برداشتن نشان' : 'نشان کردن'}><Star className={`h-4 w-4 ${file.is_favorite ? 'fill-current' : ''}`}/></button>
             <div className={`aspect-video rounded-lg ${dense ? 'mb-2' : 'mb-3'} overflow-hidden relative border ${selected ? 'border-primary-500/20' : 'border-white/[0.05]'} bg-dark-900/50`}>
                 {authorizedThumbnailUrl ? (

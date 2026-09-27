@@ -70,6 +70,7 @@ async def get_folder_file_count(db: AsyncSession, folder_id: int) -> int:
 async def list_folders(
     parent_id: Optional[int] = Query(None, description="Filter by parent folder ID"),
     sort: Optional[str] = None,
+    favorite_only: bool = False,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -86,6 +87,8 @@ async def list_folders(
         stmt = stmt.where(Folder.parent_id == parent_id)
     else:
         stmt = stmt.where(Folder.parent_id.is_(None))
+    if favorite_only:
+        stmt = stmt.where(Folder.is_favorite.is_(True))
     
     folder_sort_fields = {
         "name": func.lower(Folder.name),
@@ -99,7 +102,7 @@ async def list_folders(
         column = folder_sort_fields.get(field)
         if column is not None:
             criteria.append(desc(column) if direction.lower() == "desc" else asc(column))
-    stmt = stmt.order_by(*(criteria or [asc(func.lower(Folder.name))]), asc(Folder.id))
+    stmt = stmt.order_by(desc(Folder.is_pinned), *(criteria or [asc(func.lower(Folder.name))]), asc(Folder.id))
     result = await db.execute(stmt)
     rows = result.all()
     
@@ -112,7 +115,9 @@ async def list_folders(
             user_id=folder.user_id,
             created_at=folder.created_at,
             updated_at=folder.updated_at,
-            file_count=file_count
+            file_count=file_count,
+            is_favorite=folder.is_favorite,
+            is_pinned=folder.is_pinned,
         )
         for folder, file_count in rows
     ]
@@ -148,6 +153,8 @@ async def get_folder_tree(
             "created_at": folder.created_at,
             "updated_at": folder.updated_at,
             "file_count": file_count,
+            "is_favorite": folder.is_favorite,
+            "is_pinned": folder.is_pinned,
             "children": [],
         }
     
@@ -194,6 +201,8 @@ async def get_folder(
         created_at=folder.created_at,
         updated_at=folder.updated_at,
         file_count=file_count,
+        is_favorite=folder.is_favorite,
+        is_pinned=folder.is_pinned,
     )
 
 
@@ -245,6 +254,8 @@ async def create_folder(
         created_at=folder.created_at,
         updated_at=folder.updated_at,
         file_count=0,
+        is_favorite=folder.is_favorite,
+        is_pinned=folder.is_pinned,
     )
 
 
@@ -272,6 +283,10 @@ async def update_folder(
         folder.name = name
     if update_data.description is not None:
         folder.description = update_data.description.strip()[:1024] or None
+    if update_data.is_favorite is not None:
+        folder.is_favorite = update_data.is_favorite
+    if update_data.is_pinned is not None:
+        folder.is_pinned = update_data.is_pinned
     if update_data.parent_id is not None:
         # Prevent moving folder into itself
         if update_data.parent_id == folder_id:
@@ -321,6 +336,8 @@ async def update_folder(
         created_at=folder.created_at,
         updated_at=folder.updated_at,
         file_count=file_count,
+        is_favorite=folder.is_favorite,
+        is_pinned=folder.is_pinned,
     )
 
 

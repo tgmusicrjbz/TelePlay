@@ -15,6 +15,7 @@ export default function PwaManager() {
     const [installed, setInstalled] = useState(isStandalone());
     const [waitingWorker, setWaitingWorker] = useState<ServiceWorker | null>(null);
     const [showIosHelp, setShowIosHelp] = useState(false);
+    const [showNudge, setShowNudge] = useState(() => Number(localStorage.getItem('komod-install-nudge-until') || 0) < Date.now());
     const isIos = useMemo(() => /iphone|ipad|ipod/i.test(navigator.userAgent)
         || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1), []);
 
@@ -81,6 +82,17 @@ export default function PwaManager() {
         }
     };
 
+    useEffect(() => {
+        const requested = () => void install();
+        window.addEventListener('komod-install-request', requested);
+        return () => window.removeEventListener('komod-install-request', requested);
+    });
+
+    const dismissNudge = () => {
+        localStorage.setItem('komod-install-nudge-until', String(Date.now() + 7 * 24 * 60 * 60 * 1000));
+        setShowNudge(false);
+    };
+
     const applyUpdate = () => waitingWorker?.postMessage({ type: 'SKIP_WAITING' });
     const showInstall = !installed && (Boolean(installPrompt) || isIos);
 
@@ -89,13 +101,11 @@ export default function PwaManager() {
             <WifiOff className="h-4 w-4" /> آفلاینی؛ فایل‌های ذخیره‌شده در بخش دانلودها آمادهٔ پخش‌اند.
         </div>}
 
-        {(showInstall || waitingWorker) && <div className="pwa-safe-bottom fixed bottom-4 left-4 z-[190] flex max-w-[calc(100vw-2rem)] flex-col gap-2 sm:flex-row" dir="rtl">
+        {((showInstall && showNudge) || waitingWorker) && <div className="pwa-safe-bottom fixed bottom-4 left-4 z-[190] flex max-w-[calc(100vw-2rem)] flex-col gap-2 sm:flex-row" dir="rtl">
             {waitingWorker && <button onClick={applyUpdate} className="flex items-center justify-center gap-2 rounded-xl border border-primary-400/30 bg-dark-900/95 px-4 py-3 text-sm font-semibold text-white shadow-2xl backdrop-blur">
                 <RefreshCw className="h-4 w-4 text-primary-300" /> نسخه جدید آماده است
             </button>}
-            {showInstall && <button onClick={install} className="flex items-center justify-center gap-2 rounded-xl bg-primary-600 px-4 py-3 text-sm font-semibold text-white shadow-2xl shadow-primary-900/40">
-                <Download className="h-4 w-4" /> نصب کمد روی دستگاه
-            </button>}
+            {showInstall && showNudge && <div className="flex items-center rounded-xl bg-primary-600 shadow-2xl shadow-primary-900/40"><button onClick={install} className="flex items-center justify-center gap-2 px-3 py-2.5 text-xs font-semibold text-white"><Download className="h-4 w-4" /> نصب Komod</button><button onClick={dismissNudge} className="p-2 text-white/70" title="فعلاً نه"><X className="h-4 w-4"/></button></div>}
         </div>}
 
         {showIosHelp && <div className="fixed inset-0 z-[210] flex items-end justify-center bg-black/70 p-4 backdrop-blur-sm sm:items-center" onClick={() => setShowIosHelp(false)}>

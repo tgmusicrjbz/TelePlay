@@ -76,6 +76,10 @@ async def init_db():
             favorite_type = "BOOLEAN" if url.drivername.startswith("postgresql") else "INTEGER"
             favorite_default = "FALSE" if url.drivername.startswith("postgresql") else "0"
             await conn.execute(text(f"ALTER TABLE files ADD COLUMN is_favorite {favorite_type} NOT NULL DEFAULT {favorite_default}"))
+        if "is_pinned" not in columns:
+            favorite_type = "BOOLEAN" if url.drivername.startswith("postgresql") else "INTEGER"
+            favorite_default = "FALSE" if url.drivername.startswith("postgresql") else "0"
+            await conn.execute(text(f"ALTER TABLE files ADD COLUMN is_pinned {favorite_type} NOT NULL DEFAULT {favorite_default}"))
         playlist_columns = await conn.run_sync(
             lambda sync_conn: {column["name"] for column in inspect(sync_conn).get_columns("playlists")}
         )
@@ -88,3 +92,9 @@ async def init_db():
         )
         if "description" not in folder_columns:
             await conn.execute(text("ALTER TABLE folders ADD COLUMN description TEXT"))
+        favorite_type = "BOOLEAN" if url.drivername.startswith("postgresql") else "INTEGER"
+        favorite_default = "FALSE" if url.drivername.startswith("postgresql") else "0"
+        if "is_favorite" not in folder_columns:
+            await conn.execute(text(f"ALTER TABLE folders ADD COLUMN is_favorite {favorite_type} NOT NULL DEFAULT {favorite_default}"))
+        if "is_pinned" not in folder_columns:
+            await conn.execute(text(f"ALTER TABLE folders ADD COLUMN is_pinned {favorite_type} NOT NULL DEFAULT {favorite_default}"))

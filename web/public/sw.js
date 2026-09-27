@@ -1,5 +1,5 @@
-const CACHE_NAME = 'komod-shell-v4';
-const COVER_CACHE = 'komod-covers-v1';
+const CACHE_NAME = 'komod-shell-v5';
+const COVER_CACHE = 'komod-covers-v2';
 const CORE_ASSETS = ['/', '/index.html', '/offline.html', '/manifest.webmanifest', '/komod.svg'];
 
 self.addEventListener('install', event => {
@@ -18,7 +18,7 @@ self.addEventListener('install', event => {
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(key => key.startsWith('komod-shell-') && key !== CACHE_NAME).map(key => caches.delete(key))))
+      .then(keys => Promise.all(keys.filter(key => (key.startsWith('komod-shell-') && key !== CACHE_NAME) || (key.startsWith('komod-covers-') && key !== COVER_CACHE)).map(key => caches.delete(key))))
       .then(() => self.clients.claim())
   );
 });

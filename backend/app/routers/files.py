@@ -173,7 +173,7 @@ def apply_file_sort(query, sort: Optional[str]):
         criteria.append(desc(column) if direction.lower() == "desc" else asc(column))
     if not criteria:
         criteria = [desc(File.created_at)]
-    return query.order_by(*criteria, asc(File.id))
+    return query.order_by(desc(File.is_pinned), *criteria, asc(File.id))
 
 
 @router.get("/{file_id}/text")
@@ -200,7 +200,7 @@ async def get_text_preview(
     message = await get_message_from_channel(file.channel_message_id)
     if message is None:
         raise HTTPException(status_code=404, detail="Message not found in storage")
-    if file.file_type == "text" and message.document is None:
+    if file.file_type == "text" and getattr(message, "document", None) is None:
         return {"content": message.text or ""}
     contents = await telegram.tg_client.download_media(message, in_memory=True)
     if contents is None:
@@ -284,7 +284,7 @@ async def list_files(
     # Apply filters
     if folder_id is not None:
         query = query.where(File.folder_id == folder_id)
-    elif not search and not file_type:
+    elif not search and not file_type and not favorite_only:
         # If simply browsing (no search/filter), only show files in root (folder_id is NULL)
         query = query.where(File.folder_id.is_(None))
         
@@ -451,6 +451,8 @@ async def update_file(
         file.description = update_data.description.strip()[:1024] or None
     if update_data.is_favorite is not None:
         file.is_favorite = update_data.is_favorite
+    if update_data.is_pinned is not None:
+        file.is_pinned = update_data.is_pinned
     if update_data.folder_id is not None:
         target_id = update_data.folder_id or None
         if target_id is not None:

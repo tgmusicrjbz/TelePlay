@@ -194,7 +194,7 @@ async def get_thumbnail(
             audio_bytes = await telegram.tg_client.download_media(message, in_memory=True)
             embedded_cover = extract_embedded_cover(audio_bytes) if audio_bytes else None
             if embedded_cover:
-                return Response(content=embedded_cover, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
+                return Response(content=embedded_cover, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=604800, stale-while-revalidate=2592000"})
         if message.video and message.video.thumbs:
             thumbnail = select_best_thumbnail(message.video.thumbs)
         elif message.document and message.document.thumbs:
@@ -220,7 +220,7 @@ async def get_thumbnail(
         return Response(
             content=thumb_bytes.getvalue(),
             media_type="image/jpeg",
-            headers={"Cache-Control": "private, no-cache"},
+            headers={"Cache-Control": "private, max-age=604800, stale-while-revalidate=2592000"},
         )
     except Exception as e:
         # Log error internally, don't expose details to users

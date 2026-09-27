@@ -334,22 +334,24 @@ async def get_active_drawer_id(telegram_id: int) -> int | None:
 
 
 def get_web_app_button(telegram_id: int, text: str = "🌐 Open Web") -> InlineKeyboardButton:
-    """Use a Mini App for HTTPS; local HTTP needs the code login flow."""
-    if not settings.web_base_url.startswith("https://"):
-        return InlineKeyboardButton(text, callback_data="get_web_link", style=enums.ButtonStyle.SUCCESS)
+    """Open the authenticated web app directly from Telegram."""
     from urllib.parse import quote
     token = create_access_token(telegram_id)
     encoded_token = quote(token, safe='')
-    web_url = f"{settings.web_base_url}/auth?token={encoded_token}"
-    return InlineKeyboardButton(text, web_app=WebAppInfo(url=web_url), style=enums.ButtonStyle.SUCCESS)
+    base_url = settings.web_base_url.strip().rstrip('/')
+    if base_url.startswith('http://'):
+        return InlineKeyboardButton(text, callback_data="get_web_link")
+    if not base_url.startswith(('http://', 'https://')):
+        base_url = f"https://{base_url}"
+    web_url = f"{base_url}/auth?token={encoded_token}"
+    return InlineKeyboardButton(text, web_app=WebAppInfo(url=web_url))
 
 
 def local_web_instructions() -> str:
-    return (
-        "🌐 **نسخهٔ وب کمد**\n\n"
-        f"توی مرورگر همین کامپیوتر `{settings.web_base_url}` رو باز کن. "
-        "کد ورود صفحه رو با دستور `/login CODE` برای ربات بفرست."
-    )
+    base_url = settings.web_base_url.strip().rstrip('/')
+    if not base_url.startswith(('http://', 'https://')):
+        base_url = f"https://{base_url}"
+    return f"🌐 **نسخهٔ وب کمد**\n\nاز این لینک وارد کمد شو:\n{base_url}"
 
 
 async def safe_delete(message: Message | None, animate: bool = False) -> None:
@@ -442,7 +444,7 @@ def list_action_rows(telegram_id: int, target: str) -> list[list[InlineKeyboardB
         count = to_persian_digits(str(len(batch_selections.get(telegram_id, set()))))
         return [
             [InlineKeyboardButton(f"☑️ انتخاب‌شده‌ها: {count} مورد", callback_data="noop")],
-            [InlineKeyboardButton("🗃️ انتقال به کشو", callback_data="batch_move:0", style=enums.ButtonStyle.PRIMARY), InlineKeyboardButton("✏️ ویرایش نام/متن", callback_data="batch_edit")],
+            [InlineKeyboardButton("🗃️ انتقال به کشو", callback_data="batch_move:0"), InlineKeyboardButton("✏️ ویرایش نام/متن", callback_data="batch_edit")],
             [InlineKeyboardButton("🗑️ حذف گروهی", callback_data="batch_delete", style=enums.ButtonStyle.DANGER), InlineKeyboardButton("✖️ انصراف از انتخاب", callback_data="batch_cancel")],
         ]
     return [[InlineKeyboardButton("☑️ انتخاب گروهی", callback_data=f"batch_start:{target}"), InlineKeyboardButton("↕️ مرتب‌سازی", callback_data=f"sort_open:{target}")]]
@@ -496,10 +498,10 @@ async def render_folder_page(message: Message, telegram_id: int, parent_id: int 
     folder_items = [item for kind, item in current_items if kind == "folder"]
     file_items = [item for kind, item in current_items if kind == "file"]
     for item in root_items:
-        buttons.append([InlineKeyboardButton(f"📦 فایل‌های بیرون از کشو ({to_persian_digits(str(item))})", callback_data="rootfiles:0", style=enums.ButtonStyle.PRIMARY)])
+        buttons.append([InlineKeyboardButton(f"📦 فایل‌های بیرون از کشو ({to_persian_digits(str(item))})", callback_data="rootfiles:0")])
     for index in range(0, len(folder_items), 2):
         buttons.append([
-            InlineKeyboardButton(f"🗃️ {folder.name[:22]}", callback_data=f"folder:{folder.id}:0", style=enums.ButtonStyle.PRIMARY)
+            InlineKeyboardButton(f"🗃️ {folder.name[:22]}", callback_data=f"folder:{folder.id}:0")
             for folder in folder_items[index:index + 2]
         ])
     buttons.extend([[file_list_button(item, telegram_id)] for item in file_items])
@@ -518,8 +520,8 @@ async def render_folder_page(message: Message, telegram_id: int, parent_id: int 
         buttons.extend([
             [InlineKeyboardButton("↕️ مرتب‌سازی کشوها", callback_data=f"sort_open:folders:0:{page}"),
              InlineKeyboardButton("☑️ فیلتر نوع", callback_data="library_filter:folders:0")],
-            [InlineKeyboardButton("➕ ساخت کشو", callback_data="create_folder", style=enums.ButtonStyle.SUCCESS),
-             InlineKeyboardButton("🔍 جست‌وجو", callback_data="search_choose", style=enums.ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton("➕ ساخت کشو", callback_data="create_folder"),
+             InlineKeyboardButton("🔍 جست‌وجو", callback_data="search_choose")],
             [InlineKeyboardButton("🚪 منوی اصلی", callback_data="home")],
         ])
     if parent:
@@ -731,11 +733,11 @@ HELP_TEXT = (
 
 def main_menu_keyboard(telegram_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🗄️ کشوهای من", callback_data="folders:0:0", style=enums.ButtonStyle.PRIMARY),
-         InlineKeyboardButton("📦 همه‌ی فایل‌ها", callback_data="files:0", style=enums.ButtonStyle.PRIMARY)],
-        [InlineKeyboardButton("➕ کشوی تازه", callback_data="create_folder", style=enums.ButtonStyle.SUCCESS),
-         InlineKeyboardButton("🔍 بگرد تو کمد", callback_data="search_choose", style=enums.ButtonStyle.PRIMARY)],
-        [InlineKeyboardButton("🎧 پلی‌لیست‌های من", callback_data="playlists:0", style=enums.ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("🗄️ کشوهای من", callback_data="folders:0:0"),
+         InlineKeyboardButton("📦 همه‌ی فایل‌ها", callback_data="files:0")],
+        [InlineKeyboardButton("➕ کشوی تازه", callback_data="create_folder"),
+         InlineKeyboardButton("🔍 بگرد تو کمد", callback_data="search_choose")],
+        [InlineKeyboardButton("🎧 پلی‌لیست‌های من", callback_data="playlists:0")],
         [get_web_app_button(telegram_id, "✨ باز کردن نسخهٔ وب")],
         [InlineKeyboardButton("💡 راهنمای کمد", callback_data="show_help")],
     ])
@@ -780,7 +782,7 @@ async def render_playlists(message: Message, telegram_id: int, page: int = 0) ->
     if len(playlists) > PAGE_SIZE:
         buttons.append(pagination_row("playlists", page, len(playlists)))
     buttons.extend([
-        [InlineKeyboardButton("➕ پلی‌لیست تازه", callback_data="playlist_new", style=enums.ButtonStyle.SUCCESS)],
+        [InlineKeyboardButton("➕ پلی‌لیست تازه", callback_data="playlist_new")],
         [InlineKeyboardButton("🚪 منوی اصلی", callback_data="home")],
     ])
     text = "🎧 **پلی‌لیست‌های کمد**\n\nآهنگ‌ها و ویدیوها رو با ترتیب دلخواهت کنار هم بچین و پشت‌سرهم پخش کن."
@@ -806,8 +808,8 @@ async def render_playlist_detail(message: Message, telegram_id: int, playlist_id
     if len(items) > page_size:
         buttons.append(pagination_row(f"playlist:{playlist.id}", page, len(items)))
     buttons.extend([
-        [InlineKeyboardButton("▶️ پخش همه (از اول)", callback_data=f"plplay:{playlist.id}:0", style=enums.ButtonStyle.SUCCESS)],
-        [InlineKeyboardButton("🔀 پخش شافل", callback_data=f"plshuffle:{playlist.id}", style=enums.ButtonStyle.PRIMARY), InlineKeyboardButton("➕ افزودن فایل", callback_data=f"pladd:{playlist.id}:0", style=enums.ButtonStyle.SUCCESS)],
+        [InlineKeyboardButton("▶️ پخش همه (از اول)", callback_data=f"plplay:{playlist.id}:0")],
+        [InlineKeyboardButton("🔀 پخش شافل", callback_data=f"plshuffle:{playlist.id}"), InlineKeyboardButton("➕ افزودن فایل", callback_data=f"pladd:{playlist.id}:0")],
         [InlineKeyboardButton("⚙️ تنظیمات نام و توضیح", callback_data=f"plsettings:{playlist.id}"), InlineKeyboardButton("🗑️ حذف پلی‌لیست", callback_data=f"pldelete:{playlist.id}", style=enums.ButtonStyle.DANGER)],
         [InlineKeyboardButton("↩️ لیست پلی‌لیست‌ها", callback_data="playlists:0"), InlineKeyboardButton("🚪 منوی اصلی", callback_data="home")],
     ])
@@ -1018,9 +1020,6 @@ async def search_command(client, message: Message):
 @tg_client.on_message(filters.command("web") & filters.private)
 async def web_command(client, message: Message):
     """Get authenticated web interface link."""
-    if not settings.web_base_url.startswith("https://"):
-        await message.reply(local_web_instructions())
-        return
     user = await get_or_create_user(
         message.from_user.id,
         message.from_user.username,
@@ -1029,7 +1028,10 @@ async def web_command(client, message: Message):
     )
     
     token = create_access_token(message.from_user.id)
-    web_url = f"{settings.web_base_url}/auth?token={token}"
+    base_url = settings.web_base_url.strip().rstrip('/')
+    if not base_url.startswith(('http://', 'https://')):
+        base_url = f"https://{base_url}"
+    web_url = f"{base_url}/auth?token={token}"
     
     await message.reply(
         "🌐 **نسخهٔ وب کمد**\n\n"
@@ -1218,7 +1220,10 @@ async def handle_file(client, message: Message):
                 response += f"\n🗃️ در کشوی «{escape_markdown(drawer.name)}» ذخیره شد."
         detail_back_targets[message.from_user.id] = "files:0"
         await status_msg.edit(response, reply_markup=file_detail_keyboard(file))
-        asyncio.create_task(delete_preview_later(client, status_msg.chat.id, status_msg.id, 30))
+        chat_id = getattr(getattr(status_msg, "chat", None), "id", None) or getattr(getattr(message, "chat", None), "id", message.from_user.id)
+        status_message_id = getattr(status_msg, "id", None)
+        if status_message_id is not None:
+            asyncio.create_task(delete_preview_later(client, chat_id, status_message_id, 30))
         
     except Exception as e:
         logger.exception("Telegram upload failed for user %s: %s", message.from_user.id, e)
@@ -1985,7 +1990,7 @@ async def handle_callback(client, callback: CallbackQuery):
         await callback.message.edit(
             f"⚙️ **مدیریت کشوی {escape_markdown(folder.name)}**\n\n📝 توضیحات: {escape_markdown(folder.description) if folder.description else 'هنوز توضیحی نداره.'}",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("➕ ساخت زیرکشو", callback_data=f"create_folder:{folder.id}", style=enums.ButtonStyle.SUCCESS)],
+                [InlineKeyboardButton("➕ ساخت زیرکشو", callback_data=f"create_folder:{folder.id}")],
                 [InlineKeyboardButton("✏️ ویرایش نام/توضیح", callback_data=f"folder_edit:{folder.id}")],
                 [InlineKeyboardButton("🗃️ انتقال کشو", callback_data=f"movefolder:{folder.id}"),
                  InlineKeyboardButton("↕️ مرتب‌سازی", callback_data=f"sort_open:folders:{folder.id}:0")],
@@ -2094,18 +2099,18 @@ async def handle_callback(client, callback: CallbackQuery):
         await callback.answer()
 
     elif data == "get_web_link":
-        if settings.web_base_url.startswith("https://"):
-            token = create_access_token(callback.from_user.id)
-            web_url = f"{settings.web_base_url}/auth?token={token}"
-            await callback.message.reply(
-                "🌐 نسخهٔ وب کمد\nاین لینک رو خصوصی نگه دار:\n"
-                f"{web_url}",
-                reply_markup=InlineKeyboardMarkup([
-                    [get_web_app_button(callback.from_user.id, "🌐 باز کردن نسخهٔ وب")]
-                ])
-            )
-        else:
-            await callback.message.reply(local_web_instructions())
+        token = create_access_token(callback.from_user.id)
+        base_url = settings.web_base_url.strip().rstrip('/')
+        if not base_url.startswith(('http://', 'https://')):
+            base_url = f"https://{base_url}"
+        web_url = f"{base_url}/auth?token={token}"
+        await callback.message.reply(
+            "🌐 نسخهٔ وب کمد\nاین لینک رو خصوصی نگه دار:\n"
+            f"{web_url}",
+            reply_markup=InlineKeyboardMarkup([
+                [get_web_app_button(callback.from_user.id, "🌐 باز کردن نسخهٔ وب")]
+            ])
+        )
         await callback.answer()
         
     elif data == "show_files":

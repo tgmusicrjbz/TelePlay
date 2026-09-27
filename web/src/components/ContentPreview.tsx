@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Check, Copy, Download, Pencil, X } from 'lucide-react';
 import { api, canPreviewText } from '../lib/api';
 import { useAppStore } from '../lib/store';
+import { cacheTextFile, getOfflineText } from '../lib/offline';
 
 export default function ContentPreview() {
     const { contentPreviewFile: file, setContentPreviewFile, addToast } = useAppStore();
@@ -19,9 +20,25 @@ export default function ContentPreview() {
         setLoading(true);
         setContent('');
         setError('');
-        api.get<{ content: string }>(`/files/${file.id}/text`)
-            .then(({ data }) => { if (!cancelled) { setContent(data.content); setDraft(data.content); } })
-            .catch((err) => { if (!cancelled) setError(err.response?.data?.detail || 'Could not load text.'); })
+        const loadText = async () => {
+            try {
+                if (!navigator.onLine) {
+                    const cached = await getOfflineText(file.id);
+                    if (!cached) throw new Error('این متن هنوز برای استفاده آفلاین ذخیره نشده است.');
+                    return cached.content;
+                }
+                const { data } = await api.get<{ content: string }>(`/files/${file.id}/text`);
+                await cacheTextFile(file, data.content);
+                return data.content;
+            } catch (err) {
+                const cached = await getOfflineText(file.id);
+                if (cached) return cached.content;
+                throw err;
+            }
+        };
+        loadText()
+            .then(text => { if (!cancelled) { setContent(text); setDraft(text); } })
+            .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : 'متن بارگذاری نشد.'); })
             .finally(() => { if (!cancelled) setLoading(false); });
         return () => { cancelled = true; };
     }, [file?.id, show]);
@@ -42,6 +59,7 @@ export default function ContentPreview() {
         setSaving(true);
         try {
             const { data } = await api.patch<{ content: string }>(`/files/${file.id}/text`, { content: draft });
+            await cacheTextFile(file, data.content);
             setContent(data.content); setEditing(false);
         } finally { setSaving(false); }
     };

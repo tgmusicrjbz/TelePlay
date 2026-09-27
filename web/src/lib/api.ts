@@ -24,6 +24,8 @@ export interface Folder {
     created_at: string;
     updated_at: string;
     file_count: number;
+    is_favorite?: boolean;
+    is_pinned?: boolean;
     children?: Folder[];
 }
 
@@ -49,6 +51,7 @@ export interface TelegramFile {
     public_hash?: string;
     public_stream_url?: string;
     is_favorite?: boolean;
+    is_pinned?: boolean;
 }
 
 export interface FileListResponse {
@@ -333,7 +336,7 @@ export const useFile = (fileId: number) => {
 export const useUpdateFile = () => {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async ({ id, ...data }: { id: number; file_name?: string; description?: string; folder_id?: number | null; is_favorite?: boolean }) => {
+        mutationFn: async ({ id, ...data }: { id: number; file_name?: string; description?: string; folder_id?: number | null; is_favorite?: boolean; is_pinned?: boolean }) => {
             const { data: result } = await api.patch<TelegramFile>(`/files/${id}`, data);
             return result;
         },
@@ -464,13 +467,14 @@ export const useMoveFolders = () => {
     });
 };
 
-export const useFolders = (parentId?: number | null, sort = '') => {
+export const useFolders = (parentId?: number | null, sort = '', favoriteOnly = false) => {
     return useQuery({
-        queryKey: ['folders', parentId, sort],
+        queryKey: ['folders', parentId, sort, favoriteOnly],
         queryFn: async () => {
             const params: Record<string, any> = {};
             if (parentId !== undefined) params.parent_id = parentId;
             if (sort) params.sort = sort;
+            if (favoriteOnly) params.favorite_only = true;
             const { data } = await api.get<Folder[]>('/folders', { params });
             return data;
         },
@@ -506,7 +510,7 @@ export const useCreateFolder = () => {
 export const useUpdateFolder = () => {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async ({ id, ...data }: { id: number; name?: string; description?: string; parent_id?: number | null }) => {
+        mutationFn: async ({ id, ...data }: { id: number; name?: string; description?: string; parent_id?: number | null; is_favorite?: boolean; is_pinned?: boolean }) => {
             const { data: result } = await api.patch<Folder>(`/folders/${id}`, data);
             return result;
         },
@@ -557,7 +561,7 @@ export const formatFileSize = (bytes: number): string => {
         size /= 1024;
         unitIndex++;
     }
-    return `${size.toLocaleString('fa-IR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} ${units[unitIndex]}`;
+    return `${size.toLocaleString('fa-IR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}\u00a0${units[unitIndex]}`;
 };
 
 export const formatDuration = (seconds: number | null): string => {

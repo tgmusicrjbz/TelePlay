@@ -43,6 +43,8 @@ class FolderUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     parent_id: Optional[int] = None
+    is_favorite: Optional[bool] = None
+    is_pinned: Optional[bool] = None
 
 
 class FolderResponse(FolderBase):
@@ -51,6 +53,8 @@ class FolderResponse(FolderBase):
     created_at: datetime
     updated_at: datetime
     file_count: int = 0
+    is_favorite: bool = False
+    is_pinned: bool = False
     
     model_config = ConfigDict(from_attributes=True)
 
@@ -85,6 +89,7 @@ class FileUpdate(BaseModel):
     description: Optional[str] = None
     folder_id: Optional[int] = None
     is_favorite: Optional[bool] = None
+    is_pinned: Optional[bool] = None
 
 
 class BatchFileUpdate(BaseModel):
@@ -111,6 +116,7 @@ class FileResponse(FileBase):
     public_stream_url: Optional[str] = None
     last_pos: int = 0
     is_favorite: bool = False
+    is_pinned: bool = False
     
     model_config = ConfigDict(from_attributes=True)
 

@@ -192,9 +192,10 @@ function LoginPage() {
                             </div>
                         )}
                         
-                        <p className="text-xs text-dark-500 mt-4">
-                            این کد را با دستور <span dir="ltr" className="text-primary-400 font-mono bg-dark-800/50 px-1.5 py-0.5 rounded">/login {code || 'CODE'}</span> برای ربات بفرست و ورود را تأیید کن.
-                        </p>
+                        <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-dark-500">
+                            <span>این دستور را برای ربات بفرست:</span>
+                            <button type="button" dir="ltr" onClick={() => void navigator.clipboard.writeText(`/login ${code || 'CODE'}`)} className="rounded-lg bg-dark-800/70 px-2.5 py-1.5 font-mono text-primary-300 transition hover:bg-dark-700" title="کپی دستور ورود">/login {code || 'CODE'} · کپی</button>
+                        </div>
                     </div>
 
                     <div className="relative">

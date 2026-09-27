@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../lib/store';
-import { TelegramFile, Folder, api, canPreviewText, useUpdateFile } from '../lib/api';
-import { Play, Download, DownloadCloud, Link, Edit, FolderInput, Trash2, Globe, ShieldOff, HardDriveDownload, Eye, AlignLeft, ListPlus, Heart, Info } from 'lucide-react';
+import { TelegramFile, Folder, api, canPreviewText, useUpdateFile, useUpdateFolder } from '../lib/api';
+import { Play, Download, DownloadCloud, Link, Edit, FolderInput, Trash2, Globe, ShieldOff, HardDriveDownload, Eye, AlignLeft, ListPlus, Heart, Info, Pin } from 'lucide-react';
 import { saveFileOffline } from '../lib/offline';
 
 export default function GlobalContextMenu() {
     const { activeContextMenu, setActiveContextMenu, setPreviewFile, setContentPreviewFile, setDetailsFile, setMoveItems, setMoveFiles, setDeleteConfirm, setRenameFile, setRenameFolder, setDescriptionItem, selectedFileIds, selectedFiles, setPlaylistFile, addToast } = useAppStore();
     const updateFile = useUpdateFile();
+    const updateFolder = useUpdateFolder();
     const menuRef = useRef<HTMLDivElement>(null);
     const [copiedId, setCopiedId] = useState<string | null>(null);
     const [savingOffline, setSavingOffline] = useState(false);
@@ -190,6 +191,7 @@ export default function GlobalContextMenu() {
                                     </button><button className="context-menu-item w-full text-right" onClick={() => handleAction(() => setPlaylistFile(activeContextMenu.item as TelegramFile))}><ListPlus className="h-4 w-4"/> افزودن به پلی‌لیست</button></>
                                 )}
                                 <button className="context-menu-item w-full text-right" onClick={async () => { const file=activeContextMenu.item as TelegramFile; await updateFile.mutateAsync({id:file.id,is_favorite:!file.is_favorite}); addToast(file.is_favorite?'از نشان‌شده‌ها برداشته شد':'به نشان‌شده‌ها اضافه شد ⭐'); setActiveContextMenu(null); }}><Heart className={`h-4 w-4 ${(activeContextMenu.item as TelegramFile).is_favorite?'fill-current text-pink-400':''}`}/>{(activeContextMenu.item as TelegramFile).is_favorite?'برداشتن نشان':'نشان کردن'}</button>
+                                <button className="context-menu-item w-full text-right" onClick={async () => { const file=activeContextMenu.item as TelegramFile; await updateFile.mutateAsync({id:file.id,is_pinned:!file.is_pinned}); addToast(file.is_pinned?'از بالای کمد برداشته شد':'بالای کمد پین شد 📌'); setActiveContextMenu(null); }}><Pin className={`h-4 w-4 ${(activeContextMenu.item as TelegramFile).is_pinned?'fill-current text-primary-300':''}`}/>{(activeContextMenu.item as TelegramFile).is_pinned?'برداشتن پین':'پین بالای کمد'}</button>
                                 {(activeContextMenu.item.file_type === 'image' || canPreviewText(activeContextMenu.item as TelegramFile)) && (
                                     <button className="context-menu-item w-full text-right" onClick={() => handleAction(() => setContentPreviewFile(activeContextMenu.item as TelegramFile))}>
                                         <Eye className="w-4 h-4" />
@@ -272,6 +274,8 @@ export default function GlobalContextMenu() {
                 ) : (
                     // Folder Context Menu
                     <>
+                        <button className="context-menu-item w-full text-right" onClick={async () => { const folder=activeContextMenu.item as Folder; await updateFolder.mutateAsync({id:folder.id,is_favorite:!folder.is_favorite}); addToast(folder.is_favorite?'از نشان‌شده‌ها برداشته شد':'کشو نشان شد ⭐'); setActiveContextMenu(null); }}><Heart className={`h-4 w-4 ${(activeContextMenu.item as Folder).is_favorite?'fill-current text-pink-400':''}`}/>{(activeContextMenu.item as Folder).is_favorite?'برداشتن نشان':'نشان کردن کشو'}</button>
+                        <button className="context-menu-item w-full text-right" onClick={async () => { const folder=activeContextMenu.item as Folder; await updateFolder.mutateAsync({id:folder.id,is_pinned:!folder.is_pinned}); addToast(folder.is_pinned?'پین کشو برداشته شد':'کشو بالای کمد پین شد 📌'); setActiveContextMenu(null); }}><Pin className={`h-4 w-4 ${(activeContextMenu.item as Folder).is_pinned?'fill-current text-primary-300':''}`}/>{(activeContextMenu.item as Folder).is_pinned?'برداشتن پین':'پین بالای کمد'}</button>
                         <button
                             className="context-menu-item w-full text-right"
                             onClick={() => handleAction(() => setRenameFolder(activeContextMenu.item as Folder))}

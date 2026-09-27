@@ -5,6 +5,7 @@ import { useEffect, useCallback, useRef, useState } from 'react';
 import { FolderPlus, Folder as FolderIcon, Grid, LayoutGrid, List, Search, ChevronRight, Home, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, StickyNote, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ChevronDown, ChevronUp, Plus, CheckSquare, Square, ListChecks, ListPlus, Upload, Star, RefreshCw } from 'lucide-react';
 import { useFiles, useFolders, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useActivityFeed, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile } from '../lib/api';
 import { useAppStore } from '../lib/store';
+import { cacheAllTextNotes } from '../lib/offline';
 import FileCard from './FileCard';
 import FolderCard from './FolderCard';
 import NewFolderModal from './NewFolderModal';
@@ -130,7 +131,7 @@ export default function FileBrowser() {
     }
 
     // Folder and file visibility is controlled from one shared content switcher.
-    const { data: folders, isLoading: foldersLoading, refetch: refetchFolders } = useFolders(currentFolderId, folderSortValue);
+    const { data: folders, isLoading: foldersLoading, refetch: refetchFolders } = useFolders(currentFolderId, folderSortValue, favoriteOnly);
     const visibleFolders = folders?.filter(folder => {
         if (!searchQuery.trim()) return true;
         const query = searchQuery.trim().toLocaleLowerCase('fa');
@@ -160,6 +161,10 @@ export default function FileBrowser() {
     const selectionStart = useRef({ x: 0, y: 0 });
 
     useEffect(() => applyTheme(getStoredTheme()), []);
+
+    useEffect(() => {
+        if (navigator.onLine) void cacheAllTextNotes();
+    }, []);
 
     useEffect(() => {
         if (activeSection !== 'files') {
@@ -805,7 +810,7 @@ export default function FileBrowser() {
                                     <button title="مرتب‌سازی" aria-label="مرتب‌سازی" onClick={() => { setShowSort(value => !value); setShowFilters(false); }} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs transition-colors ${showSort ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:text-white'}`}>
                                         <ArrowDown className="h-4 w-4" />
                                     </button>
-                                    <button title="فقط نشان‌شده‌ها" aria-label="فقط نشان‌شده‌ها" disabled={contentScope === 'folders'} onClick={() => { setFavoriteOnly(value => !value); setPage(1); setAllFiles([]); }} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs transition-colors disabled:opacity-40 ${favoriteOnly ? 'bg-amber-400/15 text-amber-200' : 'text-dark-400 hover:text-white'}`}><Star className={`h-4 w-4 ${favoriteOnly ? 'fill-current' : ''}`}/></button>
+                                    <button title="فقط نشان‌شده‌ها" aria-label="فقط نشان‌شده‌ها" onClick={() => { setFavoriteOnly(value => !value); setPage(1); setAllFiles([]); }} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs transition-colors ${favoriteOnly ? 'bg-amber-400/15 text-amber-200' : 'text-dark-400 hover:text-white'}`}><Star className={`h-4 w-4 ${favoriteOnly ? 'fill-current' : ''}`}/></button>
                                     <button title="انتخاب گروهی" aria-label="انتخاب گروهی" onClick={toggleSelectionMode} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs transition-colors ${selectionMode ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:text-white'}`}>
                                         <ListChecks className="h-4 w-4" />
                                     </button>
@@ -843,7 +848,7 @@ export default function FileBrowser() {
                                         <p className="text-sm font-medium text-white">مرتب‌سازی چندمرحله‌ای ✨</p>
                                         <button onClick={() => setSortCriteria([{ field: 'created', direction: 'desc' }])} className="shrink-0 text-xs text-dark-400 hover:text-white">حالت پیش‌فرض</button>
                                     </div>
-                                    <div className="grid gap-1.5 sm:grid-cols-2">
+                                    <div className="grid gap-1.5">
                                         {sortCriteria.map((item, index) => (
                                             <div key={item.field} className="flex min-w-0 items-center gap-1 rounded-xl border border-white/[0.08] bg-dark-800/60 p-1.5">
                                                 <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary-500/15 text-xs text-primary-300">{(index + 1).toLocaleString('fa-IR')}</span>
