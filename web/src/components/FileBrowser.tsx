@@ -78,6 +78,9 @@ export default function FileBrowser() {
     const [showBatchEdit, setShowBatchEdit] = useState(false);
     const [selectionMode, setSelectionMode] = useState(false);
     const [favoriteOnly, setFavoriteOnly] = useState(false);
+    const [showTextComposer, setShowTextComposer] = useState(false);
+    const [textFileName, setTextFileName] = useState('یادداشت تازه');
+    const [textContent, setTextContent] = useState('');
     const [contentScope, setContentScope] = useState<'all' | 'files' | 'folders'>('all');
     const [sortCriteria, setSortCriteria] = useState<SortCriterion[]>(() => {
         try { return JSON.parse(localStorage.getItem('komod-sort') || '') || [{ field: 'created', direction: 'desc' }]; }
@@ -446,6 +449,23 @@ export default function FileBrowser() {
         }
     };
 
+    const handleCreateText = async (event: React.FormEvent) => {
+        event.preventDefault();
+        if (!textContent.trim()) return;
+        const rawName = textFileName.trim() || 'یادداشت تازه';
+        const fileName = /\.(md|txt)$/i.test(rawName) ? rawName : `${rawName}.md`;
+        try {
+            await uploadFileMutation.mutateAsync({ file: new File([textContent], fileName, { type: 'text/markdown;charset=utf-8' }), folderId: currentFolderId });
+            setShowTextComposer(false);
+            setTextFileName('یادداشت تازه');
+            setTextContent('');
+            addToast('یادداشت به کمد اضافه شد 📝');
+            handleRefresh();
+        } catch {
+            addToast('ذخیره یادداشت انجام نشد.', 'error');
+        }
+    };
+
     // Keyboard shortcuts
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
@@ -577,6 +597,7 @@ export default function FileBrowser() {
     }, [currentFolderId, fileTypeFilter, favoriteOnly, searchQuery, activeSection, sortValue]);
 
     const selectedFilesForActions = displayFiles?.filter(file => selectedFileIds.has(file.id)) || [];
+    const selectedPlayableFilesForActions = selectedFilesForActions.filter(file => file.file_type === 'audio' || file.file_type === 'video');
     const selectedFoldersForActions = folders?.filter(folder => selectedFolderIds.has(folder.id)) || [];
     const selectedItems = [...selectedFilesForActions, ...selectedFoldersForActions];
     const sectionTitle = activeSection === 'activity' ? 'فعالیت' : (breadcrumbs[breadcrumbs.length - 1]?.name || 'کمد من');
@@ -701,6 +722,10 @@ export default function FileBrowser() {
                                     <Upload className={`w-4 h-4 ${uploadFileMutation.isPending ? 'animate-bounce' : ''}`} />
                                     <span className="hidden sm:inline">{uploadFileMutation.isPending ? 'در حال آپلود…' : 'آپلود'}</span>
                                 </button>
+                                <button onClick={() => setShowTextComposer(true)} className="btn-secondary py-1.5 px-3 text-sm flex items-center gap-2" title="نوشتن متن مستقیم">
+                                    <StickyNote className="h-4 w-4" />
+                                    <span className="hidden sm:inline">متن تازه</span>
+                                </button>
                                 <button
                                     onClick={() => setShowNewFolder(true)}
                                     className="btn-primary py-1.5 px-3 text-sm flex items-center gap-2 shadow-lg shadow-primary-500/20"
@@ -726,11 +751,11 @@ export default function FileBrowser() {
                     onDragOver={(e) => e.preventDefault()}
                 >
                     {(selectionMode || selectedItems.length > 0) && activeSection === 'files' && (
-                        <div className="sticky top-0 z-20 mx-auto mb-3 flex min-h-14 max-w-7xl flex-wrap items-center gap-1 rounded-2xl border border-primary-500/25 bg-dark-900/95 p-1.5 shadow-2xl backdrop-blur-xl sm:hidden">
+                        <div className="sticky top-0 z-20 mx-auto mb-3 flex min-h-14 max-w-7xl flex-nowrap items-center gap-1 overflow-x-auto rounded-2xl border border-primary-500/25 bg-dark-900/95 p-1.5 shadow-2xl backdrop-blur-xl sm:hidden">
                             <span className="shrink-0 px-2 text-xs font-semibold text-primary-200">{selectedItems.length ? `${selectedItems.length.toLocaleString('fa-IR')} انتخاب` : 'یک کارت را لمس کن'}</span>
                             {selectedItems.length === 1 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-200 hover:bg-white/10" aria-label="تغییر نام" title="تغییر نام" onClick={() => selectedFilesForActions[0] ? setRenameFile(selectedFilesForActions[0]) : setRenameFolder(selectedFoldersForActions[0])}><Pencil className="h-5 w-5" /></button>}
                             {selectedFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-200 hover:bg-white/10" aria-label="ویرایش گروهی" title="ویرایش گروهی" onClick={() => setShowBatchEdit(true)}><SlidersHorizontal className="h-5 w-5" /></button>}
-                            {selectedFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-200 hover:bg-white/10" aria-label="افزودن به پلی‌لیست" title="افزودن به پلی‌لیست" onClick={() => setPlaylistFiles(selectedFilesForActions)}><ListPlus className="h-5 w-5" /></button>}
+                            {selectedPlayableFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-500/10 text-primary-200 hover:bg-primary-500/20" aria-label="افزودن به پلی‌لیست" title="افزودن فایل‌های صدا و ویدیو به پلی‌لیست" onClick={() => setPlaylistFiles(selectedPlayableFilesForActions)}><ListPlus className="h-5 w-5" /></button>}
                             <button disabled={!selectedItems.length} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-200 hover:bg-white/10 disabled:opacity-30" aria-label="جابه‌جایی" title="جابه‌جایی" onClick={() => setMoveItems({ files: selectedFilesForActions, folders: selectedFoldersForActions })}><FolderInput className="h-5 w-5" /></button>
                             <button disabled={!selectedItems.length} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-red-300 hover:bg-red-500/10 disabled:opacity-30" aria-label="حذف" title="حذف" onClick={() => setDeleteConfirm({ type: selectedFoldersForActions.length && selectedFilesForActions.length ? 'multiple' : selectedFoldersForActions.length ? 'folder' : 'file', items: selectedItems })}><Trash2 className="h-5 w-5" /></button>
                             <button className="mr-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-300 hover:bg-white/10" aria-label="پایان انتخاب گروهی" title="پایان انتخاب" onClick={cancelSelection}><X className="h-5 w-5" /></button>
@@ -748,7 +773,7 @@ export default function FileBrowser() {
                                 <span className="text-sm font-medium text-primary-200 px-2">{selectedItems.length.toLocaleString('fa-IR')} مورد انتخاب شده</span>
                                 {selectedItems.length === 1 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => selectedFilesForActions[0] ? setRenameFile(selectedFilesForActions[0]) : setRenameFolder(selectedFoldersForActions[0])}><Pencil className="w-4 h-4" /> تغییر نام</button>}
                                 {selectedFilesForActions.length > 0 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => setShowBatchEdit(true)}><SlidersHorizontal className="w-4 h-4" /> ویرایش گروهی</button>}
-                                {selectedFilesForActions.length > 0 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => setPlaylistFiles(selectedFilesForActions)}><ListPlus className="w-4 h-4" /> افزودن به پلی‌لیست</button>}
+                                {selectedPlayableFilesForActions.length > 0 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => setPlaylistFiles(selectedPlayableFilesForActions)}><ListPlus className="w-4 h-4" /> افزودن به پلی‌لیست</button>}
                                 <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => setMoveItems({ files: selectedFilesForActions, folders: selectedFoldersForActions })}><FolderInput className="w-4 h-4" /> جابه‌جایی</button>
                                 <button className="btn-secondary shrink-0 text-sm flex items-center gap-2 text-red-300" onClick={() => setDeleteConfirm({ type: selectedFoldersForActions.length && selectedFilesForActions.length ? 'multiple' : selectedFoldersForActions.length ? 'folder' : 'file', items: selectedItems })}><Trash2 className="w-4 h-4" /> حذف</button>
                                 <button className="btn-icon shrink-0" title="پایان انتخاب" onClick={cancelSelection}><X className="w-4 h-4" /></button>
@@ -818,15 +843,15 @@ export default function FileBrowser() {
                                         <p className="text-sm font-medium text-white">مرتب‌سازی چندمرحله‌ای ✨</p>
                                         <button onClick={() => setSortCriteria([{ field: 'created', direction: 'desc' }])} className="shrink-0 text-xs text-dark-400 hover:text-white">حالت پیش‌فرض</button>
                                     </div>
-                                    <div className="grid gap-2 sm:grid-cols-2">
+                                    <div className="grid gap-1.5 sm:grid-cols-2">
                                         {sortCriteria.map((item, index) => (
-                                            <div key={item.field} className="grid grid-cols-[auto_1fr_auto] items-center gap-2 rounded-xl border border-white/[0.08] bg-dark-800/60 p-2">
+                                            <div key={item.field} className="flex min-w-0 items-center gap-1 rounded-xl border border-white/[0.08] bg-dark-800/60 p-1.5">
                                                 <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary-500/15 text-xs text-primary-300">{(index + 1).toLocaleString('fa-IR')}</span>
-                                                <span className="min-w-24 flex-1 text-sm">{sortLabels[item.field]}</span>
-                                                <button className="rounded-lg bg-dark-700 px-2.5 py-1.5 text-xs hover:bg-dark-600" onClick={() => updateSort(index, { ...item, direction: item.direction === 'asc' ? 'desc' : 'asc' })}>
+                                                <span className="min-w-0 flex-1 truncate text-xs sm:text-sm">{sortLabels[item.field]}</span>
+                                                <button className="shrink-0 rounded-lg bg-dark-700 px-2 py-1.5 text-xs hover:bg-dark-600" onClick={() => updateSort(index, { ...item, direction: item.direction === 'asc' ? 'desc' : 'asc' })}>
                                                     {item.direction === 'asc' ? <><ArrowUp className="inline h-3.5 w-3.5" /> صعودی</> : <><ArrowDown className="inline h-3.5 w-3.5" /> نزولی</>}
                                                 </button>
-                                                <div className="col-span-3 flex items-center justify-end gap-1 border-t border-white/[.05] pt-1"><button className="btn-icon p-1.5" disabled={index === 0} title="یک اولویت بالاتر" onClick={() => moveSort(index, -1)}><ChevronUp className="h-4 w-4" /></button><button className="btn-icon p-1.5" disabled={index === sortCriteria.length - 1} title="یک اولویت پایین‌تر" onClick={() => moveSort(index, 1)}><ChevronDown className="h-4 w-4" /></button><button className="btn-icon p-1.5 text-red-300" title="حذف این معیار" onClick={() => removeSort(index)}><X className="h-4 w-4" /></button></div>
+                                                <button className="btn-icon shrink-0 p-1.5" disabled={index === 0} title="یک اولویت بالاتر" onClick={() => moveSort(index, -1)}><ChevronUp className="h-4 w-4" /></button><button className="btn-icon shrink-0 p-1.5" disabled={index === sortCriteria.length - 1} title="یک اولویت پایین‌تر" onClick={() => moveSort(index, 1)}><ChevronDown className="h-4 w-4" /></button><button className="btn-icon shrink-0 p-1.5 text-red-300" title="حذف این معیار" onClick={() => removeSort(index)}><X className="h-4 w-4" /></button>
                                             </div>
                                         ))}
                                     </div>
@@ -1036,6 +1061,16 @@ export default function FileBrowser() {
                 onClose={() => setShowBatchEdit(false)}
                 onSave={handleBatchEdit}
             />
+            {showTextComposer && (
+                <div className="fixed inset-0 z-[170] flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-4" onClick={() => setShowTextComposer(false)}>
+                    <form className="w-full max-w-2xl rounded-t-3xl border border-white/10 bg-dark-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl sm:rounded-3xl sm:p-5" onClick={event => event.stopPropagation()} onSubmit={handleCreateText}>
+                        <div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary-500/15 text-primary-200"><StickyNote className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h2 className="font-bold">یادداشت تازه</h2><p className="text-xs text-dark-400">متن بلند یا مارک‌داون را مستقیم در کمد ذخیره کن.</p></div><button type="button" className="btn-icon" onClick={() => setShowTextComposer(false)}><X className="h-5 w-5"/></button></div>
+                        <input className="input mt-4 w-full" value={textFileName} onChange={event => setTextFileName(event.target.value)} placeholder="نام یادداشت" maxLength={240}/>
+                        <textarea autoFocus className="input mt-3 min-h-[45vh] w-full resize-y font-mono leading-7" value={textContent} onChange={event => setTextContent(event.target.value)} placeholder="متنت را اینجا بنویس…"/>
+                        <div className="mt-4 flex gap-2"><button type="button" className="btn-secondary flex-1" onClick={() => setShowTextComposer(false)}>لغو</button><button disabled={!textContent.trim() || uploadFileMutation.isPending} className="btn-primary flex-1 disabled:opacity-50">{uploadFileMutation.isPending ? 'در حال ذخیره…' : 'ذخیره متن'}</button></div>
+                    </form>
+                </div>
+            )}
         </div>
     );
 }

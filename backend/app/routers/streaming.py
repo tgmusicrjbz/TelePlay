@@ -66,7 +66,7 @@ def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
 
 async def stored_message_response(file: File, message, range_header: str | None, download: int):
     """Serve text messages and Telegram photos, which have no document stream."""
-    if file.file_type == "text":
+    if file.file_type == "text" and message.document is None:
         content = (message.text or "").encode("utf-8")
     else:
         media = await telegram.tg_client.download_media(message, in_memory=True)

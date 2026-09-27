@@ -54,6 +54,8 @@ FILE_SORT_FIELDS = {
 def detect_upload_type(filename: str, mime_type: str | None) -> str:
     mime = (mime_type or "").lower()
     extension = Path(filename).suffix.lower()
+    if mime.startswith("text/") or extension in {".txt", ".md", ".log", ".csv", ".json", ".xml", ".yaml", ".yml"}:
+        return "text"
     if mime.startswith("video/") or extension in {".mp4", ".mkv", ".mov", ".webm", ".avi"}:
         return "video"
     if mime.startswith("audio/") or extension in {".mp3", ".m4a", ".aac", ".wav", ".ogg", ".flac", ".opus"}:
@@ -198,7 +200,7 @@ async def get_text_preview(
     message = await get_message_from_channel(file.channel_message_id)
     if message is None:
         raise HTTPException(status_code=404, detail="Message not found in storage")
-    if file.file_type == "text":
+    if file.file_type == "text" and message.document is None:
         return {"content": message.text or ""}
     contents = await telegram.tg_client.download_media(message, in_memory=True)
     if contents is None:
@@ -224,13 +226,36 @@ async def update_text_content(
         raise HTTPException(status_code=404, detail="File not found")
     if file.file_type != "text":
         raise HTTPException(status_code=415, detail="Only saved text notes can be edited")
+    message = await get_message_from_channel(file.channel_message_id)
     try:
-        await telegram.tg_client.edit_message_text(settings.telegram_storage_channel_id, file.channel_message_id, payload.content)
+        if message is not None and message.document is not None:
+            suffix = Path(file.file_name).suffix or ".md"
+            with tempfile.TemporaryDirectory(prefix="komod-text-") as temporary_dir:
+                text_path = Path(temporary_dir) / f"note{suffix}"
+                text_path.write_text(payload.content, encoding="utf-8")
+                replacement = await telegram.tg_client.send_document(
+                    chat_id=settings.telegram_storage_channel_id,
+                    document=str(text_path),
+                    caption=file.description,
+                    parse_mode=None,
+                )
+            media = replacement.document
+            if media is None:
+                raise RuntimeError("Telegram returned no document for edited note")
+            old_message_id = file.channel_message_id
+            file.file_id = media.file_id
+            file.file_unique_id = media.file_unique_id
+            file.channel_message_id = replacement.id
+            file.file_size = media.file_size or len(payload.content.encode("utf-8"))
+            file.mime_type = media.mime_type or "text/markdown"
+            await delete_from_storage_channel(old_message_id)
+        else:
+            await telegram.tg_client.edit_message_text(settings.telegram_storage_channel_id, file.channel_message_id, payload.content)
+            file.file_name = sanitize_filename(payload.content.strip().splitlines()[0][:80])
+            file.file_size = len(payload.content.encode("utf-8"))
     except Exception as error:
         logger.exception("Could not edit text note %s", file_id)
         raise HTTPException(status_code=502, detail="Could not update text in Telegram") from error
-    file.file_name = sanitize_filename(payload.content.strip().splitlines()[0][:80])
-    file.file_size = len(payload.content.encode("utf-8"))
     file.updated_at = datetime.utcnow()
     await db.commit()
     return {"content": payload.content, "file": add_urls_to_file(file)}
