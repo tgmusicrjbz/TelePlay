@@ -63,28 +63,76 @@ function AuthCallback() {
     );
 }
 
-function TelegramWebAppBootstrap() {
+function TelegramWebAppBootstrap({ children }: { children: React.ReactNode }) {
+    const [ready, setReady] = useState(false);
     useEffect(() => {
+        let cancelled = false;
         let syncing = false;
-        const sync = () => {
+        const telegramIdentity = () => {
             const webApp = (window as Window & { Telegram?: { WebApp?: { initData?: string } } }).Telegram?.WebApp;
             const initData = webApp?.initData;
-            if (!initData || syncing || localStorage.getItem('komod-telegram-init-data') === initData) return;
-            syncing = true;
-            void api.post<AuthResponse>('/auth/telegram-webapp', { init_data: initData })
-                .then(({ data }) => {
-                    saveAuthenticatedAccount(data);
-                    localStorage.setItem('komod-telegram-init-data', initData);
-                    window.location.reload();
-                })
-                .catch(() => { syncing = false; });
+            if (!initData) return null;
+            try {
+                const rawUser = new URLSearchParams(initData).get('user');
+                const userId = rawUser ? String(JSON.parse(rawUser).id || '') : '';
+                return userId ? { initData, userId } : null;
+            } catch { return null; }
         };
-        sync();
-        const timer = window.setInterval(sync, 1500);
-        document.addEventListener('visibilitychange', sync);
-        return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', sync); };
+        const sync = async () => {
+            const identity = telegramIdentity();
+            if (!identity) { if (!cancelled) setReady(true); return; }
+            const currentId = localStorage.getItem('komod-telegram-user-id');
+            const previousInitData = localStorage.getItem('komod-telegram-init-data');
+            const manualAccount = localStorage.getItem('komod-manual-account');
+            if (manualAccount && previousInitData === identity.initData && localStorage.getItem('access_token')) {
+                if (!cancelled) setReady(true);
+                return;
+            }
+            if (previousInitData !== identity.initData) localStorage.removeItem('komod-manual-account');
+            if (currentId === identity.userId && localStorage.getItem('access_token')) {
+                localStorage.setItem('komod-telegram-init-data', identity.initData);
+                if (!cancelled) setReady(true);
+                return;
+            }
+            if (syncing) return;
+            syncing = true;
+            if (currentId && currentId !== identity.userId) {
+                localStorage.removeItem('access_token');
+                localStorage.removeItem('refresh_token');
+                localStorage.removeItem('komod-active-workspace');
+            }
+            if (!cancelled) setReady(false);
+            const controller = new AbortController();
+            const timeout = window.setTimeout(() => controller.abort(), 12000);
+            try {
+                const response = await fetch('/api/auth/telegram-webapp', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ init_data: identity.initData }),
+                    signal: controller.signal,
+                });
+                if (!response.ok) throw new Error('Telegram authentication failed');
+                const data = await response.json() as AuthResponse;
+                saveAuthenticatedAccount(data);
+                localStorage.setItem('komod-telegram-user-id', identity.userId);
+                localStorage.setItem('komod-telegram-init-data', identity.initData);
+                localStorage.removeItem('komod-manual-account');
+                localStorage.removeItem('komod-active-workspace');
+                if (!cancelled) window.location.replace('/');
+            } catch {
+                if (!cancelled) setReady(true);
+            } finally {
+                window.clearTimeout(timeout);
+                syncing = false;
+            }
+        };
+        void sync();
+        const onVisible = () => { if (!document.hidden) void sync(); };
+        document.addEventListener('visibilitychange', onVisible);
+        return () => { cancelled = true; document.removeEventListener('visibilitychange', onVisible); };
     }, []);
-    return null;
+    if (!ready) return <div className="flex min-h-screen items-center justify-center bg-dark-950" dir="rtl"><div className="text-center"><div className="mx-auto mb-4 h-11 w-11 animate-spin rounded-full border-2 border-white/10 border-t-primary-400"/><p className="text-sm text-dark-300">در حال هماهنگ‌کردن حساب تلگرام…</p></div></div>;
+    return <>{children}</>;
 }
 
 function LoginPage() {
@@ -319,8 +367,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 function App() {
     return (
-        <>
-            <TelegramWebAppBootstrap />
+        <TelegramWebAppBootstrap>
             <PwaManager />
             <Routes>
                 <Route path="/login" element={<LoginPage />} />
@@ -339,7 +386,7 @@ function App() {
                     }
                 />
             </Routes>
-        </>
+        </TelegramWebAppBootstrap>
     );
 }
 

@@ -34,6 +34,7 @@ export function activateAccount(account: SavedAccount): void {
     localStorage.setItem('access_token', account.accessToken);
     if (account.refreshToken) localStorage.setItem('refresh_token', account.refreshToken); else localStorage.removeItem('refresh_token');
     localStorage.removeItem('komod-active-workspace');
+    localStorage.setItem('komod-manual-account', String(account.telegramId));
     window.location.href = '/';
 }
 
