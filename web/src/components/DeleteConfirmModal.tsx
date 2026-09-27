@@ -25,7 +25,7 @@ export default function DeleteConfirmModal({ type, name, count = 1, onConfirm, o
     const includesFolder = type === 'folder' || type === 'multiple';
     const message = count > 1 
         ? `از حذف این ${count.toLocaleString('fa-IR')} مورد مطمئنی؟`
-        : <>از حذف <span className="text-white font-medium">«{name}»</span> مطمئنی؟</>;
+        : <>از حذف <span className="inline break-all text-white font-medium">«{name}»</span> مطمئنی؟</>;
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
@@ -41,11 +41,11 @@ export default function DeleteConfirmModal({ type, name, count = 1, onConfirm, o
                 </div>
 
                 <div className="text-dark-300 mb-6">
-                    <p>{message}</p>
+                    <p className="max-w-full overflow-hidden break-words leading-7">{message}</p>
                     {includesFolder && <p className="mt-2 text-sm text-dark-400">می‌تونی فقط خود کشو را حذف کنی و محتویاتش را یک سطح بالاتر ببری، یا همه محتویات را هم پاک کنی.</p>}
                 </div>
 
-                <div className="flex justify-end gap-3">
+                <div className="flex flex-wrap justify-end gap-2 sm:gap-3">
                     <button
                         onClick={onClose}
                         disabled={isDeleting}

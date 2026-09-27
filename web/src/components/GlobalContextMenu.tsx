@@ -5,7 +5,7 @@ import { Play, Download, DownloadCloud, Link, Edit, FolderInput, Trash2, Globe, 
 import { saveFileOffline } from '../lib/offline';
 
 export default function GlobalContextMenu() {
-    const { activeContextMenu, setActiveContextMenu, setPreviewFile, setDetailsFile, setMoveItems, setMoveFiles, setDeleteConfirm, setRenameFile, setRenameFolder, setDescriptionItem, selectedFileIds, selectedFiles, setPlaylistFile, addToast } = useAppStore();
+    const { activeContextMenu, setActiveContextMenu, setPreviewFile, setContentPreviewFile, setDetailsFile, setMoveItems, setMoveFiles, setDeleteConfirm, setRenameFile, setRenameFolder, setDescriptionItem, selectedFileIds, selectedFiles, setPlaylistFile, addToast } = useAppStore();
     const updateFile = useUpdateFile();
     const menuRef = useRef<HTMLDivElement>(null);
     const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -191,7 +191,7 @@ export default function GlobalContextMenu() {
                                 )}
                                 <button className="context-menu-item w-full text-right" onClick={async () => { const file=activeContextMenu.item as TelegramFile; await updateFile.mutateAsync({id:file.id,is_favorite:!file.is_favorite}); addToast(file.is_favorite?'از نشان‌شده‌ها برداشته شد':'به نشان‌شده‌ها اضافه شد ⭐'); setActiveContextMenu(null); }}><Heart className={`h-4 w-4 ${(activeContextMenu.item as TelegramFile).is_favorite?'fill-current text-pink-400':''}`}/>{(activeContextMenu.item as TelegramFile).is_favorite?'برداشتن نشان':'نشان کردن'}</button>
                                 {(activeContextMenu.item.file_type === 'image' || canPreviewText(activeContextMenu.item as TelegramFile)) && (
-                                    <button className="context-menu-item w-full text-right" onClick={() => handleAction(() => setPreviewFile(activeContextMenu.item as TelegramFile))}>
+                                    <button className="context-menu-item w-full text-right" onClick={() => handleAction(() => setContentPreviewFile(activeContextMenu.item as TelegramFile))}>
                                         <Eye className="w-4 h-4" />
                                         پیش‌نمایش
                                     </button>

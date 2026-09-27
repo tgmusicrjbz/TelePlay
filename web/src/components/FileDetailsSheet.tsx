@@ -2,7 +2,7 @@ import { CalendarDays, Clock3, FileType2, Folder, HardDrive, Info, X } from 'luc
 import { Folder as FolderType, formatDuration, formatFileSize, formatPersianDate, useFolderTree } from '../lib/api';
 import { useAppStore } from '../lib/store';
 
-const labels = { video: 'ویدیو', audio: 'صوت و موسیقی', image: 'تصویر', document: 'سند', text: 'متن و یادداشت' };
+const labels = { video: 'ویدیو', audio: 'صدا و موسیقی', image: 'تصویر', document: 'سند', text: 'متن و یادداشت' };
 
 function findFolder(items: FolderType[], id: number): FolderType | null {
     for (const item of items) {

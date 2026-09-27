@@ -41,6 +41,7 @@ export default function FileBrowser() {
         setViewMode,
         previewFile,
         setPreviewFile,
+        setContentPreviewFile,
         showNewFolder,
         setShowNewFolder,
         moveItems,
@@ -441,7 +442,7 @@ export default function FileBrowser() {
             const index = queue.findIndex(item => item.id === file.id);
             startQueue(queue.length ? queue : [file], Math.max(0, index));
         } else if (file.file_type === 'image' || canPreviewText(file)) {
-            setPreviewFile(file);
+            setContentPreviewFile(file);
         }
     };
 
@@ -729,6 +730,7 @@ export default function FileBrowser() {
                             <span className="shrink-0 px-2 text-xs font-semibold text-primary-200">{selectedItems.length ? `${selectedItems.length.toLocaleString('fa-IR')} انتخاب` : 'یک کارت را لمس کن'}</span>
                             {selectedItems.length === 1 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-200 hover:bg-white/10" aria-label="تغییر نام" title="تغییر نام" onClick={() => selectedFilesForActions[0] ? setRenameFile(selectedFilesForActions[0]) : setRenameFolder(selectedFoldersForActions[0])}><Pencil className="h-5 w-5" /></button>}
                             {selectedFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-200 hover:bg-white/10" aria-label="ویرایش گروهی" title="ویرایش گروهی" onClick={() => setShowBatchEdit(true)}><SlidersHorizontal className="h-5 w-5" /></button>}
+                            {selectedFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-200 hover:bg-white/10" aria-label="افزودن به پلی‌لیست" title="افزودن به پلی‌لیست" onClick={() => setPlaylistFiles(selectedFilesForActions)}><ListPlus className="h-5 w-5" /></button>}
                             <button disabled={!selectedItems.length} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-200 hover:bg-white/10 disabled:opacity-30" aria-label="جابه‌جایی" title="جابه‌جایی" onClick={() => setMoveItems({ files: selectedFilesForActions, folders: selectedFoldersForActions })}><FolderInput className="h-5 w-5" /></button>
                             <button disabled={!selectedItems.length} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-red-300 hover:bg-red-500/10 disabled:opacity-30" aria-label="حذف" title="حذف" onClick={() => setDeleteConfirm({ type: selectedFoldersForActions.length && selectedFilesForActions.length ? 'multiple' : selectedFoldersForActions.length ? 'folder' : 'file', items: selectedItems })}><Trash2 className="h-5 w-5" /></button>
                             <button className="mr-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-300 hover:bg-white/10" aria-label="پایان انتخاب گروهی" title="پایان انتخاب" onClick={cancelSelection}><X className="h-5 w-5" /></button>
@@ -783,7 +785,7 @@ export default function FileBrowser() {
                                         <ListChecks className="h-4 w-4" />
                                     </button>
                                     {(selectionMode || selectedItems.length > 0) && (
-                                        <button onClick={toggleSelectAll} disabled={visibleItemCount === 0} title={allVisibleSelected ? 'لغو انتخاب همه' : 'انتخاب همه'} aria-label={allVisibleSelected ? 'لغو انتخاب همه' : 'انتخاب همه'} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-dark-900/70 text-xs text-dark-200 disabled:opacity-40">
+                                        <button onClick={toggleSelectAll} disabled={visibleItemCount === 0} title={allVisibleSelected ? 'لغو انتخاب همه' : 'انتخاب همه'} aria-label={allVisibleSelected ? 'لغو انتخاب همه' : 'انتخاب همه'} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs transition-colors disabled:opacity-40 ${allVisibleSelected ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:text-white'}`}>
                                             {allVisibleSelected ? <CheckSquare className="h-4 w-4 text-primary-300" /> : <Square className="h-4 w-4" />}
                                         </button>
                                     )}
@@ -797,17 +799,17 @@ export default function FileBrowser() {
                             </div>
                             {showFilters && contentScope !== 'folders' && (
                                 <div className="mt-3 border-t border-white/[0.06] pt-3">
-                                    <div className="grid grid-cols-5 gap-2">
+                                    <div className="grid grid-cols-5 overflow-hidden rounded-xl border border-white/[.07] bg-dark-950/60 p-1">
                                         {([
-                                            ['ویدیو', 'video', Film], ['موسیقی و صوت', 'audio', Music],
+                                            ['ویدیو', 'video', Film], ['موسیقی و صدا', 'audio', Music],
                                             ['عکس', 'image', ImageIcon], ['سند', 'document', FileText], ['متن و یادداشت', 'text', StickyNote],
                                         ] as const).map(([label, type, Icon]) => (
-                                            <button key={type} title={label} aria-label={label} onClick={() => toggleFileType(type)} className={`flex h-9 w-9 items-center justify-center rounded-full border transition-colors ${fileTypeFilter.includes(type) ? 'border-primary-500 bg-primary-600 text-white' : 'border-white/10 bg-dark-800 text-dark-300 hover:border-white/20 hover:text-white'}`}>
+                                            <button key={type} title={label} aria-label={label} onClick={() => toggleFileType(type)} className={`flex h-9 min-w-0 items-center justify-center rounded-lg transition-colors ${fileTypeFilter.includes(type) ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:bg-white/[.05] hover:text-white'}`}>
                                                 <Icon className="h-4 w-4" />
                                             </button>
                                         ))}
-                                        {fileTypeFilter.length > 0 && <button title="پاک‌کردن فیلترها" aria-label="پاک‌کردن فیلترها" onClick={() => toggleFileType(null)} className="flex h-9 w-9 items-center justify-center rounded-full text-red-300 hover:bg-red-500/10"><X className="h-4 w-4"/></button>}
                                     </div>
+                                    {fileTypeFilter.length > 0 && <button title="پاک‌کردن فیلترها" aria-label="پاک‌کردن فیلترها" onClick={() => toggleFileType(null)} className="mt-2 flex h-9 w-full items-center justify-center gap-2 rounded-xl text-xs text-red-300 hover:bg-red-500/10"><X className="h-4 w-4"/> پاک‌کردن فیلترها</button>}
                                 </div>
                             )}
                             {showSort && (
@@ -816,22 +818,20 @@ export default function FileBrowser() {
                                         <p className="text-sm font-medium text-white">مرتب‌سازی چندمرحله‌ای ✨</p>
                                         <button onClick={() => setSortCriteria([{ field: 'created', direction: 'desc' }])} className="shrink-0 text-xs text-dark-400 hover:text-white">حالت پیش‌فرض</button>
                                     </div>
-                                    <div className="space-y-2">
+                                    <div className="grid gap-2 sm:grid-cols-2">
                                         {sortCriteria.map((item, index) => (
-                                            <div key={item.field} className="flex flex-wrap items-center gap-2 rounded-xl border border-white/[0.08] bg-dark-800/60 p-2">
+                                            <div key={item.field} className="grid grid-cols-[auto_1fr_auto] items-center gap-2 rounded-xl border border-white/[0.08] bg-dark-800/60 p-2">
                                                 <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary-500/15 text-xs text-primary-300">{(index + 1).toLocaleString('fa-IR')}</span>
                                                 <span className="min-w-24 flex-1 text-sm">{sortLabels[item.field]}</span>
                                                 <button className="rounded-lg bg-dark-700 px-2.5 py-1.5 text-xs hover:bg-dark-600" onClick={() => updateSort(index, { ...item, direction: item.direction === 'asc' ? 'desc' : 'asc' })}>
                                                     {item.direction === 'asc' ? <><ArrowUp className="inline h-3.5 w-3.5" /> صعودی</> : <><ArrowDown className="inline h-3.5 w-3.5" /> نزولی</>}
                                                 </button>
-                                                <button className="btn-icon p-1.5" disabled={index === 0} title="یک اولویت بالاتر" onClick={() => moveSort(index, -1)}><ChevronUp className="h-4 w-4" /></button>
-                                                <button className="btn-icon p-1.5" disabled={index === sortCriteria.length - 1} title="یک اولویت پایین‌تر" onClick={() => moveSort(index, 1)}><ChevronDown className="h-4 w-4" /></button>
-                                                <button className="btn-icon p-1.5 text-red-300" title="حذف این معیار" onClick={() => removeSort(index)}><X className="h-4 w-4" /></button>
+                                                <div className="col-span-3 flex items-center justify-end gap-1 border-t border-white/[.05] pt-1"><button className="btn-icon p-1.5" disabled={index === 0} title="یک اولویت بالاتر" onClick={() => moveSort(index, -1)}><ChevronUp className="h-4 w-4" /></button><button className="btn-icon p-1.5" disabled={index === sortCriteria.length - 1} title="یک اولویت پایین‌تر" onClick={() => moveSort(index, 1)}><ChevronDown className="h-4 w-4" /></button><button className="btn-icon p-1.5 text-red-300" title="حذف این معیار" onClick={() => removeSort(index)}><X className="h-4 w-4" /></button></div>
                                             </div>
                                         ))}
                                     </div>
-                                    {availableSortFields.length > 0 && <div className="mt-3 flex flex-wrap gap-2">
-                                        {availableSortFields.map(field => <button key={field} className="flex items-center gap-1.5 rounded-full border border-white/10 bg-dark-800 px-3 py-2 text-xs text-dark-300 hover:border-primary-500/30 hover:text-white" onClick={() => setSortCriteria([...sortCriteria, { field, direction: 'asc' }])}><Plus className="h-3.5 w-3.5" /> {sortLabels[field]}</button>)}
+                                    {availableSortFields.length > 0 && <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                                        {availableSortFields.map(field => <button key={field} className="flex min-h-10 items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-dark-800 px-2 text-xs text-dark-300 hover:border-primary-500/30 hover:text-white" onClick={() => setSortCriteria([...sortCriteria, { field, direction: 'asc' }])}><Plus className="h-3.5 w-3.5" /> {sortLabels[field]}</button>)}
                                     </div>}
                                 </div>
                             )}

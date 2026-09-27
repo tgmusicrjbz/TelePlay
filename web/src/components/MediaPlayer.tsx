@@ -3,7 +3,7 @@
  */
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipBack, SkipForward, Download, ExternalLink, AlertTriangle, Copy, PictureInPicture2, Gauge, ChevronDown, ChevronUp, Repeat2, Shuffle, Headphones, Scaling, RotateCcw, RotateCw, Clock3, ListPlus, RectangleHorizontal, Film } from 'lucide-react';
-import { TelegramFile, formatDuration, useUpdateProgress, useFile, api } from '../lib/api';
+import { TelegramFile, useUpdateProgress, useFile, api } from '../lib/api';
 import { useAppStore } from '../lib/store';
 
 export default function MediaPlayer() {
@@ -52,6 +52,13 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     const [videoOrientation, setVideoOrientation] = useState<'portrait' | 'landscape'>('portrait');
     const [skipFeedback, setSkipFeedback] = useState<'backward' | 'forward' | null>(null);
     const [thumbnailFailed, setThumbnailFailed] = useState(false);
+    const formatPlayerTime = (seconds: number) => {
+        const safe = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
+        const hours = Math.floor(safe / 3600);
+        const minutes = Math.floor((safe % 3600) / 60);
+        const secs = safe % 60;
+        return hours > 0 ? `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}` : `${minutes}:${secs.toString().padStart(2, '0')}`;
+    };
 
     useEffect(() => setThumbnailFailed(false), [file.id]);
 
@@ -175,20 +182,38 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
 
     const toggleVideoOrientation = async () => {
         const next = videoOrientation === 'portrait' ? 'landscape' : 'portrait';
-        const orientation = screen.orientation as ScreenOrientation & { lock?: (value: string) => Promise<void>; unlock?: () => void };
-        if (!orientation?.lock) {
-            addToast('چرخش خودکار صفحه در این مرورگر پشتیبانی نمی‌شود.', 'error');
-            return;
-        }
+        const orientation = screen.orientation as ScreenOrientation & { lock?: (value: 'landscape' | 'portrait') => Promise<void>; unlock?: () => void };
         try {
-            (window as Window & { Telegram?: { WebApp?: { requestFullscreen?: () => void } } }).Telegram?.WebApp?.requestFullscreen?.();
-            if (!document.fullscreenElement) await containerRef.current?.requestFullscreen();
-            await orientation.lock(next === 'landscape' ? 'landscape-primary' : 'portrait-primary');
-            setVideoOrientation(next);
-            setIsFullscreen(Boolean(document.fullscreenElement));
+            if (next === 'portrait') {
+                orientation?.unlock?.();
+                if (orientation?.lock && document.fullscreenElement) await orientation.lock('portrait');
+                setVideoOrientation('portrait');
+                return;
+            }
+            const telegramApp = (window as Window & { Telegram?: { WebApp?: { requestFullscreen?: () => void } } }).Telegram?.WebApp;
+            telegramApp?.requestFullscreen?.();
+            if (!document.fullscreenElement && containerRef.current?.requestFullscreen) await containerRef.current.requestFullscreen();
+            if (!orientation?.lock) throw new Error('orientation-lock-unavailable');
+            await orientation.lock('landscape');
+            setVideoOrientation('landscape');
+            setIsFullscreen(true);
         } catch {
-            addToast('برای چرخش صفحه، اجازهٔ تمام‌صفحه را فعال کن.', 'error');
+            addToast('چرخش واقعی صفحه در این مرورگر یا نسخه تلگرام در دسترس نیست.', 'error');
         }
+    };
+
+    const minimizePlayer = async () => {
+        const orientation = screen.orientation as ScreenOrientation & { unlock?: () => void };
+        orientation?.unlock?.();
+        setVideoOrientation('portrait');
+        (window as Window & { Telegram?: { WebApp?: { exitFullscreen?: () => void } } }).Telegram?.WebApp?.exitFullscreen?.();
+        try {
+            if (document.fullscreenElement) await document.exitFullscreen();
+        } catch {
+            // Some Telegram WebViews leave fullscreen themselves after orientation unlock.
+        }
+        setIsFullscreen(false);
+        setMinimized(true);
     };
 
     useEffect(() => () => {
@@ -242,7 +267,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
         if (videoRef.current?.error) {
             const code = videoRef.current.error.code;
             if (code === 3 || code === 4) { // MEDIA_ERR_DECODE or MEDIA_ERR_SRC_NOT_SUPPORTED
-                setError(`مرورگر نمی‌تواند فرمت این ${isVideo ? 'ویدیو' : 'فایل صوتی'} را پخش کند.`);
+                setError(`مرورگر نمی‌تواند فرمت این ${isVideo ? 'ویدیو' : 'فایل صدا'} را پخش کند.`);
             } else {
                 setError('هنگام دریافت یا پخش فایل مشکلی پیش آمد.');
             }
@@ -359,13 +384,14 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
         if (hideControlsTimeout.current) {
             clearTimeout(hideControlsTimeout.current);
         }
+        if (showVolumePopover || showSpeedMenu || showSleepMenu) return;
         hideControlsTimeout.current = setTimeout(() => {
             if (!isMinimized) {
                 setShowControls(false);
                 setShowSpeedMenu(false);
             }
         }, 3000);
-    }, [isMinimized]);
+    }, [isMinimized, showSleepMenu, showSpeedMenu, showVolumePopover]);
 
     const showSkipFeedback = (direction: 'backward' | 'forward') => {
         setSkipFeedback(direction);
@@ -523,7 +549,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
             ref={containerRef}
             className={`${isMinimized ? 'mini-player' : 'video-player'} fixed z-[120] transition-all duration-300 ease-in-out ${
                 isMinimized 
-                    ? 'bottom-[calc(5rem+env(safe-area-inset-bottom))] left-0 right-0 h-20 border-t border-white/10 bg-dark-900 shadow-2xl md:bottom-0'
+                    ? 'bottom-[calc(5rem+env(safe-area-inset-bottom))] left-0 right-0 h-20 max-h-[25vh] border-t border-white/10 bg-dark-900 shadow-2xl md:bottom-0'
                 : 'inset-0 bg-black flex items-center justify-center font-sans'
             }`}
             style={!isMinimized && !isVideo ? ({ backgroundImage: authorizedThumbnailUrl ? `linear-gradient(135deg, rgba(8,10,20,.96), rgba(38,12,54,.84)), url(${authorizedThumbnailUrl})` : 'linear-gradient(135deg, #080a14, #260c36)', backgroundPosition: 'center', backgroundSize: 'cover' }) : undefined}
@@ -581,7 +607,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                         {(!isVideo || audioOnly) && !isMinimized && (
                             <div className="absolute inset-x-4 top-16 bottom-44 z-10 flex flex-col items-center justify-center text-center animate-scale-in">
                                 {authorizedThumbnailUrl && !audioOnly && !thumbnailFailed ? (
-                                    <div className="mb-6 h-48 w-48 overflow-hidden rounded-2xl bg-dark-800 shadow-[0_12px_30px_rgba(0,0,0,.35)] sm:h-56 sm:w-56">
+                                    <div className="mb-6 h-60 w-60 overflow-hidden rounded-3xl bg-dark-800 shadow-[0_12px_30px_rgba(0,0,0,.35)] sm:h-72 sm:w-72 lg:h-80 lg:w-80">
                                          <img 
                                             src={authorizedThumbnailUrl} 
                                             alt={file.file_name} 
@@ -590,14 +616,14 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                                          />
                                     </div>
                                 ) : (
-                                    <div className="relative mb-6 flex h-48 w-48 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-primary-500/20 to-pink-500/20 shadow-[0_12px_30px_rgba(0,0,0,.35)] sm:h-56 sm:w-56">
+                                    <div className="relative mb-6 flex h-60 w-60 items-center justify-center overflow-hidden rounded-3xl bg-gradient-to-br from-primary-500/20 to-pink-500/20 shadow-[0_12px_30px_rgba(0,0,0,.35)] sm:h-72 sm:w-72 lg:h-80 lg:w-80">
                                          <div className="absolute inset-0 bg-gradient-to-tr from-primary-500/10 to-transparent animate-pulse"></div>
                                         {audioOnly ? <Headphones className="h-24 w-24 text-primary-300 drop-shadow-lg" /> : isVideo ? <Film className="h-24 w-24 text-primary-300 drop-shadow-lg" /> : <span className="text-8xl transform transition-transform duration-500 group-hover:scale-125 drop-shadow-lg">🎵</span>}
                                     </div>
                                 )}
                                 <p dir="auto" className="max-w-[80vw] truncate text-2xl font-bold text-white drop-shadow-md">{cleanFileName}</p>
                                 {audioOnly && <p className="mb-2 text-sm text-dark-300">حالت فقط صدا فعاله</p>}
-                                <p className="text-primary-400 font-medium">{formatDuration(safeCurrentTime)} / {formatDuration(safeDuration)}</p>
+                                <p className="text-primary-400 font-medium" dir="ltr">{formatPlayerTime(safeCurrentTime)} / {formatPlayerTime(safeDuration)}</p>
                             </div>
                         )}
                         
@@ -632,7 +658,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                         </div>
                         <div className="truncate flex-1 min-w-0">
                             <h4 dir="auto" className="text-sm font-bold text-white truncate leading-tight">{cleanFileName}</h4>
-                            <p className="text-xs text-dark-400 font-mono">{formatDuration(safeCurrentTime)} / {formatDuration(safeDuration)}</p>
+                            <p className="text-xs text-dark-400 font-mono" dir="ltr">{formatPlayerTime(safeCurrentTime)} / {formatPlayerTime(safeDuration)}</p>
                         </div>
                     </div>
 
@@ -676,14 +702,14 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                     onPointerDown={revealControls}
                 >
                     {/* Top bar */}
-                    <div data-player-controls className="absolute inset-x-0 top-0 z-30 flex max-w-full items-start justify-between gap-2 overflow-hidden bg-gradient-to-b from-black/80 to-transparent p-3 sm:gap-3 sm:p-4">
-                        <div className="min-w-0 max-w-[55%] flex-1">
-                            <h3 dir="auto" className="text-base sm:text-lg font-medium truncate text-white">{cleanFileName}</h3>
+                    <div data-player-controls className={`absolute inset-x-0 top-0 z-30 flex items-center justify-between gap-3 bg-gradient-to-b from-black/80 to-transparent p-3 sm:p-4 ${isVideo ? 'overflow-hidden' : ''}`}>
+                        <div className="min-w-0 flex-1">
+                            {isVideo && <h3 dir="auto" className="max-w-[min(52vw,28rem)] truncate text-base font-medium text-white sm:text-lg" title={cleanFileName}>{cleanFileName}</h3>}
                         </div>
-                        {hasQueue && <p dir="rtl" className="absolute left-1/2 top-3 -translate-x-1/2 whitespace-nowrap rounded-full border border-white/10 bg-black/35 px-3 py-1.5 text-xs font-semibold tracking-wide text-primary-200 backdrop-blur sm:top-4">ترک <span className="text-white">{queuePosition.toLocaleString('fa-IR')}</span> از <span className="text-white">{queueLength.toLocaleString('fa-IR')}</span></p>}
-                        <div className="flex shrink-0 flex-wrap items-center justify-end gap-1 sm:gap-2">
+                        {hasQueue && <p dir="rtl" className="absolute left-1/2 top-14 -translate-x-1/2 whitespace-nowrap rounded-full border border-white/10 bg-black/45 px-3 py-1.5 text-xs font-semibold tracking-wide text-primary-200 backdrop-blur">ترک <span className="text-white">{queuePosition.toLocaleString('fa-IR')}</span> از <span className="text-white">{queueLength.toLocaleString('fa-IR')}</span></p>}
+                        <div className="flex shrink-0 items-center justify-end gap-1 sm:gap-2">
                              <button
-                                onClick={() => setMinimized(true)}
+                                onClick={() => void minimizePlayer()}
                                 className="p-2 text-white hover:bg-white/20 rounded-full transition-colors"
                                 title="کوچک‌نمایی"
                             >
@@ -730,24 +756,26 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                     </div>
 
                     {/* Transport controls: queue navigation for music, seeking for video. */}
-                    <div data-player-controls dir="ltr" className={`absolute left-1/2 z-30 flex -translate-x-1/2 items-center ${isVideo ? 'top-1/2 -translate-y-1/2 gap-10 sm:gap-24' : 'bottom-32 gap-8 sm:gap-12'}`}>
-                        <button disabled={!isVideo && !hasQueue} onClick={(e) => { e.stopPropagation(); isVideo ? handleSkip(-10) : playPrevious(); }} className="rounded-full p-3 text-white/70 transition hover:bg-white/10 hover:text-white disabled:opacity-30" title={isVideo ? '۱۰ ثانیه عقب' : 'ترک قبلی'}>{isVideo ? <RotateCcw className="h-7 w-7"/> : <SkipBack className="h-7 w-7"/>}</button>
+                    <div data-player-controls dir="ltr" className={`absolute left-1/2 z-30 flex -translate-x-1/2 items-center ${isVideo && !audioOnly ? 'top-1/2 -translate-y-1/2 gap-2 sm:gap-5' : 'bottom-32 gap-2 sm:gap-5'}`}>
+                        {isVideo && <button disabled={!hasQueue} onClick={(e) => { e.stopPropagation(); playPrevious(); }} className="rounded-full p-2 text-white/65 transition hover:bg-white/10 hover:text-white disabled:opacity-30" title="ویدیوی قبلی"><SkipBack className="h-5 w-5"/></button>}
+                        <button disabled={!isVideo && !hasQueue} onClick={(e) => { e.stopPropagation(); isVideo ? handleSkip(-10) : playPrevious(); }} className="rounded-full p-3 text-white/70 transition hover:bg-white/10 hover:text-white disabled:opacity-30" title={isVideo ? '۱۰ ثانیه عقب' : 'ترک قبلی'}>{isVideo ? <RotateCcw className="h-6 w-6"/> : <SkipBack className="h-7 w-7"/>}</button>
                         {isVideo ? <button onClick={(e) => { e.stopPropagation(); togglePlay(e); }} className="flex h-20 w-20 items-center justify-center rounded-full bg-primary-500 text-white shadow-2xl shadow-primary-500/35 transition duration-200 hover:scale-105 hover:bg-primary-400 active:scale-95" aria-label={isPlaying ? 'توقف' : 'پخش'}>{isPlaying ? <Pause className="h-9 w-9"/> : <Play className="ml-1 h-9 w-9"/>}</button> : <button onClick={(e) => { e.stopPropagation(); togglePlay(e); }} className="flex h-20 w-20 items-center justify-center rounded-full bg-primary-500 text-white shadow-xl shadow-primary-500/30 transition hover:scale-105 hover:bg-primary-400">{isPlaying ? <Pause className="h-9 w-9"/> : <Play className="ml-1 h-9 w-9"/>}</button>}
-                        <button disabled={!isVideo && !hasQueue} onClick={(e) => { e.stopPropagation(); isVideo ? handleSkip(10) : playNext(); }} className="rounded-full p-3 text-white/70 transition hover:bg-white/10 hover:text-white disabled:opacity-30" title={isVideo ? '۱۰ ثانیه جلو' : 'ترک بعدی'}>{isVideo ? <RotateCw className="h-7 w-7"/> : <SkipForward className="h-7 w-7"/>}</button>
+                        <button disabled={!isVideo && !hasQueue} onClick={(e) => { e.stopPropagation(); isVideo ? handleSkip(10) : playNext(); }} className="rounded-full p-3 text-white/70 transition hover:bg-white/10 hover:text-white disabled:opacity-30" title={isVideo ? '۱۰ ثانیه جلو' : 'ترک بعدی'}>{isVideo ? <RotateCw className="h-6 w-6"/> : <SkipForward className="h-7 w-7"/>}</button>
+                        {isVideo && <button disabled={!hasQueue} onClick={(e) => { e.stopPropagation(); playNext(); }} className="rounded-full p-2 text-white/65 transition hover:bg-white/10 hover:text-white disabled:opacity-30" title="ویدیوی بعدی"><SkipForward className="h-5 w-5"/></button>}
                     </div>
 
                     {/* Bottom controls */}
-                    <div data-player-controls className="absolute bottom-0 left-0 right-0 p-3 sm:p-6 bg-gradient-to-t from-black/95 via-black/70 to-transparent z-30">
+                    <div data-player-controls className="absolute bottom-0 left-0 right-0 z-30 border-t border-white/[.06] bg-gradient-to-t from-black via-black/85 to-black/20 p-4 shadow-[0_-14px_35px_rgba(0,0,0,.3)] backdrop-blur-sm sm:px-6 sm:py-5">
                         {/* Progress bar */}
-                        <div className="flex items-center gap-4 mb-4 group/progress">
-                            <span className="text-sm font-medium text-white/90 min-w-[50px] font-mono">{formatDuration(Math.floor(safeCurrentTime))}</span>
-                            <div className="relative flex-1 h-1 bg-white/20 rounded-full cursor-pointer group-hover/progress:h-2 transition-all">
+                        <div className="mb-5 flex items-center gap-3 group/progress sm:gap-4">
+                            <span dir="ltr" className="text-sm font-medium text-white/90 min-w-[50px] font-mono">{formatPlayerTime(safeCurrentTime)}</span>
+                            <div className="relative h-2 flex-1 cursor-pointer rounded-full bg-white/20 shadow-inner transition-all group-hover/progress:h-2.5">
                                 {/* Buffered progress can be added here */}
                                 <div
-                                    className="absolute inset-y-0 left-0 bg-gradient-to-r from-primary-500 to-primary-400 rounded-full transition-all"
+                                    className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-primary-600 via-primary-500 to-primary-300 shadow-lg shadow-primary-500/30 transition-all"
                                     style={{ width: `${progressPercent}%` }}
                                 >
-                                    <div className="absolute right-0 top-1/2 transform -translate-y-1/2 w-4 h-4 bg-white rounded-full opacity-0 group-hover/progress:opacity-100 transition-all shadow-lg shadow-primary-500/50 scale-75 group-hover/progress:scale-100"></div>
+                                    <div className="absolute right-0 top-1/2 h-4 w-4 -translate-y-1/2 scale-75 rounded-full border-2 border-primary-300 bg-white opacity-70 shadow-lg shadow-primary-500/50 transition-all group-hover/progress:scale-100 group-hover/progress:opacity-100"></div>
                                 </div>
                                 <input
                                     type="range"
@@ -758,7 +786,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                                     className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                                 />
                             </div>
-                            <span className="text-sm font-medium text-white/90 min-w-[50px] text-right font-mono">{formatDuration(Math.floor(safeDuration))}</span>
+                            <span dir="ltr" className="text-sm font-medium text-white/90 min-w-[50px] text-right font-mono">{formatPlayerTime(safeDuration)}</span>
                         </div>
 
                         {/* Control buttons */}
@@ -767,7 +795,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                             <div className="flex items-center gap-3">
                             <div className="relative">
                                 <button
-                                    onClick={() => setShowVolumePopover(open => !open)}
+                                    onClick={() => window.matchMedia('(pointer: coarse)').matches ? toggleMute() : setShowVolumePopover(open => !open)}
                                     className="rounded-lg p-2 text-white/80 transition-all hover:bg-white/10 hover:text-white"
                                     title="تنظیم صدا"
                                     aria-expanded={showVolumePopover}
@@ -775,7 +803,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                                     {isMuted || volume === 0 ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
                                 </button>
                                 {showVolumePopover && (
-                                    <div className="absolute bottom-full left-0 z-50 mb-2 flex min-w-32 items-center gap-2 rounded-xl border border-white/10 bg-dark-900/95 p-3 shadow-2xl backdrop-blur-md">
+                                    <div className="absolute bottom-full right-0 z-50 mb-2 flex w-36 max-w-[calc(100vw-2rem)] items-center justify-center gap-2 rounded-xl border border-white/10 bg-dark-900/95 p-3 shadow-2xl backdrop-blur-md">
                                         <input
                                             type="range"
                                             min={0}
@@ -786,9 +814,6 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                                             className="hidden h-1 w-24 cursor-pointer appearance-none rounded-full bg-white/30 sm:block [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
                                             aria-label="شدت صدا"
                                         />
-                                        <button onClick={toggleMute} className="rounded-lg px-2 py-1 text-xs text-white/80 hover:bg-white/10 sm:hidden">
-                                            {isMuted || volume === 0 ? 'وصل کردن صدا' : 'قطع کردن صدا'}
-                                        </button>
                                     </div>
                                 )}
                             </div>

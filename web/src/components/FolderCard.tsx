@@ -91,7 +91,7 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
                 onDrop={handleDrop}
                 data-folder-id={folder.id}
             >
-                {selectionMode && <button onClick={handleSelectClick} className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border transition-colors ${selected ? 'border-primary-400 bg-primary-500/15 text-primary-200' : 'border-white/10 bg-dark-800 text-dark-500'}`} aria-label={selected ? 'لغو انتخاب کشو' : 'انتخاب کشو'}><span className={`flex h-6 w-6 items-center justify-center rounded-full border-2 ${selected ? 'border-primary-400 bg-primary-500 text-white' : 'border-white/30'}`}>{selected && <Check className="h-4 w-4"/>}</span></button>}
+                {selectionMode && <button onClick={handleSelectClick} className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border transition-colors ${selected ? 'border-primary-400 bg-primary-500/15 text-primary-200' : 'border-white/10 bg-dark-800 text-dark-500'}`} aria-label={selected ? 'لغو انتخاب کشو' : 'انتخاب کشو'}><span className={`flex h-6 w-6 items-center justify-center rounded-md border-2 ${selected ? 'border-primary-400 bg-primary-500 text-white' : 'border-white/30'}`}>{selected && <Check className="h-4 w-4"/>}</span></button>}
                 <div 
                     className={`w-12 h-12 rounded-lg flex items-center justify-center shrink-0 border transition-colors
                         ${selected 
@@ -156,7 +156,7 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
                     
                 </div>
                 <div className="flex items-center gap-1">
-                {selectionMode && <button onClick={handleSelectClick} className={`flex h-9 w-9 items-center justify-center rounded-lg border ${selected ? 'border-primary-400 bg-primary-500/15 text-primary-200' : 'border-white/10 bg-dark-800 text-dark-500'}`} aria-label={selected ? 'لغو انتخاب کشو' : 'انتخاب کشو'}><span className={`flex h-5 w-5 items-center justify-center rounded-full border-2 ${selected ? 'border-primary-400 bg-primary-500 text-white' : 'border-white/30'}`}>{selected && <Check className="h-3.5 w-3.5"/>}</span></button>}
+                {selectionMode && <button onClick={handleSelectClick} className={`flex h-9 w-9 items-center justify-center rounded-lg border ${selected ? 'border-primary-400 bg-primary-500/15 text-primary-200' : 'border-white/10 bg-dark-800 text-dark-500'}`} aria-label={selected ? 'لغو انتخاب کشو' : 'انتخاب کشو'}><span className={`flex h-5 w-5 items-center justify-center rounded-md border-2 ${selected ? 'border-primary-400 bg-primary-500 text-white' : 'border-white/30'}`}>{selected && <Check className="h-3.5 w-3.5"/>}</span></button>}
                 {!selectionMode && <button
                     onClick={(e) => {
                         e.stopPropagation();

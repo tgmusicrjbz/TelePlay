@@ -73,7 +73,7 @@ export default function FileCard({
         }
     };
 
-    const typeLabel = ({ video: 'ویدیو', audio: 'صوت', image: 'عکس', document: 'سند', text: 'متن' } as Record<string, string>)[file.file_type] || 'فایل';
+    const typeLabel = ({ video: 'ویدیو', audio: 'صدا', image: 'عکس', document: 'سند', text: 'متن' } as Record<string, string>)[file.file_type] || 'فایل';
 
     if (viewMode === 'list') {
         return (
