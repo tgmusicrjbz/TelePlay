@@ -873,6 +873,11 @@ async def check_auth(client, message: Message):
                 "این ربات فقط برای کاربرهای مجاز فعاله.\n"
                 f"شناسهٔ تلگرام شما: `{message.from_user.id}`"
             )
+        elif any(getattr(message, field, None) for field in ("video", "audio", "voice", "document", "photo", "animation", "video_note")):
+            await message.reply(
+                "🚫 این حساب فعلاً اجازهٔ ذخیره فایل در کمد رو نداره.\n"
+                f"آیدی تلگرام: `{message.from_user.id}`"
+            )
         
         # Stop further processing of this message
         message.stop_propagation()
@@ -1132,7 +1137,7 @@ async def logout_all_command(client, message: Message):
 
 # ============== File Handler ==============
 
-async def _handle_file_impl(client, message: Message):
+async def _handle_file_impl(client, message: Message, status_msg: Message):
     """Handle uploaded files - forward to channel and save to DB."""
     # Get or create user
     user = await get_or_create_user(
@@ -1144,38 +1149,42 @@ async def _handle_file_impl(client, message: Message):
     active_drawer_id = await get_active_drawer_id(message.from_user.id)
     
     # Determine file type and extract metadata
-    if message.video:
+    if getattr(message, "video", None):
         media = message.video
         file_type = "video"
-    elif message.audio:
+    elif getattr(message, "audio", None):
         media = message.audio
         file_type = "audio"
-    elif message.voice:
+    elif getattr(message, "voice", None):
         media = message.voice
         file_type = "audio"
-    elif message.document:
+    elif getattr(message, "animation", None):
+        media = message.animation
+        file_type = "video"
+    elif getattr(message, "video_note", None):
+        media = message.video_note
+        file_type = "video"
+    elif getattr(message, "document", None):
         media = message.document
         file_type = "image" if (media.mime_type or "").startswith("image/") else "document"
-    elif message.photo:
+    elif getattr(message, "photo", None):
         media = message.photo.sizes[-1]
         file_type = "image"
     else:
         return
     
-    status_msg = await message.reply("📥 در حال ذخیره‌سازی...")
-    
     try:
         # Forward to storage channel
         forwarded = await forward_to_storage_channel(message)
-        stored_media = forwarded.video or forwarded.audio or forwarded.voice or forwarded.document
-        if forwarded.photo:
+        stored_media = next((getattr(forwarded, field, None) for field in ("video", "audio", "voice", "animation", "video_note", "document") if getattr(forwarded, field, None)), None)
+        if getattr(forwarded, "photo", None):
             stored_media = select_best_thumbnail(forwarded.photo.sizes)
         if stored_media is not None:
             media = stored_media
         
         # Extract file info
-        raw_filename = getattr(media, "file_name", None) or (f"photo_{message.id}.jpg" if message.photo else f"voice_{message.id}.ogg" if message.voice else f"{file_type}_{message.id}")
-        if message.video and message.caption:
+        raw_filename = getattr(media, "file_name", None) or (f"photo_{message.id}.jpg" if getattr(message, "photo", None) else f"voice_{message.id}.ogg" if getattr(message, "voice", None) else f"video_note_{message.id}.mp4" if getattr(message, "video_note", None) else f"{file_type}_{message.id}")
+        if getattr(message, "video", None) and message.caption:
             caption_title = next((line.strip() for line in message.caption.splitlines() if line.strip()), "")
             if caption_title:
                 extension = Path(raw_filename).suffix or ".mp4"
@@ -1186,11 +1195,11 @@ async def _handle_file_impl(client, message: Message):
             "file_unique_id": media.file_unique_id,
             "file_name": sanitize_filename(raw_filename),
             "file_size": media.file_size,
-            "mime_type": getattr(media, "mime_type", None) or ("image/jpeg" if message.photo else "audio/ogg" if message.voice else None),
+            "mime_type": getattr(media, "mime_type", None) or ("image/jpeg" if getattr(message, "photo", None) else "audio/ogg" if getattr(message, "voice", None) else None),
             "duration": getattr(media, "duration", None),
             "width": getattr(media, "width", None),
             "height": getattr(media, "height", None),
-            "thumbnail_file_id": media.file_id if message.photo else (select_best_thumbnail(getattr(media, "thumbs", None)).file_id if select_best_thumbnail(getattr(media, "thumbs", None)) else None),
+            "thumbnail_file_id": media.file_id if getattr(message, "photo", None) else (select_best_thumbnail(getattr(media, "thumbs", None)).file_id if select_best_thumbnail(getattr(media, "thumbs", None)) else None),
             "description": message.caption.strip()[:1024] if message.caption else None,
         }
         
@@ -1239,16 +1248,21 @@ async def _handle_file_impl(client, message: Message):
         await status_msg.edit("❌ فایل ذخیره نشد؛ دوباره تلاش کن.")
 
 
-@tg_client.on_message(filters.private & (filters.video | filters.audio | filters.voice | filters.document | filters.photo))
+@tg_client.on_message(filters.private & (filters.video | filters.audio | filters.voice | filters.document | filters.photo | filters.animation | filters.video_note))
 async def handle_file(client, message: Message):
     """Keep upload failures visible even when they happen before the progress message."""
+    status_msg = None
     try:
-        await _handle_file_impl(client, message)
+        status_msg = await message.reply("📥 فایل رسید؛ دارم می‌ذارمش توی کمد…")
+        await _handle_file_impl(client, message, status_msg)
     except Exception as error:
         user_id = getattr(getattr(message, "from_user", None), "id", "unknown")
         logger.exception("Telegram upload handler failed before processing for user %s: %s", user_id, error)
         with contextlib.suppress(Exception):
-            await message.reply("❌ نتونستم فایل رو پردازش کنم. چند لحظه دیگه دوباره امتحان کن.")
+            if status_msg is not None:
+                await status_msg.edit("❌ نتونستم فایل رو پردازش کنم. چند لحظه دیگه دوباره امتحان کن.")
+            else:
+                await message.reply("❌ نتونستم فایل رو پردازش کنم. چند لحظه دیگه دوباره امتحان کن.")
 
 
 @tg_client.on_message(filters.private & filters.regex(r"https?://(?:www\.)?(?:youtube\.com|youtu\.be|instagram\.com)/"), group=-1)

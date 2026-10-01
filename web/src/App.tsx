@@ -1,6 +1,6 @@
 import { Routes, Route, Navigate, useSearchParams, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import { api, AuthResponse, useCurrentUser, useLoginWithCode, useBotInfo, useGenerateLoginCode, useVerifyLoginCode } from './lib/api';
+import { api, AuthResponse, getKomodDeviceId, useCurrentUser, useLoginWithCode, useBotInfo, useGenerateLoginCode, useVerifyLoginCode } from './lib/api';
 import FileBrowser from './components/FileBrowser';
 import GlobalContextMenu from './components/GlobalContextMenu';
 import PwaManager from './components/PwaManager';
@@ -94,6 +94,12 @@ function TelegramWebAppBootstrap({ children }: { children: React.ReactNode }) {
             if (previousInitData !== identity.initData) localStorage.removeItem('komod-manual-account');
             if (currentId === identity.userId && localStorage.getItem('access_token')) {
                 localStorage.setItem('komod-telegram-init-data', identity.initData);
+                try {
+                    const { data } = await api.post<AuthResponse>('/auth/session');
+                    saveAuthenticatedAccount(data);
+                } catch {
+                    // Keep the existing local session when the network is unstable.
+                }
                 if (!cancelled) setReady(true);
                 return;
             }
@@ -110,7 +116,7 @@ function TelegramWebAppBootstrap({ children }: { children: React.ReactNode }) {
             try {
                 const response = await fetch('/api/auth/telegram-webapp', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Komod-Device-ID': getKomodDeviceId() },
                     body: JSON.stringify({ init_data: identity.initData }),
                     signal: controller.signal,
                 });

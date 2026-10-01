@@ -137,6 +137,17 @@ export interface AuthResponse {
     user: User;
 }
 
+export function getKomodDeviceId(): string {
+    const storageKey = 'komod-device-id';
+    const existing = localStorage.getItem(storageKey);
+    if (existing) return existing;
+    const generated = typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    localStorage.setItem(storageKey, generated);
+    return generated;
+}
+
 // API client
 export const api = axios.create({
     baseURL: '/api',
@@ -144,6 +155,7 @@ export const api = axios.create({
 
 // Add auth token to requests
 api.interceptors.request.use((config) => {
+    config.headers['X-Komod-Device-ID'] = getKomodDeviceId();
     const token = localStorage.getItem('access_token');
     if (token) {
         config.headers.Authorization = `Bearer ${token}`;

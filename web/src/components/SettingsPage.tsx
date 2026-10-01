@@ -115,8 +115,8 @@ export default function SettingsPage() {
         {view === 'admin' && user?.is_admin && <div className="space-y-4">
             <div className="grid grid-cols-3 gap-2"><AdminStat label="کاربر فعال" value={adminStats.active.toLocaleString('fa-IR')} icon={<Users/>}/><AdminStat label="کل فایل‌ها" value={adminStats.files.toLocaleString('fa-IR')} icon={<FileStack/>}/><AdminStat label="حجم مصرفی" value={formatFileSize(adminStats.size)} icon={<HardDrive/>}/></div>
             <Card icon={<UserRoundCog/>} title="کاربران کمد" subtitle="نام، مصرف، نشست‌ها و دسترسی هر کاربر را یک‌جا مدیریت کن.">
-                <label className="relative mt-4 block"><Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-dark-500"/><input value={adminQuery} onChange={event => setAdminQuery(event.target.value)} className="input w-full pr-9" placeholder="جست‌وجو با نام، نام کاربری یا آیدی تلگرام…"/></label>
-                <div className="mt-4 grid gap-3 lg:grid-cols-2">{filteredAdminUsers.map(item => <AdminRow key={item.id} item={item} onSave={(display_name) => updateAdmin.mutateAsync({id:item.id,display_name})} onToggle={() => updateAdmin.mutateAsync({id:item.id,is_active:!item.is_active})}/>)}</div>
+                <label className="relative mt-4 block min-w-0"><Search className="pointer-events-none absolute right-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-dark-500"/><input value={adminQuery} onChange={event => setAdminQuery(event.target.value)} className="input w-full pr-10" placeholder="جست‌وجو با نام، نام کاربری یا آیدی تلگرام…"/></label>
+                <div className="admin-users-grid mt-4 grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2">{filteredAdminUsers.map(item => <AdminRow key={item.id} item={item} onSave={(display_name) => updateAdmin.mutateAsync({id:item.id,display_name})} onToggle={() => updateAdmin.mutateAsync({id:item.id,is_active:!item.is_active})}/>)}</div>
                 {!filteredAdminUsers.length && <p className="py-10 text-center text-sm text-dark-500">کاربری با این مشخصات پیدا نشد.</p>}
             </Card>
         </div>}

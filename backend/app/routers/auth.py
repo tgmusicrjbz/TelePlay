@@ -83,6 +83,46 @@ def _new_session(request: Request, user: User) -> AuthSession:
     )
 
 
+async def _session_for_device(db: AsyncSession, request: Request, user: User) -> AuthSession:
+    """Reuse one revocable session per browser installation instead of per reconnect."""
+    device_id = request.headers.get("x-komod-device-id", "").strip()[:128]
+    if not device_id:
+        return _new_session(request, user)
+
+    session_id = f"device-{hashlib.sha256(f'komod:{user.id}:{device_id}'.encode()).hexdigest()[:57]}"
+    session = await db.get(AuthSession, session_id)
+    now = datetime.utcnow()
+    user_agent = request.headers.get("user-agent")
+    forwarded = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+    ip_address = forwarded or (request.client.host if request.client else None)
+    if session is None:
+        # Clean up legacy duplicate sessions created by repeated Mini App logins
+        # before stable device IDs were introduced.
+        duplicates = (await db.execute(select(AuthSession).where(
+            AuthSession.user_id == user.id,
+            AuthSession.user_agent == user_agent,
+            AuthSession.revoked_at.is_(None),
+        ))).scalars().all()
+        for duplicate in duplicates:
+            duplicate.revoked_at = now
+        session = AuthSession(
+            id=session_id,
+            user_id=user.id,
+            device_name=_device_name(user_agent or ""),
+            user_agent=user_agent,
+            ip_address=ip_address,
+            created_at=now,
+            last_seen_at=now,
+        )
+    else:
+        session.device_name = _device_name(user_agent or "")
+        session.user_agent = user_agent
+        session.ip_address = ip_address
+        session.last_seen_at = now
+        session.revoked_at = None
+    return session
+
+
 
 @router.get("/bot/info", response_model=BotInfoResponse)
 async def get_bot_info_endpoint():
@@ -129,6 +169,8 @@ async def refresh_token(
         session = await db.get(AuthSession, session_id)
         if session is None or session.user_id != user.id or session.revoked_at is not None:
             raise HTTPException(status_code=401, detail="Session has been revoked")
+        session.last_seen_at = datetime.utcnow()
+        await db.commit()
     
     # Generate new tokens
     new_access_token = create_access_token(telegram_id, version=user.auth_version, session_id=session_id)
@@ -202,7 +244,7 @@ async def register_current_session(
     db: AsyncSession = Depends(get_db),
 ):
     """Turn a Telegram Mini App access link into a revocable device session."""
-    session = _new_session(request, current_user)
+    session = await _session_for_device(db, request, current_user)
     db.add(session)
     await db.commit()
     return AuthResponse(
@@ -245,7 +287,7 @@ async def login_from_telegram_webapp(
         user.last_name = tg_user.get("last_name")
     if not user.is_active:
         raise HTTPException(status_code=403, detail="User account is inactive")
-    session = _new_session(request, user)
+    session = await _session_for_device(db, request, user)
     db.add(session)
     await db.commit()
     return AuthResponse(
@@ -337,7 +379,7 @@ async def verify_login_code(
         raise HTTPException(status_code=404, detail="User not found")
         
     # Generate tokens
-    session = _new_session(request, user)
+    session = await _session_for_device(db, request, user)
     db.add(session)
     await db.flush()
     access_token = create_access_token(user.telegram_id, version=user.auth_version, session_id=session.id)

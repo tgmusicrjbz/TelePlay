@@ -105,31 +105,49 @@ export default function ContentPreview() {
 
 function inlineMarkdown(text: string) {
     return text.split(/(\[[^\]]+\]\([^)]+\)|\*\*[^*]+\*\*|__[^_]+__|~~[^~]+~~|`[^`]+`|\*[^*]+\*)/g).map((part, index) => {
-        const link = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/); if (link) return <a key={index} href={link[2]} target="_blank" rel="noreferrer" className="text-primary-300 underline decoration-primary-500/40 underline-offset-4">{link[1]}</a>;
-        if (part.startsWith('**') || part.startsWith('__')) return <strong key={index}>{part.slice(2, -2)}</strong>;
-        if (part.startsWith('~~')) return <del key={index} className="text-dark-400">{part.slice(2, -2)}</del>;
-        if (part.startsWith('`')) return <code key={index} className="rounded bg-white/10 px-1.5 py-0.5 text-primary-200">{part.slice(1, -1)}</code>;
-        if (part.startsWith('*')) return <em key={index}>{part.slice(1, -1)}</em>;
+        const link = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/); if (link) return <a key={index} href={link[2]} target="_blank" rel="noreferrer" className="font-medium text-sky-300 underline decoration-sky-500/40 underline-offset-4 transition hover:text-sky-200">{link[1]}</a>;
+        if (part.startsWith('**') || part.startsWith('__')) return <strong key={index} className="font-extrabold text-amber-200">{part.slice(2, -2)}</strong>;
+        if (part.startsWith('~~')) return <del key={index} className="text-rose-300/70 decoration-rose-400/70">{part.slice(2, -2)}</del>;
+        if (part.startsWith('`')) return <code key={index} dir="ltr" className="mx-0.5 rounded-md border border-cyan-400/15 bg-cyan-400/10 px-1.5 py-0.5 font-mono text-[.9em] text-cyan-200">{part.slice(1, -1)}</code>;
+        if (part.startsWith('*')) return <em key={index} className="text-violet-200">{part.slice(1, -1)}</em>;
         return <Fragment key={index}>{part}</Fragment>;
     });
+}
+
+function MarkdownCodeBlock({ code, language }: { code: string; language?: string }) {
+    const [copied, setCopied] = useState(false);
+    const copy = async () => {
+        await navigator.clipboard.writeText(code);
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1200);
+    };
+    return <div className="my-5 overflow-hidden rounded-2xl border border-cyan-400/15 bg-[#071018] shadow-[0_16px_45px_rgba(0,0,0,.25)]">
+        <div className="flex items-center justify-between border-b border-white/[.06] bg-white/[.035] px-3 py-2" dir="ltr">
+            <div className="flex items-center gap-1.5" aria-hidden="true"><span className="h-2.5 w-2.5 rounded-full bg-rose-400/80"/><span className="h-2.5 w-2.5 rounded-full bg-amber-300/80"/><span className="h-2.5 w-2.5 rounded-full bg-emerald-400/80"/></div>
+            <span className="font-mono text-[11px] uppercase tracking-wider text-cyan-200/70">{language || 'code'}</span>
+            <button onClick={() => void copy()} className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] text-dark-300 transition hover:bg-white/[.06] hover:text-white"><Copy className="h-3.5 w-3.5"/>{copied ? 'کپی شد' : 'کپی'}</button>
+        </div>
+        <pre dir="ltr" className="overflow-x-auto p-4 text-left font-mono text-sm leading-7 text-cyan-100 selection:bg-cyan-400/25"><code>{code}</code></pre>
+    </div>;
 }
 
 function MarkdownContent({ content }: { content: string }) {
     const blocks = useMemo(() => {
         const result: JSX.Element[] = []; let code = false; let codeLines: string[] = []; let language = '';
         content.split(/\r?\n/).forEach((line, index) => {
-            if (line.trim().startsWith('```')) { if (code) { result.push(<div key={`code-${index}`} className="my-4 overflow-hidden rounded-xl border border-white/[.07] bg-black/35">{language && <div className="border-b border-white/[.06] px-4 py-2 text-left text-[11px] text-dark-500" dir="ltr">{language}</div>}<pre dir="ltr" className="overflow-x-auto p-4 font-mono text-sm leading-7 text-primary-100"><code>{codeLines.join('\n')}</code></pre></div>); codeLines = []; language = ''; } else language = line.trim().slice(3).trim(); code = !code; return; }
+            if (line.trim().startsWith('```')) { if (code) { result.push(<MarkdownCodeBlock key={`code-${index}`} code={codeLines.join('\n')} language={language}/>); codeLines = []; language = ''; } else language = line.trim().slice(3).trim(); code = !code; return; }
             if (code) { codeLines.push(line); return; }
             if (!line.trim()) { result.push(<div key={`space-${index}`} className="h-3"/>); return; }
-            if (/^\s*(---+|___+|\*\*\*+)\s*$/.test(line)) { result.push(<hr key={index} className="my-6 border-white/10"/>); return; }
-            const heading = line.match(/^(#{1,6})\s+(.+)$/); if (heading) { const Tag = `h${heading[1].length}` as keyof JSX.IntrinsicElements; result.push(<Tag key={index} className={`${heading[1].length === 1 ? 'text-2xl' : heading[1].length === 2 ? 'text-xl' : 'text-lg'} mt-6 font-bold leading-tight text-white`}>{inlineMarkdown(heading[2])}</Tag>); return; }
-            const quote = line.match(/^>\s?(.+)$/); if (quote) { result.push(<blockquote key={index} className="my-2 border-r-2 border-primary-500/50 pr-4 italic leading-8 text-dark-300">{inlineMarkdown(quote[1])}</blockquote>); return; }
-            const bullet = line.match(/^\s*[-*]\s+(.+)$/); if (bullet) { result.push(<div key={index} className="flex gap-2 leading-8"><span className="text-primary-300">•</span><span>{inlineMarkdown(bullet[1])}</span></div>); return; }
-            const ordered = line.match(/^\s*(\d+)\.\s+(.+)$/); if (ordered) { result.push(<div key={index} className="flex gap-2 leading-8"><span className="min-w-6 text-primary-300">{Number(ordered[1]).toLocaleString('fa-IR')}.</span><span>{inlineMarkdown(ordered[2])}</span></div>); return; }
-            result.push(<p key={index} className="whitespace-pre-wrap break-words leading-8">{inlineMarkdown(line)}</p>);
+            if (/^\s*(---+|___+|\*\*\*+)\s*$/.test(line)) { result.push(<div key={index} className="my-7 h-px bg-gradient-to-r from-transparent via-primary-400/45 to-transparent"/>); return; }
+            const heading = line.match(/^(#{1,6})\s+(.+)$/); if (heading) { const level = heading[1].length; const Tag = `h${level}` as keyof JSX.IntrinsicElements; const tone = level === 1 ? 'text-primary-200' : level === 2 ? 'text-sky-200' : level === 3 ? 'text-violet-200' : 'text-emerald-200'; result.push(<Tag key={index} className={`${level === 1 ? 'text-3xl' : level === 2 ? 'text-2xl' : level === 3 ? 'text-xl' : 'text-lg'} ${tone} mb-2 mt-7 border-b border-white/[.05] pb-2 font-black leading-tight`}>{inlineMarkdown(heading[2])}</Tag>); return; }
+            const quote = line.match(/^>\s?(.+)$/); if (quote) { result.push(<blockquote key={index} className="my-3 rounded-l-xl border-r-4 border-violet-400/60 bg-violet-400/[.07] px-4 py-2 italic leading-8 text-violet-100/90">{inlineMarkdown(quote[1])}</blockquote>); return; }
+            const task = line.match(/^\s*[-*]\s+\[([ xX])\]\s+(.+)$/); if (task) { const checked = task[1].toLowerCase() === 'x'; result.push(<div key={index} className="flex items-start gap-2 leading-8"><span className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border text-xs ${checked ? 'border-emerald-400/40 bg-emerald-400/15 text-emerald-300' : 'border-white/15 text-transparent'}`}>✓</span><span className={checked ? 'text-dark-400 line-through' : ''}>{inlineMarkdown(task[2])}</span></div>); return; }
+            const bullet = line.match(/^\s*[-*]\s+(.+)$/); if (bullet) { result.push(<div key={index} className="flex items-start gap-2 leading-8"><span className="mt-0.5 text-lg text-primary-300">•</span><span>{inlineMarkdown(bullet[1])}</span></div>); return; }
+            const ordered = line.match(/^\s*(\d+)\.\s+(.+)$/); if (ordered) { result.push(<div key={index} className="flex items-start gap-2 leading-8"><span className="mt-1 flex min-w-6 items-center justify-center rounded-md bg-primary-400/10 px-1 text-xs font-bold text-primary-200">{Number(ordered[1]).toLocaleString('fa-IR')}</span><span>{inlineMarkdown(ordered[2])}</span></div>); return; }
+            result.push(<p key={index} className="whitespace-pre-wrap break-words leading-8 text-dark-100">{inlineMarkdown(line)}</p>);
         });
-        if (codeLines.length) result.push(<pre key="code-final" dir="ltr" className="my-4 overflow-x-auto rounded-xl border border-white/[.07] bg-black/35 p-4 font-mono text-sm leading-7 text-primary-100"><code>{codeLines.join('\n')}</code></pre>);
+        if (codeLines.length) result.push(<MarkdownCodeBlock key="code-final" code={codeLines.join('\n')} language={language}/>);
         return result;
     }, [content]);
-    return <article dir="auto" className="mx-auto max-w-3xl text-[15px] text-dark-100">{blocks}</article>;
+    return <article dir="auto" className="mx-auto max-w-3xl rounded-2xl border border-white/[.04] bg-dark-900/35 p-4 text-[15px] text-dark-100 shadow-inner sm:p-6">{blocks}</article>;
 }

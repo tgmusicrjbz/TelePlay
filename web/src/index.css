@@ -218,6 +218,17 @@ body {
   direction: ltr !important;
 }
 
+.admin-users-grid > * {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.relative > svg.lucide-search {
+  z-index: 10;
+  pointer-events: none;
+}
+
 .desktop-volume-slider {
   display: none;
 }

@@ -404,7 +404,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                 setShowControls(false);
                 setShowSpeedMenu(false);
             }
-        }, isVideo ? 3000 : 2800);
+        }, isVideo ? 5500 : 4000);
     }, [controlsLocked, isMinimized, isVideo, showSleepMenu, showSpeedMenu, showVolumePopover]);
 
     const toggleVideoControls = useCallback(() => {
@@ -412,7 +412,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
         setShowControls(current => {
             const next = !current;
             if (next) {
-                hideControlsTimeout.current = setTimeout(() => setShowControls(false), 3000);
+                hideControlsTimeout.current = setTimeout(() => setShowControls(false), 5500);
             }
             return next;
         });
@@ -427,7 +427,10 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     const handlePlayerPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
         if (controlsLocked) return;
         const target = event.target as HTMLElement;
-        if (target.closest('button, input, a, [role="menu"]')) return;
+        if (target.closest('button, input, a, [role="menu"]')) {
+            revealControls();
+            return;
+        }
 
         if (event.pointerType !== 'touch') {
             if (isVideo) toggleVideoControls();

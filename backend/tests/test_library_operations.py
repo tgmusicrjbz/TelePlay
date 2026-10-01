@@ -24,7 +24,8 @@ from starlette.datastructures import Headers, UploadFile
 from sqlalchemy import select
 
 from app.database import Base, async_session, engine
-from app.models import BotUserState, File, Folder, Playlist, PlaylistItem, User, WatchProgress
+from app.models import AuthSession, BotUserState, File, Folder, Playlist, PlaylistItem, User, WatchProgress
+from app.routers.auth import _session_for_device
 from app.routers.files import (
     batch_update_files,
     get_activity,
@@ -369,6 +370,28 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             saved = (await db.execute(select(File).where(File.channel_message_id == 902))).scalar_one()
             self.assertEqual(saved.folder_id, self.folder_id)
         self.assertIn("در کشوی", status.edit.await_args.args[0])
+
+    async def test_device_login_reuses_one_session(self):
+        request = SimpleNamespace(
+            headers={
+                "x-komod-device-id": "same-phone-installation",
+                "user-agent": "Telegram Android",
+                "x-forwarded-for": "192.0.2.10",
+            },
+            client=SimpleNamespace(host="192.0.2.10"),
+        )
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            first = await _session_for_device(db, request, user)
+            db.add(first)
+            await db.commit()
+            second = await _session_for_device(db, request, user)
+            db.add(second)
+            await db.commit()
+            sessions = (await db.execute(select(AuthSession).where(AuthSession.user_id == self.user_id))).scalars().all()
+        self.assertEqual(first.id, second.id)
+        self.assertTrue(first.id.startswith("device-"))
+        self.assertEqual(len(sessions), 1)
 
     async def test_saved_text_message_can_be_previewed(self):
         async with async_session() as db:
