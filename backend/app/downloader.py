@@ -7,7 +7,7 @@ import json
 import logging
 import re
 from urllib.parse import quote, urlencode
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 from pyrogram import Client
 from pyrogram.errors import Timeout
@@ -39,12 +39,20 @@ class ImportJob:
 def _oembed_title(url: str) -> str:
     if "youtu" not in url.lower():
         return "instagram"
-    endpoint = "https://www.youtube.com/oembed?" + urlencode({"url": url, "format": "json"})
-    try:
-        with urlopen(endpoint, timeout=8) as response:
-            return str(json.loads(response.read().decode("utf-8")).get("title") or "youtube")
-    except Exception:
-        return "youtube"
+    endpoints = (
+        "https://www.youtube.com/oembed?" + urlencode({"url": url, "format": "json"}),
+        "https://noembed.com/embed?" + urlencode({"url": url}),
+    )
+    for endpoint in endpoints:
+        try:
+            request = Request(endpoint, headers={"User-Agent": "Mozilla/5.0 Komod/1.0", "Accept": "application/json"})
+            with urlopen(request, timeout=10) as response:
+                title = str(json.loads(response.read().decode("utf-8")).get("title") or "").strip()
+                if title:
+                    return title
+        except Exception:
+            logger.debug("Could not resolve YouTube title from %s", endpoint, exc_info=True)
+    return "youtube"
 
 
 class LinkImportService:

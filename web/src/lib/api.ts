@@ -627,6 +627,20 @@ export const useReorderPlaylistCatalog = () => {
     const queryClient = useQueryClient();
     return useMutation({
         mutationFn: async (playlistIds: number[]) => (await api.put<PlaylistSummary[]>('/playlists/reorder/catalog', { playlist_ids: playlistIds })).data,
+        onMutate: async (playlistIds) => {
+            await queryClient.cancelQueries({ queryKey: ['playlists'] });
+            const previous = queryClient.getQueryData<PlaylistSummary[]>(['playlists']);
+            if (previous) {
+                const byId = new Map(previous.map(item => [item.id, item]));
+                const ordered = playlistIds.map((id, index) => ({ ...byId.get(id)!, position: index })).filter(Boolean);
+                const missing = previous.filter(item => !playlistIds.includes(item.id));
+                queryClient.setQueryData(['playlists'], [...ordered, ...missing]);
+            }
+            return { previous };
+        },
+        onError: (_error, _ids, context) => {
+            if (context?.previous) queryClient.setQueryData(['playlists'], context.previous);
+        },
         onSuccess: data => queryClient.setQueryData(['playlists'], data),
     });
 };

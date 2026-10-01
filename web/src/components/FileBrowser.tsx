@@ -1,11 +1,11 @@
 /**
  * Main FileBrowser component - the core of the web interface
  */
-import { useEffect, useCallback, useRef, useState } from 'react';
+import { useEffect, useCallback, useMemo, useRef, useState } from 'react';
 import { FolderPlus, Folder as FolderIcon, Grid, LayoutGrid, List, Search, ChevronRight, Home, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, StickyNote, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ChevronDown, ChevronUp, Plus, CheckSquare, Square, ListChecks, ListPlus, Upload, Star, RefreshCw, Link2 } from 'lucide-react';
 import { useFiles, useFolders, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useActivityFeed, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile, useImportLink } from '../lib/api';
 import { useAppStore } from '../lib/store';
-import { cacheAllTextNotes } from '../lib/offline';
+import { cacheAllTextNotes, queueOfflineText } from '../lib/offline';
 import FileCard from './FileCard';
 import FolderCard from './FolderCard';
 import NewFolderModal from './NewFolderModal';
@@ -19,6 +19,7 @@ import Toasts from './Toasts';
 import PlaylistBrowser from './PlaylistBrowser';
 import SettingsPage from './SettingsPage';
 import DownloadsPage from './DownloadsPage';
+import CustomSelect from './CustomSelect';
 import { applyTheme, getStoredTheme } from '../lib/theme';
 
 const sortLabels: Record<SortField, string> = {
@@ -79,6 +80,8 @@ export default function FileBrowser() {
     const [showFilters, setShowFilters] = useState(false);
     const [showBatchEdit, setShowBatchEdit] = useState(false);
     const [selectionMode, setSelectionMode] = useState(false);
+    const [pullDistance, setPullDistance] = useState(0);
+    const pullStartY = useRef<number | null>(null);
     const [favoriteOnly, setFavoriteOnly] = useState(false);
     const [showTextComposer, setShowTextComposer] = useState(false);
     const [showAddMenu, setShowAddMenu] = useState(false);
@@ -87,6 +90,17 @@ export default function FileBrowser() {
     const [importFolder, setImportFolder] = useState<number | 'new' | null>(null);
     const [importFolderName, setImportFolderName] = useState('');
     const [importQuality, setImportQuality] = useState<'auto' | 'audio' | '480' | '720' | '1080'>('720');
+    const importPlatform = useMemo<'youtube' | 'instagram' | null>(() => {
+        if (!importUrl.trim()) return null;
+        try {
+            const parsed = new URL(importUrl.trim());
+            if (!['http:', 'https:'].includes(parsed.protocol)) return null;
+            const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
+            if (host === 'youtu.be' || host === 'youtube.com' || host.endsWith('.youtube.com')) return 'youtube';
+            if (host === 'instagram.com' || host.endsWith('.instagram.com')) return 'instagram';
+        } catch { /* incomplete URL */ }
+        return null;
+    }, [importUrl]);
     const [textFileName, setTextFileName] = useState('یادداشت تازه');
     const [textContent, setTextContent] = useState('');
     const [contentScope, setContentScope] = useState<'all' | 'files' | 'folders'>('all');
@@ -205,8 +219,26 @@ export default function FileBrowser() {
             refetchFolders();
         } else if (activeSection === 'activity') {
             refetchActivity();
+        } else {
+            window.location.reload();
         }
     }, [activeSection, refetchFiles, refetchFolders, refetchActivity]);
+
+    const pullEnabled = !(window as Window & { Telegram?: { WebApp?: { initData?: string } } }).Telegram?.WebApp?.initData;
+    const handlePullStart = (event: React.TouchEvent<HTMLDivElement>) => {
+        if (!pullEnabled || event.currentTarget.scrollTop > 0) return;
+        pullStartY.current = event.touches[0]?.clientY ?? null;
+    };
+    const handlePullMove = (event: React.TouchEvent<HTMLDivElement>) => {
+        if (pullStartY.current === null || event.currentTarget.scrollTop > 0) return;
+        const distance = Math.max(0, (event.touches[0]?.clientY ?? pullStartY.current) - pullStartY.current);
+        setPullDistance(Math.min(78, distance * 0.55));
+    };
+    const handlePullEnd = () => {
+        if (pullDistance >= 52) { handleRefresh(); addToast('کمد تازه شد ✨'); }
+        pullStartY.current = null;
+        setPullDistance(0);
+    };
 
     // Handle drag-drop file to folder
     const handleFileDrop = useCallback(async (fileId: number, folderId: number) => {
@@ -466,9 +498,9 @@ export default function FileBrowser() {
     const submitImportLink = async (event: React.FormEvent) => {
         event.preventDefault();
         if (!importUrl.trim()) return;
+        if (!importPlatform) { addToast('این لینک معتبر نیست؛ فقط لینک یوتیوب یا اینستاگرام پذیرفته می‌شود.', 'error'); return; }
         try {
-            const isInstagram = /(^|\.)instagram\.com$/i.test(new URL(importUrl.trim()).hostname);
-            const result = await importLinkMutation.mutateAsync({ url: importUrl.trim(), folder_id: importFolder === 'new' ? currentFolderId : importFolder, new_folder_name: importFolder === 'new' ? importFolderName.trim() : undefined, quality: isInstagram ? 'auto' : importQuality });
+            const result = await importLinkMutation.mutateAsync({ url: importUrl.trim(), folder_id: importFolder === 'new' ? currentFolderId : importFolder, new_folder_name: importFolder === 'new' ? importFolderName.trim() : undefined, quality: importPlatform === 'instagram' ? 'auto' : importQuality });
             setShowImportLink(false); setImportUrl(''); setImportFolderName('');
             addToast(`${result.message}${result.queue_position > 1 ? ` جایگاه: ${result.queue_position.toLocaleString('fa-IR')}` : ''}`);
         } catch (error: any) { addToast(error?.response?.data?.detail || 'ثبت لینک انجام نشد.', 'error'); }
@@ -479,6 +511,12 @@ export default function FileBrowser() {
         if (!textContent.trim()) return;
         const rawName = textFileName.trim() || 'یادداشت تازه';
         const fileName = /\.(md|txt)$/i.test(rawName) ? rawName : `${rawName}.md`;
+        const saveToOutbox = async () => {
+            await queueOfflineText(fileName, textContent, currentFolderId);
+            setShowTextComposer(false); setTextFileName('یادداشت تازه'); setTextContent('');
+            addToast('یادداشت روی دستگاه ذخیره شد؛ وقتی آنلاین بشی خودکار به کمد اضافه می‌شه 📝');
+        };
+        if (!navigator.onLine) { await saveToOutbox(); return; }
         try {
             await uploadFileMutation.mutateAsync({ file: new File([textContent], fileName, { type: 'text/markdown;charset=utf-8' }), folderId: currentFolderId });
             setShowTextComposer(false);
@@ -486,8 +524,9 @@ export default function FileBrowser() {
             setTextContent('');
             addToast('یادداشت به کمد اضافه شد 📝');
             handleRefresh();
-        } catch {
-            addToast('ذخیره یادداشت انجام نشد.', 'error');
+        } catch (error: any) {
+            if (!navigator.onLine || !error?.response) await saveToOutbox();
+            else addToast('ذخیره یادداشت انجام نشد.', 'error');
         }
     };
 
@@ -753,6 +792,11 @@ export default function FileBrowser() {
                 <div 
                     ref={containerRef}
                     className="relative flex-1 overflow-auto overscroll-y-contain p-4 pb-28 outline-none sm:p-6 md:pb-6 lg:p-8"
+                    style={{ overscrollBehaviorY: 'contain' }}
+                    onTouchStart={handlePullStart}
+                    onTouchMove={handlePullMove}
+                    onTouchEnd={handlePullEnd}
+                    onTouchCancel={handlePullEnd}
                     onMouseDown={handleMouseDown}
                     onMouseMove={handleMouseMove}
                     onMouseUp={handleMouseUp}
@@ -761,8 +805,9 @@ export default function FileBrowser() {
                     // Prevent default drag behaviors on container
                     onDragOver={(e) => e.preventDefault()}
                 >
+                    {pullEnabled && pullDistance > 0 && <div className="pointer-events-none fixed left-1/2 top-20 z-50 -translate-x-1/2 rounded-full border border-white/10 bg-dark-900/95 px-3 py-1.5 text-xs text-primary-200 shadow-xl backdrop-blur" style={{ transform: `translate(-50%, ${pullDistance / 3}px)` }}>{pullDistance >= 52 ? 'رها کن تا تازه بشه ✨' : 'برای تازه‌سازی پایین بکش'}</div>}
                     {!readOnlyWorkspace && (selectionMode || selectedItems.length > 0) && activeSection === 'files' && (
-                        <div className="sticky top-0 z-20 mx-auto mb-3 flex min-h-14 max-w-7xl flex-nowrap items-center gap-1 overflow-x-auto rounded-2xl border border-primary-500/25 bg-dark-900/95 p-1.5 shadow-2xl backdrop-blur-xl sm:hidden">
+                        <div className="fixed inset-x-3 top-20 z-40 mx-auto flex min-h-14 max-w-xl flex-nowrap items-center gap-1 overflow-x-auto rounded-2xl border border-primary-500/25 bg-dark-900/95 p-1.5 shadow-2xl backdrop-blur-xl sm:hidden">
                             <span className="shrink-0 px-2 text-xs font-semibold text-primary-200">{selectedItems.length ? `${selectedItems.length.toLocaleString('fa-IR')} انتخاب` : 'یک کارت را لمس کن'}</span>
                             {selectedItems.length === 1 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-200 hover:bg-white/10" aria-label="تغییر نام" title="تغییر نام" onClick={() => selectedFilesForActions[0] ? setRenameFile(selectedFilesForActions[0]) : setRenameFolder(selectedFoldersForActions[0])}><Pencil className="h-5 w-5" /></button>}
                             {selectedFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-200 hover:bg-white/10" aria-label="ویرایش گروهی" title="ویرایش گروهی" onClick={() => setShowBatchEdit(true)}><SlidersHorizontal className="h-5 w-5" /></button>}
@@ -779,7 +824,7 @@ export default function FileBrowser() {
                             {activeSection !== 'activity' && <span className="shrink-0 rounded-full border border-white/[0.07] bg-dark-800/70 px-2.5 py-1 text-xs text-dark-300">{(shownFolderCount + shownFileCount).toLocaleString('fa-IR')} مورد</span>}
                         </div>
                         {selectedItems.length > 0 ? (
-                            <div className="hidden max-w-full flex-wrap items-center gap-1.5 rounded-2xl border border-primary-500/20 bg-primary-500/10 p-1.5 sm:flex">
+                            <div className="fixed left-6 right-6 top-20 z-40 hidden max-w-4xl flex-wrap items-center gap-1.5 rounded-2xl border border-primary-500/20 bg-dark-900/95 p-1.5 shadow-2xl backdrop-blur-xl sm:flex md:right-28">
                                 <span className="text-sm font-medium text-primary-200 px-2">{selectedItems.length.toLocaleString('fa-IR')} مورد انتخاب شده</span>
                                 {selectedItems.length === 1 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => selectedFilesForActions[0] ? setRenameFile(selectedFilesForActions[0]) : setRenameFolder(selectedFoldersForActions[0])}><Pencil className="w-4 h-4" /> تغییر نام</button>}
                                 {selectedFilesForActions.length > 0 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => setShowBatchEdit(true)}><SlidersHorizontal className="w-4 h-4" /> ویرایش گروهی</button>}
@@ -1072,7 +1117,7 @@ export default function FileBrowser() {
                 onSave={handleBatchEdit}
             />
             {showAddMenu && <div className="fixed inset-0 z-[165] flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-4" onClick={() => setShowAddMenu(false)}><div className="w-full max-w-md rounded-t-3xl border border-white/10 bg-dark-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:rounded-3xl" onClick={event => event.stopPropagation()}><div className="mx-auto mb-4 h-1 w-12 rounded-full bg-white/20 sm:hidden"/><div className="flex items-center justify-between"><h2 className="font-bold">➕ افزودن به کمد</h2><button className="btn-icon" onClick={() => setShowAddMenu(false)}><X className="h-5 w-5"/></button></div><div className="mt-4 grid grid-cols-2 gap-2"><button className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-2xl border border-white/[.07] bg-dark-800/60 text-sm" onClick={() => { setShowAddMenu(false); uploadInputRef.current?.click(); }}><Upload className="h-6 w-6 text-primary-300"/> آپلود فایل</button><button className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-2xl border border-white/[.07] bg-dark-800/60 text-sm" onClick={() => { setShowAddMenu(false); setShowTextComposer(true); }}><StickyNote className="h-6 w-6 text-primary-300"/> یادداشت متنی</button><button className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-2xl border border-white/[.07] bg-dark-800/60 text-sm" onClick={() => { setShowAddMenu(false); setShowNewFolder(true); }}><FolderPlus className="h-6 w-6 text-primary-300"/> ساخت کشو</button><button className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-2xl border border-white/[.07] bg-dark-800/60 text-sm" onClick={openImportLink}><Link2 className="h-6 w-6 text-primary-300"/> ذخیره از لینک</button></div></div></div>}
-            {showImportLink && <div className="fixed inset-0 z-[170] flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-4" onClick={() => setShowImportLink(false)}><form className="w-full max-w-lg rounded-t-3xl border border-white/10 bg-dark-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:rounded-3xl sm:p-5" onClick={event => event.stopPropagation()} onSubmit={submitImportLink}><div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary-500/15 text-primary-200"><Link2 className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h2 className="font-bold">ذخیره از لینک</h2><p className="text-xs text-dark-400">لینک یوتیوب یا اینستاگرام را بفرست.</p></div><button type="button" className="btn-icon" onClick={() => setShowImportLink(false)}><X className="h-5 w-5"/></button></div><div className="mt-4"><input dir="ltr" autoFocus className="input w-full" value={importUrl} onChange={event => setImportUrl(event.target.value)} placeholder="https://…"/></div><label className="mt-3 block text-xs text-dark-400">کشوی مقصد<select value={importFolder === 'new' ? 'new' : importFolder ?? 'root'} onChange={event => setImportFolder(event.target.value === 'new' ? 'new' : event.target.value === 'root' ? null : Number(event.target.value))} className="input mt-1.5 w-full appearance-none"><option value="root">فایل‌های بیرون از کشو</option>{currentFolderId !== null && <option value={currentFolderId}>کشوی فعلی</option>}{(folders || []).filter(folder => folder.id !== currentFolderId).map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}<option value="new">➕ ساخت کشوی تازه…</option></select></label>{importFolder === 'new' && <input className="input mt-3 w-full" value={importFolderName} onChange={event => setImportFolderName(event.target.value)} placeholder="نام کشوی تازه"/>}{/(youtube\.com|youtu\.be)/i.test(importUrl) && <label className="mt-3 block text-xs text-dark-400">نوع خروجی و کیفیت<select value={importQuality} onChange={event => setImportQuality(event.target.value as typeof importQuality)} className="input mt-1.5 w-full appearance-none"><option value="audio">فقط صدا</option><option value="480">480p</option><option value="720">720p</option><option value="1080">1080p</option></select></label>}<div className="mt-5 flex gap-2"><button type="button" className="btn-secondary flex-1" onClick={() => setShowImportLink(false)}>لغو</button><button disabled={!importUrl.trim() || importLinkMutation.isPending || (importFolder === 'new' && !importFolderName.trim())} className="btn-primary flex-1 disabled:opacity-50">{importLinkMutation.isPending ? 'در حال ثبت…' : 'افزودن به صف'}</button></div></form></div>}
+            {showImportLink && <div className="fixed inset-0 z-[170] flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-4" onClick={() => setShowImportLink(false)}><form className="w-full max-w-lg rounded-t-3xl border border-white/10 bg-dark-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:rounded-3xl sm:p-5" onClick={event => event.stopPropagation()} onSubmit={submitImportLink}><div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary-500/15 text-primary-200"><Link2 className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h2 className="font-bold">ذخیره از لینک</h2><p className="text-xs text-dark-400">لینک یوتیوب یا اینستاگرام را بفرست.</p></div><button type="button" className="btn-icon" onClick={() => setShowImportLink(false)}><X className="h-5 w-5"/></button></div><div className="mt-4"><input dir="ltr" autoFocus className="input w-full" value={importUrl} onChange={event => setImportUrl(event.target.value)} placeholder="https://…"/></div>{importUrl.trim() && <p className={`mt-2 text-xs ${importPlatform ? 'text-emerald-300' : 'text-red-300'}`}>{importPlatform === 'youtube' ? '✓ لینک یوتیوب شناسایی شد' : importPlatform === 'instagram' ? '✓ لینک اینستاگرام شناسایی شد' : 'لینک معتبر یوتیوب یا اینستاگرام نیست'}</p>}<label className="mt-3 block text-xs text-dark-400">کشوی مقصد<select value={importFolder === 'new' ? 'new' : importFolder ?? 'root'} onChange={event => setImportFolder(event.target.value === 'new' ? 'new' : event.target.value === 'root' ? null : Number(event.target.value))} className="input mt-1.5 w-full appearance-none"><option value="root">فایل‌های بیرون از کشو</option>{currentFolderId !== null && <option value={currentFolderId}>کشوی فعلی</option>}{(folders || []).filter(folder => folder.id !== currentFolderId).map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}<option value="new">➕ ساخت کشوی تازه…</option></select></label>{importFolder === 'new' && <input className="input mt-3 w-full" value={importFolderName} onChange={event => setImportFolderName(event.target.value)} placeholder="نام کشوی تازه"/>}{importPlatform === 'youtube' && <CustomSelect className="mt-3" label="نوع خروجی و کیفیت" value={importQuality} onChange={setImportQuality} options={[{value:'audio',label:'فقط صدا'},{value:'480',label:'ویدیو 480p'},{value:'720',label:'ویدیو 720p'},{value:'1080',label:'ویدیو 1080p'}]}/>}<div className="mt-5 flex gap-2"><button type="button" className="btn-secondary flex-1" onClick={() => setShowImportLink(false)}>لغو</button><button disabled={!importUrl.trim() || !importPlatform || importLinkMutation.isPending || (importFolder === 'new' && !importFolderName.trim())} className="btn-primary flex-1 disabled:opacity-50">{importLinkMutation.isPending ? 'در حال ثبت…' : 'افزودن به صف'}</button></div></form></div>}
             {showTextComposer && (
                 <div className="fixed inset-0 z-[170] flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-4" onClick={() => setShowTextComposer(false)}>
                     <form className="w-full max-w-2xl rounded-t-3xl border border-white/10 bg-dark-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl sm:rounded-3xl sm:p-5" onClick={event => event.stopPropagation()} onSubmit={handleCreateText}>

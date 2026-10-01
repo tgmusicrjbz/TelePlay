@@ -11,6 +11,7 @@ import contextlib
 import logging
 import random
 import json
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from pyrogram import filters, enums
 from pyrogram.errors import MessageNotModified
@@ -1175,6 +1176,12 @@ async def handle_file(client, message: Message):
         
         # Extract file info
         raw_filename = getattr(media, "file_name", None) or (f"photo_{message.id}.jpg" if message.photo else f"voice_{message.id}.ogg" if message.voice else f"{file_type}_{message.id}")
+        if message.video and message.caption:
+            caption_title = next((line.strip() for line in message.caption.splitlines() if line.strip()), "")
+            if caption_title:
+                extension = Path(raw_filename).suffix or ".mp4"
+                clean_title = caption_title[:240]
+                raw_filename = clean_title if clean_title.lower().endswith(extension.lower()) else f"{clean_title}{extension}"
         file_info = {
             "file_id": media.file_id,
             "file_unique_id": media.file_unique_id,

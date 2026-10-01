@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Check, Copy, Download, Pencil, X } from 'lucide-react';
 import { api, canPreviewText } from '../lib/api';
 import { useAppStore } from '../lib/store';
-import { cacheTextFile, getOfflineText } from '../lib/offline';
+import { cacheTextFile, getOfflineText, updateOfflineTextDraft } from '../lib/offline';
 
 export default function ContentPreview() {
     const { contentPreviewFile: file, setContentPreviewFile, addToast } = useAppStore();
@@ -65,6 +65,11 @@ export default function ContentPreview() {
     const saveText = async () => {
         setSaving(true);
         try {
+            if (file.id < 0) {
+                await updateOfflineTextDraft(file.id, draft);
+                setContent(draft); setEditing(false); addToast('نسخه آفلاین یادداشت ویرایش شد.');
+                return;
+            }
             const { data } = await api.patch<{ content: string }>(`/files/${file.id}/text`, { content: draft });
             await cacheTextFile(file, data.content);
             setContent(data.content); setEditing(false);

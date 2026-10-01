@@ -404,8 +404,19 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                 setShowControls(false);
                 setShowSpeedMenu(false);
             }
-        }, isVideo ? 1700 : 2800);
+        }, isVideo ? 3000 : 2800);
     }, [controlsLocked, isMinimized, isVideo, showSleepMenu, showSpeedMenu, showVolumePopover]);
+
+    const toggleVideoControls = useCallback(() => {
+        if (hideControlsTimeout.current) clearTimeout(hideControlsTimeout.current);
+        setShowControls(current => {
+            const next = !current;
+            if (next) {
+                hideControlsTimeout.current = setTimeout(() => setShowControls(false), 3000);
+            }
+            return next;
+        });
+    }, []);
 
     const showSkipFeedback = (direction: 'backward' | 'forward') => {
         setSkipFeedback(direction);
@@ -419,7 +430,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
         if (target.closest('button, input, a, [role="menu"]')) return;
 
         if (event.pointerType !== 'touch') {
-            if (isVideo) setShowControls(current => !current);
+            if (isVideo) toggleVideoControls();
             else togglePlay();
             return;
         }
@@ -441,7 +452,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
         lastTap.current = { at: now, side };
         if (singleTapTimeout.current) clearTimeout(singleTapTimeout.current);
         singleTapTimeout.current = setTimeout(() => {
-            setShowControls(current => !current);
+            toggleVideoControls();
             lastTap.current = null;
         }, 330);
     };

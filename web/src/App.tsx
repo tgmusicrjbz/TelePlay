@@ -10,6 +10,7 @@ import AddToPlaylistDialog from './components/AddToPlaylistDialog';
 import FileDetailsSheet from './components/FileDetailsSheet';
 import OfflineDownloadProgressPanel from './components/OfflineDownloadProgress';
 import { saveAuthenticatedAccount } from './lib/accounts';
+import { syncOfflineTextOutbox } from './lib/offline';
 
 function AuthCallback() {
     const [searchParams] = useSearchParams();
@@ -80,6 +81,7 @@ function TelegramWebAppBootstrap({ children }: { children: React.ReactNode }) {
             } catch { return null; }
         };
         const sync = async () => {
+            if (!navigator.onLine) { if (!cancelled) setReady(true); return; }
             const identity = telegramIdentity();
             if (!identity) { if (!cancelled) setReady(true); return; }
             const currentId = localStorage.getItem('komod-telegram-user-id');
@@ -134,6 +136,18 @@ function TelegramWebAppBootstrap({ children }: { children: React.ReactNode }) {
     }, []);
     if (!ready) return <div className="flex min-h-screen items-center justify-center bg-dark-950" dir="rtl"><div className="text-center"><div className="mx-auto mb-4 h-11 w-11 animate-spin rounded-full border-2 border-white/10 border-t-primary-400"/><p className="text-sm text-dark-300">در حال هماهنگ‌کردن حساب تلگرام…</p></div></div>;
     return <>{children}</>;
+}
+
+function OfflineTextSync() {
+    useEffect(() => {
+        const sync = () => { if (navigator.onLine) void syncOfflineTextOutbox(); };
+        sync();
+        const timer = window.setInterval(sync, 30000);
+        window.addEventListener('online', sync);
+        document.addEventListener('visibilitychange', sync);
+        return () => { window.clearInterval(timer); window.removeEventListener('online', sync); document.removeEventListener('visibilitychange', sync); };
+    }, []);
+    return null;
 }
 
 function LoginPage() {
@@ -373,6 +387,7 @@ function App() {
     return (
         <TelegramWebAppBootstrap>
             <PwaManager />
+            <OfflineTextSync />
             <Routes>
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/auth" element={<AuthCallback />} />
