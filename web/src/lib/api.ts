@@ -632,7 +632,7 @@ export const useReorderPlaylistCatalog = () => {
 };
 
 export const useImportLink = () => useMutation({
-    mutationFn: async (payload: { url: string; folder_id?: number | null; new_folder_name?: string; quality?: '360' | '480' | '720' | '1080' }) =>
+    mutationFn: async (payload: { url: string; folder_id?: number | null; new_folder_name?: string; quality?: 'auto' | 'audio' | '480' | '720' | '1080' }) =>
         (await api.post<{ message: string; queue_position: number }>('/files/import-link', payload)).data,
 });
 

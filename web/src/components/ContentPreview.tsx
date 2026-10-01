@@ -12,7 +12,11 @@ export default function ContentPreview() {
     const [editing, setEditing] = useState(false);
     const [draft, setDraft] = useState('');
     const [saving, setSaving] = useState(false);
+    const [imageFailed, setImageFailed] = useState(false);
+    const [imageRetry, setImageRetry] = useState(0);
     const show = !!file && (file.file_type === 'image' || canPreviewText(file));
+
+    useEffect(() => { setImageFailed(false); setImageRetry(0); }, [file?.id]);
 
     useEffect(() => {
         if (!show || !file || file.file_type === 'image') return;
@@ -54,7 +58,10 @@ export default function ContentPreview() {
 
     if (!file || !show) return null;
     const token = localStorage.getItem('access_token');
-    const url = `${file.stream_url}?token=${encodeURIComponent(token || '')}`;
+    const isBlob = file.stream_url.startsWith('blob:');
+    const separator = file.stream_url.includes('?') ? '&' : '?';
+    const authorizedUrl = isBlob ? file.stream_url : `${file.stream_url}${separator}token=${encodeURIComponent(token || '')}`;
+    const url = imageRetry && !isBlob ? `${authorizedUrl}&retry=${imageRetry}` : authorizedUrl;
     const saveText = async () => {
         setSaving(true);
         try {
@@ -79,7 +86,7 @@ export default function ContentPreview() {
                 </header>
                 {file.file_type === 'image' ? (
                     <div className="min-h-0 flex-1 flex items-center justify-center p-4 overflow-auto">
-                        <img src={url} alt={file.file_name} className="max-w-full max-h-[75vh] object-contain rounded-lg" />
+                        {imageFailed ? <div className="rounded-2xl border border-dashed border-white/10 p-8 text-center"><p className="text-sm text-dark-400">نمایش عکس انجام نشد.</p><button className="btn-secondary mt-4" onClick={() => { setImageFailed(false); setImageRetry(Date.now()); }}>تلاش دوباره</button></div> : <img src={url} alt={file.file_name} className="max-w-full max-h-[75vh] object-contain rounded-lg" onError={() => setImageFailed(true)} />}
                     </div>
                 ) : (
                     <div className="min-h-0 overflow-auto p-5 sm:p-8 bg-dark-950/60">

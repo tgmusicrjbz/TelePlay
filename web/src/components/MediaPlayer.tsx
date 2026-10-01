@@ -2,7 +2,7 @@
  * MediaPlayer - full screen video/audio player
  */
 import { useRef, useEffect, useState, useCallback } from 'react';
-import { X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipBack, SkipForward, Download, ExternalLink, AlertTriangle, Copy, PictureInPicture2, Gauge, ChevronDown, ChevronUp, Repeat2, Shuffle, Headphones, RotateCcw, RotateCw, Clock3, ListPlus, RectangleHorizontal, Smartphone, Film, LockKeyhole, UnlockKeyhole } from 'lucide-react';
+import { X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipBack, SkipForward, Download, ExternalLink, AlertTriangle, Copy, PictureInPicture2, Gauge, ChevronDown, ChevronUp, Repeat2, Shuffle, Headphones, RotateCcw, RotateCw, Clock3, ListPlus, RectangleHorizontal, Smartphone, MonitorSmartphone, Film, LockKeyhole, UnlockKeyhole } from 'lucide-react';
 import { TelegramFile, useUpdateProgress, useFile, api } from '../lib/api';
 import { useAppStore } from '../lib/store';
 
@@ -188,16 +188,17 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
         try {
             if (next === 'auto') {
                 orientation?.unlock?.();
-                if (document.fullscreenElement) await document.exitFullscreen();
-                setIsFullscreen(false);
                 return;
             }
             const telegramApp = (window as Window & { Telegram?: { WebApp?: { requestFullscreen?: () => void } } }).Telegram?.WebApp;
-            if (!document.fullscreenElement && containerRef.current?.requestFullscreen) await containerRef.current.requestFullscreen();
-            telegramApp?.requestFullscreen?.();
+            try { telegramApp?.requestFullscreen?.(); } catch { /* older Telegram clients */ }
+            if (!document.fullscreenElement && containerRef.current?.requestFullscreen) {
+                try { await containerRef.current.requestFullscreen(); } catch { /* Telegram WebView may reject DOM fullscreen */ }
+            }
+            await new Promise(resolve => setTimeout(resolve, 120));
             if (!orientation?.lock) throw new Error('orientation-lock-unavailable');
             await orientation.lock(next);
-            setIsFullscreen(true);
+            setIsFullscreen(Boolean(document.fullscreenElement) || Boolean(telegramApp));
         } catch {
             setVideoOrientation('auto');
             addToast('قفل چرخش در این مرورگر پشتیبانی نمی‌شود؛ چرخش خودکار فعال ماند.', 'error');
@@ -417,9 +418,9 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
         const target = event.target as HTMLElement;
         if (target.closest('button, input, a, [role="menu"]')) return;
 
-        revealControls();
         if (event.pointerType !== 'touch') {
-            togglePlay();
+            if (isVideo) setShowControls(current => !current);
+            else togglePlay();
             return;
         }
 
@@ -440,7 +441,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
         lastTap.current = { at: now, side };
         if (singleTapTimeout.current) clearTimeout(singleTapTimeout.current);
         singleTapTimeout.current = setTimeout(() => {
-            setShowControls(true);
+            setShowControls(current => !current);
             lastTap.current = null;
         }, 330);
     };
@@ -726,14 +727,14 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                 <div
                     className={`absolute inset-0 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 cursor-none'}`}
                     style={{ pointerEvents: showControls ? 'auto' : 'none' }}
-                    onPointerDown={revealControls}
+                    onPointerDown={isVideo ? undefined : revealControls}
                 >
                     {/* Top bar */}
                     <div data-player-controls className={`absolute inset-x-0 top-0 z-30 flex items-center justify-between gap-3 bg-gradient-to-b from-black/80 to-transparent p-3 sm:p-4 ${isVideo ? 'overflow-hidden' : ''}`}>
                         <div className="min-w-0 flex-1">
                             {isVideo && <h3 dir="auto" className="max-w-[min(52vw,28rem)] truncate text-base font-medium text-white sm:text-lg" title={cleanFileName}>{cleanFileName}</h3>}
                         </div>
-                        {hasQueue && <p data-track-counter dir="rtl" className="absolute left-1/2 top-14 -translate-x-1/2 whitespace-nowrap rounded-xl border border-white/10 bg-black/45 px-3 py-1.5 text-xs font-semibold tracking-wide text-white backdrop-blur">ترک <span className="text-primary-300">{queuePosition.toLocaleString('fa-IR')}</span> از <span className="text-primary-300">{queueLength.toLocaleString('fa-IR')}</span></p>}
+                        {hasQueue && <p data-track-counter dir="rtl" className="absolute left-1/2 top-16 z-50 -translate-x-1/2 whitespace-nowrap rounded-xl border border-white/15 bg-black/75 px-4 py-2 text-sm font-bold text-white shadow-xl backdrop-blur-md">ترک <span className="font-black text-primary-300">{queuePosition.toLocaleString('fa-IR')}</span> از <span className="font-black text-primary-300">{queueLength.toLocaleString('fa-IR')}</span></p>}
                         <div className="flex shrink-0 items-center justify-end gap-1 sm:gap-2">
                              <button
                                 onClick={() => void minimizePlayer()}
@@ -752,9 +753,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                     </div>
 
                     {/* Secondary tools stay away from the transport controls. */}
-                    <div data-player-controls data-player-tools className="absolute left-1/2 top-24 z-40 flex w-max max-w-[calc(100%-0.75rem)] -translate-x-1/2 flex-nowrap items-center justify-center gap-0.5 rounded-2xl border border-white/10 bg-black/45 p-1 shadow-xl backdrop-blur-md sm:top-24 sm:gap-1 sm:p-1.5">
-                        {isVideo && hasQueue && <button onClick={shuffleQueue} className="rounded-lg p-2 text-white/80 hover:bg-white/10" title="شافل صف پخش"><Shuffle className="h-5 w-5" /></button>}
-                        {isVideo && <button onClick={() => setRepeatMode(repeatMode === 'off' ? 'all' : repeatMode === 'all' ? 'one' : 'off')} className={`relative rounded-lg p-2 ${repeatMode !== 'off' ? 'bg-primary-500/20 text-primary-300' : 'text-white/80 hover:bg-white/10'}`} title="حالت تکرار"><Repeat2 className="h-5 w-5" />{repeatMode === 'one' && <span className="absolute -left-0.5 -top-0.5 text-[9px] font-bold">۱</span>}</button>}
+                    <div data-player-controls data-player-tools className="absolute left-1/2 top-28 z-40 flex w-max max-w-[calc(100%-0.75rem)] -translate-x-1/2 flex-nowrap items-center justify-center gap-0.5 rounded-2xl border border-white/10 bg-black/45 p-1 shadow-xl backdrop-blur-md sm:top-28 sm:gap-1 sm:p-1.5">
                         {!isVideo && <button onClick={() => setPlaylistFile(file)} className="rounded-lg p-2 text-white/80 hover:bg-white/10" title="افزودن به پلی‌لیست"><ListPlus className="h-5 w-5" /></button>}
                         {!isVideo && <button onClick={() => handleSkip(-10)} className="rounded-lg p-2 text-white/80 hover:bg-white/10" title="۱۰ ثانیه عقب"><RotateCcw className="h-5 w-5" /></button>}
                         <div className="relative">
@@ -776,7 +775,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                             </div>}
                         </div>
                         {isVideo && <button onClick={() => setAudioOnly(current => !current)} className={`p-2 rounded-lg transition-all ${audioOnly ? 'bg-primary-500/30 text-primary-300' : 'hover:bg-white/10 text-white/80'}`} title={audioOnly ? 'بازگشت به پخش ویدیو' : 'پخش فقط صدا'}><Headphones className="w-5 h-5" /></button>}
-                        {isVideo && <button onClick={() => void toggleVideoOrientation()} className={`rounded-lg p-2 transition-all ${videoOrientation !== 'auto' ? 'bg-primary-500/30 text-primary-300' : 'text-white/80 hover:bg-white/10'}`} title={videoOrientation === 'auto' ? 'چرخش خودکار؛ بعدی: افقی' : videoOrientation === 'landscape' ? 'قفل افقی؛ بعدی: عمودی' : 'قفل عمودی؛ بعدی: خودکار'}>{videoOrientation === 'landscape' ? <RectangleHorizontal className="h-5 w-5"/> : videoOrientation === 'portrait' ? <Smartphone className="h-5 w-5"/> : <RotateCw className="h-5 w-5"/>}</button>}
+                        {isVideo && <button onClick={() => void toggleVideoOrientation()} className={`rounded-lg p-2 transition-all ${videoOrientation !== 'auto' ? 'bg-primary-500/30 text-primary-300' : 'text-white/80 hover:bg-white/10'}`} title={videoOrientation === 'auto' ? 'چرخش خودکار؛ بعدی: افقی' : videoOrientation === 'landscape' ? 'قفل افقی؛ بعدی: عمودی' : 'قفل عمودی؛ بعدی: خودکار'}>{videoOrientation === 'landscape' ? <RectangleHorizontal className="h-5 w-5"/> : videoOrientation === 'portrait' ? <Smartphone className="h-5 w-5"/> : <MonitorSmartphone className="h-5 w-5"/>}</button>}
                         {isVideo && <div className="relative"><button onClick={() => window.matchMedia('(pointer: coarse)').matches ? toggleMute() : setShowVolumePopover(open => !open)} className="rounded-lg p-2 text-white/80 hover:bg-white/10" title="صدا">{isMuted || volume === 0 ? <VolumeX className="h-5 w-5"/> : <Volume2 className="h-5 w-5"/>}</button>{showVolumePopover && <div className="absolute left-1/2 top-full z-50 mt-2 flex w-36 -translate-x-1/2 items-center rounded-xl border border-white/10 bg-dark-900/95 p-3 shadow-2xl"><input type="range" min={0} max={1} step={0.05} value={isMuted ? 0 : volume} onChange={handleVolumeChange} className="h-1 w-full cursor-pointer appearance-none rounded-full bg-white/30" aria-label="شدت صدا"/></div>}</div>}
                         <button onClick={lockControls} className="rounded-lg p-2 text-white/80 hover:bg-white/10" title="قفل لمس"><LockKeyhole className="h-5 w-5"/></button>
                         {isVideo && document.pictureInPictureEnabled && <button onClick={togglePiP} className={`p-2 rounded-lg transition-all ${isPiP ? 'bg-primary-500/30 text-primary-300' : 'hover:bg-white/10 text-white/80'}`} title="تصویر در تصویر"><PictureInPicture2 className="w-5 h-5" /></button>}

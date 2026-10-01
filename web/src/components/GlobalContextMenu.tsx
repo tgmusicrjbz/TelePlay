@@ -61,9 +61,12 @@ export default function GlobalContextMenu() {
         try {
             await navigator.clipboard.writeText(text);
             setCopiedId(id);
+            setActiveContextMenu(null);
+            addToast('پیوند کپی شد.');
             setTimeout(() => setCopiedId(null), 2000);
         } catch (err) {
-                    console.error('کپی‌کردن انجام نشد:', err);
+            console.error('کپی‌کردن انجام نشد:', err);
+            addToast('کپی‌کردن انجام نشد.', 'error');
         }
     };
 
@@ -73,24 +76,26 @@ export default function GlobalContextMenu() {
     };
 
     const handleShare = async (file: TelegramFile) => {
+        setActiveContextMenu(null);
+        addToast('در حال ساخت پیوند…', 'info');
         try {
-            const { data } = await api.post<TelegramFile>(`/files/${file.id}/share`);
-            if (activeContextMenu && activeContextMenu.type === 'file') {
-                setActiveContextMenu({ ...activeContextMenu, item: data });
-            }
+            await api.post<TelegramFile>(`/files/${file.id}/share`);
+            addToast('پیوند عمومی ساخته شد.');
         } catch (error) {
             console.error('Failed to share file:', error);
+            addToast('ساخت پیوند انجام نشد.', 'error');
         }
     };
 
     const handleRevokeShare = async (file: TelegramFile) => {
+        setActiveContextMenu(null);
+        addToast('در حال لغو پیوند…', 'info');
         try {
-            const { data } = await api.delete<TelegramFile>(`/files/${file.id}/share`);
-            if (activeContextMenu && activeContextMenu.type === 'file') {
-                setActiveContextMenu({ ...activeContextMenu, item: data });
-            }
+            await api.delete<TelegramFile>(`/files/${file.id}/share`);
+            addToast('پیوند عمومی لغو شد.');
         } catch (error) {
             console.error('Failed to revoke share:', error);
+            addToast('لغو پیوند انجام نشد.', 'error');
         }
     };
 
@@ -135,10 +140,11 @@ export default function GlobalContextMenu() {
 
     const handleOfflineSave = async (file: TelegramFile) => {
         setSavingOffline(true);
+        setActiveContextMenu(null);
+        addToast('ذخیره آفلاین شروع شد…', 'info');
         try {
             await saveFileOffline(file);
             addToast('فایل برای پخش آفلاین ذخیره شد 📥');
-            setActiveContextMenu(null);
         } catch (error) {
             addToast(error instanceof Error ? error.message : 'ذخیره آفلاین انجام نشد', 'error');
         } finally { setSavingOffline(false); }
@@ -192,8 +198,8 @@ export default function GlobalContextMenu() {
                                         پخش
                                     </button>{!readOnlyWorkspace && <button className="context-menu-item w-full text-right" onClick={() => handleAction(() => setPlaylistFile(activeContextMenu.item as TelegramFile))}><ListPlus className="h-4 w-4"/> افزودن به پلی‌لیست</button>}</>
                                 )}
-                                {!readOnlyWorkspace && <><button className="context-menu-item w-full text-right" onClick={async () => { const file=activeContextMenu.item as TelegramFile; await updateFile.mutateAsync({id:file.id,is_favorite:!file.is_favorite}); addToast(file.is_favorite?'از نشان‌شده‌ها برداشته شد':'به نشان‌شده‌ها اضافه شد ⭐'); setActiveContextMenu(null); }}><Heart className={`h-4 w-4 ${(activeContextMenu.item as TelegramFile).is_favorite?'fill-current text-pink-400':''}`}/>{(activeContextMenu.item as TelegramFile).is_favorite?'برداشتن نشان':'نشان کردن'}</button>
-                                <button className="context-menu-item w-full text-right" onClick={async () => { const file=activeContextMenu.item as TelegramFile; await updateFile.mutateAsync({id:file.id,is_pinned:!file.is_pinned}); addToast(file.is_pinned?'از بالای کمد برداشته شد':'بالای کمد پین شد 📌'); setActiveContextMenu(null); }}><Pin className={`h-4 w-4 ${(activeContextMenu.item as TelegramFile).is_pinned?'fill-current text-primary-300':''}`}/>{(activeContextMenu.item as TelegramFile).is_pinned?'برداشتن پین':'پین بالای کمد'}</button></>}
+                                {!readOnlyWorkspace && <><button className="context-menu-item w-full text-right" onClick={async () => { const file=activeContextMenu.item as TelegramFile; setActiveContextMenu(null); await updateFile.mutateAsync({id:file.id,is_favorite:!file.is_favorite}); addToast(file.is_favorite?'از نشان‌شده‌ها برداشته شد':'به نشان‌شده‌ها اضافه شد ⭐'); setActiveContextMenu(null); }}><Heart className={`h-4 w-4 ${(activeContextMenu.item as TelegramFile).is_favorite?'fill-current text-pink-400':''}`}/>{(activeContextMenu.item as TelegramFile).is_favorite?'برداشتن نشان':'نشان کردن'}</button>
+                                <button className="context-menu-item w-full text-right" onClick={async () => { const file=activeContextMenu.item as TelegramFile; setActiveContextMenu(null); await updateFile.mutateAsync({id:file.id,is_pinned:!file.is_pinned}); addToast(file.is_pinned?'از بالای کمد برداشته شد':'بالای کمد پین شد 📌'); setActiveContextMenu(null); }}><Pin className={`h-4 w-4 ${(activeContextMenu.item as TelegramFile).is_pinned?'fill-current text-primary-300':''}`}/>{(activeContextMenu.item as TelegramFile).is_pinned?'برداشتن پین':'پین بالای کمد'}</button></>}
                                 {(activeContextMenu.item.file_type === 'image' || canPreviewText(activeContextMenu.item as TelegramFile)) && (
                                     <button className="context-menu-item w-full text-right" onClick={() => handleAction(() => setContentPreviewFile(activeContextMenu.item as TelegramFile))}>
                                         <Eye className="w-4 h-4" />
@@ -213,6 +219,8 @@ export default function GlobalContextMenu() {
                                 {!readOnlyWorkspace && <><hr className="border-white/[0.08] my-1" />
 
                                 <button className="context-menu-item w-full text-right" onClick={async () => {
+                                    setActiveContextMenu(null);
+                                    addToast('در حال آماده‌سازی پیوند…', 'info');
                                     const url = await ensurePublicLink(activeContextMenu.item as TelegramFile);
                                     handleCopy(url, 'stream');
                                 }}>
@@ -221,6 +229,8 @@ export default function GlobalContextMenu() {
                                 </button>
 
                                 <button className="context-menu-item w-full text-right" onClick={async () => {
+                                    setActiveContextMenu(null);
+                                    addToast('در حال آماده‌سازی پیوند…', 'info');
                                     const url = await ensurePublicLink(activeContextMenu.item as TelegramFile);
                                     const downloadUrl = url + (url.includes('?') ? '&' : '?') + 'download=1';
                                     handleCopy(downloadUrl, 'download');
@@ -278,8 +288,8 @@ export default function GlobalContextMenu() {
                     // Folder Context Menu
                     <>
                         {readOnlyWorkspace ? <p className="px-3 py-3 text-sm text-amber-200">این کمد با دسترسی فقط مشاهده باز شده است.</p> : <>
-                        <button className="context-menu-item w-full text-right" onClick={async () => { const folder=activeContextMenu.item as Folder; await updateFolder.mutateAsync({id:folder.id,is_favorite:!folder.is_favorite}); addToast(folder.is_favorite?'از نشان‌شده‌ها برداشته شد':'کشو نشان شد ⭐'); setActiveContextMenu(null); }}><Heart className={`h-4 w-4 ${(activeContextMenu.item as Folder).is_favorite?'fill-current text-pink-400':''}`}/>{(activeContextMenu.item as Folder).is_favorite?'برداشتن نشان':'نشان کردن کشو'}</button>
-                        <button className="context-menu-item w-full text-right" onClick={async () => { const folder=activeContextMenu.item as Folder; await updateFolder.mutateAsync({id:folder.id,is_pinned:!folder.is_pinned}); addToast(folder.is_pinned?'پین کشو برداشته شد':'کشو بالای کمد پین شد 📌'); setActiveContextMenu(null); }}><Pin className={`h-4 w-4 ${(activeContextMenu.item as Folder).is_pinned?'fill-current text-primary-300':''}`}/>{(activeContextMenu.item as Folder).is_pinned?'برداشتن پین':'پین بالای کمد'}</button>
+                        <button className="context-menu-item w-full text-right" onClick={async () => { const folder=activeContextMenu.item as Folder; setActiveContextMenu(null); await updateFolder.mutateAsync({id:folder.id,is_favorite:!folder.is_favorite}); addToast(folder.is_favorite?'از نشان‌شده‌ها برداشته شد':'کشو نشان شد ⭐'); setActiveContextMenu(null); }}><Heart className={`h-4 w-4 ${(activeContextMenu.item as Folder).is_favorite?'fill-current text-pink-400':''}`}/>{(activeContextMenu.item as Folder).is_favorite?'برداشتن نشان':'نشان کردن کشو'}</button>
+                        <button className="context-menu-item w-full text-right" onClick={async () => { const folder=activeContextMenu.item as Folder; setActiveContextMenu(null); await updateFolder.mutateAsync({id:folder.id,is_pinned:!folder.is_pinned}); addToast(folder.is_pinned?'پین کشو برداشته شد':'کشو بالای کمد پین شد 📌'); setActiveContextMenu(null); }}><Pin className={`h-4 w-4 ${(activeContextMenu.item as Folder).is_pinned?'fill-current text-primary-300':''}`}/>{(activeContextMenu.item as Folder).is_pinned?'برداشتن پین':'پین بالای کمد'}</button>
                         <button
                             className="context-menu-item w-full text-right"
                             onClick={() => handleAction(() => setRenameFolder(activeContextMenu.item as Folder))}

@@ -5,6 +5,7 @@ import asyncio
 from dataclasses import dataclass
 import json
 import logging
+import re
 from urllib.parse import quote, urlencode
 from urllib.request import urlopen
 
@@ -113,22 +114,55 @@ class LinkImportService:
         clicked: set[str] = set()
         found: list[dict] = []
         seen: set[int] = set()
-        for _ in range(45):
+        audio_mode = quality.lower() == "audio"
+
+        async def click_button(message, button) -> bool:
+            try:
+                if getattr(button, "callback_data", None):
+                    await self.client.request_callback_answer(
+                        chat_id="allsaverbot",
+                        message_id=message.id,
+                        callback_data=button.callback_data,
+                    )
+                else:
+                    await message.click(button.text)
+                return True
+            except (Timeout, TimeoutError):
+                return False
+            except Exception:
+                logger.debug("Downloader button click failed", exc_info=True)
+                return False
+
+        def media_kind(message) -> str | None:
+            mime = (getattr(message.document, "mime_type", "") or "").lower() if message.document else ""
+            if audio_mode:
+                return "audio" if message.audio or message.voice or mime.startswith("audio/") else None
+            if message.video or mime.startswith("video/"):
+                return "video"
+            if message.audio or message.voice or mime.startswith("audio/"):
+                return "audio"
+            if message.photo:
+                return "image"
+            return None
+
+        for _ in range(80):
             await asyncio.sleep(2)
             async for message in self.client.get_chat_history("allsaverbot", limit=8):
                 if message.id <= sent.id or message.id in seen or message.reply_markup:
                     continue
-                if message.video or message.photo:
+                kind = media_kind(message)
+                if kind:
                     seen.add(message.id)
-                    found.append({"message": message, "title": title, "type": "video" if message.video else "image"})
+                    found.append({"message": message, "title": title, "type": kind})
             if found:
                 await asyncio.sleep(3)
                 async for message in self.client.get_chat_history("allsaverbot", limit=12):
                     if message.id <= sent.id or message.id in seen or message.reply_markup:
                         continue
-                    if message.video or message.photo:
+                    kind = media_kind(message)
+                    if kind:
                         seen.add(message.id)
-                        found.append({"message": message, "title": title, "type": "video" if message.video else "image"})
+                        found.append({"message": message, "title": title, "type": kind})
                 break
             async for raw in self.client.get_chat_history("allsaverbot", limit=4):
                 if raw.id <= sent.id or not raw.reply_markup:
@@ -136,18 +170,22 @@ class LinkImportService:
                 message = await self.client.get_messages("allsaverbot", raw.id)
                 if not message.reply_markup:
                     continue
-                buttons = [button for row in message.reply_markup.inline_keyboard for button in row]
-                quality_buttons = [button for button in buttons if any(value in button.text for value in ("360", "480", "720", "1080"))]
+                buttons = [button for row in message.reply_markup.inline_keyboard for button in row if not getattr(button, "url", None)]
+                if audio_mode:
+                    audio_button = next((button for button in buttons if any(word in button.text.lower() for word in ("audio", "صوت", "mp3")) and "⏳" not in button.text), None)
+                    if audio_button and audio_button.text not in clicked and await click_button(message, audio_button):
+                        clicked.add(audio_button.text)
+                        break
+                quality_buttons = [button for button in buttons if re.search(r"\b(360|480|720|1080)p?\b", button.text, re.IGNORECASE)] if not audio_mode else []
                 candidates = quality_buttons or [button for button in buttons if not any(word in button.text.lower() for word in ("back", "بازگشت", "назад"))]
-                target = next((button for button in candidates if quality in button.text and "⏳" not in button.text), None) if quality_buttons else None
+                globe = next((button for button in buttons if ("🌏" in button.text or "🌐" in button.text) and button.text not in clicked), None)
+                target = next((button for button in candidates if quality != "auto" and quality in button.text and "⏳" not in button.text), None) if quality_buttons else None
+                target = target or globe
                 target = target or next((button for button in candidates if "⏳" not in button.text and button.text not in clicked), None)
                 if target:
-                    try:
-                        await message.click(target.text)
-                    except (Timeout, TimeoutError):
-                        pass
-                    clicked.add(target.text)
-                    break
+                    if await click_button(message, target):
+                        clicked.add(target.text)
+                        break
             async for message in self.client.get_chat_history("allsaverbot", limit=3):
                 if message.id > sent.id and message.text and not message.reply_markup and any(word in message.text.lower() for word in ("error", "ошибка", "не удалось")):
                     raise RuntimeError(message.text[:180])
@@ -174,10 +212,10 @@ class LinkImportService:
                 folder_id = folder.id
             for index, item in enumerate(items, 1):
                 copied = await item["message"].copy(settings.telegram_storage_channel_id)
-                media = copied.video or (select_best_thumbnail(copied.photo.sizes) if copied.photo else None)
+                media = copied.video or copied.audio or copied.voice or copied.document or (select_best_thumbnail(copied.photo.sizes) if copied.photo else None)
                 if media is None:
                     continue
-                suffix = ".mp4" if item["type"] == "video" else ".jpg"
+                suffix = ".mp4" if item["type"] == "video" else ".mp3" if item["type"] == "audio" else ".jpg"
                 indexed = f"_{index}" if len(items) > 1 else ""
                 stored = File(
                     user_id=user.id,
@@ -188,7 +226,7 @@ class LinkImportService:
                     file_name=sanitize_filename(f"{item['title']}{indexed}{suffix}"),
                     description=job.url,
                     file_size=getattr(media, "file_size", None) or 0,
-                    mime_type="video/mp4" if item["type"] == "video" else "image/jpeg",
+                    mime_type=(getattr(media, "mime_type", None) or ("video/mp4" if item["type"] == "video" else "audio/mpeg" if item["type"] == "audio" else "image/jpeg")),
                     file_type=item["type"],
                     duration=getattr(media, "duration", None),
                     width=getattr(media, "width", None),

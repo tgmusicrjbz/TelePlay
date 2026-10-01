@@ -47,7 +47,7 @@ class LinkImportRequest(BaseModel):
     url: str = Field(min_length=8, max_length=2048)
     folder_id: Optional[int] = None
     new_folder_name: Optional[str] = Field(default=None, max_length=255)
-    quality: Optional[str] = Field(default="720", pattern="^(360|480|720|1080)$")
+    quality: Optional[str] = Field(default="720", pattern="^(auto|audio|480|720|1080)$")
 
 
 FILE_SORT_FIELDS = {
@@ -97,7 +97,8 @@ async def import_link(
         folder = (await db.execute(select(Folder).where(Folder.id == folder_id, Folder.user_id == current_user.id))).scalar_one_or_none()
         if folder is None:
             raise HTTPException(status_code=404, detail="کشوی مقصد پیدا نشد.")
-    position = await link_importer.enqueue(ImportJob(url=payload.url.strip(), user_id=current_user.id, telegram_id=current_user.telegram_id, folder_id=folder_id, quality=payload.quality or "720", notify=True))
+    quality = "auto" if host == "instagram.com" or host.endswith(".instagram.com") else (payload.quality or "720")
+    position = await link_importer.enqueue(ImportJob(url=payload.url.strip(), user_id=current_user.id, telegram_id=current_user.telegram_id, folder_id=folder_id, quality=quality, notify=True))
     return {"message": "درخواست در صف دانلود قرار گرفت.", "queue_position": position}
 
 

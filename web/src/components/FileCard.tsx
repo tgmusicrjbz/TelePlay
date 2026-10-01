@@ -54,7 +54,7 @@ export default function FileCard({
     const token = localStorage.getItem('access_token');
     const thumbnailSource = file.thumbnail_url || (file.file_type === 'image' ? file.stream_url : null);
     const authorizedThumbnailUrl = thumbnailSource
-        ? `${thumbnailSource}${thumbnailSource.includes('?') ? '&' : '?'}token=${encodeURIComponent(token || '')}`
+        ? thumbnailSource.startsWith('blob:') ? thumbnailSource : `${thumbnailSource}${thumbnailSource.includes('?') ? '&' : '?'}token=${encodeURIComponent(token || '')}`
         : null;
     useEffect(() => setThumbnailFailed(false), [authorizedThumbnailUrl]);
 
