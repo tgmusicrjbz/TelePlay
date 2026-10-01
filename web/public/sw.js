@@ -1,5 +1,5 @@
 const CACHE_NAME = 'komod-shell-v5';
-const COVER_CACHE = 'komod-covers-v2';
+const COVER_CACHE = 'komod-covers-v3';
 const CORE_ASSETS = ['/', '/index.html', '/offline.html', '/manifest.webmanifest', '/komod.svg'];
 
 self.addEventListener('install', event => {
@@ -38,9 +38,14 @@ self.addEventListener('fetch', event => {
   if (isCoverRequest) {
     event.respondWith(
       caches.open(COVER_CACHE).then(async cache => {
-        const cached = await cache.match(request);
+        // Access tokens rotate. Cache by resource/workspace instead of the token,
+        // otherwise every refresh produces a different cache key.
+        const cacheUrl = new URL(request.url);
+        cacheUrl.searchParams.delete('token');
+        const cacheKey = new Request(cacheUrl.toString(), { method: 'GET' });
+        const cached = await cache.match(cacheKey);
         const network = fetch(request).then(response => {
-          if (response.ok) cache.put(request, response.clone());
+          if (response.ok) cache.put(cacheKey, response.clone());
           return response;
         }).catch(() => cached);
         return cached || network;

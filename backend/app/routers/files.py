@@ -14,6 +14,7 @@ from sqlalchemy import select, func, delete, asc, desc, exists
 from sqlalchemy.orm import selectinload
 from pydantic import BaseModel, Field
 from datetime import datetime
+from urllib.parse import urlparse
 
 from ..database import get_db
 from ..models import File, User, WatchProgress, Folder, Playlist
@@ -23,6 +24,7 @@ from ..telegram import delete_from_storage_channel, get_message_from_channel
 from .. import telegram
 from ..config import get_settings
 from ..media_metadata import extract_embedded_cover
+from ..downloader import ImportJob, link_importer
 from ..services import (
     escape_like, 
     sanitize_filename, 
@@ -39,6 +41,13 @@ logger = logging.getLogger(__name__)
 
 class TextContentUpdate(BaseModel):
     content: str = Field(min_length=1, max_length=1_000_000)
+
+
+class LinkImportRequest(BaseModel):
+    url: str = Field(min_length=8, max_length=2048)
+    folder_id: Optional[int] = None
+    new_folder_name: Optional[str] = Field(default=None, max_length=255)
+    quality: Optional[str] = Field(default="720", pattern="^(360|480|720|1080)$")
 
 
 FILE_SORT_FIELDS = {
@@ -63,6 +72,33 @@ def detect_upload_type(filename: str, mime_type: str | None) -> str:
     if mime.startswith("image/") or extension in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}:
         return "image"
     return "document"
+
+
+@router.post("/import-link", status_code=202)
+async def import_link(
+    payload: LinkImportRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    host = (urlparse(payload.url.strip()).hostname or "").lower()
+    if not any(host == domain or host.endswith(f".{domain}") for domain in ("youtube.com", "youtu.be", "instagram.com")):
+        raise HTTPException(status_code=400, detail="فعلاً فقط لینک یوتیوب و اینستاگرام پشتیبانی می‌شود.")
+    if not link_importer.available:
+        raise HTTPException(status_code=503, detail="دانلود از لینک هنوز روی سرور تنظیم نشده است.")
+    folder_id = payload.folder_id
+    if payload.new_folder_name and payload.new_folder_name.strip():
+        name = payload.new_folder_name.strip()
+        folder = Folder(user_id=current_user.id, parent_id=payload.folder_id, name=name)
+        db.add(folder)
+        await db.commit()
+        await db.refresh(folder)
+        folder_id = folder.id
+    elif folder_id is not None:
+        folder = (await db.execute(select(Folder).where(Folder.id == folder_id, Folder.user_id == current_user.id))).scalar_one_or_none()
+        if folder is None:
+            raise HTTPException(status_code=404, detail="کشوی مقصد پیدا نشد.")
+    position = await link_importer.enqueue(ImportJob(url=payload.url.strip(), user_id=current_user.id, telegram_id=current_user.telegram_id, folder_id=folder_id, quality=payload.quality or "720", notify=True))
+    return {"message": "درخواست در صف دانلود قرار گرفت.", "queue_position": position}
 
 
 @router.post("/upload", response_model=FileResponse, status_code=201)

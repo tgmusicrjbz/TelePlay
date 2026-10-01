@@ -93,6 +93,7 @@ export interface PlaylistSummary {
     audio_count: number;
     video_count: number;
     preview_names: string[];
+    position?: number;
     created_at: string;
     updated_at: string;
 }
@@ -150,6 +151,10 @@ api.interceptors.request.use((config) => {
     const workspace = localStorage.getItem('komod-active-workspace');
     if (workspace && !String(config.url || '').startsWith('/auth') && !String(config.url || '').startsWith('/accounts') && !String(config.url || '').startsWith('/admin')) {
         config.headers['X-Workspace-User'] = workspace;
+    }
+    const method = String(config.method || 'get').toLowerCase();
+    if (workspace && localStorage.getItem('komod-active-workspace-permission') === 'read' && !['get', 'head', 'options'].includes(method)) {
+        return Promise.reject(new Error('این کمد با دسترسی فقط مشاهده باز شده و امکان تغییر ندارد.'));
     }
     return config;
 });
@@ -229,6 +234,12 @@ api.interceptors.response.use(
                 return api(originalRequest);
             } catch (err) {
                 processQueue(err, null);
+                const responseStatus = (err as { response?: { status?: number } })?.response?.status;
+                if (!responseStatus || ![400, 401, 403].includes(responseStatus)) {
+                    // A timeout/offline response must never sign the user out. Keep
+                    // both tokens so the app can recover as soon as the network does.
+                    return Promise.reject(err);
+                }
                 localStorage.removeItem('access_token');
                 localStorage.removeItem('refresh_token');
                 localStorage.removeItem('user');
@@ -612,6 +623,19 @@ export const usePlaylists = () => useQuery<PlaylistSummary[]>({
     queryFn: async () => (await api.get<PlaylistSummary[]>('/playlists')).data,
 });
 
+export const useReorderPlaylistCatalog = () => {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async (playlistIds: number[]) => (await api.put<PlaylistSummary[]>('/playlists/reorder/catalog', { playlist_ids: playlistIds })).data,
+        onSuccess: data => queryClient.setQueryData(['playlists'], data),
+    });
+};
+
+export const useImportLink = () => useMutation({
+    mutationFn: async (payload: { url: string; folder_id?: number | null; new_folder_name?: string; quality?: '360' | '480' | '720' | '1080' }) =>
+        (await api.post<{ message: string; queue_position: number }>('/files/import-link', payload)).data,
+});
+
 export const usePlaylist = (id: number | null) => useQuery<Playlist>({
     queryKey: ['playlists', id],
     queryFn: async () => (await api.get<Playlist>(`/playlists/${id}`)).data,
@@ -712,7 +736,14 @@ export const useRevokeSession = () => {
     const queryClient = useQueryClient();
     return useMutation({ mutationFn: async (id: string) => api.delete(`/auth/sessions/${id}`), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['sessions'] }) });
 };
-export const useWorkspaces = () => useQuery({ queryKey: ['workspaces'], queryFn: async () => (await api.get<Workspace[]>('/accounts/workspaces')).data });
+export const useWorkspaces = () => useQuery({ queryKey: ['workspaces'], queryFn: async () => {
+    const spaces = (await api.get<Workspace[]>('/accounts/workspaces')).data;
+    const active = Number(localStorage.getItem('komod-active-workspace') || 0);
+    const selected = spaces.find(space => space.user_id === active);
+    if (selected) localStorage.setItem('komod-active-workspace-permission', selected.permission);
+    else localStorage.removeItem('komod-active-workspace-permission');
+    return spaces;
+} });
 export const useWorkspaceGrants = () => useQuery({ queryKey: ['workspaceGrants'], queryFn: async () => (await api.get<Workspace[]>('/accounts/grants')).data });
 export const useGrantWorkspace = () => {
     const queryClient = useQueryClient();

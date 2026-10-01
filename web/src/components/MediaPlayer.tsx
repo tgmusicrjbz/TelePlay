@@ -2,7 +2,7 @@
  * MediaPlayer - full screen video/audio player
  */
 import { useRef, useEffect, useState, useCallback } from 'react';
-import { X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipBack, SkipForward, Download, ExternalLink, AlertTriangle, Copy, PictureInPicture2, Gauge, ChevronDown, ChevronUp, Repeat2, Shuffle, Headphones, RotateCcw, RotateCw, Clock3, ListPlus, RectangleHorizontal, Smartphone, Film } from 'lucide-react';
+import { X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipBack, SkipForward, Download, ExternalLink, AlertTriangle, Copy, PictureInPicture2, Gauge, ChevronDown, ChevronUp, Repeat2, Shuffle, Headphones, RotateCcw, RotateCw, Clock3, ListPlus, RectangleHorizontal, Smartphone, Film, LockKeyhole, UnlockKeyhole } from 'lucide-react';
 import { TelegramFile, useUpdateProgress, useFile, api } from '../lib/api';
 import { useAppStore } from '../lib/store';
 
@@ -49,6 +49,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     const sleepTimeout = useRef<ReturnType<typeof setTimeout>>();
     const [audioOnly, setAudioOnly] = useState(false);
     const [videoOrientation, setVideoOrientation] = useState<'auto' | 'portrait' | 'landscape'>('auto');
+    const [controlsLocked, setControlsLocked] = useState(false);
     const [skipFeedback, setSkipFeedback] = useState<'backward' | 'forward' | null>(null);
     const [thumbnailFailed, setThumbnailFailed] = useState(false);
     const formatPlayerTime = (seconds: number) => {
@@ -183,36 +184,48 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     const toggleVideoOrientation = async () => {
         const next = videoOrientation === 'auto' ? 'landscape' : videoOrientation === 'landscape' ? 'portrait' : 'auto';
         const orientation = screen.orientation as ScreenOrientation & { lock?: (value: 'landscape' | 'portrait') => Promise<void>; unlock?: () => void };
+        setVideoOrientation(next);
         try {
             if (next === 'auto') {
                 orientation?.unlock?.();
-                setVideoOrientation('auto');
+                if (document.fullscreenElement) await document.exitFullscreen();
+                setIsFullscreen(false);
                 return;
             }
             const telegramApp = (window as Window & { Telegram?: { WebApp?: { requestFullscreen?: () => void } } }).Telegram?.WebApp;
-            telegramApp?.requestFullscreen?.();
             if (!document.fullscreenElement && containerRef.current?.requestFullscreen) await containerRef.current.requestFullscreen();
+            telegramApp?.requestFullscreen?.();
             if (!orientation?.lock) throw new Error('orientation-lock-unavailable');
             await orientation.lock(next);
-            setVideoOrientation(next);
             setIsFullscreen(true);
         } catch {
-            addToast('چرخش واقعی صفحه در این مرورگر یا نسخه تلگرام در دسترس نیست.', 'error');
+            setVideoOrientation('auto');
+            addToast('قفل چرخش در این مرورگر پشتیبانی نمی‌شود؛ چرخش خودکار فعال ماند.', 'error');
         }
     };
 
+    const lockControls = () => {
+        setControlsLocked(true);
+        setShowControls(false);
+        setShowSpeedMenu(false);
+        setShowSleepMenu(false);
+        setShowVolumePopover(false);
+    };
+
     const minimizePlayer = async () => {
+        // Update the UI first. Fullscreen/orientation APIs are unreliable in some
+        // Telegram WebViews and must never block the minimize action.
+        setMinimized(true);
         const orientation = screen.orientation as ScreenOrientation & { unlock?: () => void };
-        orientation?.unlock?.();
+        try { orientation?.unlock?.(); } catch { /* unsupported by this WebView */ }
         setVideoOrientation('auto');
-        (window as Window & { Telegram?: { WebApp?: { exitFullscreen?: () => void } } }).Telegram?.WebApp?.exitFullscreen?.();
+        try { (window as Window & { Telegram?: { WebApp?: { exitFullscreen?: () => void } } }).Telegram?.WebApp?.exitFullscreen?.(); } catch { /* optional API */ }
         try {
             if (document.fullscreenElement) await document.exitFullscreen();
         } catch {
             // Some Telegram WebViews leave fullscreen themselves after orientation unlock.
         }
         setIsFullscreen(false);
-        setMinimized(true);
     };
 
     useEffect(() => () => {
@@ -379,6 +392,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     }, [isFullscreen, onClose, error, isPlaying, isMinimized]);
 
     const revealControls = useCallback(() => {
+        if (controlsLocked) return;
         setShowControls(true);
         if (hideControlsTimeout.current) {
             clearTimeout(hideControlsTimeout.current);
@@ -389,8 +403,8 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                 setShowControls(false);
                 setShowSpeedMenu(false);
             }
-        }, 3000);
-    }, [isMinimized, showSleepMenu, showSpeedMenu, showVolumePopover]);
+        }, isVideo ? 1700 : 2800);
+    }, [controlsLocked, isMinimized, isVideo, showSleepMenu, showSpeedMenu, showVolumePopover]);
 
     const showSkipFeedback = (direction: 'backward' | 'forward') => {
         setSkipFeedback(direction);
@@ -399,6 +413,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     };
 
     const handlePlayerPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+        if (controlsLocked) return;
         const target = event.target as HTMLElement;
         if (target.closest('button, input, a, [role="menu"]')) return;
 
@@ -551,10 +566,12 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                     ? 'bottom-[calc(5rem+env(safe-area-inset-bottom))] left-0 right-0 h-20 max-h-[25vh] border-t border-white/10 bg-dark-900 shadow-2xl md:bottom-0'
                 : 'inset-0 bg-black flex items-center justify-center font-sans'
             }`}
+            data-media-kind={isVideo ? 'video' : 'audio'}
+            data-controls-locked={controlsLocked ? 'true' : 'false'}
             style={!isMinimized && !isVideo ? ({ backgroundImage: authorizedThumbnailUrl ? `linear-gradient(135deg, rgba(8,10,20,.96), rgba(38,12,54,.84)), url(${authorizedThumbnailUrl})` : 'linear-gradient(135deg, #080a14, #260c36)', backgroundPosition: 'center', backgroundSize: 'cover' }) : undefined}
             onMouseMove={!isMinimized ? revealControls : undefined}
             onPointerUp={!isMinimized ? handlePlayerPointerUp : undefined}
-            onDoubleClick={!isMinimized ? toggleFullscreen : undefined}
+            onDoubleClick={!isMinimized && !controlsLocked ? toggleFullscreen : undefined}
         >
             {/* Media Element - Always present */}
             <div className={`w-full h-full ${isMinimized ? 'hidden' : 'flex items-center justify-center'}`}>
@@ -693,8 +710,19 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                 </div>
             )}
 
+            {!isMinimized && controlsLocked && (
+                <button
+                    onClick={(event) => { event.stopPropagation(); setControlsLocked(false); setShowControls(true); }}
+                    className="absolute left-4 top-4 z-[80] flex h-12 w-12 items-center justify-center rounded-2xl border border-white/15 bg-black/65 text-white shadow-2xl backdrop-blur-md"
+                    title="باز کردن قفل لمس"
+                    aria-label="باز کردن قفل لمس"
+                >
+                    <UnlockKeyhole className="h-5 w-5" />
+                </button>
+            )}
+
             {/* Fullscreen Controls overlay */}
-            {!error && !isMinimized && (
+            {!error && !isMinimized && !controlsLocked && (
                 <div
                     className={`absolute inset-0 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 cursor-none'}`}
                     style={{ pointerEvents: showControls ? 'auto' : 'none' }}
@@ -705,7 +733,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                         <div className="min-w-0 flex-1">
                             {isVideo && <h3 dir="auto" className="max-w-[min(52vw,28rem)] truncate text-base font-medium text-white sm:text-lg" title={cleanFileName}>{cleanFileName}</h3>}
                         </div>
-                        {hasQueue && <p dir="rtl" className="absolute left-1/2 top-14 -translate-x-1/2 whitespace-nowrap rounded-xl border border-white/10 bg-black/45 px-3 py-1.5 text-xs font-semibold tracking-wide text-white backdrop-blur">ترک <span className="text-primary-300">{queuePosition.toLocaleString('fa-IR')}</span> از <span className="text-primary-300">{queueLength.toLocaleString('fa-IR')}</span></p>}
+                        {hasQueue && <p data-track-counter dir="rtl" className="absolute left-1/2 top-14 -translate-x-1/2 whitespace-nowrap rounded-xl border border-white/10 bg-black/45 px-3 py-1.5 text-xs font-semibold tracking-wide text-white backdrop-blur">ترک <span className="text-primary-300">{queuePosition.toLocaleString('fa-IR')}</span> از <span className="text-primary-300">{queueLength.toLocaleString('fa-IR')}</span></p>}
                         <div className="flex shrink-0 items-center justify-end gap-1 sm:gap-2">
                              <button
                                 onClick={() => void minimizePlayer()}
@@ -724,7 +752,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                     </div>
 
                     {/* Secondary tools stay away from the transport controls. */}
-                    <div data-player-controls className="absolute left-1/2 top-24 z-40 flex w-max max-w-[calc(100%-0.75rem)] -translate-x-1/2 flex-nowrap items-center justify-center gap-0.5 rounded-2xl border border-white/10 bg-black/45 p-1 shadow-xl backdrop-blur-md sm:top-24 sm:gap-1 sm:p-1.5">
+                    <div data-player-controls data-player-tools className="absolute left-1/2 top-24 z-40 flex w-max max-w-[calc(100%-0.75rem)] -translate-x-1/2 flex-nowrap items-center justify-center gap-0.5 rounded-2xl border border-white/10 bg-black/45 p-1 shadow-xl backdrop-blur-md sm:top-24 sm:gap-1 sm:p-1.5">
                         {isVideo && hasQueue && <button onClick={shuffleQueue} className="rounded-lg p-2 text-white/80 hover:bg-white/10" title="شافل صف پخش"><Shuffle className="h-5 w-5" /></button>}
                         {isVideo && <button onClick={() => setRepeatMode(repeatMode === 'off' ? 'all' : repeatMode === 'all' ? 'one' : 'off')} className={`relative rounded-lg p-2 ${repeatMode !== 'off' ? 'bg-primary-500/20 text-primary-300' : 'text-white/80 hover:bg-white/10'}`} title="حالت تکرار"><Repeat2 className="h-5 w-5" />{repeatMode === 'one' && <span className="absolute -left-0.5 -top-0.5 text-[9px] font-bold">۱</span>}</button>}
                         {!isVideo && <button onClick={() => setPlaylistFile(file)} className="rounded-lg p-2 text-white/80 hover:bg-white/10" title="افزودن به پلی‌لیست"><ListPlus className="h-5 w-5" /></button>}
@@ -749,6 +777,8 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                         </div>
                         {isVideo && <button onClick={() => setAudioOnly(current => !current)} className={`p-2 rounded-lg transition-all ${audioOnly ? 'bg-primary-500/30 text-primary-300' : 'hover:bg-white/10 text-white/80'}`} title={audioOnly ? 'بازگشت به پخش ویدیو' : 'پخش فقط صدا'}><Headphones className="w-5 h-5" /></button>}
                         {isVideo && <button onClick={() => void toggleVideoOrientation()} className={`rounded-lg p-2 transition-all ${videoOrientation !== 'auto' ? 'bg-primary-500/30 text-primary-300' : 'text-white/80 hover:bg-white/10'}`} title={videoOrientation === 'auto' ? 'چرخش خودکار؛ بعدی: افقی' : videoOrientation === 'landscape' ? 'قفل افقی؛ بعدی: عمودی' : 'قفل عمودی؛ بعدی: خودکار'}>{videoOrientation === 'landscape' ? <RectangleHorizontal className="h-5 w-5"/> : videoOrientation === 'portrait' ? <Smartphone className="h-5 w-5"/> : <RotateCw className="h-5 w-5"/>}</button>}
+                        {isVideo && <div className="relative"><button onClick={() => window.matchMedia('(pointer: coarse)').matches ? toggleMute() : setShowVolumePopover(open => !open)} className="rounded-lg p-2 text-white/80 hover:bg-white/10" title="صدا">{isMuted || volume === 0 ? <VolumeX className="h-5 w-5"/> : <Volume2 className="h-5 w-5"/>}</button>{showVolumePopover && <div className="absolute left-1/2 top-full z-50 mt-2 flex w-36 -translate-x-1/2 items-center rounded-xl border border-white/10 bg-dark-900/95 p-3 shadow-2xl"><input type="range" min={0} max={1} step={0.05} value={isMuted ? 0 : volume} onChange={handleVolumeChange} className="h-1 w-full cursor-pointer appearance-none rounded-full bg-white/30" aria-label="شدت صدا"/></div>}</div>}
+                        <button onClick={lockControls} className="rounded-lg p-2 text-white/80 hover:bg-white/10" title="قفل لمس"><LockKeyhole className="h-5 w-5"/></button>
                         {isVideo && document.pictureInPictureEnabled && <button onClick={togglePiP} className={`p-2 rounded-lg transition-all ${isPiP ? 'bg-primary-500/30 text-primary-300' : 'hover:bg-white/10 text-white/80'}`} title="تصویر در تصویر"><PictureInPicture2 className="w-5 h-5" /></button>}
                         <button onClick={toggleFullscreen} className="p-2 rounded-lg hover:bg-white/10 text-white/80" title={isFullscreen ? 'خروج از تمام‌صفحه' : 'تمام‌صفحه'}>{isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}</button>
                     </div>
@@ -763,7 +793,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                     </div>
 
                     {/* Bottom controls */}
-                    <div data-player-controls className="absolute bottom-0 left-0 right-0 z-30 border-t border-white/[.06] bg-gradient-to-t from-black via-black/85 to-black/20 p-4 shadow-[0_-14px_35px_rgba(0,0,0,.3)] backdrop-blur-sm sm:px-6 sm:py-5">
+                    <div data-player-controls data-player-bottom className="absolute bottom-0 left-0 right-0 z-30 border-t border-white/[.06] bg-gradient-to-t from-black via-black/85 to-black/20 p-4 shadow-[0_-14px_35px_rgba(0,0,0,.3)] backdrop-blur-sm sm:px-6 sm:py-5">
                         {/* Progress bar */}
                         <div className="mb-5 flex items-center gap-3 group/progress sm:gap-4">
                             <span dir="ltr" className="text-sm font-medium text-white/90 min-w-[50px] font-mono">{formatPlayerTime(safeCurrentTime)}</span>
@@ -786,7 +816,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                         </div>
 
                         {/* Control buttons */}
-                        <div dir="ltr" className="flex items-center justify-between gap-3">
+                        {!isVideo && <div dir="ltr" className="flex items-center justify-between gap-3">
                             {!isVideo ? <div className="flex items-center gap-1"><button disabled={!hasQueue} onClick={shuffleQueue} className="rounded-full p-2 text-white/75 hover:bg-white/10 disabled:opacity-30" title="شافل"><Shuffle className="h-5 w-5"/></button><button onClick={() => setRepeatMode(repeatMode === 'off' ? 'all' : repeatMode === 'all' ? 'one' : 'off')} className={`rounded-full p-2 ${repeatMode !== 'off' ? 'bg-primary-500/25 text-primary-200' : 'text-white/75 hover:bg-white/10'}`} title="تکرار"><Repeat2 className="h-5 w-5"/></button></div> : <div />}
                             <div className="flex items-center gap-3">
                             <div className="relative">
@@ -881,7 +911,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                                 </button>
                             </div>
                             </div>
-                        </div>
+                        </div>}
                     </div>
                 </div>
             )}

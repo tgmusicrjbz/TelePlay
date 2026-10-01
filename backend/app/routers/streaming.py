@@ -121,7 +121,7 @@ async def stream_file(
     if file.file_type == "text" or message.photo:
         return await stored_message_response(file, message, request.headers.get("range"), download)
 
-    media = message.video or message.audio or message.document
+    media = message.video or message.audio or message.voice or message.document
     file_size = getattr(media, "file_size", None) or file.file_size
     range_header = request.headers.get("range")
     from_bytes, until_bytes = parse_range_header(range_header, file_size)

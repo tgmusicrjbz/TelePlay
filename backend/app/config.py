@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     
     # Use string field to avoid JSON parsing issues with comma-separated env var
     telegram_helper_bot_tokens_str: str = Field("", alias="TELEGRAM_HELPER_BOT_TOKENS")
+    telegram_worker_session: str = Field("", alias="TELEGRAM_WORKER_SESSION")
     
     # Authorized Users (optional - comma separated IDs)
     auth_users_str: str = Field("", alias="AUTH_USERS")

@@ -93,17 +93,17 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
             >
                 {selectionMode && <button onClick={handleSelectClick} className="absolute left-0 top-0 z-10 flex h-11 w-11 items-center justify-center" aria-label={selected ? 'لغو انتخاب کشو' : 'انتخاب کشو'}><span className={`flex h-6 w-6 items-center justify-center rounded-md border ${selected ? 'border-primary-400 bg-primary-500 text-white' : 'border-white/30 bg-dark-900/90'}`}>{selected && <Check className="h-4 w-4"/>}</span></button>}
                 <div 
-                    className={`w-12 h-12 rounded-lg flex items-center justify-center shrink-0 border transition-colors
+                    className={`relative w-12 h-12 rounded-lg flex items-center justify-center shrink-0 border transition-colors
                         ${selected 
                             ? 'bg-primary-500/20 border-primary-500/40' 
                             : 'bg-primary-500/10 border-primary-500/20 group-hover:bg-primary-500/20'}`}
                 >
                     <FolderIcon className={`w-6 h-6 transition-colors ${selected ? 'text-primary-300' : 'text-primary-400 group-hover:text-primary-300'}`} />
-                    
+                    {(folder.is_pinned || folder.is_favorite) && <span className="absolute -right-1 -top-1 flex items-center gap-0.5 rounded-full border border-white/10 bg-dark-900/95 p-1 shadow-lg">{folder.is_pinned && <Pin className="h-3 w-3 fill-current text-primary-300"/>}{folder.is_favorite && <Star className="h-3 w-3 fill-current text-amber-300"/>}</span>}
                 </div>
 
                 <div className="flex-1 min-w-0">
-                    <p className={`flex items-center gap-1.5 font-medium truncate text-sm transition-colors ${selected ? 'text-primary-300' : 'text-white group-hover:text-primary-300'}`}>{folder.is_pinned && <Pin className="h-3.5 w-3.5 shrink-0 fill-current text-primary-300"/>}{folder.is_favorite && <Star className="h-3.5 w-3.5 shrink-0 fill-current text-amber-300"/>}<span className="truncate">{folder.name}</span></p>
+                    <p className={`flex items-center gap-1.5 font-medium truncate text-sm transition-colors ${selected ? 'text-primary-300' : 'text-white group-hover:text-primary-300'}`}><span className="truncate">{folder.name}</span></p>
                     <p className="text-xs text-dark-400 mt-0.5">
                         {folder.file_count.toLocaleString('fa-IR')} فایل
                     </p>
@@ -147,13 +147,13 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
         >
             <div className={`flex items-start justify-between ${dense ? 'mb-2' : 'mb-3'}`}>
                 <div 
-                    className={`w-10 h-10 rounded-lg flex items-center justify-center border group-hover:scale-110 transition-all duration-300
+                    className={`relative w-10 h-10 rounded-lg flex items-center justify-center border group-hover:scale-110 transition-all duration-300
                         ${selected 
                             ? 'bg-gradient-to-br from-primary-500/20 to-primary-500/10 border-primary-500/40' 
                             : 'bg-gradient-to-br from-primary-500/10 to-primary-500/5 border-primary-500/20 group-hover:border-primary-500/30'}`}
                 >
                     <FolderIcon className={`w-5 h-5 transition-colors ${selected ? 'text-primary-300' : 'text-primary-400'}`} />
-                    
+                    {(folder.is_pinned || folder.is_favorite) && <span className="absolute -right-1 -top-1 flex items-center gap-0.5 rounded-full border border-white/10 bg-dark-900/95 p-0.5 shadow-lg">{folder.is_pinned && <Pin className="h-2.5 w-2.5 fill-current text-primary-300"/>}{folder.is_favorite && <Star className="h-2.5 w-2.5 fill-current text-amber-300"/>}</span>}
                 </div>
                 <div className="flex items-center gap-1">
                 {selectionMode && <button onClick={handleSelectClick} className="absolute left-0 top-0 z-20 flex h-11 w-11 items-center justify-center" aria-label={selected ? 'لغو انتخاب کشو' : 'انتخاب کشو'}><span className={`flex h-6 w-6 items-center justify-center rounded-md border ${selected ? 'border-primary-400 bg-primary-500 text-white' : 'border-white/30 bg-dark-900/90'}`}>{selected && <Check className="h-4 w-4"/>}</span></button>}
@@ -175,7 +175,7 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
             </div>
 
             <p className={`flex items-center gap-1.5 font-medium text-sm truncate transition-colors ${selected ? 'text-primary-300' : 'text-white group-hover:text-primary-300'}`} title={folder.name}>
-                {folder.is_pinned && <Pin className="h-3.5 w-3.5 shrink-0 fill-current text-primary-300"/>}{folder.is_favorite && <Star className="h-3.5 w-3.5 shrink-0 fill-current text-amber-300"/>}<span className="truncate">{folder.name}</span>
+                <span className="truncate">{folder.name}</span>
             </p>
             <p className="text-xs text-dark-500 mt-1">
                 {folder.file_count.toLocaleString('fa-IR')} فایل

@@ -11,7 +11,7 @@ from ..database import get_db
 from ..models import File, Playlist, PlaylistItem, User
 from ..schemas import (
     FileResponse, PlaylistAddItems, PlaylistCreate, PlaylistItemResponse,
-    PlaylistReorder, PlaylistResponse, PlaylistSummary, PlaylistUpdate,
+    PlaylistCatalogReorder, PlaylistReorder, PlaylistResponse, PlaylistSummary, PlaylistUpdate,
 )
 from ..services import add_urls_to_file
 
@@ -38,6 +38,7 @@ def _playlist_response(playlist: Playlist) -> PlaylistResponse:
         audio_count=sum(item.file.file_type == "audio" for item in ordered),
         video_count=sum(item.file.file_type == "video" for item in ordered),
         preview_names=[item.file.file_name for item in ordered[:2]],
+        position=playlist.position,
         created_at=playlist.created_at,
         updated_at=playlist.updated_at,
         items=[PlaylistItemResponse(id=item.id, position=index, added_at=item.added_at, file=_file_response(item.file)) for index, item in enumerate(ordered)],
@@ -62,7 +63,7 @@ async def list_playlists(db: AsyncSession = Depends(get_db), current_user: User 
         select(Playlist)
         .where(Playlist.user_id == current_user.id)
         .options(selectinload(Playlist.items).selectinload(PlaylistItem.file).selectinload(File.watch_progress), selectinload(Playlist.cover_file))
-        .order_by(Playlist.updated_at.desc(), Playlist.id.desc())
+        .order_by(Playlist.position.asc(), Playlist.updated_at.desc(), Playlist.id.desc())
     )).scalars().unique().all()
     return [PlaylistSummary(**_playlist_response(playlist).model_dump(exclude={"items"})) for playlist in playlists]
 
@@ -75,10 +76,25 @@ async def create_playlist(payload: PlaylistCreate, db: AsyncSession = Depends(ge
     duplicate = (await db.execute(select(Playlist.id).where(Playlist.user_id == current_user.id, func.lower(Playlist.name) == name.lower()))).scalar_one_or_none()
     if duplicate:
         raise HTTPException(status_code=409, detail="A playlist with this name already exists")
-    playlist = Playlist(user_id=current_user.id, name=name, description=(payload.description or "").strip() or None)
+    last_position = (await db.execute(select(func.coalesce(func.max(Playlist.position), -1)).where(Playlist.user_id == current_user.id))).scalar_one()
+    playlist = Playlist(user_id=current_user.id, name=name, description=(payload.description or "").strip() or None, position=last_position + 1)
     db.add(playlist)
     await db.commit()
     return _playlist_response(await _owned_playlist(db, playlist.id, current_user.id))
+
+
+@router.put("/reorder/catalog", response_model=list[PlaylistSummary])
+async def reorder_playlist_catalog(payload: PlaylistCatalogReorder, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    playlists = (await db.execute(select(Playlist).where(Playlist.user_id == current_user.id))).scalars().all()
+    current_ids = {playlist.id for playlist in playlists}
+    if len(payload.playlist_ids) != len(set(payload.playlist_ids)) or set(payload.playlist_ids) != current_ids:
+        raise HTTPException(status_code=400, detail="ترتیب باید همه پلی‌لیست‌ها را دقیقاً یک بار داشته باشد.")
+    by_id = {playlist.id: playlist for playlist in playlists}
+    for position, playlist_id in enumerate(payload.playlist_ids):
+        by_id[playlist_id].position = position
+    await db.commit()
+    ordered = [await _owned_playlist(db, playlist_id, current_user.id) for playlist_id in payload.playlist_ids]
+    return [PlaylistSummary(**_playlist_response(playlist).model_dump(exclude={"items"})) for playlist in ordered]
 
 
 @router.get("/{playlist_id}", response_model=PlaylistResponse)

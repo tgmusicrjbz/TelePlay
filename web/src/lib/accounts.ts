@@ -21,6 +21,7 @@ export function saveAuthenticatedAccount(auth: AuthResponse): void {
     localStorage.setItem('access_token', auth.access_token);
     localStorage.setItem('refresh_token', auth.refresh_token);
     localStorage.removeItem('komod-active-workspace');
+    localStorage.removeItem('komod-active-workspace-permission');
 }
 
 export function syncCurrentAccount(user: User): void {
@@ -34,6 +35,7 @@ export function activateAccount(account: SavedAccount): void {
     localStorage.setItem('access_token', account.accessToken);
     if (account.refreshToken) localStorage.setItem('refresh_token', account.refreshToken); else localStorage.removeItem('refresh_token');
     localStorage.removeItem('komod-active-workspace');
+    localStorage.removeItem('komod-active-workspace-permission');
     localStorage.setItem('komod-manual-account', String(account.telegramId));
     window.location.href = '/';
 }

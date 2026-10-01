@@ -3,10 +3,11 @@ import { X, CheckCircle, AlertCircle, Info } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 
 export default function Toasts() {
-    const { toasts, removeToast } = useAppStore();
+    const { toasts, removeToast, isPlayerMinimized, previewFile } = useAppStore();
+    const playerVisible = isPlayerMinimized && previewFile && (previewFile.file_type === 'audio' || previewFile.file_type === 'video');
 
     return (
-        <div className="fixed bottom-[calc(env(safe-area-inset-bottom)+168px)] right-4 z-[160] flex flex-col gap-2 pointer-events-none md:bottom-[calc(env(safe-area-inset-bottom)+88px)]">
+        <div className={`fixed right-3 z-[160] flex max-w-[calc(100vw-1.5rem)] flex-col gap-2 pointer-events-none md:right-5 ${playerVisible ? 'bottom-[calc(env(safe-area-inset-bottom)+148px)] md:bottom-24' : 'bottom-[calc(env(safe-area-inset-bottom)+72px)] md:bottom-3'}`}>
             {toasts.map((toast) => (
                 <ToastItem key={toast.id} toast={toast} onDismiss={() => removeToast(toast.id)} />
             ))}

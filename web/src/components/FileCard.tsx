@@ -1,6 +1,7 @@
 /**
  * FileCard component - displays a single file in grid or list view
  */
+import { useEffect, useState } from 'react';
 import { Play, MoreVertical, Film, Music, FileText, Image, Check, Star, Pin } from 'lucide-react';
 import { TelegramFile, formatFileSize, formatDuration, useUpdateFile } from '../lib/api';
 import { useAppStore } from '../lib/store';
@@ -24,6 +25,7 @@ export default function FileCard({
 }: FileCardProps) {
     const { activeContextMenu, setActiveContextMenu, addToast } = useAppStore();
     const updateFile = useUpdateFile();
+    const [thumbnailFailed, setThumbnailFailed] = useState(false);
     const toggleFavorite = async (event: React.MouseEvent) => {
         event.stopPropagation();
         await updateFile.mutateAsync({ id: file.id, is_favorite: !file.is_favorite });
@@ -54,6 +56,9 @@ export default function FileCard({
     const authorizedThumbnailUrl = thumbnailSource
         ? `${thumbnailSource}${thumbnailSource.includes('?') ? '&' : '?'}token=${encodeURIComponent(token || '')}`
         : null;
+    useEffect(() => setThumbnailFailed(false), [authorizedThumbnailUrl]);
+
+    const fallbackThumbnail = (large = false) => <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-gradient-to-br from-primary-500/25 via-dark-900 to-pink-500/20"><div className="absolute -left-6 -top-6 h-20 w-20 rounded-full bg-primary-400/10 blur-2xl"/><div className="absolute -bottom-7 -right-5 h-20 w-20 rounded-full bg-pink-400/10 blur-2xl"/><span className={`relative flex items-center justify-center rounded-2xl border border-white/10 bg-black/20 text-primary-200 shadow-xl ${large ? 'h-16 w-16' : 'h-10 w-10'}`}>{getIcon()}</span></div>;
 
     const getIcon = () => {
         switch (file.file_type) {
@@ -91,10 +96,10 @@ export default function FileCard({
             {file.is_pinned && <span className="absolute left-10 top-2 z-10 text-primary-300" title="پین‌شده"><Pin className="h-3.5 w-3.5 fill-current"/></span>}
             <button onClick={toggleFavorite} disabled={updateFile.isPending} className={`absolute right-2 top-2 z-10 rounded-full p-1.5 ${file.is_favorite ? 'bg-amber-400/15 text-amber-300' : 'text-dark-500 opacity-0 group-hover:opacity-100'}`} title={file.is_favorite ? 'برداشتن نشان' : 'نشان کردن'}><Star className={`h-3.5 w-3.5 ${file.is_favorite ? 'fill-current' : ''}`}/></button>
                 <div className="w-12 h-12 rounded-lg bg-dark-800/80 flex items-center justify-center overflow-hidden shrink-0 border border-white/[0.05]">
-                    {authorizedThumbnailUrl ? (
-                        <img src={authorizedThumbnailUrl} alt={file.file_name} className="w-full h-full object-cover" />
+                    {authorizedThumbnailUrl && !thumbnailFailed ? (
+                        <img src={authorizedThumbnailUrl} alt={file.file_name} className="w-full h-full object-cover" onError={() => setThumbnailFailed(true)} />
                     ) : (
-                        getIcon()
+                        fallbackThumbnail()
                     )}
                 </div>
 
@@ -162,16 +167,14 @@ export default function FileCard({
             {file.is_pinned && <span className="absolute left-10 top-2 z-20 rounded-full bg-dark-950/75 p-1.5 text-primary-300" title="پین‌شده"><Pin className="h-3.5 w-3.5 fill-current"/></span>}
             <button onClick={toggleFavorite} disabled={updateFile.isPending} className={`absolute right-2 top-2 z-20 flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-dark-950/75 backdrop-blur ${file.is_favorite ? 'text-amber-300' : 'text-white/65 opacity-0 group-hover:opacity-100'}`} title={file.is_favorite ? 'برداشتن نشان' : 'نشان کردن'}><Star className={`h-4 w-4 ${file.is_favorite ? 'fill-current' : ''}`}/></button>
             <div className={`aspect-video rounded-lg ${dense ? 'mb-2' : 'mb-3'} overflow-hidden relative border ${selected ? 'border-primary-500/20' : 'border-white/[0.05]'} bg-dark-900/50`}>
-                {authorizedThumbnailUrl ? (
+                {authorizedThumbnailUrl && !thumbnailFailed ? (
                     <>
-                        <img src={authorizedThumbnailUrl} alt={file.file_name} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
+                        <img src={authorizedThumbnailUrl} alt={file.file_name} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" onError={() => setThumbnailFailed(true)} />
                         {/* Gradient overlay */}
                         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
                     </>
                 ) : (
-                    <div className="w-full h-full flex items-center justify-center">
-                        {getIcon()}
-                    </div>
+                    fallbackThumbnail(true)
                 )}
 
                 {/* Progress Bar */}

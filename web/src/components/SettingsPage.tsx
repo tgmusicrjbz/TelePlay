@@ -37,7 +37,7 @@ export default function SettingsPage() {
             try { await revokeSession.mutateAsync(currentSession.id); } catch { /* credentials are cleared below */ }
         }
         if (user) forgetAccount(user.telegram_id);
-        ['access_token', 'refresh_token', 'user', 'komod-active-workspace', 'komod-manual-account'].forEach(key => localStorage.removeItem(key));
+        ['access_token', 'refresh_token', 'user', 'komod-active-workspace', 'komod-active-workspace-permission', 'komod-manual-account'].forEach(key => localStorage.removeItem(key));
         const next = savedAccounts()[0];
         if (next) activateAccount(next); else window.location.href = '/login';
     };
@@ -45,8 +45,14 @@ export default function SettingsPage() {
     const displayName = user?.display_name || [user?.first_name, user?.last_name].filter(Boolean).join(' ') || 'کاربر کمد';
     const activeWorkspace = Number(localStorage.getItem('komod-active-workspace') || user?.id || 0);
     const switchWorkspace = (id: number) => {
-        if (id === user?.id) localStorage.removeItem('komod-active-workspace');
-        else localStorage.setItem('komod-active-workspace', String(id));
+        const selected = workspaces.find(space => space.user_id === id);
+        if (id === user?.id) {
+            localStorage.removeItem('komod-active-workspace');
+            localStorage.removeItem('komod-active-workspace-permission');
+        } else {
+            localStorage.setItem('komod-active-workspace', String(id));
+            localStorage.setItem('komod-active-workspace-permission', selected?.permission || 'read');
+        }
         window.location.href = '/';
     };
     const saveGrant = async (telegramId: number, permission: Permission) => {

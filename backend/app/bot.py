@@ -25,6 +25,7 @@ from .models import User, File, Folder, LoginCode, Playlist, PlaylistItem, BotUs
 from .config import get_settings
 from .auth import create_access_token
 from .services import escape_like, select_best_thumbnail
+from .downloader import ImportJob, link_importer
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -1130,7 +1131,7 @@ async def logout_all_command(client, message: Message):
 
 # ============== File Handler ==============
 
-@tg_client.on_message(filters.private & (filters.video | filters.audio | filters.document | filters.photo))
+@tg_client.on_message(filters.private & (filters.video | filters.audio | filters.voice | filters.document | filters.photo))
 async def handle_file(client, message: Message):
     """Handle uploaded files - forward to channel and save to DB."""
     # Get or create user
@@ -1149,6 +1150,9 @@ async def handle_file(client, message: Message):
     elif message.audio:
         media = message.audio
         file_type = "audio"
+    elif message.voice:
+        media = message.voice
+        file_type = "audio"
     elif message.document:
         media = message.document
         file_type = "image" if (media.mime_type or "").startswith("image/") else "document"
@@ -1163,20 +1167,20 @@ async def handle_file(client, message: Message):
     try:
         # Forward to storage channel
         forwarded = await forward_to_storage_channel(message)
-        stored_media = forwarded.video or forwarded.audio or forwarded.document
+        stored_media = forwarded.video or forwarded.audio or forwarded.voice or forwarded.document
         if forwarded.photo:
             stored_media = select_best_thumbnail(forwarded.photo.sizes)
         if stored_media is not None:
             media = stored_media
         
         # Extract file info
-        raw_filename = getattr(media, "file_name", None) or (f"photo_{message.id}.jpg" if message.photo else f"{file_type}_{message.id}")
+        raw_filename = getattr(media, "file_name", None) or (f"photo_{message.id}.jpg" if message.photo else f"voice_{message.id}.ogg" if message.voice else f"{file_type}_{message.id}")
         file_info = {
             "file_id": media.file_id,
             "file_unique_id": media.file_unique_id,
             "file_name": sanitize_filename(raw_filename),
             "file_size": media.file_size,
-            "mime_type": getattr(media, "mime_type", None) or ("image/jpeg" if message.photo else None),
+            "mime_type": getattr(media, "mime_type", None) or ("image/jpeg" if message.photo else "audio/ogg" if message.voice else None),
             "duration": getattr(media, "duration", None),
             "width": getattr(media, "width", None),
             "height": getattr(media, "height", None),
@@ -1227,6 +1231,27 @@ async def handle_file(client, message: Message):
     except Exception as e:
         logger.exception("Telegram upload failed for user %s: %s", message.from_user.id, e)
         await status_msg.edit("❌ فایل ذخیره نشد؛ دوباره تلاش کن.")
+
+
+@tg_client.on_message(filters.private & filters.regex(r"https?://(?:www\.)?(?:youtube\.com|youtu\.be|instagram\.com)/"), group=-1)
+async def handle_import_link(client, message: Message):
+    """Queue supported social links without blocking the bot conversation."""
+    message.stop_propagation()
+    user = await get_or_create_user(message.from_user.id, message.from_user.username, message.from_user.first_name, message.from_user.last_name)
+    if not link_importer.available:
+        await message.reply("⚙️ دانلود از لینک هنوز روی سرور تنظیم نشده. متغیر TELEGRAM_WORKER_SESSION باید اضافه شود.")
+        return
+    match = re.search(r"https?://(?:www\.)?(?:youtube\.com|youtu\.be|instagram\.com)/\S+", message.text or "", re.IGNORECASE)
+    if not match:
+        return
+    url = match.group(0).rstrip(".,;!?)]}>'\"")
+    try:
+        position = await link_importer.enqueue(ImportJob(url=url, user_id=user.id, telegram_id=user.telegram_id, folder_id=None, notify=True, default_folder=True))
+        queue_text = f" جایگاه فعلی: {to_persian_digits(str(position))}" if position > 1 else ""
+        await message.reply(f"📥 درخواستت در صف دانلود قرار گرفت؛ لازم نیست اینجا منتظر بمونی. آماده که شد خبرت می‌کنم.{queue_text}")
+    except Exception as error:
+        logger.exception("Could not enqueue link import: %s", error)
+        await message.reply("❌ ثبت لینک در صف انجام نشد؛ کمی بعد دوباره تلاش کن.")
 
 
 @tg_client.on_message(filters.private & filters.text & ~filters.regex(r"^/"))

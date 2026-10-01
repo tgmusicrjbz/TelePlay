@@ -8,6 +8,7 @@ import MediaPlayer from './components/MediaPlayer';
 import ContentPreview from './components/ContentPreview';
 import AddToPlaylistDialog from './components/AddToPlaylistDialog';
 import FileDetailsSheet from './components/FileDetailsSheet';
+import OfflineDownloadProgressPanel from './components/OfflineDownloadProgress';
 import { saveAuthenticatedAccount } from './lib/accounts';
 
 function AuthCallback() {
@@ -340,6 +341,9 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
         );
     }
 
+    const authStatus = (error as { response?: { status?: number } } | null)?.response?.status;
+    if (error && !authStatus) return <>{children}</>;
+
     if (error) {
         return (
             <div dir="rtl" className="min-h-screen flex items-center justify-center bg-dark-950 p-4">
@@ -381,6 +385,7 @@ function App() {
                             <ContentPreview />
                             <AddToPlaylistDialog />
                             <FileDetailsSheet />
+                            <OfflineDownloadProgressPanel />
                             <FileBrowser />
                         </ProtectedRoute>
                     }

@@ -94,6 +94,8 @@ async def init_db():
         )
         if "cover_file_id" not in playlist_columns:
             await conn.execute(text("ALTER TABLE playlists ADD COLUMN cover_file_id INTEGER REFERENCES files(id) ON DELETE SET NULL"))
+        if "position" not in playlist_columns:
+            await conn.execute(text("ALTER TABLE playlists ADD COLUMN position INTEGER NOT NULL DEFAULT 0"))
         if url.drivername.startswith("postgresql"):
             await conn.execute(text("ALTER TABLE playlist_items DROP CONSTRAINT IF EXISTS uq_playlist_file"))
         folder_columns = await conn.run_sync(

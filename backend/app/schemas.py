@@ -160,6 +160,10 @@ class PlaylistReorder(BaseModel):
     file_ids: Optional[List[int]] = Field(default=None, min_length=1, max_length=500)
 
 
+class PlaylistCatalogReorder(BaseModel):
+    playlist_ids: List[int] = Field(min_length=1, max_length=500)
+
+
 class PlaylistSummary(BaseModel):
     id: int
     name: str
@@ -172,6 +176,7 @@ class PlaylistSummary(BaseModel):
     audio_count: int = 0
     video_count: int = 0
     preview_names: List[str] = Field(default_factory=list)
+    position: int = 0
     created_at: datetime
     updated_at: datetime
 
