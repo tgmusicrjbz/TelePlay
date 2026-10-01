@@ -1132,8 +1132,7 @@ async def logout_all_command(client, message: Message):
 
 # ============== File Handler ==============
 
-@tg_client.on_message(filters.private & (filters.video | filters.audio | filters.voice | filters.document | filters.photo))
-async def handle_file(client, message: Message):
+async def _handle_file_impl(client, message: Message):
     """Handle uploaded files - forward to channel and save to DB."""
     # Get or create user
     user = await get_or_create_user(
@@ -1238,6 +1237,18 @@ async def handle_file(client, message: Message):
     except Exception as e:
         logger.exception("Telegram upload failed for user %s: %s", message.from_user.id, e)
         await status_msg.edit("❌ فایل ذخیره نشد؛ دوباره تلاش کن.")
+
+
+@tg_client.on_message(filters.private & (filters.video | filters.audio | filters.voice | filters.document | filters.photo))
+async def handle_file(client, message: Message):
+    """Keep upload failures visible even when they happen before the progress message."""
+    try:
+        await _handle_file_impl(client, message)
+    except Exception as error:
+        user_id = getattr(getattr(message, "from_user", None), "id", "unknown")
+        logger.exception("Telegram upload handler failed before processing for user %s: %s", user_id, error)
+        with contextlib.suppress(Exception):
+            await message.reply("❌ نتونستم فایل رو پردازش کنم. چند لحظه دیگه دوباره امتحان کن.")
 
 
 @tg_client.on_message(filters.private & filters.regex(r"https?://(?:www\.)?(?:youtube\.com|youtu\.be|instagram\.com)/"), group=-1)

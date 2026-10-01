@@ -44,7 +44,11 @@ export default function PwaManager() {
         let refreshing = false;
         const register = async () => {
             try {
-                const registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+                const registration = await navigator.serviceWorker.register('/sw.js', {
+                    scope: '/',
+                    updateViaCache: 'none',
+                });
+                await registration.update();
                 if (registration.waiting) setWaitingWorker(registration.waiting);
                 registration.addEventListener('updatefound', () => {
                     const worker = registration.installing;
@@ -53,7 +57,16 @@ export default function PwaManager() {
                     });
                 });
                 const timer = window.setInterval(() => registration.update(), 60 * 60 * 1000);
-                return () => window.clearInterval(timer);
+                const checkForUpdate = () => {
+                    if (document.visibilityState === 'visible') void registration.update();
+                };
+                document.addEventListener('visibilitychange', checkForUpdate);
+                window.addEventListener('focus', checkForUpdate);
+                return () => {
+                    window.clearInterval(timer);
+                    document.removeEventListener('visibilitychange', checkForUpdate);
+                    window.removeEventListener('focus', checkForUpdate);
+                };
             } catch (error) {
                 console.error('Service worker registration failed', error);
             }

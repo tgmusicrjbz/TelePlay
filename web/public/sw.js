@@ -1,4 +1,4 @@
-const CACHE_NAME = 'komod-shell-v5';
+const CACHE_NAME = 'komod-shell-v6';
 const COVER_CACHE = 'komod-covers-v3';
 const CORE_ASSETS = ['/', '/index.html', '/offline.html', '/manifest.webmanifest', '/komod.svg'];
 
