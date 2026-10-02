@@ -5,7 +5,10 @@ import asyncio
 from dataclasses import dataclass
 import json
 import logging
+from pathlib import Path
 import re
+import tempfile
+import time
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
@@ -66,19 +69,25 @@ class LinkImportService:
         return bool(settings.telegram_worker_session)
 
     async def start(self) -> None:
-        if not self.available or self.client is not None:
+        if not self.available:
             return
-        self.client = Client(
-            "komod-worker",
-            api_id=settings.telegram_api_id,
-            api_hash=settings.telegram_api_hash,
-            session_string=settings.telegram_worker_session,
-            in_memory=True,
-            no_updates=True,
-        )
-        await self.client.start()
-        self.task = asyncio.create_task(self._run(), name="link-import-worker")
-        logger.info("Background link importer started")
+        if self.client is None:
+            self.client = Client(
+                "komod-worker",
+                api_id=settings.telegram_api_id,
+                api_hash=settings.telegram_api_hash,
+                session_string=settings.telegram_worker_session,
+                in_memory=True,
+                no_updates=True,
+            )
+            await self.client.start()
+        if self.task is None or self.task.done():
+            if self.task is not None and not self.task.cancelled():
+                error = self.task.exception()
+                if error is not None:
+                    logger.error("Restarting failed link-import worker: %s", error)
+            self.task = asyncio.create_task(self._run(), name="link-import-worker")
+            logger.info("Background link importer started")
 
     async def stop(self) -> None:
         if self.task:
@@ -92,7 +101,7 @@ class LinkImportService:
     async def enqueue(self, job: ImportJob) -> int:
         if not self.available:
             raise RuntimeError("TELEGRAM_WORKER_SESSION is not configured")
-        if self.client is None:
+        if self.client is None or self.task is None or self.task.done():
             await self.start()
         await self.queue.put(job)
         return self.queue.qsize()
@@ -101,16 +110,21 @@ class LinkImportService:
         while True:
             job = await self.queue.get()
             try:
+                if job.notify:
+                    await self._notify(job, "⏳ نوبت لینک تو رسید؛ دارم فایل اصلی رو آماده می‌کنم…")
                 items = await self._download(job.url, job.quality)
                 saved = await self._store(job, items)
+                if not saved:
+                    raise RuntimeError("هیچ فایل قابل ذخیره‌ای در پاسخ پیدا نشد")
                 if job.notify:
-                    await self._notify(job, f"✅ دانلود آماده شد؛ {len(saved)} فایل داخل کمدت ذخیره شد.")
+                    count = str(len(saved)).translate(str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹"))
+                    await self._notify(job, f"✅ آماده شد! {count} فایل توی کمدت قرار گرفت.")
             except asyncio.CancelledError:
                 raise
             except Exception as error:
                 logger.exception("Link import failed for %s", job.url)
                 if job.notify:
-                    await self._notify(job, f"❌ ذخیره لینک انجام نشد: {str(error)[:180]}")
+                    await self._notify(job, "❌ این لینک آماده نشد. ممکنه پست خصوصی، حذف‌شده یا موقتاً خارج از دسترس باشه؛ کمی بعد دوباره امتحانش کن.")
             finally:
                 self.queue.task_done()
 
@@ -118,6 +132,7 @@ class LinkImportService:
         if self.client is None:
             raise RuntimeError("Import worker is unavailable")
         title = sanitize_filename(await asyncio.to_thread(_oembed_title, url))
+        is_instagram = "instagram.com" in url.lower()
         sent = await self.client.send_message("allsaverbot", url)
         clicked: set[str] = set()
         found: list[dict] = []
@@ -149,29 +164,34 @@ class LinkImportService:
                 return "video"
             if message.audio or message.voice or mime.startswith("audio/"):
                 return "audio"
-            if message.photo:
+            # YouTube download bots commonly send the thumbnail first. It must
+            # never be mistaken for the requested video. Instagram photos are
+            # real carousel items and should be preserved.
+            if message.photo and is_instagram:
                 return "image"
             return None
 
-        for _ in range(80):
+        started_at = time.monotonic()
+        last_media_at: float | None = None
+        while time.monotonic() - started_at < 180:
             await asyncio.sleep(2)
-            async for message in self.client.get_chat_history("allsaverbot", limit=8):
+            received_now = 0
+            async for message in self.client.get_chat_history("allsaverbot", limit=60):
                 if message.id <= sent.id or message.id in seen or message.reply_markup:
                     continue
                 kind = media_kind(message)
                 if kind:
                     seen.add(message.id)
                     found.append({"message": message, "title": title, "type": kind})
-            if found:
-                await asyncio.sleep(3)
-                async for message in self.client.get_chat_history("allsaverbot", limit=12):
-                    if message.id <= sent.id or message.id in seen or message.reply_markup:
-                        continue
-                    kind = media_kind(message)
-                    if kind:
-                        seen.add(message.id)
-                        found.append({"message": message, "title": title, "type": kind})
+                    received_now += 1
+            if received_now:
+                last_media_at = time.monotonic()
+            # Albums may arrive one item at a time. Wait for a quiet window
+            # after the latest item instead of stopping after the first result.
+            if found and last_media_at is not None and time.monotonic() - last_media_at >= (10 if is_instagram else 6):
                 break
+            if found:
+                continue
             async for raw in self.client.get_chat_history("allsaverbot", limit=4):
                 if raw.id <= sent.id or not raw.reply_markup:
                     continue
@@ -199,7 +219,32 @@ class LinkImportService:
                     raise RuntimeError(message.text[:180])
         if not found:
             raise TimeoutError("زمان دریافت فایل از سرویس دانلود تمام شد")
-        return found
+        return sorted(found, key=lambda item: item["message"].id)
+
+    async def _copy_to_storage(self, message, item_type: str, filename: str):
+        """Copy server-side when possible; fall back to bot re-upload.
+
+        The Telegram account behind TELEGRAM_WORKER_SESSION does not need to be
+        a member of the storage channel when the fallback is used.
+        """
+        try:
+            return await message.copy(settings.telegram_storage_channel_id)
+        except Exception:
+            logger.warning("Worker could not copy media to storage; using bot upload fallback", exc_info=True)
+        if telegram.tg_client is None:
+            raise RuntimeError("ربات ذخیره‌سازی در دسترس نیست")
+        with tempfile.TemporaryDirectory(prefix="komod-link-") as temp_dir:
+            target = str(Path(temp_dir) / filename)
+            downloaded = await self.client.download_media(message, file_name=target)
+            if not downloaded:
+                raise RuntimeError("دریافت فایل اصلی کامل نشد")
+            if item_type == "video":
+                return await telegram.tg_client.send_video(settings.telegram_storage_channel_id, downloaded, supports_streaming=True)
+            if item_type == "audio":
+                return await telegram.tg_client.send_audio(settings.telegram_storage_channel_id, downloaded)
+            if item_type == "image":
+                return await telegram.tg_client.send_photo(settings.telegram_storage_channel_id, downloaded)
+            return await telegram.tg_client.send_document(settings.telegram_storage_channel_id, downloaded)
 
     async def _store(self, job: ImportJob, items: list[dict]) -> list[File]:
         if self.client is None:
@@ -219,19 +264,20 @@ class LinkImportService:
                     await db.flush()
                 folder_id = folder.id
             for index, item in enumerate(items, 1):
-                copied = await item["message"].copy(settings.telegram_storage_channel_id)
+                suffix = ".mp4" if item["type"] == "video" else ".mp3" if item["type"] == "audio" else ".jpg"
+                indexed = f"_{index}" if len(items) > 1 else ""
+                filename = sanitize_filename(f"{item['title']}{indexed}{suffix}")
+                copied = await self._copy_to_storage(item["message"], item["type"], filename)
                 media = copied.video or copied.audio or copied.voice or copied.document or (select_best_thumbnail(copied.photo.sizes) if copied.photo else None)
                 if media is None:
                     continue
-                suffix = ".mp4" if item["type"] == "video" else ".mp3" if item["type"] == "audio" else ".jpg"
-                indexed = f"_{index}" if len(items) > 1 else ""
                 stored = File(
                     user_id=user.id,
                     folder_id=folder_id,
                     channel_message_id=copied.id,
                     file_id=media.file_id,
                     file_unique_id=media.file_unique_id,
-                    file_name=sanitize_filename(f"{item['title']}{indexed}{suffix}"),
+                    file_name=filename,
                     description=job.url,
                     file_size=getattr(media, "file_size", None) or 0,
                     mime_type=(getattr(media, "mime_type", None) or ("video/mp4" if item["type"] == "video" else "audio/mpeg" if item["type"] == "audio" else "image/jpeg")),

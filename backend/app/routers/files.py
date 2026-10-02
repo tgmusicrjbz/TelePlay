@@ -99,7 +99,7 @@ async def import_link(
             raise HTTPException(status_code=404, detail="کشوی مقصد پیدا نشد.")
     quality = "auto" if host == "instagram.com" or host.endswith(".instagram.com") else (payload.quality or "720")
     position = await link_importer.enqueue(ImportJob(url=payload.url.strip(), user_id=current_user.id, telegram_id=current_user.telegram_id, folder_id=folder_id, quality=quality, notify=True))
-    return {"message": "درخواست در صف دانلود قرار گرفت.", "queue_position": position}
+    return {"message": "لینک ثبت شد؛ شروع دانلود و آماده‌شدن فایل رو توی ربات خبر می‌دیم.", "queue_position": position}
 
 
 @router.post("/upload", response_model=FileResponse, status_code=201)

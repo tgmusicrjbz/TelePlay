@@ -1175,7 +1175,7 @@ async def _handle_file_impl(client, message: Message, status_msg: Message):
     
     try:
         # Forward to storage channel
-        forwarded = await forward_to_storage_channel(message)
+        forwarded = await asyncio.wait_for(forward_to_storage_channel(message), timeout=120)
         stored_media = next((getattr(forwarded, field, None) for field in ("video", "audio", "voice", "animation", "video_note", "document") if getattr(forwarded, field, None)), None)
         if getattr(forwarded, "photo", None):
             stored_media = select_best_thumbnail(forwarded.photo.sizes)
@@ -1248,12 +1248,13 @@ async def _handle_file_impl(client, message: Message, status_msg: Message):
         await status_msg.edit("❌ فایل ذخیره نشد؛ دوباره تلاش کن.")
 
 
-@tg_client.on_message(filters.private & (filters.video | filters.audio | filters.voice | filters.document | filters.photo | filters.animation | filters.video_note))
+@tg_client.on_message(filters.private & (filters.video | filters.audio | filters.voice | filters.document | filters.photo | filters.animation | filters.video_note), group=-1)
 async def handle_file(client, message: Message):
     """Keep upload failures visible even when they happen before the progress message."""
     status_msg = None
     try:
-        status_msg = await message.reply("📥 فایل رسید؛ دارم می‌ذارمش توی کمد…")
+        logger.info("Incoming Telegram media user=%s message=%s", message.from_user.id, message.id)
+        status_msg = await message.reply("📥 گرفتمش؛ دارم توی کمد ذخیره‌اش می‌کنم…")
         await _handle_file_impl(client, message, status_msg)
     except Exception as error:
         user_id = getattr(getattr(message, "from_user", None), "id", "unknown")
@@ -1268,10 +1269,10 @@ async def handle_file(client, message: Message):
 @tg_client.on_message(filters.private & filters.regex(r"https?://(?:www\.)?(?:youtube\.com|youtu\.be|instagram\.com)/"), group=-1)
 async def handle_import_link(client, message: Message):
     """Queue supported social links without blocking the bot conversation."""
-    message.stop_propagation()
     user = await get_or_create_user(message.from_user.id, message.from_user.username, message.from_user.first_name, message.from_user.last_name)
     if not link_importer.available:
         await message.reply("⚙️ دانلود از لینک هنوز روی سرور تنظیم نشده. متغیر TELEGRAM_WORKER_SESSION باید اضافه شود.")
+        message.stop_propagation()
         return
     match = re.search(r"https?://(?:www\.)?(?:youtube\.com|youtu\.be|instagram\.com)/\S+", message.text or "", re.IGNORECASE)
     if not match:
@@ -1279,11 +1280,12 @@ async def handle_import_link(client, message: Message):
     url = match.group(0).rstrip(".,;!?)]}>'\"")
     try:
         position = await link_importer.enqueue(ImportJob(url=url, user_id=user.id, telegram_id=user.telegram_id, folder_id=None, notify=True, default_folder=True))
-        queue_text = f" جایگاه فعلی: {to_persian_digits(str(position))}" if position > 1 else ""
-        await message.reply(f"📥 درخواستت در صف دانلود قرار گرفت؛ لازم نیست اینجا منتظر بمونی. آماده که شد خبرت می‌کنم.{queue_text}")
+        queue_text = f"\nنوبت در صف: {to_persian_digits(str(position))}" if position > 1 else ""
+        await message.reply(f"🔗 لینک رو گرفتم و گذاشتم توی صف.\nمی‌تونی به کارت برسی؛ شروع دانلود و آماده‌شدن فایل رو همین‌جا خبر می‌دم.{queue_text}")
     except Exception as error:
         logger.exception("Could not enqueue link import: %s", error)
         await message.reply("❌ ثبت لینک در صف انجام نشد؛ کمی بعد دوباره تلاش کن.")
+    message.stop_propagation()
 
 
 @tg_client.on_message(filters.private & filters.text & ~filters.regex(r"^/"))
