@@ -584,7 +584,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
             data-media-kind={isVideo ? 'video' : 'audio'}
             data-controls-locked={controlsLocked ? 'true' : 'false'}
             style={!isMinimized && !isVideo ? ({ backgroundImage: authorizedThumbnailUrl ? `linear-gradient(135deg, rgba(8,10,20,.96), rgba(38,12,54,.84)), url(${authorizedThumbnailUrl})` : 'linear-gradient(135deg, #080a14, #260c36)', backgroundPosition: 'center', backgroundSize: 'cover' }) : undefined}
-            onMouseMove={!isMinimized ? revealControls : undefined}
+            onMouseMove={!isMinimized && !isVideo ? revealControls : undefined}
             onPointerUp={!isMinimized ? handlePlayerPointerUp : undefined}
             onDoubleClick={!isMinimized && !controlsLocked ? toggleFullscreen : undefined}
         >

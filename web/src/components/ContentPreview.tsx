@@ -121,13 +121,14 @@ function MarkdownCodeBlock({ code, language }: { code: string; language?: string
         setCopied(true);
         window.setTimeout(() => setCopied(false), 1200);
     };
-    return <div className="my-5 overflow-hidden rounded-2xl border border-cyan-400/15 bg-[#071018] shadow-[0_16px_45px_rgba(0,0,0,.25)]">
-        <div className="flex items-center justify-between border-b border-white/[.06] bg-white/[.035] px-3 py-2" dir="ltr">
-            <div className="flex items-center gap-1.5" aria-hidden="true"><span className="h-2.5 w-2.5 rounded-full bg-rose-400/80"/><span className="h-2.5 w-2.5 rounded-full bg-amber-300/80"/><span className="h-2.5 w-2.5 rounded-full bg-emerald-400/80"/></div>
-            <span className="font-mono text-[11px] uppercase tracking-wider text-cyan-200/70">{language || 'code'}</span>
-            <button onClick={() => void copy()} className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] text-dark-300 transition hover:bg-white/[.06] hover:text-white"><Copy className="h-3.5 w-3.5"/>{copied ? 'کپی شد' : 'کپی'}</button>
+    return <div dir="ltr" className="my-5 min-w-0 max-w-full overflow-hidden rounded-xl border border-cyan-400/15 bg-[#071018] shadow-[0_12px_32px_rgba(0,0,0,.24)]">
+        <div className="flex min-w-0 items-center justify-between gap-3 border-b border-white/[.06] bg-white/[.035] px-3 py-2">
+            <span className="min-w-0 truncate font-mono text-[11px] uppercase tracking-wider text-cyan-200/70">{language || 'کد'}</span>
+            <button dir="rtl" onClick={() => void copy()} className="flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] text-dark-300 transition hover:bg-white/[.06] hover:text-white"><Copy className="h-3.5 w-3.5"/>{copied ? 'کپی شد' : 'کپی'}</button>
         </div>
-        <pre dir="ltr" className="overflow-x-auto p-4 text-left font-mono text-sm leading-7 text-cyan-100 selection:bg-cyan-400/25"><code>{code}</code></pre>
+        <div className="max-w-full overflow-x-auto overscroll-x-contain">
+            <pre className="m-0 w-max min-w-full whitespace-pre p-4 text-left font-mono text-sm leading-7 text-cyan-100 selection:bg-cyan-400/25" style={{ tabSize: 4 }}><code className="block">{code}</code></pre>
+        </div>
     </div>;
 }
 
