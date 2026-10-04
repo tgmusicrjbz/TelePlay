@@ -16,6 +16,10 @@ export interface OfflineTextDraft { id: number; name: string; content: string; f
 export interface OfflineDownloadProgress { done: number; total: number; failed: number; currentName: string; loaded: number; size: number; }
 export interface OfflineJobProgress extends OfflineDownloadProgress { id: string; kind: 'file' | 'playlist'; title: string; state: 'downloading' | 'done' | 'error'; }
 let textOutboxSyncing = false;
+type OfflineQueueJob = { file: TelegramFile; onProgress?: (loaded:number,total:number)=>void; options?: {silentProgress?:boolean}; resolve:()=>void; reject:(error:unknown)=>void };
+const offlineQueue: OfflineQueueJob[] = [];
+const offlinePromises = new Map<number, Promise<void>>();
+let activeOfflineJobs = 0;
 
 function emitProgress(progress: OfflineJobProgress) {
     window.dispatchEvent(new CustomEvent<OfflineJobProgress>(OFFLINE_PROGRESS_EVENT, { detail: progress }));
@@ -55,7 +59,7 @@ export const getOfflineText = (id: number) => transaction<OfflineText | undefine
 export const listOfflineTexts = () => transaction<OfflineText[]>(TEXT_STORE, 'readonly', store => store.getAll());
 export const listOfflineTextDrafts = () => transaction<OfflineTextDraft[]>(TEXT_OUTBOX_STORE, 'readonly', store => store.getAll());
 
-export async function saveFileOffline(file: TelegramFile, onProgress?: (loaded: number, total: number) => void, options?: { silentProgress?: boolean }): Promise<void> {
+async function performFileOffline(file: TelegramFile, onProgress?: (loaded: number, total: number) => void, options?: { silentProgress?: boolean }): Promise<void> {
     if (!navigator.onLine) throw new Error('برای ذخیره اولیه باید آنلاین باشی.');
     const jobId = `file-${file.id}`;
     if (!options?.silentProgress) emitProgress({ id: jobId, kind: 'file', title: file.file_name, state: 'downloading', done: 0, total: 1, failed: 0, currentName: file.file_name, loaded: 0, size: file.file_size });
@@ -84,6 +88,30 @@ export async function saveFileOffline(file: TelegramFile, onProgress?: (loaded: 
         if (!options?.silentProgress) emitProgress({ id: jobId, kind: 'file', title: file.file_name, state: 'error', done: 0, total: 1, failed: 1, currentName: file.file_name, loaded: 0, size: file.file_size });
         throw error;
     }
+}
+
+function pumpOfflineQueue() {
+    while (activeOfflineJobs < 3 && offlineQueue.length) {
+        const job = offlineQueue.shift()!;
+        activeOfflineJobs += 1;
+        void performFileOffline(job.file, job.onProgress, job.options).then(job.resolve, job.reject).finally(() => {
+            activeOfflineJobs -= 1;
+            offlinePromises.delete(job.file.id);
+            pumpOfflineQueue();
+        });
+    }
+}
+
+/** Queue downloads globally so several files can be requested while only three transfer at once. */
+export function saveFileOffline(file: TelegramFile, onProgress?: (loaded: number, total: number) => void, options?: { silentProgress?: boolean }): Promise<void> {
+    const existing = offlinePromises.get(file.id);
+    if (existing) return existing;
+    const promise = new Promise<void>((resolve, reject) => {
+        offlineQueue.push({ file, onProgress, options, resolve, reject });
+        pumpOfflineQueue();
+    });
+    offlinePromises.set(file.id, promise);
+    return promise;
 }
 
 export async function savePlaylistOffline(playlist: Playlist, onProgress?: (progress: OfflineDownloadProgress) => void): Promise<OfflinePlaylist> {

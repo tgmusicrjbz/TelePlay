@@ -21,6 +21,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from .telegram import tg_client, forward_to_storage_channel, delete_from_storage_channel
+from .routers.folders import ensure_default_folder
 from .database import async_session
 from .models import User, File, Folder, LoginCode, Playlist, PlaylistItem, BotUserState
 from .config import get_settings
@@ -470,6 +471,9 @@ async def render_folder_page(message: Message, telegram_id: int, parent_id: int 
         if not user:
             await message.edit("برای شروع، دستور /start رو بفرست.")
             return
+        if parent_id is None:
+            await ensure_default_folder(db, user.id)
+            await db.commit()
         parent = (await db.execute(owned_folder(parent_id, telegram_id))).scalar_one_or_none() if parent_id else None
         if parent_id and not parent:
             await message.edit("این کشو دیگه وجود نداره.", reply_markup=main_menu_keyboard(telegram_id))
@@ -488,7 +492,7 @@ async def render_folder_page(message: Message, telegram_id: int, parent_id: int 
     await set_current_drawer(telegram_id, parent_id)
 
     if parent_id is None:
-        items = [("root", root_file_count)] + sort_library_items([("folder", item) for item in folders], telegram_id)
+        items = ([("root", root_file_count)] if root_file_count else []) + sort_library_items([("folder", item) for item in folders], telegram_id)
     else:
         items = sort_library_items([("folder", item) for item in folders] + [("file", item) for item in files], telegram_id)
     total = len(items)
@@ -1205,6 +1209,8 @@ async def _handle_file_impl(client, message: Message, status_msg: Message):
         
         # Save to database
         async with async_session() as db:
+            if active_drawer_id is None:
+                active_drawer_id = (await ensure_default_folder(db, user.id)).id
             file = File(
                 user_id=user.id,
                 folder_id=active_drawer_id,
@@ -1274,14 +1280,17 @@ async def handle_import_link(client, message: Message):
         await message.reply("⚙️ دانلود از لینک هنوز روی سرور تنظیم نشده. متغیر TELEGRAM_WORKER_SESSION باید اضافه شود.")
         message.stop_propagation()
         return
-    match = re.search(r"https?://(?:www\.)?(?:youtube\.com|youtu\.be|instagram\.com)/\S+", message.text or "", re.IGNORECASE)
-    if not match:
+    matches = re.findall(r"https?://(?:www\.)?(?:youtube\.com|youtu\.be|instagram\.com)/\S+", message.text or "", re.IGNORECASE)
+    if not matches:
         return
-    url = match.group(0).rstrip(".,;!?)]}>'\"")
     try:
-        position = await link_importer.enqueue(ImportJob(url=url, user_id=user.id, telegram_id=user.telegram_id, folder_id=None, notify=True, default_folder=True))
-        queue_text = f"\nنوبت در صف: {to_persian_digits(str(position))}" if position > 1 else ""
-        await message.reply(f"🔗 لینک رو گرفتم و گذاشتم توی صف.\nمی‌تونی به کارت برسی؛ شروع دانلود و آماده‌شدن فایل رو همین‌جا خبر می‌دم.{queue_text}")
+        positions = []
+        for raw_url in matches:
+            url = raw_url.rstrip(".,;!?)]}>'\"")
+            positions.append(await link_importer.enqueue(ImportJob(url=url, user_id=user.id, telegram_id=user.telegram_id, folder_id=None, notify=True, default_folder=True)))
+        count = to_persian_digits(str(len(matches)))
+        reply = await message.reply(f"🔗 {count} لینک رفت توی صف دانلود.\nلازم نیست منتظر بمونی؛ هرکدوم آماده بشه خبرت می‌کنم ✨")
+        asyncio.create_task(delete_preview_later(client, reply.chat.id, reply.id, 30))
     except Exception as error:
         logger.exception("Could not enqueue link import: %s", error)
         await message.reply("❌ ثبت لینک در صف انجام نشد؛ کمی بعد دوباره تلاش کن.")
@@ -1305,6 +1314,8 @@ async def handle_text_note(client, message: Message):
         stored = await forward_to_storage_channel(message)
         title = sanitize_filename(content.strip().splitlines()[0][:80])
         async with async_session() as db:
+            if active_drawer_id is None:
+                active_drawer_id = (await ensure_default_folder(db, user.id)).id
             note = File(
                 user_id=user.id, folder_id=active_drawer_id, channel_message_id=stored.id,
                 file_id=f"text:{stored.id}", file_unique_id=f"text:{stored.id}",

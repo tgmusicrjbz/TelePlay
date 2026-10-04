@@ -2,6 +2,7 @@
 Folder management API endpoints.
 """
 from typing import Optional, List
+import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, update, delete, text, asc, desc
@@ -14,6 +15,48 @@ from ..telegram import delete_from_storage_channel
 
 
 router = APIRouter(prefix="/folders", tags=["Folders"])
+logger = logging.getLogger(__name__)
+
+
+async def ensure_default_folder(db: AsyncSession, user_id: int) -> Folder:
+    """Create the system drawer once and migrate legacy root files into it."""
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        await db.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": user_id})
+    folder = (await db.execute(select(Folder).where(
+        Folder.user_id == user_id, Folder.is_default.is_(True)
+    ))).scalar_one_or_none()
+    if folder is None:
+        folder = (await db.execute(select(Folder).where(
+            Folder.user_id == user_id, Folder.parent_id.is_(None), Folder.name == "فایل‌های من"
+        ))).scalar_one_or_none()
+        if folder is None:
+            folder = Folder(user_id=user_id, name="فایل‌های من", parent_id=None, is_default=True)
+            db.add(folder)
+            await db.flush()
+        else:
+            folder.is_default = True
+    await db.execute(update(File).where(
+        File.user_id == user_id, File.folder_id.is_(None)
+    ).values(folder_id=folder.id))
+    await db.flush()
+    return folder
+
+
+async def get_all_folder_counts(db: AsyncSession, user_id: int) -> dict[int, int]:
+    result = await db.execute(text("""
+        WITH RECURSIVE hierarchy(ancestor_id, descendant_id) AS (
+            SELECT id, id FROM folders WHERE user_id = :user_id
+            UNION ALL
+            SELECT h.ancestor_id, f.id FROM hierarchy h
+            JOIN folders f ON f.parent_id = h.descendant_id
+            WHERE f.user_id = :user_id
+        )
+        SELECT h.ancestor_id, COUNT(fi.id)
+        FROM hierarchy h
+        LEFT JOIN files fi ON fi.folder_id = h.descendant_id AND fi.user_id = :user_id
+        GROUP BY h.ancestor_id
+    """), {"user_id": user_id})
+    return {int(folder_id): int(count) for folder_id, count in result.all()}
 
 
 async def delete_folder_contents(db: AsyncSession, folder: Folder, delete_contents: bool) -> None:
@@ -40,7 +83,7 @@ async def delete_folder_contents(db: AsyncSession, folder: Folder, delete_conten
     message_ids = [file.channel_message_id for file in files]
     for start in range(0, len(message_ids), 100):
         if not await delete_from_storage_channel(message_ids[start:start + 100]):
-            raise HTTPException(status_code=502, detail="Could not delete files from Telegram storage")
+            logger.warning("Telegram cleanup failed for folder %s; deleting stale database rows", folder.id)
     file_ids = [file.id for file in files]
     if file_ids:
         await db.execute(delete(WatchProgress).where(WatchProgress.file_id.in_(file_ids)))
@@ -74,53 +117,34 @@ async def list_folders(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """List user's folders optimally."""
-    # Select folder and count of files in one query
-    stmt = (
-        select(Folder, func.count(File.id).label("file_count"))
-        .outerjoin(File, File.folder_id == Folder.id)
-        .where(Folder.user_id == current_user.id)
-        .group_by(Folder.id)
-    )
-    
-    if parent_id is not None:
-        stmt = stmt.where(Folder.parent_id == parent_id)
-    else:
-        stmt = stmt.where(Folder.parent_id.is_(None))
+    """List drawers with recursive file counts."""
+    if parent_id is None:
+        await ensure_default_folder(db, current_user.id)
+        await db.commit()
+    stmt = select(Folder).where(Folder.user_id == current_user.id)
+    stmt = stmt.where(Folder.parent_id == parent_id) if parent_id is not None else stmt.where(Folder.parent_id.is_(None))
     if favorite_only:
         stmt = stmt.where(Folder.is_favorite.is_(True))
-    
-    folder_sort_fields = {
-        "name": func.lower(Folder.name),
-        "count": func.count(File.id),
-        "created": Folder.created_at,
-        "updated": Folder.updated_at,
-    }
+    folders = (await db.execute(stmt)).scalars().all()
+    counts = await get_all_folder_counts(db, current_user.id)
     criteria = []
     for raw in (sort or "name:asc").split(",")[:4]:
         field, _, direction = raw.strip().partition(":")
-        column = folder_sort_fields.get(field)
-        if column is not None:
-            criteria.append(desc(column) if direction.lower() == "desc" else asc(column))
-    stmt = stmt.order_by(desc(Folder.is_pinned), *(criteria or [asc(func.lower(Folder.name))]), asc(Folder.id))
-    result = await db.execute(stmt)
-    rows = result.all()
-    
-    return [
-        FolderResponse(
-            id=folder.id,
-            name=folder.name,
-            description=folder.description,
-            parent_id=folder.parent_id,
-            user_id=folder.user_id,
-            created_at=folder.created_at,
-            updated_at=folder.updated_at,
-            file_count=file_count,
-            is_favorite=folder.is_favorite,
-            is_pinned=folder.is_pinned,
-        )
-        for folder, file_count in rows
-    ]
+        if field in {"name", "count", "created", "updated"}:
+            criteria.append((field, direction.lower() == "desc"))
+    def key_for(folder: Folder, field: str):
+        return {"name": folder.name.casefold(), "count": counts.get(folder.id, 0), "created": folder.created_at, "updated": folder.updated_at}[field]
+    folders.sort(key=lambda folder: folder.id)
+    for field, reverse in reversed(criteria or [("name", False)]):
+        folders.sort(key=lambda folder, selected=field: key_for(folder, selected), reverse=reverse)
+    folders.sort(key=lambda folder: not folder.is_pinned)
+    return [FolderResponse(
+        id=folder.id, name=folder.name, description=folder.description,
+        parent_id=folder.parent_id, user_id=folder.user_id,
+        created_at=folder.created_at, updated_at=folder.updated_at,
+        file_count=counts.get(folder.id, 0), is_favorite=folder.is_favorite,
+        is_pinned=folder.is_pinned, is_default=folder.is_default,
+    ) for folder in folders]
 
 
 @router.get("/tree", response_model=List[FolderWithChildren])
@@ -128,37 +152,18 @@ async def get_folder_tree(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get the complete folder tree for the user optimally."""
-    # Get all folders with counts in one query
-    stmt = (
-        select(Folder, func.count(File.id).label("file_count"))
-        .outerjoin(File, File.folder_id == Folder.id)
-        .where(Folder.user_id == current_user.id)
-        .group_by(Folder.id)
-        .order_by(Folder.name)
-    )
-    
-    result = await db.execute(stmt)
-    rows = result.all()
-    
-    # Build tree
-    folder_map = {}
-    for folder, file_count in rows:
-        folder_map[folder.id] = {
-            "id": folder.id,
-            "name": folder.name,
-            "description": folder.description,
-            "parent_id": folder.parent_id,
-            "user_id": folder.user_id,
-            "created_at": folder.created_at,
-            "updated_at": folder.updated_at,
-            "file_count": file_count,
-            "is_favorite": folder.is_favorite,
-            "is_pinned": folder.is_pinned,
-            "children": [],
-        }
-    
-    # Link parents and children
+    """Get the complete drawer tree with recursive counts."""
+    await ensure_default_folder(db, current_user.id)
+    await db.commit()
+    folders = (await db.execute(select(Folder).where(Folder.user_id == current_user.id).order_by(Folder.name))).scalars().all()
+    counts = await get_all_folder_counts(db, current_user.id)
+    folder_map = {folder.id: {
+        "id": folder.id, "name": folder.name, "description": folder.description,
+        "parent_id": folder.parent_id, "user_id": folder.user_id,
+        "created_at": folder.created_at, "updated_at": folder.updated_at,
+        "file_count": counts.get(folder.id, 0), "is_favorite": folder.is_favorite,
+        "is_pinned": folder.is_pinned, "is_default": folder.is_default, "children": [],
+    } for folder in folders}
     roots = []
     for folder_data in folder_map.values():
         parent_id = folder_data["parent_id"]
@@ -166,7 +171,6 @@ async def get_folder_tree(
             folder_map[parent_id]["children"].append(folder_data)
         else:
             roots.append(folder_data)
-    
     return roots
 
 
@@ -176,33 +180,18 @@ async def get_folder(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get a specific folder by ID with file count."""
-    stmt = (
-        select(Folder, func.count(File.id).label("file_count"))
-        .outerjoin(File, File.folder_id == Folder.id)
-        .where(Folder.id == folder_id, Folder.user_id == current_user.id)
-        .group_by(Folder.id)
-    )
-    
-    result = await db.execute(stmt)
-    row = result.first()
-    
-    if not row:
+    folder = (await db.execute(select(Folder).where(
+        Folder.id == folder_id, Folder.user_id == current_user.id
+    ))).scalar_one_or_none()
+    if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
-    
-    folder, file_count = row
-    
     return FolderResponse(
-        id=folder.id,
-        name=folder.name,
-        description=folder.description,
-        parent_id=folder.parent_id,
-        user_id=folder.user_id,
-        created_at=folder.created_at,
-        updated_at=folder.updated_at,
-        file_count=file_count,
-        is_favorite=folder.is_favorite,
-        is_pinned=folder.is_pinned,
+        id=folder.id, name=folder.name, description=folder.description,
+        parent_id=folder.parent_id, user_id=folder.user_id,
+        created_at=folder.created_at, updated_at=folder.updated_at,
+        file_count=await get_folder_file_count(db, folder.id),
+        is_favorite=folder.is_favorite, is_pinned=folder.is_pinned,
+        is_default=folder.is_default,
     )
 
 
@@ -256,6 +245,7 @@ async def create_folder(
         file_count=0,
         is_favorite=folder.is_favorite,
         is_pinned=folder.is_pinned,
+        is_default=folder.is_default,
     )
 
 
@@ -288,6 +278,8 @@ async def update_folder(
     if update_data.is_pinned is not None:
         folder.is_pinned = update_data.is_pinned
     if update_data.parent_id is not None:
+        if folder.is_default:
+            raise HTTPException(status_code=400, detail="Default folder must stay at the root")
         # Prevent moving folder into itself
         if update_data.parent_id == folder_id:
             raise HTTPException(status_code=400, detail="Cannot move folder into itself")
@@ -338,6 +330,7 @@ async def update_folder(
         file_count=file_count,
         is_favorite=folder.is_favorite,
         is_pinned=folder.is_pinned,
+        is_default=folder.is_default,
     )
 
 
@@ -357,6 +350,8 @@ async def delete_folder(
     
     if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
+    if folder.is_default:
+        raise HTTPException(status_code=400, detail="Default folder cannot be deleted")
     
     if move_files_to is not None and not delete_contents:
         destination = move_files_to or None
@@ -387,6 +382,8 @@ async def batch_delete_folders(
             Folder.id == folder_id, Folder.user_id == current_user.id
         ))).scalar_one_or_none()
         if folder is None:
+            continue
+        if folder.is_default:
             continue
         await delete_folder_contents(db, folder, delete_contents)
         await db.flush()

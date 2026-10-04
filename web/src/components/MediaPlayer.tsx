@@ -404,7 +404,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                 setShowControls(false);
                 setShowSpeedMenu(false);
             }
-        }, isVideo ? 3000 : 4000);
+        }, isVideo ? 3000 : 6500);
     }, [controlsLocked, isMinimized, isVideo, showSleepMenu, showSpeedMenu, showVolumePopover]);
 
     const toggleVideoControls = useCallback(() => {
@@ -689,7 +689,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                         </div>
                         <div className="truncate flex-1 min-w-0">
                             <h4 dir="auto" className="text-sm font-bold text-white truncate leading-tight">{cleanFileName}</h4>
-                            <p className="text-xs text-dark-400 font-mono" dir="ltr">{formatPlayerTime(safeCurrentTime)} / {formatPlayerTime(safeDuration)}</p>
+                            <p className="font-player text-xs text-dark-400" dir="ltr">{formatPlayerTime(safeCurrentTime)} / {formatPlayerTime(safeDuration)}</p>
                         </div>
                     </div>
 
@@ -809,7 +809,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                     <div data-player-controls data-player-bottom className="absolute bottom-0 left-0 right-0 z-30 border-t border-white/[.06] bg-gradient-to-t from-black via-black/85 to-black/20 p-4 shadow-[0_-14px_35px_rgba(0,0,0,.3)] backdrop-blur-sm sm:px-6 sm:py-5">
                         {/* Progress bar */}
                         <div className="mb-5 flex items-center gap-3 group/progress sm:gap-4">
-                            <span dir="ltr" className="text-sm font-medium text-white/90 min-w-[50px] font-mono">{formatPlayerTime(safeCurrentTime)}</span>
+                            <span dir="ltr" className="font-player min-w-[50px] text-sm font-medium text-white/90">{formatPlayerTime(safeCurrentTime)}</span>
                             <div className="relative h-2 flex-1 cursor-pointer rounded-full bg-white/20 shadow-inner transition-all group-hover/progress:h-2.5">
                                 {/* Buffered progress can be added here */}
                                 <div
@@ -825,7 +825,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                                     className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                                 />
                             </div>
-                            <span dir="ltr" className="text-sm font-medium text-white/90 min-w-[50px] text-right font-mono">{formatPlayerTime(safeDuration)}</span>
+                            <span dir="ltr" className="font-player min-w-[50px] text-right text-sm font-medium text-white/90">{formatPlayerTime(safeDuration)}</span>
                         </div>
 
                         {/* Control buttons */}

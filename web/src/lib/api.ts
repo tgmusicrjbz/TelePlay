@@ -33,6 +33,7 @@ export interface Folder {
     file_count: number;
     is_favorite?: boolean;
     is_pinned?: boolean;
+    is_default?: boolean;
     children?: Folder[];
 }
 
@@ -612,11 +613,13 @@ export const formatDuration = (seconds: number | null): string => {
 export const useUploadFile = () => {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async ({ file, folderId }: { file: globalThis.File; folderId: number | null }) => {
+        mutationFn: async ({ file, folderId, onProgress }: { file: globalThis.File; folderId: number | null; onProgress?: (percent: number) => void }) => {
             const form = new FormData();
             form.append('upload', file, file.name);
             if (folderId !== null) form.append('folder_id', String(folderId));
-            const { data } = await api.post<TelegramFile>('/files/upload', form);
+            const { data } = await api.post<TelegramFile>('/files/upload', form, {
+                onUploadProgress: event => onProgress?.(Math.min(100, Math.round((event.loaded / Math.max(1, event.total || file.size)) * 100))),
+            });
             return data;
         },
         onSuccess: () => {
@@ -659,7 +662,7 @@ export const useReorderPlaylistCatalog = () => {
 
 export const useImportLink = () => useMutation({
     mutationFn: async (payload: { url: string; folder_id?: number | null; new_folder_name?: string; quality?: 'auto' | 'audio' | '480' | '720' | '1080' }) =>
-        (await api.post<{ message: string; queue_position: number }>('/files/import-link', payload)).data,
+        (await api.post<{ message: string; queue_position: number; job_id: string }>('/files/import-link', payload)).data,
 });
 
 export const usePlaylist = (id: number | null) => useQuery<Playlist>({
@@ -773,7 +776,7 @@ export const useWorkspaces = () => useQuery({ queryKey: ['workspaces'], queryFn:
 export const useWorkspaceGrants = () => useQuery({ queryKey: ['workspaceGrants'], queryFn: async () => (await api.get<Workspace[]>('/accounts/grants')).data });
 export const useGrantWorkspace = () => {
     const queryClient = useQueryClient();
-    return useMutation({ mutationFn: async (payload: { telegram_id: number; permission: 'read' | 'write' }) => (await api.post<Workspace>('/accounts/grants', payload)).data, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['workspaceGrants'] }) });
+    return useMutation({ mutationFn: async (payload: { telegram_id?: number; identifier?: string; permission: 'read' | 'write' }) => (await api.post<Workspace>('/accounts/grants', payload)).data, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['workspaceGrants'] }) });
 };
 export const useRevokeWorkspace = () => {
     const queryClient = useQueryClient();

@@ -10,7 +10,6 @@ export default function GlobalContextMenu() {
     const updateFolder = useUpdateFolder();
     const menuRef = useRef<HTMLDivElement>(null);
     const [copiedId, setCopiedId] = useState<string | null>(null);
-    const [savingOffline, setSavingOffline] = useState(false);
 
     // Close menu on escape
     useEffect(() => {
@@ -138,16 +137,13 @@ export default function GlobalContextMenu() {
         }
     };
 
-    const handleOfflineSave = async (file: TelegramFile) => {
-        setSavingOffline(true);
+    const handleOfflineSave = (file: TelegramFile) => {
         setActiveContextMenu(null);
-        addToast('ذخیره آفلاین شروع شد…', 'info');
-        try {
-            await saveFileOffline(file);
-            addToast('فایل برای پخش آفلاین ذخیره شد 📥');
-        } catch (error) {
-            addToast(error instanceof Error ? error.message : 'ذخیره آفلاین انجام نشد', 'error');
-        } finally { setSavingOffline(false); }
+        addToast('به صف ذخیره آفلاین اضافه شد…', 'info');
+        void saveFileOffline(file).then(
+            () => addToast('فایل برای پخش آفلاین ذخیره شد 📥'),
+            error => addToast(error instanceof Error ? error.message : 'ذخیره آفلاین انجام نشد', 'error'),
+        );
     };
 
     // --- Render ---
@@ -207,7 +203,7 @@ export default function GlobalContextMenu() {
                                     </button>
                                 )}
                                 <button className="context-menu-item w-full text-right" onClick={() => handleAction(() => setDetailsFile(activeContextMenu.item as TelegramFile))}><Info className="h-4 w-4"/> جزئیات فایل</button>
-                                <button disabled={savingOffline} className="context-menu-item w-full text-right disabled:opacity-50" onClick={() => void handleOfflineSave(activeContextMenu.item as TelegramFile)}><DownloadCloud className="h-4 w-4"/> {savingOffline ? 'در حال ذخیره…' : 'ذخیره برای پخش آفلاین'}</button>
+                                <button className="context-menu-item w-full text-right" onClick={() => handleOfflineSave(activeContextMenu.item as TelegramFile)}><DownloadCloud className="h-4 w-4"/> ذخیره برای پخش آفلاین</button>
                                 <button
                                     className="context-menu-item w-full text-right"
                                     onClick={() => { handleDownload(activeContextMenu.item as TelegramFile); setActiveContextMenu(null); }}

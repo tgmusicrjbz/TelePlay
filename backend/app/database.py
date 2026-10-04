@@ -109,3 +109,5 @@ async def init_db():
             await conn.execute(text(f"ALTER TABLE folders ADD COLUMN is_favorite {favorite_type} NOT NULL DEFAULT {favorite_default}"))
         if "is_pinned" not in folder_columns:
             await conn.execute(text(f"ALTER TABLE folders ADD COLUMN is_pinned {favorite_type} NOT NULL DEFAULT {favorite_default}"))
+        if "is_default" not in folder_columns:
+            await conn.execute(text(f"ALTER TABLE folders ADD COLUMN is_default {favorite_type} NOT NULL DEFAULT {favorite_default}"))

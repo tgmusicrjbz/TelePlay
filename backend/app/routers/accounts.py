@@ -39,7 +39,14 @@ async def list_grants(current_user: User = Depends(get_current_user), db: AsyncS
 
 @router.post("/accounts/grants", response_model=WorkspaceResponse)
 async def grant_workspace(payload: WorkspaceGrantCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    member = (await db.execute(select(User).where(User.telegram_id == payload.telegram_id, User.is_active.is_(True)))).scalar_one_or_none()
+    identifier = (payload.identifier or "").strip().lstrip("@")
+    if payload.telegram_id is not None:
+        member_query = select(User).where(User.telegram_id == payload.telegram_id)
+    elif identifier:
+        member_query = select(User).where(func.lower(User.username) == identifier.lower())
+    else:
+        raise HTTPException(status_code=400, detail="آیدی عددی یا نام کاربری تلگرام را وارد کن.")
+    member = (await db.execute(member_query.where(User.is_active.is_(True)))).scalar_one_or_none()
     if member is None:
         raise HTTPException(status_code=404, detail="این کاربر باید حداقل یک بار وارد کمد شده باشد.")
     if member.id == current_user.id:

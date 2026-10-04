@@ -2,10 +2,10 @@
  * Main FileBrowser component - the core of the web interface
  */
 import { useEffect, useCallback, useMemo, useRef, useState } from 'react';
-import { FolderPlus, Folder as FolderIcon, Grid, LayoutGrid, List, Search, ChevronRight, Home, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, StickyNote, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ChevronDown, ChevronUp, Plus, CheckSquare, Square, ListChecks, ListPlus, Upload, Star, RefreshCw, Link2 } from 'lucide-react';
-import { useFiles, useFolders, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useActivityFeed, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile, useImportLink } from '../lib/api';
+import { FolderPlus, Folder as FolderIcon, Grid, LayoutGrid, List, Search, ChevronRight, Home, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, StickyNote, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ChevronDown, ChevronUp, Plus, CheckSquare, Square, ListChecks, ListPlus, Upload, Star, RefreshCw, Link2, DownloadCloud, Download } from 'lucide-react';
+import { api, useFiles, useFolders, useFolderTree, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useActivityFeed, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile, useImportLink } from '../lib/api';
 import { useAppStore } from '../lib/store';
-import { cacheAllTextNotes, queueOfflineText } from '../lib/offline';
+import { cacheAllTextNotes, queueOfflineText, saveFileOffline } from '../lib/offline';
 import FileCard from './FileCard';
 import FolderCard from './FolderCard';
 import NewFolderModal from './NewFolderModal';
@@ -90,17 +90,19 @@ export default function FileBrowser() {
     const [importFolder, setImportFolder] = useState<number | 'new' | null>(null);
     const [importFolderName, setImportFolderName] = useState('');
     const [importQuality, setImportQuality] = useState<'auto' | 'audio' | '480' | '720' | '1080'>('720');
+    const [uploadProgress, setUploadProgress] = useState<{name:string; index:number; total:number; percent:number}|null>(null);
+    const importUrls = useMemo(() => importUrl.split(/\s+/).map(item => item.trim()).filter(Boolean), [importUrl]);
     const importPlatform = useMemo<'youtube' | 'instagram' | null>(() => {
-        if (!importUrl.trim()) return null;
+        if (importUrls.length !== 1) return null;
         try {
-            const parsed = new URL(importUrl.trim());
+            const parsed = new URL(importUrls[0]);
             if (!['http:', 'https:'].includes(parsed.protocol)) return null;
             const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
             if (host === 'youtu.be' || host === 'youtube.com' || host.endsWith('.youtube.com')) return 'youtube';
             if (host === 'instagram.com' || host.endsWith('.instagram.com')) return 'instagram';
         } catch { /* incomplete URL */ }
         return null;
-    }, [importUrl]);
+    }, [importUrls]);
     const [textFileName, setTextFileName] = useState('یادداشت تازه');
     const [textContent, setTextContent] = useState('');
     const [contentScope, setContentScope] = useState<'all' | 'files' | 'folders'>('all');
@@ -110,9 +112,26 @@ export default function FileBrowser() {
     });
     const sortValue = serializeSort(sortCriteria.filter(item => item.field !== 'count'));
     const folderSortValue = serializeSort(sortCriteria.filter(item => ['name', 'created', 'updated', 'count'].includes(item.field)));
+    const [rootFilesMode, setRootFilesMode] = useState(() => localStorage.getItem('komod-root-files-mode') || 'folder');
+    const { data: rootFolders } = useFolders(null, folderSortValue, false);
+    const { data: folderTree } = useFolderTree();
+    const importFolderOptions = useMemo(() => {
+        const result:{value:string;label:string}[]=[];
+        const walk=(items:Folder[]|undefined,depth=0)=>items?.forEach(folder=>{result.push({value:String(folder.id),label:`${'— '.repeat(depth)}🗂️ ${folder.name}`});walk(folder.children,depth+1)});
+        walk(folderTree);
+        return result;
+    },[folderTree]);
+    const defaultFolder = rootFolders?.find(folder => folder.is_default);
+    const effectiveFolderId = currentFolderId === null && rootFilesMode === 'files' && defaultFolder ? defaultFolder.id : currentFolderId;
+
+    useEffect(() => {
+        const refreshMode = () => setRootFilesMode(localStorage.getItem('komod-root-files-mode') || 'folder');
+        window.addEventListener('komod-root-mode-changed', refreshMode);
+        return () => window.removeEventListener('komod-root-mode-changed', refreshMode);
+    }, []);
 
     // Data Fetching
-    const { data: filesList, isLoading: filesLoading, isFetching: filesFetching, refetch: refetchFiles } = useFiles(currentFolderId, fileTypeFilter.join(',') || undefined, searchQuery || undefined, page, sortValue, favoriteOnly);
+    const { data: filesList, isLoading: filesLoading, isFetching: filesFetching, refetch: refetchFiles } = useFiles(effectiveFolderId, fileTypeFilter.join(',') || undefined, searchQuery || undefined, page, sortValue, favoriteOnly);
     const { data: activityFeed, isLoading: activityLoading, isError: activityError, refetch: refetchActivity } = useActivityFeed(activeSection === 'activity', 50);
     
 
@@ -154,6 +173,7 @@ export default function FileBrowser() {
     // Folder and file visibility is controlled from one shared content switcher.
     const { data: folders, isLoading: foldersLoading, refetch: refetchFolders } = useFolders(currentFolderId, folderSortValue, favoriteOnly);
     const visibleFolders = folders?.filter(folder => {
+        if (currentFolderId === null && rootFilesMode === 'files' && folder.is_default) return false;
         if (!searchQuery.trim()) return true;
         const query = searchQuery.trim().toLocaleLowerCase('fa');
         return folder.name.toLocaleLowerCase('fa').includes(query)
@@ -189,6 +209,15 @@ export default function FileBrowser() {
     }, []);
 
     useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('share-target') !== '1') return;
+        const shared = [params.get('url'), params.get('text')].filter(Boolean).join('\n');
+        const urls = shared.match(/https?:\/\/[^\s]+/g) || [];
+        if (urls.length) { setImportUrl(urls.join('\n')); setShowImportLink(true); }
+        window.history.replaceState({}, '', window.location.pathname);
+    }, []);
+
+    useEffect(() => {
         if (activeSection !== 'files') {
             setSelectionMode(false);
             clearSelection();
@@ -202,14 +231,15 @@ export default function FileBrowser() {
         let uploaded = 0;
         try {
             for (const file of selected) {
-                await uploadFileMutation.mutateAsync({ file, folderId: currentFolderId });
+                setUploadProgress({name:file.name,index:uploaded+1,total:selected.length,percent:0});
+                await uploadFileMutation.mutateAsync({ file, folderId: effectiveFolderId, onProgress: percent => setUploadProgress({name:file.name,index:uploaded+1,total:selected.length,percent}) });
                 uploaded += 1;
             }
             addToast(`${uploaded.toLocaleString('fa-IR')} فایل با موفقیت به کمد اضافه شد 📥`);
             handleRefresh();
         } catch {
             addToast(uploaded ? `${uploaded.toLocaleString('fa-IR')} فایل ذخیره شد؛ ادامهٔ آپلود متوقف شد.` : 'آپلود فایل انجام نشد. اتصال ربات و کانال ذخیره‌سازی را بررسی کن.', 'error');
-        }
+        } finally { setUploadProgress(null); }
     };
 
     // handle refresh
@@ -494,15 +524,48 @@ export default function FileBrowser() {
         }
     };
 
-    const openImportLink = () => { setImportFolder(currentFolderId); setShowAddMenu(false); setShowImportLink(true); };
+    const downloadSelectedFiles = async () => {
+        addToast('دارم لینک‌های دانلود رو آماده می‌کنم…', 'info');
+        for (const file of selectedFilesForActions) {
+            try {
+                const {data}=await api.post<TelegramFile>(`/files/${file.id}/share`);
+                if(!data.public_stream_url) continue;
+                const anchor=document.createElement('a');
+                anchor.href=`${window.location.origin}${data.public_stream_url}${data.public_stream_url.includes('?')?'&':'?'}download=1`;
+                anchor.download=file.file_name; document.body.appendChild(anchor); anchor.click(); anchor.remove();
+                await new Promise(resolve=>setTimeout(resolve,250));
+            } catch { /* continue with the remaining selected files */ }
+        }
+        addToast('دانلود فایل‌های انتخاب‌شده شروع شد.');
+    };
+
+    const openImportLink = () => { setImportFolder(effectiveFolderId); setShowAddMenu(false); setShowImportLink(true); };
     const submitImportLink = async (event: React.FormEvent) => {
         event.preventDefault();
-        if (!importUrl.trim()) return;
-        if (!importPlatform) { addToast('این لینک معتبر نیست؛ فقط لینک یوتیوب یا اینستاگرام پذیرفته می‌شود.', 'error'); return; }
+        if (!importUrls.length) return;
+        const classify = (raw:string) => { try { const host=new URL(raw).hostname.replace(/^www\./,''); return host==='youtu.be'||host==='youtube.com'||host.endsWith('.youtube.com')?'youtube':host==='instagram.com'||host.endsWith('.instagram.com')?'instagram':null; } catch{return null;} };
+        if (importUrls.some(url => !classify(url))) { addToast('یکی از لینک‌ها معتبر نیست؛ فقط یوتیوب و اینستاگرام پذیرفته می‌شود.', 'error'); return; }
         try {
-            const result = await importLinkMutation.mutateAsync({ url: importUrl.trim(), folder_id: importFolder === 'new' ? currentFolderId : importFolder, new_folder_name: importFolder === 'new' ? importFolderName.trim() : undefined, quality: importPlatform === 'instagram' ? 'auto' : importQuality });
+            let lastMessage='';
+            const jobs:string[]=[];
+            for (let index=0; index<importUrls.length; index++) {
+                const url=importUrls[index], platform=classify(url);
+                const result = await importLinkMutation.mutateAsync({ url, folder_id: importFolder === 'new' ? currentFolderId : importFolder, new_folder_name: importFolder === 'new' && index===0 ? importFolderName.trim() : undefined, quality: platform === 'instagram' ? 'auto' : importQuality });
+                lastMessage=result.message;
+                jobs.push(result.job_id);
+            }
             setShowImportLink(false); setImportUrl(''); setImportFolderName('');
-            addToast(`${result.message}${result.queue_position > 1 ? ` نوبت صف: ${result.queue_position.toLocaleString('fa-IR')}` : ''}`);
+            addToast(importUrls.length>1 ? `${importUrls.length.toLocaleString('fa-IR')} لینک به صف اضافه شد؛ وضعیت هرکدام را همین‌جا و در ربات می‌بینی.` : lastMessage);
+            jobs.forEach(jobId => { void (async () => {
+                for (let attempt=0; attempt<90; attempt++) {
+                    await new Promise(resolve => setTimeout(resolve, 3000));
+                    try {
+                        const {data}=await api.get<{state:string;message:string;saved:number}>(`/files/import-link/status/${jobId}`);
+                        if(data.state==='done'){ addToast(`${data.saved.toLocaleString('fa-IR')} فایل از لینک به کمد اضافه شد ✅`); handleRefresh(); return; }
+                        if(data.state==='error'){ addToast(data.message,'error'); return; }
+                    } catch { return; }
+                }
+            })(); });
         } catch (error: any) { addToast(error?.response?.data?.detail || 'ثبت لینک انجام نشد.', 'error'); }
     };
 
@@ -512,13 +575,13 @@ export default function FileBrowser() {
         const rawName = textFileName.trim() || 'یادداشت تازه';
         const fileName = /\.(md|txt)$/i.test(rawName) ? rawName : `${rawName}.md`;
         const saveToOutbox = async () => {
-            await queueOfflineText(fileName, textContent, currentFolderId);
+            await queueOfflineText(fileName, textContent, effectiveFolderId);
             setShowTextComposer(false); setTextFileName('یادداشت تازه'); setTextContent('');
             addToast('یادداشت روی دستگاه ذخیره شد؛ وقتی آنلاین بشی خودکار به کمد اضافه می‌شه 📝');
         };
         if (!navigator.onLine) { await saveToOutbox(); return; }
         try {
-            await uploadFileMutation.mutateAsync({ file: new File([textContent], fileName, { type: 'text/markdown;charset=utf-8' }), folderId: currentFolderId });
+            await uploadFileMutation.mutateAsync({ file: new File([textContent], fileName, { type: 'text/markdown;charset=utf-8' }), folderId: effectiveFolderId });
             setShowTextComposer(false);
             setTextFileName('یادداشت تازه');
             setTextContent('');
@@ -812,6 +875,8 @@ export default function FileBrowser() {
                             {selectedItems.length === 1 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-200 hover:bg-white/10" aria-label="تغییر نام" title="تغییر نام" onClick={() => selectedFilesForActions[0] ? setRenameFile(selectedFilesForActions[0]) : setRenameFolder(selectedFoldersForActions[0])}><Pencil className="h-5 w-5" /></button>}
                             {selectedFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-200 hover:bg-white/10" aria-label="ویرایش گروهی" title="ویرایش گروهی" onClick={() => setShowBatchEdit(true)}><SlidersHorizontal className="h-5 w-5" /></button>}
                             {selectedPlayableFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-500/10 text-primary-200 hover:bg-primary-500/20" aria-label="افزودن به پلی‌لیست" title="افزودن فایل‌های صدا و ویدیو به پلی‌لیست" onClick={() => setPlaylistFiles(selectedPlayableFilesForActions)}><ListPlus className="h-5 w-5" /></button>}
+                            {selectedFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-primary-200 hover:bg-primary-500/10" aria-label="ذخیره آفلاین" title="افزودن همه به صف ذخیره آفلاین" onClick={() => { selectedFilesForActions.forEach(file => void saveFileOffline(file)); addToast(`${selectedFilesForActions.length.toLocaleString('fa-IR')} فایل به صف ذخیره آفلاین اضافه شد.`); }}><DownloadCloud className="h-5 w-5" /></button>}
+                            {selectedFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-200 hover:bg-white/10" aria-label="دانلود" title="دانلود فایل‌های انتخاب‌شده" onClick={() => void downloadSelectedFiles()}><Download className="h-5 w-5" /></button>}
                             <button disabled={!selectedItems.length} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-200 hover:bg-white/10 disabled:opacity-30" aria-label="جابه‌جایی" title="جابه‌جایی" onClick={() => setMoveItems({ files: selectedFilesForActions, folders: selectedFoldersForActions })}><FolderInput className="h-5 w-5" /></button>
                             <button disabled={!selectedItems.length} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-red-300 hover:bg-red-500/10 disabled:opacity-30" aria-label="حذف" title="حذف" onClick={() => setDeleteConfirm({ type: selectedFoldersForActions.length && selectedFilesForActions.length ? 'multiple' : selectedFoldersForActions.length ? 'folder' : 'file', items: selectedItems })}><Trash2 className="h-5 w-5" /></button>
                             <button className="mr-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-300 hover:bg-white/10" aria-label="پایان انتخاب گروهی" title="پایان انتخاب" onClick={cancelSelection}><X className="h-5 w-5" /></button>
@@ -829,6 +894,8 @@ export default function FileBrowser() {
                                 {selectedItems.length === 1 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => selectedFilesForActions[0] ? setRenameFile(selectedFilesForActions[0]) : setRenameFolder(selectedFoldersForActions[0])}><Pencil className="w-4 h-4" /> تغییر نام</button>}
                                 {selectedFilesForActions.length > 0 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => setShowBatchEdit(true)}><SlidersHorizontal className="w-4 h-4" /> ویرایش گروهی</button>}
                                 {selectedPlayableFilesForActions.length > 0 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => setPlaylistFiles(selectedPlayableFilesForActions)}><ListPlus className="w-4 h-4" /> افزودن به پلی‌لیست</button>}
+                                {selectedFilesForActions.length > 0 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => { selectedFilesForActions.forEach(file => void saveFileOffline(file)); addToast(`${selectedFilesForActions.length.toLocaleString('fa-IR')} فایل به صف ذخیره آفلاین اضافه شد.`); }}><DownloadCloud className="w-4 h-4" /> ذخیره آفلاین</button>}
+                                {selectedFilesForActions.length > 0 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => void downloadSelectedFiles()}><Download className="w-4 h-4" /> دانلود</button>}
                                 <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => setMoveItems({ files: selectedFilesForActions, folders: selectedFoldersForActions })}><FolderInput className="w-4 h-4" /> جابه‌جایی</button>
                                 <button className="btn-secondary shrink-0 text-sm flex items-center gap-2 text-red-300" onClick={() => setDeleteConfirm({ type: selectedFoldersForActions.length && selectedFilesForActions.length ? 'multiple' : selectedFoldersForActions.length ? 'folder' : 'file', items: selectedItems })}><Trash2 className="w-4 h-4" /> حذف</button>
                                 <button className="btn-icon shrink-0" title="پایان انتخاب" onClick={cancelSelection}><X className="w-4 h-4" /></button>
@@ -991,7 +1058,7 @@ export default function FileBrowser() {
                                             viewMode={viewMode}
                                             selected={selectedFolderIds.has(folder.id)}
                                             selectionMode={selectionMode}
-                                            onSelect={(multi) => selectFolder(folder.id, multi)}
+                                            onSelect={(multi) => { if (multi) setSelectionMode(true); selectFolder(folder.id, multi); }}
                                             onOpen={() => navigateToFolder(folder)}
                                             onFileDrop={handleFileDrop}
                                         />
@@ -1005,7 +1072,7 @@ export default function FileBrowser() {
                                             viewMode={viewMode}
                                             selected={selectedFileIds.has(file.id)}
                                             selectionMode={selectionMode}
-                                            onSelect={(multi) => selectFile(file.id, selectionMode || multi)}
+                                            onSelect={(multi) => { if (multi) setSelectionMode(true); selectFile(file.id, selectionMode || multi); }}
                                             onPlay={() => handleFileOpen(file)}
                                         />
                                     ))}
@@ -1117,7 +1184,8 @@ export default function FileBrowser() {
                 onSave={handleBatchEdit}
             />
             {showAddMenu && <div className="fixed inset-0 z-[165] flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-4" onClick={() => setShowAddMenu(false)}><div className="w-full max-w-md rounded-t-3xl border border-white/10 bg-dark-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:rounded-3xl" onClick={event => event.stopPropagation()}><div className="mx-auto mb-4 h-1 w-12 rounded-full bg-white/20 sm:hidden"/><div className="flex items-center justify-between"><h2 className="font-bold">➕ افزودن به کمد</h2><button className="btn-icon" onClick={() => setShowAddMenu(false)}><X className="h-5 w-5"/></button></div><div className="mt-4 grid grid-cols-2 gap-2"><button className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-2xl border border-white/[.07] bg-dark-800/60 text-sm" onClick={() => { setShowAddMenu(false); uploadInputRef.current?.click(); }}><Upload className="h-6 w-6 text-primary-300"/> آپلود فایل</button><button className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-2xl border border-white/[.07] bg-dark-800/60 text-sm" onClick={() => { setShowAddMenu(false); setShowTextComposer(true); }}><StickyNote className="h-6 w-6 text-primary-300"/> یادداشت متنی</button><button className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-2xl border border-white/[.07] bg-dark-800/60 text-sm" onClick={() => { setShowAddMenu(false); setShowNewFolder(true); }}><FolderPlus className="h-6 w-6 text-primary-300"/> ساخت کشو</button><button className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-2xl border border-white/[.07] bg-dark-800/60 text-sm" onClick={openImportLink}><Link2 className="h-6 w-6 text-primary-300"/> ذخیره از لینک</button></div></div></div>}
-            {showImportLink && <div className="fixed inset-0 z-[170] flex items-end justify-center overflow-hidden bg-black/70 backdrop-blur-sm sm:items-center sm:p-4" onClick={() => setShowImportLink(false)}><form className="max-h-[92dvh] w-full max-w-lg overflow-x-hidden overflow-y-auto overscroll-contain rounded-t-3xl border border-white/10 bg-dark-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:max-h-[calc(100dvh-2rem)] sm:rounded-3xl sm:p-5" onClick={event => event.stopPropagation()} onSubmit={submitImportLink}><div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary-500/15 text-primary-200"><Link2 className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h2 className="font-bold">ذخیره از لینک</h2><p className="text-xs text-dark-400">لینک یوتیوب یا اینستاگرام را بفرست.</p></div><button type="button" className="btn-icon" onClick={() => setShowImportLink(false)}><X className="h-5 w-5"/></button></div><div className="mt-4"><input dir="ltr" autoFocus className="input w-full" value={importUrl} onChange={event => setImportUrl(event.target.value)} placeholder="https://…"/></div>{importUrl.trim() && <p className={`mt-2 text-xs ${importPlatform ? 'text-emerald-300' : 'text-red-300'}`}>{importPlatform === 'youtube' ? '✓ لینک یوتیوب شناسایی شد' : importPlatform === 'instagram' ? '✓ لینک اینستاگرام شناسایی شد' : 'لینک معتبر یوتیوب یا اینستاگرام نیست'}</p>}<label className="mt-3 block text-xs text-dark-400">کشوی مقصد<select value={importFolder === 'new' ? 'new' : importFolder ?? 'root'} onChange={event => setImportFolder(event.target.value === 'new' ? 'new' : event.target.value === 'root' ? null : Number(event.target.value))} className="input mt-1.5 w-full appearance-none"><option value="root">فایل‌های بیرون از کشو</option>{currentFolderId !== null && <option value={currentFolderId}>کشوی فعلی</option>}{(folders || []).filter(folder => folder.id !== currentFolderId).map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}<option value="new">➕ ساخت کشوی تازه…</option></select></label>{importFolder === 'new' && <input className="input mt-3 w-full" value={importFolderName} onChange={event => setImportFolderName(event.target.value)} placeholder="نام کشوی تازه"/>}{importPlatform === 'youtube' && <CustomSelect className="mt-3" placement="top" label="خروجی" value={importQuality} onChange={setImportQuality} options={[{value:'audio',label:'🎧 صدا'},{value:'480',label:'🎬 480p'},{value:'720',label:'🎬 720p'},{value:'1080',label:'🎬 1080p'}]}/>}<div className="mt-5 flex gap-2"><button type="button" className="btn-secondary flex-1" onClick={() => setShowImportLink(false)}>لغو</button><button disabled={!importUrl.trim() || !importPlatform || importLinkMutation.isPending || (importFolder === 'new' && !importFolderName.trim())} className="btn-primary flex-1 disabled:opacity-50">{importLinkMutation.isPending ? 'در حال ثبت…' : 'افزودن به صف'}</button></div></form></div>}
+            {uploadProgress && <div className="fixed bottom-24 left-4 right-4 z-[175] mx-auto max-w-md rounded-2xl border border-primary-500/25 bg-dark-900/95 p-4 shadow-2xl backdrop-blur-xl"><div className="flex items-center gap-3"><Upload className="h-5 w-5 text-primary-300"/><div className="min-w-0 flex-1"><div className="flex justify-between gap-2 text-xs"><span className="truncate">{uploadProgress.name}</span><span dir="ltr">{uploadProgress.index}/{uploadProgress.total} · {uploadProgress.percent}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-dark-700"><div className="h-full rounded-full bg-primary-500 transition-[width]" style={{width:`${uploadProgress.percent}%`}}/></div></div></div></div>}
+            {showImportLink && <div className="fixed inset-0 z-[170] flex items-end justify-center overflow-hidden bg-black/70 backdrop-blur-sm sm:items-center sm:p-4" onClick={() => setShowImportLink(false)}><form className="max-h-[92dvh] w-full max-w-lg overflow-x-hidden overflow-y-auto overscroll-contain rounded-t-3xl border border-white/10 bg-dark-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:max-h-[calc(100dvh-2rem)] sm:rounded-3xl sm:p-5" onClick={event => event.stopPropagation()} onSubmit={submitImportLink}><div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary-500/15 text-primary-200"><Link2 className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h2 className="font-bold">ذخیره از لینک</h2><p className="text-xs text-dark-400">لینک یوتیوب یا اینستاگرام را بفرست.</p></div><button type="button" className="btn-icon" onClick={() => setShowImportLink(false)}><X className="h-5 w-5"/></button></div><div className="mt-4"><textarea dir="ltr" autoFocus rows={3} className="input w-full resize-none" value={importUrl} onChange={event => setImportUrl(event.target.value)} placeholder="هر لینک را در یک خط بگذار…"/></div>{importUrl.trim() && <p className={`mt-2 text-xs ${importPlatform || importUrls.length > 1 ? 'text-emerald-300' : 'text-red-300'}`}>{importUrls.length > 1 ? `✓ ${importUrls.length.toLocaleString('fa-IR')} لینک برای افزودن دسته‌ای` : importPlatform === 'youtube' ? '✓ لینک یوتیوب شناسایی شد' : importPlatform === 'instagram' ? '✓ لینک اینستاگرام شناسایی شد' : 'لینک معتبر یوتیوب یا اینستاگرام نیست'}</p>}<CustomSelect className="mt-3" placement="top" label="کشوی مقصد" value={importFolder === 'new' ? 'new' : String(importFolder ?? 'root')} onChange={value => setImportFolder(value === 'new' ? 'new' : value === 'root' ? null : Number(value))} options={[{value:'root',label:'🗃️ فایل‌های من'},...(currentFolderId !== null?[{value:String(currentFolderId),label:'📍 کشوی فعلی'}]:[]),...importFolderOptions.filter(option => option.value !== String(currentFolderId)),{value:'new',label:'➕ ساخت کشوی تازه…'}]}/>{importFolder === 'new' && <input className="input mt-3 w-full" value={importFolderName} onChange={event => setImportFolderName(event.target.value)} placeholder="نام کشوی تازه"/>}{(importPlatform === 'youtube' || importUrls.length > 1) && <CustomSelect className="mt-3" placement="top" label="خروجی" value={importQuality} onChange={setImportQuality} options={[{value:'audio',label:'🎧 صدا'},{value:'480',label:'🎬 480p'},{value:'720',label:'🎬 720p'},{value:'1080',label:'🎬 1080p'}]}/>}<div className="mt-5 flex gap-2"><button type="button" className="btn-secondary flex-1" onClick={() => setShowImportLink(false)}>لغو</button><button disabled={!importUrl.trim() || (!importPlatform && importUrls.length < 2) || importLinkMutation.isPending || (importFolder === 'new' && !importFolderName.trim())} className="btn-primary flex-1 disabled:opacity-50">{importLinkMutation.isPending ? 'در حال ثبت…' : 'افزودن به صف'}</button></div></form></div>}
             {showTextComposer && (
                 <div className="fixed inset-0 z-[170] flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-4" onClick={() => setShowTextComposer(false)}>
                     <form className="w-full max-w-2xl rounded-t-3xl border border-white/10 bg-dark-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl sm:rounded-3xl sm:p-5" onClick={event => event.stopPropagation()} onSubmit={handleCreateText}>

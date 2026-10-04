@@ -7,13 +7,26 @@ export const colorThemes = {
 } as const;
 
 export type ColorTheme = keyof typeof colorThemes;
+export type ActiveTheme = ColorTheme | 'custom';
 
-export const getStoredTheme = (): ColorTheme => {
+export const getStoredTheme = (): ActiveTheme => {
     const saved = localStorage.getItem('komod-color-theme');
-    return saved && saved in colorThemes ? saved as ColorTheme : 'violet';
+    return saved === 'custom' || (saved && saved in colorThemes) ? saved as ActiveTheme : 'violet';
 };
 
-export const applyTheme = (theme: ColorTheme) => {
+const setShade = (shade: number, rgb: [number, number, number]) => document.documentElement.style.setProperty(`--primary-${shade}`, rgb.join(' '));
+const mix = (base: [number,number,number], target: [number,number,number], amount: number): [number,number,number] => base.map((value,index) => Math.round(value + (target[index] - value) * amount)) as [number,number,number];
+export const applyCustomTheme = (hex: string) => {
+    const match = /^#?([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(hex);
+    if (!match) return;
+    const base: [number,number,number] = [parseInt(match[1],16),parseInt(match[2],16),parseInt(match[3],16)];
+    const shades = [50,100,200,300,400,500,600,700,800,900,950];
+    const values = [.92,.82,.68,.5,.25,0,-.13,-.28,-.43,-.57,-.72];
+    shades.forEach((shade,index) => setShade(shade, values[index] >= 0 ? mix(base,[255,255,255],values[index]) : mix(base,[0,0,0],-values[index])));
+    localStorage.setItem('komod-custom-color', `#${match[1]}${match[2]}${match[3]}`);
+};
+export const applyTheme = (theme: ActiveTheme) => {
+    if (theme === 'custom') { applyCustomTheme(localStorage.getItem('komod-custom-color') || '#a855f7'); return; }
     colorThemes[theme].shades.forEach((value, index) => {
         const shade = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950][index];
         document.documentElement.style.setProperty(`--primary-${shade}`, value);

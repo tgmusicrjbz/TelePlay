@@ -34,7 +34,7 @@ from app.routers.files import (
     update_file,
     upload_file,
 )
-from app.routers.folders import delete_folder_contents, update_folder
+from app.routers.folders import delete_folder_contents, list_folders, update_folder
 from app.routers.streaming import stored_message_response
 from app.routers.playlists import add_playlist_items, create_playlist, reorder_playlist, shuffle_playlist
 from app.schemas import BatchFileUpdate, FileUpdate, FolderUpdate, PlaylistAddItems, PlaylistCreate, PlaylistReorder
@@ -107,15 +107,22 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await db.execute(select(File))).scalars().all(), [])
             self.assertEqual((await db.execute(select(WatchProgress))).scalars().all(), [])
 
-    async def test_remote_delete_failure_keeps_database_records(self):
+    async def test_root_folder_count_includes_nested_files(self):
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            folders = await list_folders(parent_id=None, sort="name:asc", favorite_only=False, db=db, current_user=user)
+        parent = next(folder for folder in folders if folder.id == self.parent_id)
+        self.assertEqual(parent.file_count, 2)
+        self.assertTrue(any(folder.is_default for folder in folders))
+
+    async def test_remote_delete_failure_still_removes_stale_database_records(self):
         async with async_session() as db:
             with patch("app.routers.folders.delete_from_storage_channel", new_callable=AsyncMock, return_value=False):
-                with self.assertRaises(HTTPException):
-                    await delete_folder_contents(db, await db.get(Folder, self.folder_id), True)
-                await db.rollback()
+                await delete_folder_contents(db, await db.get(Folder, self.folder_id), True)
+                await db.commit()
         async with async_session() as db:
-            self.assertIsNotNone(await db.get(Folder, self.folder_id))
-            self.assertEqual(len((await db.execute(select(File))).scalars().all()), 2)
+            self.assertIsNone(await db.get(Folder, self.folder_id))
+            self.assertEqual((await db.execute(select(File))).scalars().all(), [])
 
     async def test_move_folder_into_child_is_rejected(self):
         async with async_session() as db:
@@ -430,7 +437,8 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
         await render_folder_page(message, 111)
         markup = message.edit.await_args.kwargs["reply_markup"]
         callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
-        self.assertIn("rootfiles:0", callbacks)
+        self.assertNotIn("rootfiles:0", callbacks)
+        self.assertTrue(any(callback and callback.startswith("folder:") for callback in callbacks))
         self.assertIn("folders:0:1", callbacks)
 
     async def test_utf8_text_document_can_be_previewed(self):

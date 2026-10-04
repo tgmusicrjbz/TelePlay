@@ -1,7 +1,7 @@
 /**
  * FolderCard component - displays a folder in grid or list view with drag-drop support
  */
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Check, Folder as FolderIcon, MoreVertical, ChevronRight, Pin, Star } from 'lucide-react';
 import { Folder } from '../lib/api';
 import { useAppStore } from '../lib/store';
@@ -19,6 +19,8 @@ interface FolderCardProps {
 export default function FolderCard({ folder, viewMode, selected, selectionMode = false, onSelect, onOpen, onFileDrop }: FolderCardProps) {
     const [isDragOver, setIsDragOver] = useState(false);
     const { activeContextMenu, setActiveContextMenu } = useAppStore();
+    const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const longPressed = useRef(false);
 
     // Check if this folder's context menu is active
     const showMenu = activeContextMenu?.type === 'folder' && activeContextMenu?.item.id === folder.id;
@@ -26,10 +28,12 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
     const handleContextMenu = (e: React.MouseEvent) => {
         e.preventDefault();
         e.stopPropagation();
+        if (longPressed.current) return;
         setActiveContextMenu({ type: 'folder', item: folder, x: e.clientX, y: e.clientY });
     };
 
     const handleClick = (e: React.MouseEvent) => {
+        if (longPressed.current) { longPressed.current = false; return; }
         if (onSelect && selectionMode) {
             e.preventDefault();
             e.stopPropagation();
@@ -38,6 +42,12 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
             onOpen();
         }
     };
+    const beginLongPress = () => {
+        if (!onSelect) return;
+        longPressed.current = false;
+        longPressTimer.current = setTimeout(() => { longPressed.current = true; onSelect(true); }, 500);
+    };
+    const endLongPress = () => { if (longPressTimer.current) clearTimeout(longPressTimer.current); longPressTimer.current = null; };
 
     const handleSelectClick = (e: React.MouseEvent) => {
         e.preventDefault();
@@ -86,6 +96,10 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
                     ${dropStyles} ${selectedStyles}`}
                 onClick={handleClick}
                 onContextMenu={handleContextMenu}
+                onPointerDown={beginLongPress}
+                onPointerUp={endLongPress}
+                onPointerCancel={endLongPress}
+                onPointerLeave={endLongPress}
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
@@ -140,6 +154,10 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
                 ${dropStyles} ${selectedStyles}`}
             onClick={handleClick}
             onContextMenu={handleContextMenu}
+            onPointerDown={beginLongPress}
+            onPointerUp={endLongPress}
+            onPointerCancel={endLongPress}
+            onPointerLeave={endLongPress}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}

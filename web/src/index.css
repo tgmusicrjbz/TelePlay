@@ -218,6 +218,12 @@ body {
   direction: ltr !important;
 }
 
+.font-player {
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .015em;
+}
+
 .admin-users-grid > * {
   min-width: 0;
   max-width: 100%;

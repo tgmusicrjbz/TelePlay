@@ -1,7 +1,7 @@
 /**
  * FileCard component - displays a single file in grid or list view
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Play, MoreVertical, Film, Music, FileText, Image, Check, Star, Pin } from 'lucide-react';
 import { TelegramFile, formatFileSize, formatDuration, useUpdateFile } from '../lib/api';
 import { useAppStore } from '../lib/store';
@@ -26,6 +26,8 @@ export default function FileCard({
     const { activeContextMenu, setActiveContextMenu, addToast } = useAppStore();
     const updateFile = useUpdateFile();
     const [thumbnailFailed, setThumbnailFailed] = useState(false);
+    const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const longPressed = useRef(false);
     const toggleFavorite = async (event: React.MouseEvent) => {
         event.stopPropagation();
         await updateFile.mutateAsync({ id: file.id, is_favorite: !file.is_favorite });
@@ -38,6 +40,7 @@ export default function FileCard({
     const handleContextMenu = (e: React.MouseEvent) => {
         e.preventDefault();
         e.stopPropagation();
+        if (longPressed.current) return;
         if (!selected) {
             onSelect(false);
         }
@@ -46,9 +49,15 @@ export default function FileCard({
 
     const handleClick = (e: React.MouseEvent) => {
         e.stopPropagation();
+        if (longPressed.current) { longPressed.current = false; return; }
         if (selectionMode) onSelect(true);
         else onPlay();
     };
+    const beginLongPress = () => {
+        longPressed.current = false;
+        longPressTimer.current = setTimeout(() => { longPressed.current = true; onSelect(true); }, 500);
+    };
+    const endLongPress = () => { if (longPressTimer.current) clearTimeout(longPressTimer.current); longPressTimer.current = null; };
 
     // Generate authenticated stream URL for thumbnail
     const token = localStorage.getItem('access_token');
@@ -90,6 +99,10 @@ export default function FileCard({
                     }`}
                 onClick={handleClick}
                 onContextMenu={handleContextMenu}
+                onPointerDown={beginLongPress}
+                onPointerUp={endLongPress}
+                onPointerCancel={endLongPress}
+                onPointerLeave={endLongPress}
                 data-file-id={file.id}
             >
             {selectionMode && <div className="absolute left-0 top-0 z-10 flex h-11 w-11 items-center justify-center"><div className={`flex h-6 w-6 items-center justify-center rounded-md border ${selected ? 'border-primary-400 bg-primary-500 text-white' : 'border-white/30 bg-dark-900/90'}`}>{selected && <Check className="h-4 w-4" />}</div></div>}
@@ -161,6 +174,10 @@ export default function FileCard({
                 }`}
             onClick={handleClick}
             onContextMenu={handleContextMenu}
+            onPointerDown={beginLongPress}
+            onPointerUp={endLongPress}
+            onPointerCancel={endLongPress}
+            onPointerLeave={endLongPress}
             data-file-id={file.id}
         >
             {selectionMode && <div className="absolute left-0 top-0 z-20 flex h-11 w-11 items-center justify-center"><div className={`flex h-6 w-6 items-center justify-center rounded-md border ${selected ? 'border-primary-400 bg-primary-500 text-white' : 'border-white/30 bg-dark-900/90'}`}>{selected && <Check className="h-4 w-4" />}</div></div>}

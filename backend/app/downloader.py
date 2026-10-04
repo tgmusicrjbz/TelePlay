@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import tempfile
 import time
+import uuid
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
@@ -37,6 +38,7 @@ class ImportJob:
     quality: str = "720"
     notify: bool = True
     default_folder: bool = False
+    id: str = ""
 
 
 def _oembed_title(url: str) -> str:
@@ -63,6 +65,7 @@ class LinkImportService:
         self.client: Client | None = None
         self.queue: asyncio.Queue[ImportJob] = asyncio.Queue()
         self.task: asyncio.Task | None = None
+        self.statuses: dict[str, dict] = {}
 
     @property
     def available(self) -> bool:
@@ -103,13 +106,20 @@ class LinkImportService:
             raise RuntimeError("TELEGRAM_WORKER_SESSION is not configured")
         if self.client is None or self.task is None or self.task.done():
             await self.start()
+        job.id = job.id or uuid.uuid4().hex
+        self.statuses[job.id] = {"id": job.id, "user_id": job.user_id, "state": "queued", "message": "توی صفه و به‌زودی شروع می‌شه.", "saved": 0}
         await self.queue.put(job)
         return self.queue.qsize()
+
+    def status(self, job_id: str, user_id: int) -> dict | None:
+        status = self.statuses.get(job_id)
+        return status if status and status["user_id"] == user_id else None
 
     async def _run(self) -> None:
         while True:
             job = await self.queue.get()
             try:
+                self.statuses[job.id].update(state="downloading", message="دارم فایل اصلی رو آماده می‌کنم…")
                 if job.notify:
                     await self._notify(job, "⏳ نوبت لینک تو رسید؛ دارم فایل اصلی رو آماده می‌کنم…")
                 items = await self._download(job.url, job.quality)
@@ -119,12 +129,14 @@ class LinkImportService:
                 if job.notify:
                     count = str(len(saved)).translate(str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹"))
                     await self._notify(job, f"✅ آماده شد! {count} فایل توی کمدت قرار گرفت.")
+                self.statuses[job.id].update(state="done", message="فایل‌ها با موفقیت به کمد اضافه شدند.", saved=len(saved))
             except asyncio.CancelledError:
                 raise
             except Exception as error:
                 logger.exception("Link import failed for %s", job.url)
                 if job.notify:
                     await self._notify(job, "❌ این لینک آماده نشد. ممکنه پست خصوصی، حذف‌شده یا موقتاً خارج از دسترس باشه؛ کمی بعد دوباره امتحانش کن.")
+                self.statuses[job.id].update(state="error", message="آماده‌سازی این لینک انجام نشد.")
             finally:
                 self.queue.task_done()
 
@@ -298,7 +310,14 @@ class LinkImportService:
         token = quote(create_access_token(job.telegram_id), safe="")
         url = f"{settings.web_base_url.rstrip('/')}/auth?token={token}"
         keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🗄️ باز کردن کمد", web_app=WebAppInfo(url=url))]]) if url.startswith("https://") else None
-        await telegram.tg_client.send_message(job.telegram_id, text, reply_markup=keyboard)
+        message = await telegram.tg_client.send_message(job.telegram_id, text, reply_markup=keyboard)
+        async def remove_later() -> None:
+            await asyncio.sleep(45)
+            try:
+                await telegram.tg_client.delete_messages(job.telegram_id, message.id)
+            except Exception:
+                pass
+        asyncio.create_task(remove_later())
 
 
 link_importer = LinkImportService()

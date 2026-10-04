@@ -58,6 +58,7 @@ class FolderResponse(FolderBase):
     file_count: int = 0
     is_favorite: bool = False
     is_pinned: bool = False
+    is_default: bool = False
     
     model_config = ConfigDict(from_attributes=True)
 
@@ -265,7 +266,8 @@ class SessionResponse(BaseModel):
 
 
 class WorkspaceGrantCreate(BaseModel):
-    telegram_id: int
+    telegram_id: Optional[int] = None
+    identifier: Optional[str] = Field(default=None, min_length=1, max_length=255)
     permission: Literal["read", "write"] = "read"
 
 

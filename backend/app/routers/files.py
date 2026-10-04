@@ -25,6 +25,7 @@ from .. import telegram
 from ..config import get_settings
 from ..media_metadata import extract_embedded_cover
 from ..downloader import ImportJob, link_importer
+from .folders import ensure_default_folder
 from ..services import (
     escape_like, 
     sanitize_filename, 
@@ -97,9 +98,21 @@ async def import_link(
         folder = (await db.execute(select(Folder).where(Folder.id == folder_id, Folder.user_id == current_user.id))).scalar_one_or_none()
         if folder is None:
             raise HTTPException(status_code=404, detail="کشوی مقصد پیدا نشد.")
+    else:
+        folder_id = (await ensure_default_folder(db, current_user.id)).id
+        await db.commit()
     quality = "auto" if host == "instagram.com" or host.endswith(".instagram.com") else (payload.quality or "720")
-    position = await link_importer.enqueue(ImportJob(url=payload.url.strip(), user_id=current_user.id, telegram_id=current_user.telegram_id, folder_id=folder_id, quality=quality, notify=True))
-    return {"message": "لینک ثبت شد؛ شروع دانلود و آماده‌شدن فایل رو توی ربات خبر می‌دیم.", "queue_position": position}
+    job = ImportJob(url=payload.url.strip(), user_id=current_user.id, telegram_id=current_user.telegram_id, folder_id=folder_id, quality=quality, notify=True)
+    position = await link_importer.enqueue(job)
+    return {"message": "لینک رفت توی صف؛ وضعیتش همین‌جا هم به‌روز می‌شه.", "queue_position": position, "job_id": job.id}
+
+
+@router.get("/import-link/status/{job_id}")
+async def import_link_status(job_id: str, current_user: User = Depends(get_current_user)):
+    status = link_importer.status(job_id, current_user.id)
+    if status is None:
+        raise HTTPException(status_code=404, detail="وضعیت این لینک پیدا نشد.")
+    return status
 
 
 @router.post("/upload", response_model=FileResponse, status_code=201)
@@ -112,6 +125,9 @@ async def upload_file(
 ):
     """Upload a browser file into the Telegram storage channel."""
     filename = sanitize_filename(upload.filename or "file")
+    if folder_id is None:
+        folder_id = (await ensure_default_folder(db, current_user.id)).id
+        await db.commit()
     if folder_id is not None:
         folder = (await db.execute(select(Folder).where(Folder.id == folder_id, Folder.user_id == current_user.id))).scalar_one_or_none()
         if folder is None:
@@ -526,15 +542,15 @@ async def delete_file(
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
     
-    # Delete from Telegram storage channel
-    if not await delete_from_storage_channel(file.channel_message_id):
-        raise HTTPException(status_code=502, detail="Could not delete file from Telegram storage")
+    # Old Telegram messages may already be gone or belong to a previous storage
+    # channel.  Their stale metadata must still be removable from Komod.
+    storage_deleted = await delete_from_storage_channel(file.channel_message_id)
     
     # Delete from database
     await db.delete(file)
     await db.commit()
     
-    return {"message": "File deleted successfully"}
+    return {"message": "File deleted successfully", "storage_deleted": storage_deleted}
 
 
 @router.post("/batch-delete")
@@ -558,8 +574,7 @@ async def batch_delete_files(
     
     # Delete from Telegram (batch)
     for start in range(0, len(msg_ids), 100):
-        if not await delete_from_storage_channel(msg_ids[start:start + 100]):
-            raise HTTPException(status_code=502, detail="Could not delete files from Telegram storage")
+        await delete_from_storage_channel(msg_ids[start:start + 100])
     
     # Delete from DB
     for file in files:
