@@ -41,9 +41,9 @@ class ImportJob:
     id: str = ""
 
 
-def _oembed_title(url: str) -> str:
+def _oembed_metadata(url: str) -> tuple[str, str | None]:
     if "youtu" not in url.lower():
-        return "instagram"
+        return "instagram", None
     endpoints = (
         "https://www.youtube.com/oembed?" + urlencode({"url": url, "format": "json"}),
         "https://noembed.com/embed?" + urlencode({"url": url}),
@@ -52,12 +52,14 @@ def _oembed_title(url: str) -> str:
         try:
             request = Request(endpoint, headers={"User-Agent": "Mozilla/5.0 Komod/1.0", "Accept": "application/json"})
             with urlopen(request, timeout=10) as response:
-                title = str(json.loads(response.read().decode("utf-8")).get("title") or "").strip()
+                payload = json.loads(response.read().decode("utf-8"))
+                title = str(payload.get("title") or "").strip()
+                author = str(payload.get("author_name") or "").strip() or None
                 if title:
-                    return title
+                    return title, author
         except Exception:
             logger.debug("Could not resolve YouTube title from %s", endpoint, exc_info=True)
-    return "youtube"
+    return "youtube", None
 
 
 class LinkImportService:
@@ -143,7 +145,8 @@ class LinkImportService:
     async def _download(self, url: str, quality: str) -> list[dict]:
         if self.client is None:
             raise RuntimeError("Import worker is unavailable")
-        title = sanitize_filename(await asyncio.to_thread(_oembed_title, url))
+        raw_title, source_author = await asyncio.to_thread(_oembed_metadata, url)
+        title = sanitize_filename(raw_title)
         is_instagram = "instagram.com" in url.lower()
         sent = await self.client.send_message("allsaverbot", url)
         clicked: set[str] = set()
@@ -194,7 +197,13 @@ class LinkImportService:
                 kind = media_kind(message)
                 if kind:
                     seen.add(message.id)
-                    found.append({"message": message, "title": title, "type": kind})
+                    caption = str(getattr(message, "caption", "") or getattr(message, "text", "") or "").strip()
+                    inferred_author = source_author
+                    if not inferred_author and caption:
+                        first_line = caption.splitlines()[0].strip()
+                        if first_line and len(first_line) <= 120 and not first_line.startswith("http"):
+                            inferred_author = first_line
+                    found.append({"message": message, "title": title, "type": kind, "author": inferred_author})
                     received_now += 1
             if received_now:
                 last_media_at = time.monotonic()
@@ -290,7 +299,7 @@ class LinkImportService:
                     file_id=media.file_id,
                     file_unique_id=media.file_unique_id,
                     file_name=filename,
-                    description=job.url,
+                    description=(f"{item.get('author')}\n\n{job.url}" if item.get("author") else job.url),
                     file_size=getattr(media, "file_size", None) or 0,
                     mime_type=(getattr(media, "mime_type", None) or ("video/mp4" if item["type"] == "video" else "audio/mpeg" if item["type"] == "audio" else "image/jpeg")),
                     file_type=item["type"],

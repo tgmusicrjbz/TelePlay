@@ -219,9 +219,13 @@ body {
 }
 
 .font-player {
-  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-family: "Segoe UI Variable", Inter, "SF Pro Display", Roboto, sans-serif;
   font-variant-numeric: tabular-nums;
   letter-spacing: .015em;
+}
+
+:lang(en), [dir="ltr"], code, pre, input[type="url"], input[type="email"] {
+  font-family: "Segoe UI Variable", Inter, "SF Pro Text", Roboto, system-ui, sans-serif;
 }
 
 .admin-users-grid > * {

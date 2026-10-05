@@ -22,7 +22,7 @@ function ToastItem({ toast, onDismiss }: { toast: { id: string; message: string;
         setTimeout(onDismiss, 180);
     }, [onDismiss]);
     useEffect(() => {
-        const timer = setTimeout(dismiss, 2800);
+        const timer = setTimeout(dismiss, toast.type === 'error' ? 3200 : 2100);
 
         return () => clearTimeout(timer);
     }, [dismiss]);

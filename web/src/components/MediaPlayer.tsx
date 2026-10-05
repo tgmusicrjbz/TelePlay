@@ -2,7 +2,7 @@
  * MediaPlayer - full screen video/audio player
  */
 import { useRef, useEffect, useState, useCallback } from 'react';
-import { X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipBack, SkipForward, Download, ExternalLink, AlertTriangle, Copy, PictureInPicture2, Gauge, ChevronDown, ChevronUp, Repeat2, Shuffle, Headphones, RotateCcw, RotateCw, Clock3, ListPlus, RectangleHorizontal, Smartphone, MonitorSmartphone, Film, LockKeyhole, UnlockKeyhole } from 'lucide-react';
+import { X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipBack, SkipForward, Download, AlertTriangle, Copy, PictureInPicture2, Gauge, ChevronDown, ChevronUp, Repeat2, Shuffle, Headphones, RotateCcw, RotateCw, Clock3, ListPlus, RectangleHorizontal, Smartphone, MonitorSmartphone, Film, LockKeyhole, UnlockKeyhole } from 'lucide-react';
 import { TelegramFile, useUpdateProgress, useFile, api } from '../lib/api';
 import { useAppStore } from '../lib/store';
 
@@ -36,6 +36,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     const [isPiP, setIsPiP] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [streamRetry, setStreamRetry] = useState(0);
     const hideControlsTimeout = useRef<ReturnType<typeof setTimeout>>();
     const singleTapTimeout = useRef<ReturnType<typeof setTimeout>>();
     const feedbackTimeout = useRef<ReturnType<typeof setTimeout>>();
@@ -279,10 +280,14 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     const handleError = () => {
         if (videoRef.current?.error) {
             const code = videoRef.current.error.code;
-            if (code === 3 || code === 4) { // MEDIA_ERR_DECODE or MEDIA_ERR_SRC_NOT_SUPPORTED
-                setError(`مرورگر نمی‌تواند فرمت این ${isVideo ? 'ویدیو' : 'فایل صدا'} را پخش کند.`);
+            if (code === 2) {
+                setError('ارتباط با فایل قطع شد یا اینترنت پایدار نیست.');
+            } else if (code === 3) {
+                setError(`فایل دریافت شد، اما مرورگر نتوانست ${isVideo ? 'تصویر ویدیو' : 'صدای آن'} را رمزگشایی کند.`);
+            } else if (code === 4) {
+                setError(`فرمت این ${isVideo ? 'ویدیو' : 'فایل صدا'} در این مرورگر پشتیبانی نمی‌شود.`);
             } else {
-                setError('هنگام دریافت یا پخش فایل مشکلی پیش آمد.');
+                setError('پخش فایل متوقف شد؛ ممکن است اتصال یا دسترسی فایل موقتاً مشکل داشته باشد.');
             }
             setIsLoading(false);
         }
@@ -398,13 +403,16 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
         if (hideControlsTimeout.current) {
             clearTimeout(hideControlsTimeout.current);
         }
+        // Music controls stay visible. Hiding transport controls on every tap is
+        // useful for video, but makes an audio player feel broken.
+        if (!isVideo) return;
         if (showVolumePopover || showSpeedMenu || showSleepMenu) return;
         hideControlsTimeout.current = setTimeout(() => {
             if (!isMinimized) {
                 setShowControls(false);
                 setShowSpeedMenu(false);
             }
-        }, isVideo ? 3000 : 6500);
+        }, 3000);
     }, [controlsLocked, isMinimized, isVideo, showSleepMenu, showSpeedMenu, showVolumePopover]);
 
     const toggleVideoControls = useCallback(() => {
@@ -434,7 +442,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
 
         if (event.pointerType !== 'touch') {
             if (isVideo) toggleVideoControls();
-            else togglePlay();
+            else { setShowControls(true); togglePlay(); }
             return;
         }
 
@@ -501,10 +509,9 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     };
 
     const isOfflineSource = file.stream_url.startsWith('blob:');
-    const relativeStreamUrl = isOfflineSource ? file.stream_url : `${file.stream_url}${file.stream_url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token || '')}`;
+    const relativeStreamUrl = isOfflineSource ? file.stream_url : `${file.stream_url}${file.stream_url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token || '')}&retry=${streamRetry}`;
     const authorizedStreamUrl = isOfflineSource ? relativeStreamUrl : getAbsoluteUrl(relativeStreamUrl);
     const externalUrl = publicUrl || authorizedStreamUrl;
-    const vlcUrl = `vlc://${externalUrl}`;
 
     // Authorized Thumbnail URL
     const relativeThumbnailUrl = file.thumbnail_url ? `${file.thumbnail_url}${file.thumbnail_url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token || '')}` : null;
@@ -595,17 +602,11 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                         <div className="w-16 h-16 rounded-2xl bg-yellow-500/20 flex items-center justify-center mx-auto mb-5 border border-yellow-500/30">
                             <AlertTriangle className="w-8 h-8 text-yellow-400" />
                         </div>
-                        <h3 className="text-xl font-bold text-white mb-2">پخش این فایل در مرورگر ممکن نیست</h3>
+                        <h3 className="text-xl font-bold text-white mb-2">پخش فایل متوقف شد</h3>
                         <p className="text-dark-300 mb-6">{error}</p>
 
                         <div className="flex flex-col gap-3">
-                            <a
-                                href={vlcUrl}
-                                className="btn-primary flex items-center justify-center gap-2"
-                            >
-                                <ExternalLink className="w-4 h-4" />
-                                باز کردن در VLC
-                            </a>
+                            <button onClick={() => { setError(null); setIsLoading(true); setStreamRetry(Date.now()); window.setTimeout(() => void videoRef.current?.play().catch(() => undefined), 120); }} className="btn-primary flex items-center justify-center gap-2"><RotateCw className="h-4 w-4"/> تلاش دوباره</button>
                             <div className="flex gap-3">
                                 <Button
                                     onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(externalUrl); }}

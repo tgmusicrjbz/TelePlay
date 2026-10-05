@@ -275,7 +275,7 @@ export const useAppStore = create<AppState>((set) => ({
     toasts: [],
     addToast: (message, type = 'success') => set((state) => {
         const id = Math.random().toString(36).substring(2, 9);
-        return { toasts: [...state.toasts, { id, message, type }] };
+        return { toasts: [...state.toasts.slice(-2), { id, message, type }] };
     }),
     removeToast: (id) => set((state) => ({
         toasts: state.toasts.filter((t) => t.id !== id),

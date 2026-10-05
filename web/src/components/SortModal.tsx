@@ -36,10 +36,9 @@ export default function SortModal({ open, criteria, onApply, onClose }: Props) {
             <div className="space-y-2">
                 {draft.map((item, index) => <div key={item.field} className="flex items-center gap-2 rounded-xl border border-white/10 bg-dark-800/60 p-2">
                     <span className="w-6 text-center text-xs text-primary-300">{index + 1}</span>
-                    <span className="min-w-0 flex-1 text-sm">{labels[item.field]}</span>
-                    <button className="btn-secondary px-2 py-1 text-xs" onClick={() => update(index, { ...item, direction: item.direction === 'asc' ? 'desc' : 'asc' })}>
+                    <button className="flex min-w-0 flex-1 items-center justify-between rounded-lg px-2 py-1.5 text-right text-sm transition hover:bg-white/[.05]" title="برای تغییر جهت دوباره بزن" onClick={() => update(index, { ...item, direction: item.direction === 'asc' ? 'desc' : 'asc' })}><span>{labels[item.field]}</span><span className="text-xs text-primary-200">
                         {item.direction === 'asc' ? <><ArrowUp className="inline h-3.5 w-3.5" /> صعودی</> : <><ArrowDown className="inline h-3.5 w-3.5" /> نزولی</>}
-                    </button>
+                    </span></button>
                     <button className="btn-icon" disabled={index === 0} onClick={() => move(index, -1)}><ChevronUp className="h-4 w-4" /></button>
                     <button className="btn-icon" disabled={index === draft.length - 1} onClick={() => move(index, 1)}><ChevronDown className="h-4 w-4" /></button>
                     <button className="btn-icon text-red-300" onClick={() => setDraft(draft.filter((_, i) => i !== index))}><X className="h-4 w-4" /></button>

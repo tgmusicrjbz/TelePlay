@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import { AlignJustify, Check, Copy, Download, Maximize2, Minimize2, Minus, Moon, Pencil, Plus, Sun, WrapText, X } from 'lucide-react';
+import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Check, Copy, Download, Maximize2, Minimize2, Minus, Moon, Pencil, Plus, Sun, WrapText, X } from 'lucide-react';
 import { api, canPreviewText } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { cacheTextFile, getOfflineText, updateOfflineTextDraft } from '../lib/offline';
@@ -19,6 +19,7 @@ export default function ContentPreview() {
     const [readerLineHeight, setReaderLineHeight] = useState(() => Number(localStorage.getItem('komod-reader-line-height')) || 2);
     const [readerTone, setReaderTone] = useState<'dark' | 'warm'>(() => localStorage.getItem('komod-reader-tone') === 'warm' ? 'warm' : 'dark');
     const [readerWrap, setReaderWrap] = useState(() => localStorage.getItem('komod-reader-wrap') !== 'off');
+    const [readerAlign, setReaderAlign] = useState<'right' | 'left' | 'center' | 'justify'>(() => (localStorage.getItem('komod-reader-align') as 'right' | 'left' | 'center' | 'justify') || 'right');
     const previewRef = useRef<HTMLElement>(null);
     const show = !!file && (file.file_type === 'image' || canPreviewText(file));
 
@@ -29,7 +30,8 @@ export default function ContentPreview() {
         localStorage.setItem('komod-reader-line-height', String(readerLineHeight));
         localStorage.setItem('komod-reader-tone', readerTone);
         localStorage.setItem('komod-reader-wrap', readerWrap ? 'on' : 'off');
-    }, [readerFontSize, readerLineHeight, readerTone, readerWrap]);
+        localStorage.setItem('komod-reader-align', readerAlign);
+    }, [readerFontSize, readerLineHeight, readerTone, readerWrap, readerAlign]);
 
     useEffect(() => {
         const syncFullscreen = () => {
@@ -147,13 +149,16 @@ export default function ContentPreview() {
                             </div>
                             <span className="hidden text-xs text-dark-500 sm:block">{wordCount.toLocaleString('fa-IR')} واژه</span>
                             <div className="flex items-center gap-1">
+                                <div className="hidden items-center rounded-xl border border-white/[.07] bg-dark-800/70 p-1 sm:flex">
+                                    {([['right', AlignRight], ['center', AlignCenter], ['left', AlignLeft], ['justify', AlignJustify]] as const).map(([value, Icon]) => <button key={value} onClick={() => setReaderAlign(value)} className={`flex h-8 w-8 items-center justify-center rounded-lg ${readerAlign === value ? 'bg-primary-500/20 text-primary-200' : 'text-dark-400 hover:text-white'}`} title={value === 'right' ? 'راست‌چین' : value === 'left' ? 'چپ‌چین' : value === 'center' ? 'وسط‌چین' : 'تراز دوطرفه'}><Icon className="h-4 w-4"/></button>)}
+                                </div>
                                 <button onClick={cycleLineHeight} className="btn-icon h-10 w-10" title="تغییر فاصله خط‌ها"><AlignJustify className="h-4 w-4"/></button>
                                 <button onClick={() => setReaderWrap(value => !value)} className={`btn-icon h-10 w-10 ${readerWrap ? 'text-primary-200' : ''}`} title={readerWrap ? 'خاموش‌کردن شکستن خط‌ها' : 'شکستن خودکار خط‌ها'}><WrapText className="h-4 w-4"/></button>
                                 <button onClick={() => setReaderTone(tone => tone === 'dark' ? 'warm' : 'dark')} className="btn-icon h-10 w-10" title={readerTone === 'dark' ? 'حالت مطالعه گرم' : 'حالت تاریک'}>{readerTone === 'dark' ? <Sun className="h-4 w-4"/> : <Moon className="h-4 w-4"/>}</button>
                             </div>
                         </div>
                         <div className={`min-h-0 flex-1 overflow-auto p-4 transition-colors sm:p-8 ${readerTone === 'warm' ? 'bg-[#19160f]' : 'bg-dark-950/60'}`}>
-                            {loading ? <p className="text-dark-400">در حال بارگذاری متن…</p> : error ? <p className="text-red-400">{error}</p> : editing ? <div className="mx-auto max-w-5xl"><textarea dir="auto" value={draft} onChange={event => setDraft(event.target.value)} className="min-h-[65vh] w-full resize-y rounded-xl border border-white/10 bg-dark-900 p-4 font-mono text-dark-100 outline-none focus:border-primary-400" style={{ fontSize: readerFontSize, lineHeight: readerLineHeight }}/><div className="mt-3 flex justify-end gap-2"><button className="btn-secondary" onClick={() => { setDraft(content); setEditing(false); }}>لغو</button><button disabled={saving} className="btn-primary flex items-center gap-2" onClick={() => void saveText()}><Check className="h-4 w-4"/> {saving ? 'در حال ذخیره…' : 'ذخیره متن'}</button></div></div> : <MarkdownContent content={content} fontSize={readerFontSize} lineHeight={readerLineHeight} warm={readerTone === 'warm'} wrap={readerWrap} />}
+                            {loading ? <p className="text-dark-400">در حال بارگذاری متن…</p> : error ? <p className="text-red-400">{error}</p> : editing ? <div className="mx-auto max-w-5xl"><textarea dir="auto" value={draft} onChange={event => setDraft(event.target.value)} className="min-h-[65vh] w-full resize-y rounded-xl border border-white/10 bg-dark-900 p-4 font-mono text-dark-100 outline-none focus:border-primary-400" style={{ fontSize: readerFontSize, lineHeight: readerLineHeight }}/><div className="mt-3 flex justify-end gap-2"><button className="btn-secondary" onClick={() => { setDraft(content); setEditing(false); }}>لغو</button><button disabled={saving} className="btn-primary flex items-center gap-2" onClick={() => void saveText()}><Check className="h-4 w-4"/> {saving ? 'در حال ذخیره…' : 'ذخیره متن'}</button></div></div> : <MarkdownContent content={content} fontSize={readerFontSize} lineHeight={readerLineHeight} warm={readerTone === 'warm'} wrap={readerWrap} align={readerAlign} />}
                         </div>
                     </>
                 )}
@@ -163,10 +168,12 @@ export default function ContentPreview() {
 }
 
 function inlineMarkdown(text: string) {
-    return text.split(/(\[[^\]]+\]\([^)]+\)|\*\*[^*]+\*\*|__[^_]+__|~~[^~]+~~|`[^`]+`|\*[^*]+\*)/g).map((part, index) => {
+    return text.split(/(!\[[^\]]*\]\([^)]+\)|\[[^\]]+\]\([^)]+\)|\*\*[^*]+\*\*|__[^_]+__|<u>.*?<\/u>|~~[^~]+~~|`[^`]+`|\*[^*]+\*)/g).map((part, index) => {
+        const image = part.match(/^!\[([^\]]*)\]\(([^)]+)\)$/); if (image) return <img key={index} src={image[2]} alt={image[1]} loading="lazy" className="my-4 max-h-[70vh] max-w-full rounded-2xl border border-white/[.07] object-contain shadow-xl"/>;
         const link = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/); if (link) return <a key={index} href={link[2]} target="_blank" rel="noreferrer" className="break-all font-medium text-sky-300 underline decoration-sky-500/40 underline-offset-4 transition hover:text-sky-200">{link[1]}</a>;
         if (part.startsWith('**') || part.startsWith('__')) return <strong key={index} className="font-extrabold text-amber-200">{part.slice(2, -2)}</strong>;
         if (part.startsWith('~~')) return <del key={index} className="text-rose-300/70 decoration-rose-400/70">{part.slice(2, -2)}</del>;
+        if (part.startsWith('<u>')) return <u key={index} className="decoration-primary-400/70 decoration-2 underline-offset-4">{part.slice(3, -4)}</u>;
         if (part.startsWith('`')) return <code key={index} dir="ltr" className="mx-0.5 break-all rounded-md border border-cyan-400/15 bg-cyan-400/10 px-1.5 py-0.5 font-mono text-[.9em] text-cyan-200">{part.slice(1, -1)}</code>;
         if (part.startsWith('*')) return <em key={index} className="text-violet-200">{part.slice(1, -1)}</em>;
         return <Fragment key={index}>{part}</Fragment>;
@@ -192,26 +199,37 @@ function MarkdownCodeBlock({ code, language }: { code: string; language?: string
     </div>;
 }
 
-function MarkdownContent({ content, fontSize = 15, lineHeight = 2, warm = false, wrap = true }: { content: string; fontSize?: number; lineHeight?: number; warm?: boolean; wrap?: boolean }) {
+function MarkdownContent({ content, fontSize = 15, lineHeight = 2, warm = false, wrap = true, align = 'right' }: { content: string; fontSize?: number; lineHeight?: number; warm?: boolean; wrap?: boolean; align?: 'right' | 'left' | 'center' | 'justify' }) {
     const blocks = useMemo(() => {
         const result: JSX.Element[] = []; let code = false; let codeLines: string[] = []; let language = '';
-        const lines = content.split(/\r?\n/); let skipTableSeparator = false;
-        lines.forEach((line, index) => {
-            if (line.trim().startsWith('```')) { if (code) { result.push(<MarkdownCodeBlock key={`code-${index}`} code={codeLines.join('\n')} language={language}/>); codeLines = []; language = ''; } else language = line.trim().slice(3).trim(); code = !code; return; }
-            if (code) { codeLines.push(line); return; }
-            if (skipTableSeparator) { skipTableSeparator = false; return; }
-            if (!line.trim()) { result.push(<div key={`space-${index}`} className="h-3"/>); return; }
-            if (/^\s*(---+|___+|\*\*\*+)\s*$/.test(line)) { result.push(<div key={index} className="my-7 h-px bg-gradient-to-r from-transparent via-primary-400/45 to-transparent"/>); return; }
-            if (line.includes('|')) { const cells = line.trim().replace(/^\||\|$/g, '').split('|').map(cell => cell.trim()); const header = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(lines[index + 1] || ''); if (header) skipTableSeparator = true; result.push(<div key={index} className="max-w-full overflow-x-auto"><div className={`grid min-w-max grid-flow-col auto-cols-fr border-b border-white/[.07] ${header ? 'bg-primary-500/10 font-bold text-primary-100' : 'text-dark-200'}`}>{cells.map((cell, cellIndex) => <span key={cellIndex} className="min-w-28 break-words border-l border-white/[.06] px-3 py-2 last:border-l-0">{inlineMarkdown(cell)}</span>)}</div></div>); return; }
-            const heading = line.match(/^(#{1,6})\s+(.+)$/); if (heading) { const level = heading[1].length; const Tag = `h${level}` as keyof JSX.IntrinsicElements; const tone = level === 1 ? 'text-primary-200' : level === 2 ? 'text-sky-200' : level === 3 ? 'text-violet-200' : 'text-emerald-200'; result.push(<Tag key={index} className={`${level === 1 ? 'text-3xl' : level === 2 ? 'text-2xl' : level === 3 ? 'text-xl' : 'text-lg'} ${tone} mb-2 mt-7 break-words border-b border-white/[.05] pb-2 font-black leading-tight`}>{inlineMarkdown(heading[2])}</Tag>); return; }
-            const quote = line.match(/^>\s?(.+)$/); if (quote) { result.push(<blockquote key={index} className="my-3 rounded-l-xl border-r-4 border-violet-400/60 bg-violet-400/[.07] px-4 py-2 italic text-violet-100/90">{inlineMarkdown(quote[1])}</blockquote>); return; }
-            const task = line.match(/^\s*[-*]\s+\[([ xX])\]\s+(.+)$/); if (task) { const checked = task[1].toLowerCase() === 'x'; result.push(<div key={index} className="flex items-start gap-2"><span className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border text-xs ${checked ? 'border-emerald-400/40 bg-emerald-400/15 text-emerald-300' : 'border-white/15 text-transparent'}`}>✓</span><span className={checked ? 'text-dark-400 line-through' : ''}>{inlineMarkdown(task[2])}</span></div>); return; }
-            const bullet = line.match(/^\s*[-*]\s+(.+)$/); if (bullet) { result.push(<div key={index} className="flex items-start gap-2"><span className="mt-0.5 text-lg text-primary-300">•</span><span>{inlineMarkdown(bullet[1])}</span></div>); return; }
-            const ordered = line.match(/^\s*(\d+)\.\s+(.+)$/); if (ordered) { result.push(<div key={index} className="flex items-start gap-2"><span className="mt-1 flex min-w-6 items-center justify-center rounded-md bg-primary-400/10 px-1 text-xs font-bold text-primary-200">{Number(ordered[1]).toLocaleString('fa-IR')}</span><span>{inlineMarkdown(ordered[2])}</span></div>); return; }
+        const lines = content.split(/\r?\n/);
+        for (let index = 0; index < lines.length; index += 1) {
+            const line = lines[index];
+            if (line.trim().startsWith('```')) { if (code) { result.push(<MarkdownCodeBlock key={`code-${index}`} code={codeLines.join('\n')} language={language}/>); codeLines = []; language = ''; } else language = line.trim().slice(3).trim(); code = !code; continue; }
+            if (code) { codeLines.push(line); continue; }
+            if (!line.trim()) { result.push(<div key={`space-${index}`} className="h-3"/>); continue; }
+            if (/^\s*(---+|___+|\*\*\*+)\s*$/.test(line)) { result.push(<div key={index} className="my-7 h-px bg-gradient-to-r from-transparent via-primary-400/45 to-transparent"/>); continue; }
+            const nextIsSeparator = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(lines[index + 1] || '');
+            if (line.includes('|') && nextIsSeparator) {
+                const rows: string[][] = [line.trim().replace(/^\||\|$/g, '').split('|').map(cell => cell.trim())];
+                index += 2;
+                while (index < lines.length && lines[index].includes('|') && lines[index].trim()) {
+                    rows.push(lines[index].trim().replace(/^\||\|$/g, '').split('|').map(cell => cell.trim()));
+                    index += 1;
+                }
+                index -= 1;
+                result.push(<div key={`table-${index}`} className="my-5 max-w-full overflow-x-auto rounded-2xl border border-white/[.08] shadow-lg"><table className="w-full min-w-max border-collapse text-sm"><thead className="bg-primary-500/12 text-primary-100"><tr>{rows[0].map((cell, cellIndex) => <th key={cellIndex} className="min-w-32 border-l border-white/[.07] px-4 py-3 text-right font-bold last:border-l-0">{inlineMarkdown(cell)}</th>)}</tr></thead><tbody>{rows.slice(1).map((cells, rowIndex) => <tr key={rowIndex} className="border-t border-white/[.06] odd:bg-white/[.018]"><>{rows[0].map((_, cellIndex) => <td key={cellIndex} className="max-w-sm break-words border-l border-white/[.05] px-4 py-3 align-top last:border-l-0">{inlineMarkdown(cells[cellIndex] || '')}</td>)}</></tr>)}</tbody></table></div>);
+                continue;
+            }
+            const heading = line.match(/^(#{1,6})\s+(.+)$/); if (heading) { const level = heading[1].length; const Tag = `h${level}` as keyof JSX.IntrinsicElements; const tone = level === 1 ? 'text-primary-200' : level === 2 ? 'text-sky-200' : level === 3 ? 'text-violet-200' : 'text-emerald-200'; result.push(<Tag key={index} className={`${level === 1 ? 'text-3xl' : level === 2 ? 'text-2xl' : level === 3 ? 'text-xl' : 'text-lg'} ${tone} mb-2 mt-7 break-words border-b border-white/[.05] pb-2 font-black leading-tight`}>{inlineMarkdown(heading[2])}</Tag>); continue; }
+            const quote = line.match(/^>\s?(.+)$/); if (quote) { result.push(<blockquote key={index} className="my-3 rounded-l-xl border-r-4 border-violet-400/60 bg-violet-400/[.07] px-4 py-2 italic text-violet-100/90">{inlineMarkdown(quote[1])}</blockquote>); continue; }
+            const task = line.match(/^\s*[-*]\s+\[([ xX])\]\s+(.+)$/); if (task) { const checked = task[1].toLowerCase() === 'x'; result.push(<div key={index} className="flex items-start gap-2"><span className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border text-xs ${checked ? 'border-emerald-400/40 bg-emerald-400/15 text-emerald-300' : 'border-white/15 text-transparent'}`}>✓</span><span className={checked ? 'text-dark-400 line-through' : ''}>{inlineMarkdown(task[2])}</span></div>); continue; }
+            const bullet = line.match(/^\s*[-*]\s+(.+)$/); if (bullet) { result.push(<div key={index} className="flex items-start gap-2"><span className="mt-0.5 text-lg text-primary-300">•</span><span>{inlineMarkdown(bullet[1])}</span></div>); continue; }
+            const ordered = line.match(/^\s*(\d+)\.\s+(.+)$/); if (ordered) { result.push(<div key={index} className="flex items-start gap-2"><span className="mt-1 flex min-w-6 items-center justify-center rounded-md bg-primary-400/10 px-1 text-xs font-bold text-primary-200">{Number(ordered[1]).toLocaleString('fa-IR')}</span><span>{inlineMarkdown(ordered[2])}</span></div>); continue; }
             result.push(<p key={index} className="whitespace-pre-wrap break-words text-dark-100">{inlineMarkdown(line)}</p>);
-        });
+        }
         if (codeLines.length) result.push(<MarkdownCodeBlock key="code-final" code={codeLines.join('\n')} language={language}/>);
         return result;
     }, [content]);
-    return <article dir="auto" className={`mx-auto max-w-3xl overflow-hidden rounded-2xl border p-4 shadow-inner transition-colors sm:p-6 ${warm ? 'border-amber-100/[.07] bg-amber-50/[.035] text-amber-50/90' : 'border-white/[.04] bg-dark-900/35 text-dark-100'} ${wrap ? 'break-words' : 'overflow-x-auto whitespace-pre'}`} style={{ fontSize, lineHeight }}>{blocks}</article>;
+    return <article dir="auto" className={`mx-auto max-w-3xl overflow-hidden rounded-2xl border p-4 shadow-inner transition-colors sm:p-6 ${warm ? 'border-amber-100/[.1] bg-[#211d14] text-amber-50/95' : 'border-white/[.04] bg-dark-900/35 text-dark-100'} ${wrap ? 'break-words' : 'overflow-x-auto whitespace-pre'}`} style={{ fontSize, lineHeight, textAlign: align }}>{blocks}</article>;
 }

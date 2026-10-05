@@ -91,7 +91,10 @@ async function performFileOffline(file: TelegramFile, onProgress?: (loaded: numb
 }
 
 function pumpOfflineQueue() {
-    while (activeOfflineJobs < 3 && offlineQueue.length) {
+    // Keep one transfer active at a time. Telegram-backed streams are long lived
+    // and parallel requests make both the UI and constrained Railway instances
+    // less responsive. Users can still enqueue as many files as they want.
+    while (activeOfflineJobs < 1 && offlineQueue.length) {
         const job = offlineQueue.shift()!;
         activeOfflineJobs += 1;
         void performFileOffline(job.file, job.onProgress, job.options).then(job.resolve, job.reject).finally(() => {
@@ -102,7 +105,7 @@ function pumpOfflineQueue() {
     }
 }
 
-/** Queue downloads globally so several files can be requested while only three transfer at once. */
+/** Queue downloads globally; requests are processed one at a time. */
 export function saveFileOffline(file: TelegramFile, onProgress?: (loaded: number, total: number) => void, options?: { silentProgress?: boolean }): Promise<void> {
     const existing = offlinePromises.get(file.id);
     if (existing) return existing;
@@ -142,7 +145,7 @@ export async function savePlaylistOffline(playlist: Playlist, onProgress?: (prog
             report(file.file_name);
         }
     };
-    await Promise.all(Array.from({ length: Math.min(2, playable.length) }, worker));
+    await worker();
     if (!savedIds.length) {
         emitProgress({ id: jobId, kind: 'playlist', title: playlist.name, state: 'error', done, total: playable.length, failed, currentName: '', loaded: 0, size: totalSize });
         throw new Error('هیچ‌کدام از فایل‌های پلی‌لیست دانلود نشدند؛ اتصال ربات به کانال ذخیره‌سازی را بررسی کن.');

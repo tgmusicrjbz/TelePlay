@@ -29,7 +29,9 @@ export default function DeleteConfirmModal({ type, name, count = 1, onConfirm, o
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-            <div dir="rtl" className="glass-card w-full max-w-sm p-6 animate-slide-up">
+            <div dir="rtl" className="w-full max-w-md overflow-hidden rounded-3xl border border-white/10 bg-dark-900 shadow-2xl animate-slide-up">
+                <div className="h-1 bg-gradient-to-l from-red-400 via-red-500 to-orange-400"/>
+                <div className="p-5 sm:p-6">
                 <div className="flex items-center justify-between mb-4">
                     <h2 className="text-lg font-semibold flex items-center gap-2 text-red-400">
                         <Trash2 className="w-5 h-5" />
@@ -45,18 +47,13 @@ export default function DeleteConfirmModal({ type, name, count = 1, onConfirm, o
                     {includesFolder && <p className="mt-2 text-sm text-dark-400">می‌تونی فقط خود کشو را حذف کنی و محتویاتش را یک سطح بالاتر ببری، یا همه محتویات را هم پاک کنی.</p>}
                 </div>
 
-                <div className="flex flex-wrap justify-start gap-2 sm:gap-3">
-                    <button
-                        onClick={onClose}
-                        disabled={isDeleting}
-                        className="px-4 py-2 text-dark-400 hover:text-white transition-colors"
-                    >
-                        بی‌خیال
-                    </button>
-                    {includesFolder && <button onClick={() => confirm(false)} disabled={isDeleting} className="px-4 py-2 bg-dark-700 hover:bg-dark-600 rounded-lg font-medium disabled:opacity-50">نگه‌داشتن محتویات</button>}
-                    <button onClick={() => confirm(true)} disabled={isDeleting} className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg font-medium transition-colors disabled:opacity-50">
+                <div className="grid gap-2 sm:grid-cols-2">
+                    <button onClick={() => confirm(true)} disabled={isDeleting} className="min-h-11 rounded-xl bg-red-600 px-4 py-2 font-medium transition-colors hover:bg-red-500 disabled:opacity-50">
                         {isDeleting ? 'در حال حذف…' : includesFolder ? 'حذف کشو و محتویات' : 'حذف فایل'}
                     </button>
+                    {includesFolder && <button onClick={() => confirm(false)} disabled={isDeleting} className="min-h-11 rounded-xl border border-white/10 bg-dark-800 px-4 py-2 font-medium hover:bg-dark-700 disabled:opacity-50">فقط حذف کشو</button>}
+                    <button onClick={onClose} disabled={isDeleting} className="min-h-11 rounded-xl px-4 py-2 text-dark-400 transition-colors hover:bg-white/[.04] hover:text-white sm:col-span-2">بی‌خیال</button>
+                </div>
                 </div>
             </div>
         </div>

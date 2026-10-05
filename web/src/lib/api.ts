@@ -613,11 +613,12 @@ export const formatDuration = (seconds: number | null): string => {
 export const useUploadFile = () => {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async ({ file, folderId, onProgress }: { file: globalThis.File; folderId: number | null; onProgress?: (percent: number) => void }) => {
+        mutationFn: async ({ file, folderId, onProgress, signal }: { file: globalThis.File; folderId: number | null; onProgress?: (percent: number) => void; signal?: AbortSignal }) => {
             const form = new FormData();
             form.append('upload', file, file.name);
             if (folderId !== null) form.append('folder_id', String(folderId));
             const { data } = await api.post<TelegramFile>('/files/upload', form, {
+                signal,
                 onUploadProgress: event => onProgress?.(Math.min(100, Math.round((event.loaded / Math.max(1, event.total || file.size)) * 100))),
             });
             return data;
