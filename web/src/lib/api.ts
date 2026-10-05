@@ -35,6 +35,8 @@ export interface User {
 export interface AuthSession { id: string; device_name: string; user_agent?: string | null; ip_address?: string | null; created_at: string; last_seen_at: string; current: boolean; }
 export interface Workspace { user_id: number; telegram_id: number; name: string; username?: string | null; permission: 'owner' | 'read' | 'write'; }
 export interface AdminUser extends User { total_size: number; file_count: number; session_count: number; }
+export interface AdminStats { active_users: number; total_users: number; total_files: number; total_size: number; }
+export interface StorageChannel { configured: boolean; channel_id?: number | null; title?: string | null; }
 
 export interface Folder {
     id: number;
@@ -811,6 +813,10 @@ export const useRevokeWorkspace = () => {
     return useMutation({ mutationFn: async (id: number) => api.delete(`/accounts/grants/${id}`), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['workspaceGrants'] }) });
 };
 export const useAdminUsers = (enabled: boolean) => useQuery({ queryKey: ['adminUsers'], queryFn: async () => (await api.get<AdminUser[]>('/admin/users')).data, enabled, retry: false });
+export const useAdminStats = (enabled: boolean) => useQuery({ queryKey: ['adminStats'], queryFn: async () => (await api.get<AdminStats>('/admin/stats')).data, enabled, retry: false });
+export const useStorageChannel = () => useQuery({ queryKey: ['storageChannel'], queryFn: async () => (await api.get<StorageChannel>('/accounts/storage-channel')).data });
+export const useSetStorageChannel = () => { const queryClient=useQueryClient(); return useMutation({ mutationFn: async (channel_id:number)=>(await api.put<StorageChannel>('/accounts/storage-channel',{channel_id})).data, onSuccess:()=>queryClient.invalidateQueries({queryKey:['storageChannel']}) }); };
+export const useResetStorageChannel = () => { const queryClient=useQueryClient(); return useMutation({ mutationFn: async()=>api.delete('/accounts/storage-channel'), onSuccess:()=>queryClient.invalidateQueries({queryKey:['storageChannel']}) }); };
 export const useUpdateAdminUser = () => {
     const queryClient = useQueryClient();
     return useMutation({ mutationFn: async ({ id, ...payload }: { id: number; display_name?: string; is_active?: boolean }) => (await api.patch<AdminUser>(`/admin/users/${id}`, payload)).data, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['adminUsers'] }) });

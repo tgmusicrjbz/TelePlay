@@ -2,6 +2,7 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Response
+from pyrogram.enums import ChatMemberStatus, ChatType
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,7 +10,8 @@ from ..auth import get_current_user
 from ..config import get_settings
 from ..database import get_db
 from ..models import AuthSession, File, User, WorkspaceGrant
-from ..schemas import AdminUserResponse, AdminUserUpdate, WorkspaceGrantCreate, WorkspaceResponse
+from ..schemas import AdminStatsResponse, AdminUserResponse, AdminUserUpdate, StorageChannelResponse, StorageChannelUpdate, WorkspaceGrantCreate, WorkspaceResponse
+from .. import telegram
 
 router = APIRouter(tags=["Accounts"])
 settings = get_settings()
@@ -81,6 +83,66 @@ def require_admin(current_user: User = Depends(get_current_user)) -> User:
     return current_user
 
 
+@router.get("/accounts/storage-channel", response_model=StorageChannelResponse)
+async def get_storage_channel(current_user: User = Depends(get_current_user)):
+    if current_user.storage_channel_id is None:
+        return StorageChannelResponse(configured=False)
+    try:
+        chat = await telegram.tg_client.get_chat(current_user.storage_channel_id)
+        return StorageChannelResponse(configured=True, channel_id=current_user.storage_channel_id, title=chat.title)
+    except Exception:
+        return StorageChannelResponse(configured=True, channel_id=current_user.storage_channel_id, title="کانال تنظیم‌شده")
+
+
+@router.put("/accounts/storage-channel", response_model=StorageChannelResponse)
+async def set_storage_channel(payload: StorageChannelUpdate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    channel_id = int(payload.channel_id)
+    if channel_id >= 0 or not str(abs(channel_id)).startswith("100"):
+        raise HTTPException(status_code=400, detail="آیدی عددی کانال خصوصی باید با ‎-100 شروع شود.")
+    try:
+        chat = await telegram.tg_client.get_chat(channel_id)
+        if chat.type != ChatType.CHANNEL:
+            raise HTTPException(status_code=400, detail="فضای انتخاب‌شده باید یک کانال تلگرام باشد.")
+        user_member = await telegram.tg_client.get_chat_member(channel_id, current_user.telegram_id)
+        bot_id = (await telegram.tg_client.get_me()).id
+        bot_member = await telegram.tg_client.get_chat_member(channel_id, bot_id)
+        if user_member.status not in {ChatMemberStatus.OWNER, ChatMemberStatus.ADMINISTRATOR}:
+            raise HTTPException(status_code=403, detail="برای اتصال این کانال باید مدیر یا مالک آن باشی.")
+        if bot_member.status not in {ChatMemberStatus.OWNER, ChatMemberStatus.ADMINISTRATOR}:
+            raise HTTPException(status_code=403, detail="ابتدا ربات کمد را با دسترسی ارسال و حذف پیام، مدیر کانال کن.")
+        privileges = getattr(bot_member, "privileges", None)
+        if privileges and getattr(privileges, "can_post_messages", True) is False:
+            raise HTTPException(status_code=403, detail="دسترسی ارسال پیام برای ربات در کانال فعال نیست.")
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(status_code=400, detail="کانال در دسترس نیست؛ عضویت و دسترسی مدیریتی ربات را بررسی کن.") from error
+    current_user.storage_channel_id = channel_id
+    await db.commit()
+    return StorageChannelResponse(configured=True, channel_id=channel_id, title=chat.title)
+
+
+@router.delete("/accounts/storage-channel", status_code=204)
+async def reset_storage_channel(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    current_user.storage_channel_id = None
+    await db.commit()
+    return Response(status_code=204)
+
+
+@router.get("/admin/stats", response_model=AdminStatsResponse)
+async def admin_stats(_: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    total_users, active_users = (await db.execute(select(
+        func.count(User.id), func.count(User.id).filter(User.is_active.is_(True))
+    ))).one()
+    total_files, total_size = (await db.execute(select(
+        func.count(File.id), func.coalesce(func.sum(File.file_size), 0)
+    ))).one()
+    return AdminStatsResponse(
+        active_users=int(active_users or 0), total_users=int(total_users or 0),
+        total_files=int(total_files or 0), total_size=int(total_size or 0),
+    )
+
+
 @router.get("/admin/users", response_model=list[AdminUserResponse])
 async def admin_users(_: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
     users = (await db.execute(select(User).order_by(User.created_at.desc()))).scalars().all()
@@ -88,7 +150,7 @@ async def admin_users(_: User = Depends(require_admin), db: AsyncSession = Depen
     for user in users:
         size, files = (await db.execute(select(func.coalesce(func.sum(File.file_size), 0), func.count(File.id)).where(File.user_id == user.id))).one()
         sessions = (await db.execute(select(func.count(AuthSession.id)).where(AuthSession.user_id == user.id, AuthSession.revoked_at.is_(None)))).scalar_one()
-        result.append(AdminUserResponse.model_validate(user, from_attributes=True).model_copy(update={"total_size": size, "file_count": files, "session_count": sessions}))
+        result.append(AdminUserResponse.model_validate(user, from_attributes=True).model_copy(update={"total_size": int(size or 0), "file_count": int(files or 0), "session_count": int(sessions or 0)}))
     return result
 
 
@@ -112,4 +174,4 @@ async def update_admin_user(user_id: int, payload: AdminUserUpdate, admin: User 
     size = (await db.execute(select(func.coalesce(func.sum(File.file_size), 0)).where(File.user_id == user.id))).scalar_one()
     files = (await db.execute(select(func.count(File.id)).where(File.user_id == user.id))).scalar_one()
     sessions = (await db.execute(select(func.count(AuthSession.id)).where(AuthSession.user_id == user.id, AuthSession.revoked_at.is_(None)))).scalar_one()
-    return AdminUserResponse.model_validate(user, from_attributes=True).model_copy(update={"total_size": size, "file_count": files, "session_count": sessions})
+    return AdminUserResponse.model_validate(user, from_attributes=True).model_copy(update={"total_size": int(size or 0), "file_count": int(files or 0), "session_count": int(sessions or 0)})

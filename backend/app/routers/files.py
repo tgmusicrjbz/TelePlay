@@ -169,8 +169,9 @@ async def upload_file(
             if cover_bytes:
                 embedded_cover_path = str(Path(temporary_dir) / "embedded-cover.jpg")
                 Path(embedded_cover_path).write_bytes(cover_bytes)
+        target_channel_id = current_user.storage_channel_id or settings.telegram_storage_channel_id
         common = {
-            "chat_id": settings.telegram_storage_channel_id,
+            "chat_id": target_channel_id,
             "caption": (description or "").strip()[:1024] or None,
             "parse_mode": None,
         }
@@ -198,6 +199,7 @@ async def upload_file(
             file_id=media.file_id,
             file_unique_id=media.file_unique_id,
             channel_message_id=sent_message.id,
+            storage_channel_id=target_channel_id,
             file_name=filename,
             description=(description or "").strip()[:1024] or None,
             file_size=media.file_size or file_size,
@@ -220,7 +222,7 @@ async def upload_file(
         await db.rollback()
         if sent_message is not None:
             try:
-                await delete_from_storage_channel(sent_message.id)
+                await delete_from_storage_channel(sent_message.id, target_channel_id if 'target_channel_id' in locals() else None)
             except Exception:
                 pass
         logger.exception("Web upload failed")

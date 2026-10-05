@@ -72,6 +72,8 @@ async def init_db():
         )
         if "display_name" not in user_columns:
             await conn.execute(text("ALTER TABLE users ADD COLUMN display_name VARCHAR(255)"))
+        if "storage_channel_id" not in user_columns:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN storage_channel_id BIGINT"))
         if "is_active" not in user_columns:
             active_type = "BOOLEAN" if url.drivername.startswith("postgresql") else "INTEGER"
             active_default = "TRUE" if url.drivername.startswith("postgresql") else "1"
@@ -81,6 +83,8 @@ async def init_db():
         )
         if "description" not in columns:
             await conn.execute(text("ALTER TABLE files ADD COLUMN description TEXT"))
+        if "storage_channel_id" not in columns:
+            await conn.execute(text("ALTER TABLE files ADD COLUMN storage_channel_id BIGINT"))
         if "is_favorite" not in columns:
             favorite_type = "BOOLEAN" if url.drivername.startswith("postgresql") else "INTEGER"
             favorite_default = "FALSE" if url.drivername.startswith("postgresql") else "0"

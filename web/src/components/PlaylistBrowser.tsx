@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { DndContext, DragEndEvent, DragOverlay, PointerSensor, TouchSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, arrayMove, rectSortingStrategy, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { ArrowDownUp, Check, ChevronDown, ChevronRight, DownloadCloud, Film, GripVertical, Grid3X3, Image, LayoutGrid, List, MoreVertical, Music, Pencil, Play, Plus, RefreshCw, Save, Search, Share2, Shuffle, Trash2, Upload, X } from 'lucide-react';
+import { ArrowDownUp, Check, ChevronDown, ChevronRight, DownloadCloud, Film, GripVertical, Grid3X3, Image, LayoutGrid, List, MoreVertical, Music, Pencil, Play, Plus, Save, Search, Share2, Shuffle, Trash2, Upload, X } from 'lucide-react';
 import { api, formatDuration, Playlist, PlaylistItem, PlaylistSummary, useAddPlaylistItems, useCreatePlaylist, useDeletePlaylist, useFiles, useFolders, usePlaylist, usePlaylists, useRemovePlaylistItem, useReorderPlaylist, useReorderPlaylistCatalog, useShufflePlaylist, useUpdatePlaylist, useUploadFile } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import CustomSelect from './CustomSelect';
@@ -28,7 +28,7 @@ export default function PlaylistBrowser() {
 
 function PlaylistIndex() {
     const readOnlyWorkspace = Boolean(localStorage.getItem('komod-active-workspace')) && localStorage.getItem('komod-active-workspace-permission') === 'read';
-    const { data: playlists = [], isLoading, refetch, isFetching } = usePlaylists();
+    const { data: playlists = [], isLoading } = usePlaylists();
     const [kind, setKind] = useState<Kind>('all');
     const [sort, setSort] = useState<'manual' | 'updated' | 'name' | 'count'>('manual');
     const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
@@ -80,7 +80,6 @@ function PlaylistIndex() {
                     {showSort && <div className="absolute inset-x-0 top-full z-40 mt-2 rounded-2xl border border-white/10 bg-dark-900 p-1.5 shadow-2xl">{([['manual','ترتیب دستی'],['updated','تاریخ تغییر'],['name','نام'],['count','تعداد ترک']] as const).map(([value,label]) => <button key={value} onClick={() => { if (sort === value && value !== 'manual') setSortDirection(direction => direction === 'asc' ? 'desc' : 'asc'); else { setSort(value); setSortDirection(value === 'updated' || value === 'count' ? 'desc' : 'asc'); } setShowSort(false); }} className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-right text-xs ${sort === value ? 'bg-primary-500/15 text-primary-200' : 'text-dark-300 hover:bg-white/[.05]'}`}><span>{label}</span>{sort===value&&value!=='manual'&&<span>{sortDirection==='asc'?'↑':'↓'}</span>}</button>)}</div>}
                 </div>
                 {!readOnlyWorkspace && <button title="ساخت پلی‌لیست" aria-label="ساخت پلی‌لیست" onClick={() => setCreating(true)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-500 text-white shadow-lg shadow-primary-950/25 transition hover:bg-primary-400"><Plus className="h-5 w-5"/></button>}
-                <button title="تازه‌سازی" aria-label="تازه‌سازی" onClick={() => void refetch()} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-dark-400 hover:bg-white/[.05] hover:text-white"><RefreshCw className={`h-4 w-4 ${isFetching ? 'animate-spin' : ''}`}/></button>
                 <div className="flex h-10 shrink-0 rounded-xl bg-dark-950/60 p-1"><button aria-label="نمای کارتی" onClick={() => setView('grid')} className={`rounded-lg px-2 ${view === 'grid' ? 'bg-primary-500/20 text-primary-200' : 'text-dark-400'}`}><LayoutGrid className="h-4 w-4"/></button><button aria-label="نمای کاشی کوچک" onClick={() => setView('dense')} className={`rounded-lg px-2 ${view === 'dense' ? 'bg-primary-500/20 text-primary-200' : 'text-dark-400'}`}><Grid3X3 className="h-4 w-4"/></button><button aria-label="نمای لیستی" onClick={() => setView('list')} className={`rounded-lg px-2 ${view === 'list' ? 'bg-primary-500/20 text-primary-200' : 'text-dark-400'}`}><List className="h-4 w-4"/></button></div>
             </div>
             {isLoading ? <div className="h-36 animate-pulse rounded-2xl bg-dark-800"/> : visible.length ? <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={reorderCards}><SortableContext items={visible.map(item => item.id)} strategy={rectSortingStrategy}><div className={view === 'grid' ? 'grid gap-4 sm:grid-cols-2 xl:grid-cols-3' : view === 'dense' ? 'grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5' : 'flex flex-col gap-2'}>{visible.map(p => <PlaylistCard key={p.id} playlist={p} view={view} manual={!readOnlyWorkspace && sort === 'manual' && view === 'list'} onLongPress={() => setMenuPlaylist(p)} />)}</div></SortableContext></DndContext> : <div className="rounded-2xl border border-dashed border-white/10 py-12 text-center text-dark-400">هنوز پلی‌لیستی اینجا نیست.</div>}

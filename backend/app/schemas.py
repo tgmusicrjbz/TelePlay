@@ -290,6 +290,23 @@ class AdminUserResponse(UserResponse):
     session_count: int = 0
 
 
+class AdminStatsResponse(BaseModel):
+    active_users: int = 0
+    total_users: int = 0
+    total_files: int = 0
+    total_size: int = 0
+
+
+class StorageChannelUpdate(BaseModel):
+    channel_id: int
+
+
+class StorageChannelResponse(BaseModel):
+    configured: bool
+    channel_id: Optional[int] = None
+    title: Optional[str] = None
+
+
 class BotInfoResponse(BaseModel):
     username: str
     name: Optional[str] = None

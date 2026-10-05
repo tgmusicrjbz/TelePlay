@@ -172,28 +172,32 @@ async def stop_telegram_client():
 
 # ── convenience helpers (always use tg_client) ───────────────────────
 
-async def get_message_from_channel(message_id: int) -> Message:
+def storage_channel(channel_id: int | None = None) -> int:
+    return channel_id or settings.telegram_storage_channel_id
+
+
+async def get_message_from_channel(message_id: int, channel_id: int | None = None) -> Message:
     """Get a message from the storage channel by ID."""
     return await tg_client.get_messages(
-        settings.telegram_storage_channel_id,
+        storage_channel(channel_id),
         message_id,
     )
 
 
-async def forward_to_storage_channel(message: Message) -> Message:
+async def forward_to_storage_channel(message: Message, channel_id: int | None = None) -> Message:
     """Forward a message to the storage channel."""
-    return await message.copy(settings.telegram_storage_channel_id)
+    return await message.copy(storage_channel(channel_id))
 
 
 
-async def delete_from_storage_channel(message_ids: int | list[int]) -> bool:
+async def delete_from_storage_channel(message_ids: int | list[int], channel_id: int | None = None) -> bool:
     """Delete channel messages idempotently, with per-message fallback for mixed batches."""
     ids = message_ids if isinstance(message_ids, list) else [message_ids]
     if not ids:
         return True
     try:
         await tg_client.delete_messages(
-            settings.telegram_storage_channel_id,
+            storage_channel(channel_id),
             ids if isinstance(message_ids, list) else ids[0],
         )
         return True
@@ -207,7 +211,7 @@ async def delete_from_storage_channel(message_ids: int | list[int]) -> bool:
     failed = []
     for message_id in ids:
         try:
-            await tg_client.delete_messages(settings.telegram_storage_channel_id, message_id)
+            await tg_client.delete_messages(storage_channel(channel_id), message_id)
         except MessageIdInvalid:
             continue
         except Exception as error:

@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, AtSign, Check, Download, FileStack, FolderPlus, Gauge, Globe2, HardDrive, LogOut, MonitorSmartphone, Palette, Plus, Search, Shield, Smartphone, Trash2, UserRoundCog, Users, Warehouse } from 'lucide-react';
-import { AdminUser, Folder, formatFileSize, formatPersianDate, getServerOrigin, useAdminUsers, useCurrentUser, useFolderTree, useGrantWorkspace, useLogoutAll, useRevokeSession, useRevokeWorkspace, useSessions, useStorageStats, useUpdateAdminUser, useWorkspaceGrants, useWorkspaces } from '../lib/api';
+import { ArrowRight, AtSign, Check, Database, Download, FileStack, FolderPlus, Gauge, Globe2, HardDrive, LockKeyhole, LogOut, MonitorSmartphone, Palette, Plus, Search, Shield, Smartphone, Trash2, UserRoundCog, Users, Warehouse } from 'lucide-react';
+import { AdminUser, Folder, formatFileSize, formatPersianDate, getServerOrigin, useAdminStats, useAdminUsers, useCurrentUser, useFolderTree, useGrantWorkspace, useLogoutAll, useResetStorageChannel, useRevokeSession, useRevokeWorkspace, useSessions, useSetStorageChannel, useStorageChannel, useStorageStats, useUpdateAdminUser, useWorkspaceGrants, useWorkspaces } from '../lib/api';
 import { activateAccount, forgetAccount, savedAccounts, syncCurrentAccount } from '../lib/accounts';
 import { applyCustomTheme, applyTheme, colorThemes, ActiveTheme, ColorTheme, getStoredTheme } from '../lib/theme';
 import CustomSelect from './CustomSelect';
 
-type SettingsView = 'home' | 'accounts' | 'sessions' | 'access' | 'appearance' | 'connection' | 'admin';
+type SettingsView = 'home' | 'accounts' | 'sessions' | 'access' | 'storage' | 'appearance' | 'connection' | 'admin';
 type Permission = 'read' | 'write';
 type SavedColor = { color: string; name: string };
 type ServerAddress = { url: string; name: string };
@@ -18,11 +18,15 @@ export default function SettingsPage() {
     const { data: folderTree = [] } = useFolderTree();
     const { data: grants = [] } = useWorkspaceGrants();
     const { data: adminUsers = [] } = useAdminUsers(Boolean(user?.is_admin));
+    const { data: adminStats } = useAdminStats(Boolean(user?.is_admin));
+    const { data: storageChannel } = useStorageChannel();
     const logoutAll = useLogoutAll();
     const revokeSession = useRevokeSession();
     const grantWorkspace = useGrantWorkspace();
     const revokeWorkspace = useRevokeWorkspace();
     const updateAdmin = useUpdateAdminUser();
+    const setStorageChannel = useSetStorageChannel();
+    const resetStorageChannel = useResetStorageChannel();
     const [view, setView] = useState<SettingsView>('home');
     const [theme, setTheme] = useState<ActiveTheme>(getStoredTheme);
     const [customColor, setCustomColor] = useState(() => localStorage.getItem('komod-custom-color') || '#a855f7');
@@ -39,6 +43,8 @@ export default function SettingsPage() {
     const [sharePermission, setSharePermission] = useState<Permission>('read');
     const [accessMessage, setAccessMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
     const [adminQuery, setAdminQuery] = useState('');
+    const [storageChannelInput, setStorageChannelInput] = useState('');
+    const [storageChannelMessage, setStorageChannelMessage] = useState<{kind:'ok'|'error';text:string}|null>(null);
     const accounts = savedAccounts();
     const incomingFolderOptions = useMemo(() => {
         const result = [{value:'default',label:'🗃️ کشوی پیش‌فرض'}];
@@ -50,7 +56,7 @@ export default function SettingsPage() {
         if (!query) return adminUsers;
         return adminUsers.filter(item => [item.display_name, item.first_name, item.last_name, item.username, String(item.telegram_id)].filter(Boolean).some(value => String(value).toLocaleLowerCase('fa').includes(query)));
     }, [adminQuery, adminUsers]);
-    const adminStats = useMemo(() => ({ active: adminUsers.filter(item => item.is_active).length, files: adminUsers.reduce((sum, item) => sum + item.file_count, 0), size: adminUsers.reduce((sum, item) => sum + item.total_size, 0) }), [adminUsers]);
+    const saveStorageChannel = async () => { const channelId=Number(storageChannelInput.trim()); if(!Number.isSafeInteger(channelId)){setStorageChannelMessage({kind:'error',text:'آیدی عددی معتبر کانال را وارد کن.'});return;} try{const result=await setStorageChannel.mutateAsync(channelId);setStorageChannelMessage({kind:'ok',text:`کانال «${result.title||'انتخاب‌شده'}» برای فایل‌های تازه فعال شد.`});setStorageChannelInput('');}catch(error:any){setStorageChannelMessage({kind:'error',text:error?.response?.data?.detail||'اتصال کانال انجام نشد.'});} };
 
     useEffect(() => applyTheme(theme), [theme]);
     useEffect(() => { if (user) syncCurrentAccount(user); }, [user]);
@@ -132,6 +138,7 @@ export default function SettingsPage() {
                 <SettingsButton icon={<Users/>} title="حساب‌ها" text="افزودن حساب و جابه‌جایی بین حساب‌ها" onClick={() => setView('accounts')} />
                 <SettingsButton icon={<MonitorSmartphone/>} title="مدیریت نشست‌ها" text="دستگاه‌های واردشده و خروج از نشست‌ها" onClick={() => setView('sessions')} />
                 <SettingsButton icon={<Shield/>} title="دسترسی و اشتراک‌گذاری" text="کمدهای مشترک و سطح دسترسی کاربران" onClick={() => setView('access')} />
+                <SettingsButton icon={<Database/>} title="فضای ذخیره‌سازی" text="اتصال کانال خصوصی خودت برای فایل‌های تازه" onClick={() => setView('storage')} />
                 <SettingsButton icon={<Palette/>} title="ظاهر برنامه" text="رنگ کمد و نصب Komod روی دستگاه" onClick={() => setView('appearance')} />
                 <SettingsButton icon={<Globe2/>} title="اتصال برنامه" text="آدرس اصلی یا مسیر HTTPS جایگزین" onClick={() => setView('connection')} />
                 {user?.is_admin && <SettingsButton icon={<UserRoundCog/>} title="مدیریت کاربران" text="نام، وضعیت و مصرف کاربران کمد" onClick={() => setView('admin')} />}
@@ -144,6 +151,8 @@ export default function SettingsPage() {
         </div>}
 
         {view === 'sessions' && <Card icon={<MonitorSmartphone/>} title="نشست‌های فعال" subtitle="دستگاه‌هایی که با حساب فعلی وارد کمد شده‌اند."><div className="mt-4 space-y-2">{sessions.length ? sessions.map(session => <div key={session.id} className="flex items-center gap-3 rounded-xl bg-dark-800/50 p-3"><MonitorSmartphone className="h-5 w-5 text-dark-400"/><div className="min-w-0 flex-1"><strong className="block text-sm">{session.device_name} {session.current && <span className="text-primary-300">· همین دستگاه</span>}</strong><small className="text-dark-500">آخرین فعالیت: {formatPersianDate(session.last_seen_at)}</small></div><button className="btn-icon text-red-300" title="خروج این دستگاه" onClick={() => void revokeSession.mutateAsync(session.id)}><LogOut className="h-4 w-4"/></button></div>) : <p className="text-sm text-dark-500">نشست فعالی ثبت نشده است.</p>}</div><div className="mt-4 flex flex-col gap-2 sm:flex-row"><button className="btn-secondary flex min-h-11 flex-1 items-center justify-center gap-2 text-red-300" onClick={() => setConfirmation('device')}><LogOut className="h-4 w-4"/> خروج از این دستگاه</button><button className="btn-secondary flex min-h-11 flex-1 items-center justify-center gap-2 text-orange-300" onClick={() => setConfirmation('all')}><Users className="h-4 w-4"/> خروج از همه دستگاه‌ها</button></div></Card>}
+
+        {view === 'storage' && <div className="space-y-4"><Card icon={<Database/>} title="کانال خصوصی من" subtitle="فایل‌های تازه حساب تو می‌توانند در کانال مجزای خودت ذخیره شوند."><div className={`mt-4 rounded-2xl border p-4 ${storageChannel?.configured?'border-emerald-400/20 bg-emerald-500/[.06]':'border-white/[.07] bg-dark-800/45'}`}><div className="flex items-center gap-3"><span className={`flex h-10 w-10 items-center justify-center rounded-xl ${storageChannel?.configured?'bg-emerald-500/15 text-emerald-300':'bg-white/[.05] text-dark-400'}`}>{storageChannel?.configured?<Check className="h-5 w-5"/>:<Database className="h-5 w-5"/>}</span><div className="min-w-0 flex-1"><strong className="block text-sm">{storageChannel?.configured?storageChannel.title||'کانال متصل':'کانال اختصاصی تنظیم نشده'}</strong><small className="text-dark-500">{storageChannel?.configured?'فایل‌های قبلی در محل قبلی خودشان باقی می‌مانند.':'فعلاً فضای پیش‌فرض کمد استفاده می‌شود.'}</small></div>{storageChannel?.configured&&<button className="btn-secondary px-3 py-2 text-xs text-red-300" onClick={async()=>{await resetStorageChannel.mutateAsync();setStorageChannelMessage({kind:'ok',text:'کانال اختصاصی برای فایل‌های تازه غیرفعال شد.'});}}>قطع اتصال</button>}</div></div><ol className="mt-4 list-decimal space-y-2 pr-5 text-sm leading-7 text-dark-300"><li>یک کانال خصوصی در تلگرام بساز.</li><li>ربات کمد را با اجازه ارسال و حذف پیام، مدیر کانال کن.</li><li>آیدی عددی کانال را که با <span dir="ltr" className="font-player text-primary-200">-100</span> شروع می‌شود وارد کن.</li></ol><div className="mt-4 flex flex-col gap-2 sm:flex-row"><input dir="ltr" value={storageChannelInput} onChange={event=>setStorageChannelInput(event.target.value)} className="input min-h-11 flex-1 text-left" placeholder="-1001234567890"/><button disabled={setStorageChannel.isPending||!storageChannelInput.trim()} onClick={()=>void saveStorageChannel()} className="btn-primary min-h-11 px-5 disabled:opacity-50">بررسی و اتصال</button></div>{storageChannelMessage&&<p className={`mt-3 rounded-xl px-3 py-2 text-sm ${storageChannelMessage.kind==='ok'?'bg-emerald-500/10 text-emerald-300':'bg-red-500/10 text-red-300'}`}>{storageChannelMessage.text}</p>}</Card><Card icon={<LockKeyhole/>} title="محافظت از فایل‌ها" subtitle="کمد قبل از اتصال، مالکیت کانال و دسترسی مدیریتی ربات را بررسی می‌کند."><p className="mt-3 text-sm leading-7 text-dark-400">شناسه کانال در پاسخ فایل‌ها نمایش داده نمی‌شود. هر فایل نیز محل ذخیره خودش را نگه می‌دارد تا تغییر کانال باعث قطع دسترسی فایل‌های قبلی نشود.</p></Card></div>}
 
         {view === 'access' && <div className="space-y-4">
             <Card icon={<Warehouse/>} title="کمدهای در دسترس" subtitle="کمد خودت و فضاهایی که دیگران با تو به اشتراک گذاشته‌اند."><div className="mt-4 grid gap-2 sm:grid-cols-2">{workspaces.map(space => <button key={space.user_id} onClick={() => switchWorkspace(space.user_id)} className={`flex items-center gap-3 rounded-xl border p-3 text-right ${activeWorkspace === space.user_id ? 'border-primary-400/35 bg-primary-500/10' : 'border-white/[.07] bg-dark-800/50'}`}><Warehouse className="h-5 w-5 text-primary-300"/><span className="min-w-0 flex-1"><strong className="block truncate text-sm">{space.name}</strong><small className="text-dark-500">{permissionLabel(space.permission)}</small></span>{activeWorkspace === space.user_id && <span className="text-primary-300">✓</span>}</button>)}</div></Card>
@@ -166,7 +175,7 @@ export default function SettingsPage() {
         </div>}
 
         {view === 'admin' && user?.is_admin && <div className="space-y-4">
-            <div className="grid grid-cols-3 gap-2"><AdminStat label="کاربر فعال" value={adminStats.active.toLocaleString('fa-IR')} icon={<Users/>}/><AdminStat label="کل فایل‌ها" value={adminStats.files.toLocaleString('fa-IR')} icon={<FileStack/>}/><AdminStat label="حجم مصرفی" value={formatFileSize(adminStats.size)} icon={<HardDrive/>}/></div>
+            <div className="grid grid-cols-3 gap-2"><AdminStat label="کاربر فعال" value={(adminStats?.active_users||0).toLocaleString('fa-IR')} icon={<Users/>}/><AdminStat label="کل فایل‌ها" value={(adminStats?.total_files||0).toLocaleString('fa-IR')} icon={<FileStack/>}/><AdminStat label="حجم کل کاربران" value={formatFileSize(adminStats?.total_size||0)} icon={<HardDrive/>}/></div>
             <Card icon={<UserRoundCog/>} title="کاربران کمد" subtitle="نام، مصرف، نشست‌ها و دسترسی هر کاربر را یک‌جا مدیریت کن.">
                 <label className="relative mt-4 block min-w-0"><Search className="pointer-events-none absolute right-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-dark-500"/><input value={adminQuery} onChange={event => setAdminQuery(event.target.value)} className="input w-full pr-10" placeholder="جست‌وجو"/></label>
                 <div className="admin-users-grid mt-4 grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2">{filteredAdminUsers.map(item => <AdminRow key={item.id} item={item} onSave={(display_name) => updateAdmin.mutateAsync({id:item.id,display_name})} onToggle={() => updateAdmin.mutateAsync({id:item.id,is_active:!item.is_active})}/>)}</div>
@@ -178,8 +187,8 @@ export default function SettingsPage() {
     </div>;
 }
 
-function viewTitle(view: SettingsView) { return ({ home:'تنظیمات', accounts:'حساب‌ها', sessions:'مدیریت نشست‌ها', access:'دسترسی و اشتراک‌گذاری', appearance:'ظاهر برنامه', connection:'اتصال برنامه', admin:'مدیریت کاربران' })[view]; }
-function viewSubtitle(view: SettingsView) { return ({ home:'بخش موردنظرت را انتخاب کن.', accounts:'حساب‌های ذخیره‌شده روی این دستگاه.', sessions:'ورودهای فعال حساب فعلی را مدیریت کن.', access:'مشخص کن چه کسی کمدت را ببیند یا داخلش فایل ذخیره کند.', appearance:'رنگ و نحوه نصب کمد را تنظیم کن.', connection:'آدرس اصلی و مسیرهای جایگزین HTTPS را مدیریت کن.', admin:'کاربران کمد را مدیریت کن.' })[view]; }
+function viewTitle(view: SettingsView) { return ({ home:'تنظیمات', accounts:'حساب‌ها', sessions:'مدیریت نشست‌ها', access:'دسترسی و اشتراک‌گذاری', storage:'فضای ذخیره‌سازی', appearance:'ظاهر برنامه', connection:'اتصال برنامه', admin:'مدیریت کاربران' })[view]; }
+function viewSubtitle(view: SettingsView) { return ({ home:'بخش موردنظرت را انتخاب کن.', accounts:'حساب‌های ذخیره‌شده روی این دستگاه.', sessions:'ورودهای فعال حساب فعلی را مدیریت کن.', access:'مشخص کن چه کسی کمدت را ببیند یا داخلش فایل ذخیره کند.', storage:'کانال خصوصی خودت را برای فایل‌های تازه متصل کن.', appearance:'رنگ و نحوه نصب کمد را تنظیم کن.', connection:'آدرس اصلی و مسیرهای جایگزین HTTPS را مدیریت کن.', admin:'کاربران کمد را مدیریت کن.' })[view]; }
 function permissionLabel(permission: 'owner' | Permission) { return permission === 'owner' ? 'کمد خودم' : permission === 'write' ? 'مشاهده و ذخیره' : 'فقط مشاهده'; }
 function PermissionSelect({ value, onChange }:{ value:Permission; onChange:(value:Permission)=>void }) { return <CustomSelect value={value} onChange={onChange} options={[{value:'read',label:'👁️ فقط مشاهده'},{value:'write',label:'📥 مشاهده و ذخیره'}]}/>; }
 function SettingsButton({icon,title,text,onClick}:{icon:React.ReactElement;title:string;text:string;onClick:()=>void}) { return <button onClick={onClick} className="group flex min-h-28 items-center gap-4 rounded-2xl border border-white/[.07] bg-dark-900/70 p-5 text-right transition hover:border-primary-400/25 hover:bg-primary-500/[.06]"><span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-primary-500/10 text-primary-300 [&>svg]:h-6 [&>svg]:w-6">{icon}</span><span className="min-w-0 flex-1"><strong className="block">{title}</strong><small className="mt-1 block leading-6 text-dark-400">{text}</small></span><ArrowRight className="h-5 w-5 rotate-180 text-dark-600 transition group-hover:text-primary-300"/></button>; }

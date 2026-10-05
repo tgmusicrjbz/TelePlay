@@ -18,6 +18,7 @@ class User(Base):
     first_name: Mapped[Optional[str]] = mapped_column(String(255))
     last_name: Mapped[Optional[str]] = mapped_column(String(255))
     display_name: Mapped[Optional[str]] = mapped_column(String(255))
+    storage_channel_id: Mapped[Optional[int]] = mapped_column(BigInteger)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     auth_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -115,6 +116,7 @@ class File(Base):
     file_id: Mapped[str] = mapped_column(String(255), nullable=False)
     file_unique_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     channel_message_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    storage_channel_id: Mapped[Optional[int]] = mapped_column(BigInteger)
     
     # File metadata
     file_name: Mapped[str] = mapped_column(String(500), nullable=False)
