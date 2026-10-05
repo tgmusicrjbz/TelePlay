@@ -14,11 +14,13 @@ export interface OfflinePlaylist { id: number; name: string; description?: strin
 export interface OfflineText { id: number; file: TelegramFile; content: string; savedAt: string; }
 export interface OfflineTextDraft { id: number; name: string; content: string; folderId: number | null; createdAt: string; }
 export interface OfflineDownloadProgress { done: number; total: number; failed: number; currentName: string; loaded: number; size: number; }
-export interface OfflineJobProgress extends OfflineDownloadProgress { id: string; kind: 'file' | 'playlist'; title: string; state: 'downloading' | 'done' | 'error'; }
+export interface OfflineJobProgress extends OfflineDownloadProgress { id: string; kind: 'file' | 'playlist'; title: string; state: 'queued' | 'downloading' | 'paused' | 'cancelled' | 'done' | 'error'; }
 let textOutboxSyncing = false;
 type OfflineQueueJob = { file: TelegramFile; onProgress?: (loaded:number,total:number)=>void; options?: {silentProgress?:boolean}; resolve:()=>void; reject:(error:unknown)=>void };
 const offlineQueue: OfflineQueueJob[] = [];
 const offlinePromises = new Map<number, Promise<void>>();
+const activeControllers = new Map<number, AbortController>();
+const playlistControls = new Map<string, { paused: boolean; cancelled: boolean }>();
 let activeOfflineJobs = 0;
 
 function emitProgress(progress: OfflineJobProgress) {
@@ -64,6 +66,8 @@ async function performFileOffline(file: TelegramFile, onProgress?: (loaded: numb
     const jobId = `file-${file.id}`;
     if (!options?.silentProgress) emitProgress({ id: jobId, kind: 'file', title: file.file_name, state: 'downloading', done: 0, total: 1, failed: 0, currentName: file.file_name, loaded: 0, size: file.file_size });
     await navigator.storage?.persist?.();
+    const controller = new AbortController();
+    activeControllers.set(file.id, controller);
     try {
         if (await getOfflineMedia(file.id)) {
             onProgress?.(file.file_size, file.file_size);
@@ -73,6 +77,7 @@ async function performFileOffline(file: TelegramFile, onProgress?: (loaded: numb
         const source = file.stream_url.replace(/^\/api/, '');
         const response = await api.get<Blob>(source, {
             responseType: 'blob',
+            signal: controller.signal,
             onDownloadProgress: event => {
                 const total = event.total || file.file_size || 0;
                 onProgress?.(event.loaded, total);
@@ -85,9 +90,30 @@ async function performFileOffline(file: TelegramFile, onProgress?: (loaded: numb
         window.dispatchEvent(new Event(OFFLINE_CHANGED_EVENT));
         if (!options?.silentProgress) emitProgress({ id: jobId, kind: 'file', title: file.file_name, state: 'done', done: 1, total: 1, failed: 0, currentName: file.file_name, loaded: blob.size, size: blob.size });
     } catch (error) {
-        if (!options?.silentProgress) emitProgress({ id: jobId, kind: 'file', title: file.file_name, state: 'error', done: 0, total: 1, failed: 1, currentName: file.file_name, loaded: 0, size: file.file_size });
+        const cancelled = controller.signal.aborted;
+        if (!options?.silentProgress) emitProgress({ id: jobId, kind: 'file', title: file.file_name, state: cancelled ? 'cancelled' : 'error', done: 0, total: 1, failed: cancelled ? 0 : 1, currentName: file.file_name, loaded: 0, size: file.file_size });
         throw error;
+    } finally { activeControllers.delete(file.id); }
+}
+
+export function cancelOfflineJob(jobId: string): void {
+    if (jobId.startsWith('playlist-')) {
+        const control = playlistControls.get(jobId); if (control) control.cancelled = true;
+        return;
     }
+    const fileId = Number(jobId.replace('file-', ''));
+    const queuedIndex = offlineQueue.findIndex(job => job.file.id === fileId);
+    if (queuedIndex >= 0) {
+        const [job] = offlineQueue.splice(queuedIndex, 1);
+        offlinePromises.delete(fileId);
+        job.reject(new DOMException('دانلود لغو شد', 'AbortError'));
+        emitProgress({id:jobId,kind:'file',title:job.file.file_name,state:'cancelled',done:0,total:1,failed:0,currentName:job.file.file_name,loaded:0,size:job.file.file_size});
+    } else activeControllers.get(fileId)?.abort();
+}
+
+export function toggleOfflineJobPause(jobId: string): void {
+    const control = playlistControls.get(jobId);
+    if (control) control.paused = !control.paused;
 }
 
 function pumpOfflineQueue() {
@@ -111,6 +137,7 @@ export function saveFileOffline(file: TelegramFile, onProgress?: (loaded: number
     if (existing) return existing;
     const promise = new Promise<void>((resolve, reject) => {
         offlineQueue.push({ file, onProgress, options, resolve, reject });
+        if (!options?.silentProgress) emitProgress({ id: `file-${file.id}`, kind: 'file', title: file.file_name, state: 'queued', done: 0, total: 1, failed: 0, currentName: 'در صف ذخیره‌سازی', loaded: 0, size: file.file_size });
         pumpOfflineQueue();
     });
     offlinePromises.set(file.id, promise);
@@ -121,6 +148,8 @@ export async function savePlaylistOffline(playlist: Playlist, onProgress?: (prog
     const playable = playlist.items.map(item => item.file).filter(file => file.file_type === 'audio' || file.file_type === 'video');
     if (!playable.length) throw new Error('این پلی‌لیست فایل صوتی یا ویدیویی قابل دانلود ندارد.');
     const jobId = `playlist-${playlist.id}`;
+    const control = { paused: false, cancelled: false };
+    playlistControls.set(jobId, control);
     const totalSize = playable.reduce((sum, file) => sum + (file.file_size || 0), 0);
     const loadedByFile = new Map<number, number>();
     let cursor = 0; let done = 0; let failed = 0; const savedIds: number[] = [];
@@ -132,6 +161,11 @@ export async function savePlaylistOffline(playlist: Playlist, onProgress?: (prog
     report('در حال آماده‌سازی…');
     const worker = async () => {
         while (cursor < playable.length) {
+            while (control.paused && !control.cancelled) {
+                emitProgress({ id: jobId, kind: 'playlist', title: playlist.name, state: 'paused', done, total: playable.length, failed, currentName: 'دانلود موقتاً متوقف شده', loaded: [...loadedByFile.values()].reduce((sum, value) => sum + value, 0), size: totalSize });
+                await new Promise(resolve => window.setTimeout(resolve, 250));
+            }
+            if (control.cancelled) break;
             const file = playable[cursor++];
             report(file.file_name);
             let saved = false;
@@ -146,6 +180,11 @@ export async function savePlaylistOffline(playlist: Playlist, onProgress?: (prog
         }
     };
     await worker();
+    if (control.cancelled) {
+        playlistControls.delete(jobId);
+        emitProgress({ id: jobId, kind: 'playlist', title: playlist.name, state: 'cancelled', done, total: playable.length, failed, currentName: '', loaded: [...loadedByFile.values()].reduce((sum, value) => sum + value, 0), size: totalSize });
+        throw new DOMException('دانلود پلی‌لیست لغو شد', 'AbortError');
+    }
     if (!savedIds.length) {
         emitProgress({ id: jobId, kind: 'playlist', title: playlist.name, state: 'error', done, total: playable.length, failed, currentName: '', loaded: 0, size: totalSize });
         throw new Error('هیچ‌کدام از فایل‌های پلی‌لیست دانلود نشدند؛ اتصال ربات به کانال ذخیره‌سازی را بررسی کن.');
@@ -154,6 +193,7 @@ export async function savePlaylistOffline(playlist: Playlist, onProgress?: (prog
     await transaction<IDBValidKey>(PLAYLIST_STORE, 'readwrite', store => store.put(record));
     window.dispatchEvent(new Event(OFFLINE_CHANGED_EVENT));
     emitProgress({ id: jobId, kind: 'playlist', title: playlist.name, state: 'done', done, total: playable.length, failed, currentName: '', loaded: [...loadedByFile.values()].reduce((sum, value) => sum + value, 0), size: totalSize });
+    playlistControls.delete(jobId);
     return record;
 }
 

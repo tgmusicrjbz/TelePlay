@@ -446,6 +446,15 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
             return;
         }
 
+        // A tap on the music player toggles playback and must never hide its
+        // controls. The video-only single/double tap logic below used to run
+        // for audio on touch screens and immediately collapsed the overlay.
+        if (!isVideo) {
+            setShowControls(true);
+            togglePlay();
+            return;
+        }
+
         const bounds = containerRef.current?.getBoundingClientRect();
         if (!bounds) return;
         const side = event.clientX < bounds.left + bounds.width / 2 ? 'left' : 'right';
@@ -519,10 +528,12 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
 
     useEffect(() => {
         if (!('mediaSession' in navigator)) return;
+        const descriptionLine = (file.description || '').split(/\r?\n/).map(line => line.trim()).find(line => line && !/^https?:\/\//i.test(line));
+        const mediaKind = file.file_type === 'audio' ? 'صدای در حال پخش' : file.file_type === 'video' ? 'ویدیوی در حال پخش' : 'در حال پخش';
         navigator.mediaSession.metadata = new MediaMetadata({
             title: cleanFileName,
-            artist: file.description?.split(/\r?\n/)[0]?.slice(0, 80) || 'کمد',
-            album: hasQueue ? `صف پخش · ${queuePosition.toLocaleString('fa-IR')} از ${queueLength.toLocaleString('fa-IR')}` : 'کمد',
+            artist: descriptionLine?.slice(0, 80) || mediaKind,
+            album: hasQueue ? `کمد · قطعه ${queuePosition.toLocaleString('fa-IR')} از ${queueLength.toLocaleString('fa-IR')}` : 'پخش از کمد',
             artwork: authorizedThumbnailUrl ? [{ src: authorizedThumbnailUrl }] : undefined,
         });
         const actions: Array<[MediaSessionAction, MediaSessionActionHandler | null]> = [

@@ -115,6 +115,22 @@ async def import_link_status(job_id: str, current_user: User = Depends(get_curre
     return status
 
 
+@router.post("/import-link/status/{job_id}/pause")
+async def toggle_import_link_pause(job_id: str, current_user: User = Depends(get_current_user)):
+    status = link_importer.toggle_pause(job_id, current_user.id)
+    if status is None:
+        raise HTTPException(status_code=404, detail="وضعیت این لینک پیدا نشد.")
+    return status
+
+
+@router.post("/import-link/status/{job_id}/cancel")
+async def cancel_import_link(job_id: str, current_user: User = Depends(get_current_user)):
+    status = link_importer.cancel(job_id, current_user.id)
+    if status is None:
+        raise HTTPException(status_code=404, detail="وضعیت این لینک پیدا نشد.")
+    return status
+
+
 @router.post("/upload", response_model=FileResponse, status_code=201)
 async def upload_file(
     upload: UploadFile = FormFile(...),

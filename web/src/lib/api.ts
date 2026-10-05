@@ -4,6 +4,20 @@
 import axios from 'axios';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
+const normalizeServerOrigin = (value?: string | null) => {
+    const trimmed = String(value || '').trim().replace(/\/+$/, '');
+    if (!trimmed) return window.location.origin;
+    try {
+        const url = new URL(trimmed);
+        return url.protocol === 'https:' || (url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname))
+            ? url.origin
+            : window.location.origin;
+    } catch { return window.location.origin; }
+};
+
+export const getServerOrigin = () => normalizeServerOrigin(localStorage.getItem('komod-server-origin'));
+export const resolveServerUrl = (value: string) => value.startsWith('/') ? `${getServerOrigin()}${value}` : value;
+
 // Types
 export interface User {
     id: number;
@@ -151,8 +165,21 @@ export function getKomodDeviceId(): string {
 
 // API client
 export const api = axios.create({
-    baseURL: '/api',
+    baseURL: `${getServerOrigin()}/api`,
 });
+
+const MEDIA_URL_KEYS = new Set(['stream_url', 'thumbnail_url', 'cover_url', 'public_stream_url']);
+const resolveResponseMediaUrls = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(resolveResponseMediaUrls);
+    if (!value || typeof value !== 'object') return value;
+    const record = value as Record<string, unknown>;
+    Object.entries(record).forEach(([key, item]) => {
+        if (MEDIA_URL_KEYS.has(key) && typeof item === 'string') record[key] = resolveServerUrl(item);
+        else if (key === 'cover_urls' && Array.isArray(item)) record[key] = item.map(url => typeof url === 'string' ? resolveServerUrl(url) : url);
+        else resolveResponseMediaUrls(item);
+    });
+    return value;
+};
 
 // Add auth token to requests
 api.interceptors.request.use((config) => {
@@ -193,7 +220,7 @@ const processQueue = (error: any, token: string | null = null) => {
 
 // Handle 401 and 429 errors
 api.interceptors.response.use(
-    (response) => response,
+    (response) => { resolveResponseMediaUrls(response.data); return response; },
     async (error) => {
         const originalRequest = error.config;
 
@@ -231,7 +258,7 @@ api.interceptors.response.use(
                     throw new Error('No refresh token available');
                 }
 
-                const { data } = await axios.post('/api/auth/refresh', {
+                const { data } = await axios.post(`${getServerOrigin()}/api/auth/refresh`, {
                     refresh_token: refreshToken,
                 });
 

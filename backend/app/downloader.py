@@ -68,6 +68,8 @@ class LinkImportService:
         self.queue: asyncio.Queue[ImportJob] = asyncio.Queue()
         self.task: asyncio.Task | None = None
         self.statuses: dict[str, dict] = {}
+        self.controls: dict[str, dict[str, bool]] = {}
+        self.active_job_id: str | None = None
 
     @property
     def available(self) -> bool:
@@ -110,6 +112,7 @@ class LinkImportService:
             await self.start()
         job.id = job.id or uuid.uuid4().hex
         self.statuses[job.id] = {"id": job.id, "user_id": job.user_id, "state": "queued", "message": "توی صفه و به‌زودی شروع می‌شه.", "saved": 0}
+        self.controls[job.id] = {"paused": False, "cancelled": False}
         await self.queue.put(job)
         return self.queue.qsize()
 
@@ -117,14 +120,48 @@ class LinkImportService:
         status = self.statuses.get(job_id)
         return status if status and status["user_id"] == user_id else None
 
+    def toggle_pause(self, job_id: str, user_id: int) -> dict | None:
+        status = self.status(job_id, user_id)
+        control = self.controls.get(job_id)
+        if status is None or control is None or status["state"] in {"done", "error", "cancelled"}:
+            return status
+        control["paused"] = not control["paused"]
+        if control["paused"]:
+            status.update(state="paused", message="فعلاً متوقف شده؛ هر وقت خواستی ادامه بده.")
+        else:
+            state = "downloading" if self.active_job_id == job_id else "queued"
+            status.update(state=state, message="دوباره ادامه پیدا کرد.")
+        return status
+
+    def cancel(self, job_id: str, user_id: int) -> dict | None:
+        status = self.status(job_id, user_id)
+        control = self.controls.get(job_id)
+        if status is None or control is None or status["state"] in {"done", "error", "cancelled"}:
+            return status
+        control["cancelled"] = True
+        control["paused"] = False
+        status.update(state="cancelled", message="این مورد از صف کنار گذاشته شد.")
+        return status
+
+    async def _checkpoint(self, job: ImportJob) -> bool:
+        control = self.controls.get(job.id, {})
+        while control.get("paused") and not control.get("cancelled"):
+            await asyncio.sleep(.35)
+        return not control.get("cancelled")
+
     async def _run(self) -> None:
         while True:
             job = await self.queue.get()
             try:
+                self.active_job_id = job.id
+                if not await self._checkpoint(job):
+                    continue
                 self.statuses[job.id].update(state="downloading", message="دارم فایل اصلی رو آماده می‌کنم…")
                 if job.notify:
                     await self._notify(job, "⏳ نوبت لینک تو رسید؛ دارم فایل اصلی رو آماده می‌کنم…")
                 items = await self._download(job.url, job.quality)
+                if not await self._checkpoint(job):
+                    continue
                 saved = await self._store(job, items)
                 if not saved:
                     raise RuntimeError("هیچ فایل قابل ذخیره‌ای در پاسخ پیدا نشد")
@@ -140,6 +177,8 @@ class LinkImportService:
                     await self._notify(job, "❌ این لینک آماده نشد. ممکنه پست خصوصی، حذف‌شده یا موقتاً خارج از دسترس باشه؛ کمی بعد دوباره امتحانش کن.")
                 self.statuses[job.id].update(state="error", message="آماده‌سازی این لینک انجام نشد.")
             finally:
+                if self.active_job_id == job.id:
+                    self.active_job_id = None
                 self.queue.task_done()
 
     async def _download(self, url: str, quality: str) -> list[dict]:
@@ -299,7 +338,10 @@ class LinkImportService:
                     file_id=media.file_id,
                     file_unique_id=media.file_unique_id,
                     file_name=filename,
-                    description=(f"{item.get('author')}\n\n{job.url}" if item.get("author") else job.url),
+                    description=(
+                        f"{'📺' if 'youtu' in job.url.lower() else '📷'} {item.get('author')}\n\n🔗 {job.url}"
+                        if item.get("author") else f"🔗 {job.url}"
+                    ),
                     file_size=getattr(media, "file_size", None) or 0,
                     mime_type=(getattr(media, "mime_type", None) or ("video/mp4" if item["type"] == "video" else "audio/mpeg" if item["type"] == "audio" else "image/jpeg")),
                     file_type=item["type"],

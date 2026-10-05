@@ -1,6 +1,6 @@
 import { Routes, Route, Navigate, useSearchParams, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import { api, AuthResponse, getKomodDeviceId, useCurrentUser, useLoginWithCode, useBotInfo, useGenerateLoginCode, useVerifyLoginCode } from './lib/api';
+import { api, AuthResponse, getKomodDeviceId, resolveServerUrl, useCurrentUser, useLoginWithCode, useBotInfo, useGenerateLoginCode, useVerifyLoginCode } from './lib/api';
 import FileBrowser from './components/FileBrowser';
 import GlobalContextMenu from './components/GlobalContextMenu';
 import PwaManager from './components/PwaManager';
@@ -114,7 +114,7 @@ function TelegramWebAppBootstrap({ children }: { children: React.ReactNode }) {
             const controller = new AbortController();
             const timeout = window.setTimeout(() => controller.abort(), 12000);
             try {
-                const response = await fetch('/api/auth/telegram-webapp', {
+                const response = await fetch(resolveServerUrl('/api/auth/telegram-webapp'), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-Komod-Device-ID': getKomodDeviceId() },
                     body: JSON.stringify({ init_data: identity.initData }),
