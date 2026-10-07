@@ -2,6 +2,7 @@
 File management API endpoints.
 """
 from typing import Optional
+import json
 from fastapi import APIRouter, Depends, File as FormFile, Form, HTTPException, Query, UploadFile
 import secrets
 import logging
@@ -268,7 +269,7 @@ async def get_text_preview(
         raise HTTPException(status_code=415, detail="Text preview is not available for this file")
     if file.file_size > 1024 * 1024:
         raise HTTPException(status_code=413, detail="Text preview is limited to 1 MB")
-    message = await get_message_from_channel(file.channel_message_id)
+    message = await get_message_from_channel(file.channel_message_id, file.storage_channel_id)
     if message is None:
         raise HTTPException(status_code=404, detail="Message not found in storage")
     if file.file_type == "text" and getattr(message, "document", None) is None:
@@ -297,7 +298,7 @@ async def update_text_content(
         raise HTTPException(status_code=404, detail="File not found")
     if file.file_type != "text":
         raise HTTPException(status_code=415, detail="Only saved text notes can be edited")
-    message = await get_message_from_channel(file.channel_message_id)
+    message = await get_message_from_channel(file.channel_message_id, file.storage_channel_id)
     try:
         if message is not None and message.document is not None:
             suffix = Path(file.file_name).suffix or ".md"
@@ -305,7 +306,7 @@ async def update_text_content(
                 text_path = Path(temporary_dir) / f"note{suffix}"
                 text_path.write_text(payload.content, encoding="utf-8")
                 replacement = await telegram.tg_client.send_document(
-                    chat_id=settings.telegram_storage_channel_id,
+                    chat_id=file.storage_channel_id or settings.telegram_storage_channel_id,
                     document=str(text_path),
                     caption=file.description,
                     parse_mode=None,
@@ -319,9 +320,9 @@ async def update_text_content(
             file.channel_message_id = replacement.id
             file.file_size = media.file_size or len(payload.content.encode("utf-8"))
             file.mime_type = media.mime_type or "text/markdown"
-            await delete_from_storage_channel(old_message_id)
+            await delete_from_storage_channel(old_message_id, file.storage_channel_id)
         else:
-            await telegram.tg_client.edit_message_text(settings.telegram_storage_channel_id, file.channel_message_id, payload.content)
+            await telegram.tg_client.edit_message_text(file.storage_channel_id or settings.telegram_storage_channel_id, file.channel_message_id, payload.content)
             file.file_name = sanitize_filename(payload.content.strip().splitlines()[0][:80])
             file.file_size = len(payload.content.encode("utf-8"))
     except Exception as error:
@@ -369,7 +370,8 @@ async def list_files(
         escaped = f"%{escape_like(search)}%"
         query = query.where(
             File.file_name.ilike(escaped, escape="\\") |
-            File.description.ilike(escaped, escape="\\")
+            File.description.ilike(escaped, escape="\\") |
+            File.tags_json.ilike(escaped, escape="\\")
         )
     
     # Get total count
@@ -524,6 +526,15 @@ async def update_file(
         file.is_favorite = update_data.is_favorite
     if update_data.is_pinned is not None:
         file.is_pinned = update_data.is_pinned
+    if update_data.tags is not None:
+        tags: list[str] = []
+        for raw in update_data.tags:
+            tag = " ".join(str(raw).strip().lstrip("#").split())[:40]
+            if tag and tag.casefold() not in {item.casefold() for item in tags}:
+                tags.append(tag)
+            if len(tags) >= 20:
+                break
+        file.tags_json = json.dumps(tags, ensure_ascii=False)
     if update_data.folder_id is not None:
         target_id = update_data.folder_id or None
         if target_id is not None:
@@ -562,7 +573,7 @@ async def delete_file(
     
     # Old Telegram messages may already be gone or belong to a previous storage
     # channel.  Their stale metadata must still be removable from Komod.
-    storage_deleted = await delete_from_storage_channel(file.channel_message_id)
+    storage_deleted = await delete_from_storage_channel(file.channel_message_id, file.storage_channel_id)
     
     # Delete from database
     await db.delete(file)
@@ -587,12 +598,17 @@ async def batch_delete_files(
     if not files:
         return {"message": "No files found to delete"}
     
-    # Collect message IDs for Telegram deletion
-    msg_ids = [f.channel_message_id for f in files]
-    
-    # Delete from Telegram (batch)
-    for start in range(0, len(msg_ids), 100):
-        await delete_from_storage_channel(msg_ids[start:start + 100])
+    # Telegram message ids are only unique inside their own channel.
+    messages_by_channel: dict[int | None, list[int]] = {}
+    for item in files:
+        messages_by_channel.setdefault(item.storage_channel_id, []).append(item.channel_message_id)
+    for channel_id, msg_ids in messages_by_channel.items():
+        for start in range(0, len(msg_ids), 100):
+            batch = msg_ids[start:start + 100]
+            if channel_id is None:
+                await delete_from_storage_channel(batch)
+            else:
+                await delete_from_storage_channel(batch, channel_id)
     
     # Delete from DB
     for file in files:

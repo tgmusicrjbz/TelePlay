@@ -76,6 +76,7 @@ export interface TelegramFile {
     public_stream_url?: string;
     is_favorite?: boolean;
     is_pinned?: boolean;
+    tags?: string[];
 }
 
 export interface FileListResponse {
@@ -400,7 +401,7 @@ export const useFile = (fileId: number) => {
 export const useUpdateFile = () => {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async ({ id, ...data }: { id: number; file_name?: string; description?: string; folder_id?: number | null; is_favorite?: boolean; is_pinned?: boolean }) => {
+        mutationFn: async ({ id, ...data }: { id: number; file_name?: string; description?: string; folder_id?: number | null; is_favorite?: boolean; is_pinned?: boolean; tags?: string[] }) => {
             const { data: result } = await api.patch<TelegramFile>(`/files/${id}`, data);
             return result;
         },

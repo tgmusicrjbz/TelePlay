@@ -64,7 +64,8 @@ class Settings(BaseSettings):
     
     # JWT
     jwt_secret: str
-    jwt_expiry_minutes: int = 10080  # 7 days for persistent sessions
+    jwt_expiry_minutes: int = 30
+    refresh_token_expiry_days: int = 30
     
     # Server
     server_host: str = "0.0.0.0"

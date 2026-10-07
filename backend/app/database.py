@@ -83,6 +83,8 @@ async def init_db():
         )
         if "description" not in columns:
             await conn.execute(text("ALTER TABLE files ADD COLUMN description TEXT"))
+        if "tags_json" not in columns:
+            await conn.execute(text("ALTER TABLE files ADD COLUMN tags_json TEXT NOT NULL DEFAULT '[]'"))
         if "storage_channel_id" not in columns:
             await conn.execute(text("ALTER TABLE files ADD COLUMN storage_channel_id BIGINT"))
         if "is_favorite" not in columns:

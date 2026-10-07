@@ -1,6 +1,7 @@
 """
 Shared business logic and database queries.
 """
+import json
 import re
 from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -52,6 +53,10 @@ def sanitize_filename(name: str) -> str:
 
 def add_urls_to_file(file: File) -> dict:
     """Add stream and thumbnail URLs to file response."""
+    try:
+        tags = [str(item) for item in json.loads(file.tags_json or "[]") if str(item).strip()]
+    except (TypeError, ValueError, json.JSONDecodeError):
+        tags = []
     data = {
         "id": file.id,
         "user_id": file.user_id,
@@ -60,6 +65,7 @@ def add_urls_to_file(file: File) -> dict:
         "file_unique_id": file.file_unique_id,
         "file_name": file.file_name,
         "description": file.description,
+        "tags": tags,
         "file_size": file.file_size,
         "mime_type": file.mime_type,
         "file_type": file.file_type,

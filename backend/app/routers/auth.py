@@ -120,6 +120,13 @@ async def _session_for_device(db: AsyncSession, request: Request, user: User) ->
         session.ip_address = ip_address
         session.last_seen_at = now
         session.revoked_at = None
+    active_sessions = (await db.execute(select(AuthSession).where(
+        AuthSession.user_id == user.id,
+        AuthSession.revoked_at.is_(None),
+        AuthSession.id != session_id,
+    ).order_by(AuthSession.last_seen_at.desc()))).scalars().all()
+    for stale in active_sessions[9:]:
+        stale.revoked_at = now
     return session
 
 
@@ -304,7 +311,9 @@ async def login_from_telegram_webapp(
 
 
 @router.post("/generate-code", response_model=LoginCodeResponse)
+@limiter.limit("10/minute")
 async def generate_login_code(
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """

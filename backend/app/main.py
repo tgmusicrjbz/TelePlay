@@ -4,14 +4,15 @@ FastAPI main application with Telegram MTProto client lifecycle.
 import logging
 import asyncio
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Form
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
+from urllib.parse import urlencode
 import os
 
 import logging
@@ -102,7 +103,7 @@ app.add_middleware(
     allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Accept", "Range", "X-Workspace-User"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "Range", "X-Workspace-User", "X-Komod-Device-ID"],
     expose_headers=["Content-Range", "Accept-Ranges", "Content-Length"],
 )
 
@@ -118,11 +119,12 @@ async def add_security_headers(request: Request, call_next):
     # Prevent clickjacking (allow framing only for same origin)
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
     
-    # XSS protection (legacy but still useful)
-    response.headers["X-XSS-Protection"] = "1; mode=block"
-    
-    # Referrer policy - don't leak URLs
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=()"
+    if request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    if request.url.path.startswith("/api/auth"):
+        response.headers["Cache-Control"] = "no-store"
     
     # Content Security Policy (adjust as needed for your frontend)
     # response.headers["Content-Security-Policy"] = "default-src 'self'"
@@ -147,6 +149,17 @@ app.include_router(accounts_router, prefix="/api")
 async def health():
     """Health check for container orchestration."""
     return {"status": "healthy"}
+
+
+@app.post("/share-target")
+async def receive_shared_link(
+    title: str = Form(""),
+    text: str = Form(""),
+    url: str = Form(""),
+):
+    """Receive links shared to the installed PWA and continue in the import UI."""
+    query = urlencode({"share-target": "1", "title": title, "text": text, "url": url})
+    return RedirectResponse(url=f"/?{query}", status_code=303)
 
 
 # ... imports ...

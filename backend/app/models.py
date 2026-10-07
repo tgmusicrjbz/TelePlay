@@ -121,6 +121,7 @@ class File(Base):
     # File metadata
     file_name: Mapped[str] = mapped_column(String(500), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
+    tags_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
     is_favorite: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_pinned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     file_size: Mapped[int] = mapped_column(BigInteger, nullable=False)

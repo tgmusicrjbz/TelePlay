@@ -80,10 +80,15 @@ async def delete_folder_contents(db: AsyncSession, folder: Folder, delete_conten
     files = (await db.execute(select(File).where(
         File.folder_id.in_(folder_ids), File.user_id == folder.user_id
     ))).scalars().all()
-    message_ids = [file.channel_message_id for file in files]
-    for start in range(0, len(message_ids), 100):
-        if not await delete_from_storage_channel(message_ids[start:start + 100]):
-            logger.warning("Telegram cleanup failed for folder %s; deleting stale database rows", folder.id)
+    messages_by_channel: dict[int | None, list[int]] = {}
+    for item in files:
+        messages_by_channel.setdefault(item.storage_channel_id, []).append(item.channel_message_id)
+    for channel_id, message_ids in messages_by_channel.items():
+        for start in range(0, len(message_ids), 100):
+            batch = message_ids[start:start + 100]
+            deleted = await delete_from_storage_channel(batch, channel_id) if channel_id is not None else await delete_from_storage_channel(batch)
+            if not deleted:
+                logger.warning("Telegram cleanup failed for folder %s; deleting stale database rows", folder.id)
     file_ids = [file.id for file in files]
     if file_ids:
         await db.execute(delete(WatchProgress).where(WatchProgress.file_id.in_(file_ids)))

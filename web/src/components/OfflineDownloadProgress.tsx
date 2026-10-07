@@ -1,16 +1,21 @@
-import { useEffect, useState } from 'react';
-import { Check, ChevronDown, ChevronUp, DownloadCloud, Eye, ListMusic, Minus, Pause, Play, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Check, ChevronDown, ChevronUp, DownloadCloud, Eye, ListMusic, Minus, Pause, Play, Trash2, X } from 'lucide-react';
 import { cancelOfflineJob, OFFLINE_PROGRESS_EVENT, OfflineJobProgress, toggleOfflineJobPause } from '../lib/offline';
 
 export default function OfflineDownloadProgressPanel() {
     const [jobs, setJobs] = useState<Record<string, OfflineJobProgress>>({});
     const [collapsed, setCollapsed] = useState(false);
     const [hidden, setHidden] = useState(false);
+    const suppressedJobs = useRef(new Set<string>());
     useEffect(() => {
         const update = (event: Event) => {
             const job = (event as CustomEvent<OfflineJobProgress>).detail;
+            if (suppressedJobs.current.has(job.id)) {
+                if (!['queued', 'downloading', 'paused'].includes(job.state)) suppressedJobs.current.delete(job.id);
+                return;
+            }
             setJobs(previous => ({ ...previous, [job.id]: job }));
-            if (!['queued', 'downloading', 'paused'].includes(job.state)) window.setTimeout(() => setJobs(previous => { const next = { ...previous }; delete next[job.id]; return next; }), 3500);
+            if (!['queued', 'downloading', 'paused'].includes(job.state)) window.setTimeout(() => setJobs(previous => { const next = { ...previous }; delete next[job.id]; return next; }), 1800);
         };
         window.addEventListener(OFFLINE_PROGRESS_EVENT, update);
         return () => window.removeEventListener(OFFLINE_PROGRESS_EVENT, update);
@@ -28,6 +33,7 @@ export default function OfflineDownloadProgressPanel() {
                 {queued > 0 && <span className="rounded-full bg-primary-500/15 px-2 py-0.5 text-[10px] text-primary-200">{queued.toLocaleString('fa-IR')} در صف</span>}
                 <button className="btn-icon h-8 w-8" onClick={() => setCollapsed(value => !value)} aria-label={collapsed ? 'نمایش دانلودها' : 'کوچک کردن'}>{collapsed ? <ChevronUp className="h-4 w-4"/> : <Minus className="h-4 w-4"/>}</button>
                 <button className="btn-icon h-8 w-8" onClick={() => setHidden(true)} aria-label="پنهان کردن"><X className="h-4 w-4"/></button>
+                <button className="btn-icon h-8 w-8 text-red-300" onClick={() => { visible.forEach(job => suppressedJobs.current.add(job.id)); setJobs({}); }} aria-label="بستن کامل وضعیت دانلود"><Trash2 className="h-4 w-4"/></button>
             </div>
             {collapsed ? <CompactJob job={active}/> : <div className="max-h-64 space-y-1 overflow-y-auto p-2">{visible.map(job => {
         const percent = job.size > 0 ? Math.min(100, job.loaded / job.size * 100) : job.total ? Math.min(100, job.done / job.total * 100) : 2;

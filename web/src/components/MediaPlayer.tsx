@@ -528,13 +528,13 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
 
     useEffect(() => {
         if (!('mediaSession' in navigator)) return;
-        const descriptionLine = (file.description || '').split(/\r?\n/).map(line => line.trim()).find(line => line && !/^https?:\/\//i.test(line));
+        const descriptionLine = (file.description || '').split(/\r?\n/).map(line => line.trim()).find(line => line && !/^https?:\/\//i.test(line))?.replace(/^[📺📷🎧🎬]\s*/u, '');
         const mediaKind = file.file_type === 'audio' ? 'صدای در حال پخش' : file.file_type === 'video' ? 'ویدیوی در حال پخش' : 'در حال پخش';
         navigator.mediaSession.metadata = new MediaMetadata({
             title: cleanFileName,
             artist: descriptionLine?.slice(0, 80) || mediaKind,
             album: hasQueue ? `کمد · قطعه ${queuePosition.toLocaleString('fa-IR')} از ${queueLength.toLocaleString('fa-IR')}` : 'پخش از کمد',
-            artwork: authorizedThumbnailUrl ? [{ src: authorizedThumbnailUrl }] : undefined,
+            artwork: authorizedThumbnailUrl ? [96, 128, 192, 256, 384, 512].map(size => ({ src: authorizedThumbnailUrl, sizes: `${size}x${size}` })) : undefined,
         });
         const actions: Array<[MediaSessionAction, MediaSessionActionHandler | null]> = [
             ['play', async () => { backgroundPlaybackRequested.current = true; const media = videoRef.current; if (media?.paused) await media.play(); }],
@@ -555,6 +555,13 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     useEffect(() => {
         if ('mediaSession' in navigator) navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
     }, [isPlaying]);
+
+    useEffect(() => {
+        if (!('mediaSession' in navigator) || !navigator.mediaSession.setPositionState || safeDuration <= 0) return;
+        try {
+            navigator.mediaSession.setPositionState({ duration: safeDuration, playbackRate: videoRef.current?.playbackRate || 1, position: Math.min(safeCurrentTime, safeDuration) });
+        } catch { /* Some embedded browsers expose MediaSession without position state support. */ }
+    }, [safeCurrentTime, safeDuration]);
 
     // Common Media Element
     const MediaElement = isVideo ? (

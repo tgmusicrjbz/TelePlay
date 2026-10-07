@@ -75,6 +75,7 @@ class FileBase(BaseModel):
     file_size: int
     mime_type: Optional[str] = None
     file_type: str  # video, audio, document, image, text
+    tags: List[str] = Field(default_factory=list)
     duration: Optional[float] = None
     width: Optional[int] = None
     height: Optional[int] = None
@@ -94,6 +95,7 @@ class FileUpdate(BaseModel):
     folder_id: Optional[int] = None
     is_favorite: Optional[bool] = None
     is_pinned: Optional[bool] = None
+    tags: Optional[List[str]] = None
 
 
 class BatchFileUpdate(BaseModel):

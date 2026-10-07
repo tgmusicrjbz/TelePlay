@@ -115,7 +115,7 @@ async def stream_file(
         raise HTTPException(status_code=404, detail="File not found")
     
     # Get message from channel
-    message = await get_message_from_channel(file.channel_message_id)
+    message = await get_message_from_channel(file.channel_message_id, file.storage_channel_id)
     if not message:
         raise HTTPException(status_code=404, detail="Message not found in channel")
     if file.file_type == "text" or message.photo:
@@ -184,7 +184,7 @@ async def get_thumbnail(
     
     try:
         # Get the message and download thumbnail
-        message = await get_message_from_channel(file.channel_message_id)
+        message = await get_message_from_channel(file.channel_message_id, file.storage_channel_id)
         if not message:
             raise HTTPException(status_code=404, detail="Message not found")
 
@@ -261,7 +261,7 @@ async def stream_public_file(
     req_length = until_bytes - from_bytes + 1
     
     # Get message from channel
-    message = await get_message_from_channel(file.channel_message_id)
+    message = await get_message_from_channel(file.channel_message_id, file.storage_channel_id)
     if not message:
         raise HTTPException(status_code=404, detail="Message not found in channel")
     if file.file_type == "text" or message.photo:

@@ -81,7 +81,7 @@ function TelegramWebAppBootstrap({ children }: { children: React.ReactNode }) {
             } catch { return null; }
         };
         const sync = async () => {
-            if (!navigator.onLine) { if (!cancelled) setReady(true); return; }
+            if (!navigator.onLine || localStorage.getItem('komod-force-offline') === '1') { if (!cancelled) setReady(true); return; }
             const identity = telegramIdentity();
             if (!identity) { if (!cancelled) setReady(true); return; }
             const currentId = localStorage.getItem('komod-telegram-user-id');
@@ -146,7 +146,7 @@ function TelegramWebAppBootstrap({ children }: { children: React.ReactNode }) {
 
 function OfflineTextSync() {
     useEffect(() => {
-        const sync = () => { if (navigator.onLine) void syncOfflineTextOutbox(); };
+        const sync = () => { if (navigator.onLine && localStorage.getItem('komod-force-offline') !== '1') void syncOfflineTextOutbox(); };
         sync();
         const timer = window.setInterval(sync, 30000);
         window.addEventListener('online', sync);
@@ -332,15 +332,17 @@ function BotLink({ code }: { code?: string }) {
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
     const { isLoading, error } = useCurrentUser();
     const token = localStorage.getItem('access_token');
-    const [online, setOnline] = useState(navigator.onLine);
+    const [online, setOnline] = useState(navigator.onLine && localStorage.getItem('komod-force-offline') !== '1');
 
     useEffect(() => {
-        const update = () => setOnline(navigator.onLine);
+        const update = () => setOnline(navigator.onLine && localStorage.getItem('komod-force-offline') !== '1');
         window.addEventListener('online', update);
         window.addEventListener('offline', update);
+        window.addEventListener('komod-connectivity-mode', update);
         return () => {
             window.removeEventListener('online', update);
             window.removeEventListener('offline', update);
+            window.removeEventListener('komod-connectivity-mode', update);
         };
     }, []);
 

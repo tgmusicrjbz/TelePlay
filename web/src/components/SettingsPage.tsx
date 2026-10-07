@@ -30,6 +30,8 @@ export default function SettingsPage() {
     const [view, setView] = useState<SettingsView>('home');
     const [theme, setTheme] = useState<ActiveTheme>(getStoredTheme);
     const [customColor, setCustomColor] = useState(() => localStorage.getItem('komod-custom-color') || '#a855f7');
+    const [hexColor, setHexColor] = useState(() => localStorage.getItem('komod-custom-color') || '#a855f7');
+    const [forceOffline, setForceOffline] = useState(() => localStorage.getItem('komod-force-offline') === '1');
     const [customColorName, setCustomColorName] = useState('');
     const [savedColors, setSavedColors] = useState<SavedColor[]>(() => {
         try { return (JSON.parse(localStorage.getItem('komod-saved-colors') || '[]') as Array<string | SavedColor>).map((item, index) => typeof item === 'string' ? { color:item, name:`رنگ ${index + 1}` } : item); } catch { return []; }
@@ -63,6 +65,17 @@ export default function SettingsPage() {
 
     const chooseTheme = (next: ActiveTheme) => { setTheme(next); localStorage.setItem('komod-color-theme', next); applyTheme(next); };
     const chooseCustomColor = (color: string) => { setCustomColor(color); applyCustomTheme(color); chooseTheme('custom'); };
+    const applyHexColor = () => {
+        const normalized = hexColor.trim().startsWith('#') ? hexColor.trim() : `#${hexColor.trim()}`;
+        if (!/^#[0-9a-f]{6}$/i.test(normalized)) return;
+        setHexColor(normalized.toUpperCase());
+        chooseCustomColor(normalized);
+    };
+    const changeConnectionMode = (offline: boolean) => {
+        setForceOffline(offline);
+        if (offline) localStorage.setItem('komod-force-offline', '1'); else localStorage.removeItem('komod-force-offline');
+        window.dispatchEvent(new Event('komod-connectivity-mode'));
+    };
     const saveCustomColor = () => {
         const next = [{ color:customColor, name:customColorName.trim() || `رنگ ${savedColors.length + 1}` }, ...savedColors.filter(item => item.color.toLowerCase() !== customColor.toLowerCase())].slice(0, 12);
         setSavedColors(next); localStorage.setItem('komod-saved-colors', JSON.stringify(next));
@@ -163,7 +176,10 @@ export default function SettingsPage() {
 
         {view === 'appearance' && <Card icon={<FolderPlus/>} title="محل فایل‌های تازه" subtitle="مقصد پیش‌فرض فایل‌ها و لینک‌هایی که از صفحهٔ اصلی اضافه می‌کنی."><CustomSelect className="mt-3" value={localStorage.getItem('komod-incoming-folder') || 'default'} onChange={value => { localStorage.setItem('komod-incoming-folder', String(value)); window.dispatchEvent(new Event('komod-incoming-folder-changed')); }} options={incomingFolderOptions}/></Card>}
 
+        {view === 'appearance' && <Card icon={<Palette/>} title="رنگ با کد دقیق" subtitle="کد هگز شش‌رقمی دلخواهت را وارد کن."><div className="mt-4 flex items-center gap-2"><span className="h-11 w-11 shrink-0 rounded-xl border border-white/15" style={{backgroundColor:/^#[0-9a-f]{6}$/i.test(hexColor)?hexColor:customColor}}/><input dir="ltr" value={hexColor} onChange={event=>setHexColor(event.target.value)} onBlur={applyHexColor} onKeyDown={event=>{if(event.key==='Enter')applyHexColor();}} className="input min-w-0 flex-1 text-left font-mono uppercase" placeholder="#A855F7" maxLength={7}/><button className="btn-primary min-h-11 px-4" onClick={applyHexColor}>اعمال</button></div></Card>}
+
         {view === 'connection' && <div className="space-y-4">
+            <Card icon={<MonitorSmartphone/>} title="حالت اتصال" subtitle="در حالت آفلاین فقط محتوای ذخیره‌شده روی همین دستگاه نمایش داده می‌شود."><div className="mt-4 grid grid-cols-2 overflow-hidden rounded-xl border border-white/[.08] bg-dark-950/50 p-1"><button onClick={()=>changeConnectionMode(false)} className={`min-h-10 rounded-lg text-sm transition ${!forceOffline?'bg-primary-500 text-white':'text-dark-400'}`}>آنلاین</button><button onClick={()=>changeConnectionMode(true)} className={`min-h-10 rounded-lg text-sm transition ${forceOffline?'bg-primary-500 text-white':'text-dark-400'}`}>آفلاین</button></div></Card>
             <Card icon={<Globe2/>} title="مسیر اتصال" subtitle="اگر آدرس اصلی در شبکه‌ات باز نمی‌شود، آدرس HTTPS یک دامنه جایگزین یا reverse proxy را اینجا ذخیره کن.">
                 <div className="mt-4 grid gap-2 sm:grid-cols-[10rem_1fr_auto]"><input value={serverName} onChange={event=>setServerName(event.target.value)} className="input" placeholder="نام مسیر"/><input dir="ltr" value={serverUrl} onChange={event=>setServerUrl(event.target.value)} className="input text-left" placeholder="https://komod.example.com"/><button onClick={saveServerAddress} className="btn-primary min-h-11 px-4">ذخیره</button></div>
                 {pingResult&&!pingResult.ok&&<p className="mt-2 text-xs text-red-300">آدرس معتبر یا قابل دسترس نیست. آدرس کامل HTTPS را وارد کن.</p>}

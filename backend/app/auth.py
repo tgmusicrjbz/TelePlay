@@ -36,7 +36,7 @@ def create_access_token(telegram_id: int, version: int = 0, session_id: str | No
 
 def create_refresh_token(telegram_id: int, version: int = 0, session_id: str | None = None) -> str:
     """Create a JWT refresh token (longer expiry)."""
-    expire = datetime.utcnow() + timedelta(days=90)
+    expire = datetime.utcnow() + timedelta(days=settings.refresh_token_expiry_days)
     payload = {
         "sub": str(telegram_id),  # Subject must be string
         "exp": expire,

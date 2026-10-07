@@ -27,6 +27,14 @@ const sortLabels: Record<SortField, string> = {
     created: 'تاریخ آپلود', updated: 'تاریخ ویرایش', count: 'تعداد فایل‌های کشو',
 };
 
+const extractImportUrls = (value: string) => {
+    const starts = Array.from(value.matchAll(/https?:\/\//gi), match => match.index ?? -1).filter(index => index >= 0);
+    return starts.map((start, index) => value.slice(start, starts[index + 1] ?? value.length)
+        .split(/[\s<>()\[\]{}"']/, 1)[0]
+        .replace(/[،,.;!?]+$/g, ''))
+        .filter(Boolean);
+};
+
 export default function FileBrowser() {
     const readOnlyWorkspace = Boolean(localStorage.getItem('komod-active-workspace')) && localStorage.getItem('komod-active-workspace-permission') === 'read';
     const {
@@ -66,6 +74,7 @@ export default function FileBrowser() {
         selectionBox,
         setSelectionBox,
         activeSection,
+        setActiveSection,
         addToast,
         setSelectedFiles,
         setPlaylistFiles,
@@ -95,7 +104,7 @@ export default function FileBrowser() {
     const [importJobs, setImportJobs] = useState<Array<{id:string; url:string; state:'queued'|'downloading'|'paused'|'cancelled'|'done'|'error'; message:string; saved:number}>>([]);
     const [importPanelMode, setImportPanelMode] = useState<'open'|'collapsed'|'hidden'>('open');
     const uploadAbortRef = useRef<AbortController | null>(null);
-    const importUrls = useMemo(() => (importUrl.match(/https?:\/\/[^\s<>()]+/gi) || []).map(item => item.replace(/[،,.;!?]+$/g, '')), [importUrl]);
+    const importUrls = useMemo(() => extractImportUrls(importUrl), [importUrl]);
     const importPlatform = useMemo<'youtube' | 'instagram' | null>(() => {
         if (importUrls.length !== 1) return null;
         try {
@@ -139,7 +148,7 @@ export default function FileBrowser() {
     }, []);
 
     // Data Fetching
-    const { data: filesList, isLoading: filesLoading, isFetching: filesFetching, refetch: refetchFiles } = useFiles(effectiveFolderId, fileTypeFilter.join(',') || undefined, searchQuery || undefined, page, sortValue, favoriteOnly);
+    const { data: filesList, isLoading: filesLoading, isFetching: filesFetching, refetch: refetchFiles } = useFiles(searchQuery.trim() ? undefined : effectiveFolderId, fileTypeFilter.join(',') || undefined, searchQuery || undefined, page, sortValue, favoriteOnly);
     const { data: activityFeed, isLoading: activityLoading, isError: activityError, refetch: refetchActivity } = useActivityFeed(activeSection === 'activity', 50);
     
 
@@ -213,17 +222,26 @@ export default function FileBrowser() {
     useEffect(() => applyTheme(getStoredTheme()), []);
 
     useEffect(() => {
-        if (navigator.onLine) void cacheAllTextNotes();
+        if (navigator.onLine && localStorage.getItem('komod-force-offline') !== '1') void cacheAllTextNotes();
     }, []);
 
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);
         if (params.get('share-target') !== '1') return;
         const shared = [params.get('url'), params.get('text')].filter(Boolean).join('\n');
-        const urls = shared.match(/https?:\/\/[^\s]+/g) || [];
+        const urls = extractImportUrls(shared);
         if (urls.length) { setImportUrl(urls.join('\n')); setShowImportLink(true); }
         window.history.replaceState({}, '', window.location.pathname);
     }, []);
+
+    useEffect(() => {
+        const applyConnectionMode = () => {
+            if (localStorage.getItem('komod-force-offline') === '1') setActiveSection('downloads');
+        };
+        applyConnectionMode();
+        window.addEventListener('komod-connectivity-mode', applyConnectionMode);
+        return () => window.removeEventListener('komod-connectivity-mode', applyConnectionMode);
+    }, [setActiveSection]);
 
     useEffect(() => {
         if (activeSection !== 'files') {
@@ -576,8 +594,8 @@ export default function FileBrowser() {
                     try {
                         const {data}=await api.get<{state:'queued'|'downloading'|'paused'|'cancelled'|'done'|'error';message:string;saved:number}>(`/files/import-link/status/${jobId}`);
                         setImportJobs(previous => previous.map(job => job.id === jobId ? {...job,...data} : job));
-                        if(data.state==='done'){ addToast(`${data.saved.toLocaleString('fa-IR')} فایل از لینک به کمد اضافه شد ✅`); handleRefresh(); return; }
-                        if(data.state==='error'||data.state==='cancelled'){ if(data.state==='error') addToast(data.message,'error'); return; }
+                        if(data.state==='done'){ addToast(`${data.saved.toLocaleString('fa-IR')} فایل از لینک به کمد اضافه شد ✅`); handleRefresh(); window.setTimeout(()=>setImportJobs(previous=>previous.filter(job=>job.id!==jobId)),1800); return; }
+                        if(data.state==='error'||data.state==='cancelled'){ if(data.state==='error') addToast(data.message,'error'); window.setTimeout(()=>setImportJobs(previous=>previous.filter(job=>job.id!==jobId)),1800); return; }
                     } catch { return; }
                 }
             })(); });
@@ -588,6 +606,7 @@ export default function FileBrowser() {
         try {
             const {data}=await api.post<{state:'queued'|'downloading'|'paused'|'cancelled'|'done'|'error';message:string;saved:number}>(`/files/import-link/status/${jobId}/${action}`);
             setImportJobs(previous=>previous.map(job=>job.id===jobId?{...job,...data}:job));
+            if (data.state === 'cancelled') window.setTimeout(()=>setImportJobs(previous=>previous.filter(job=>job.id!==jobId)),1200);
         } catch (error:any) { addToast(error?.response?.data?.detail || 'تغییر وضعیت انجام نشد.','error'); }
     };
 
@@ -601,7 +620,7 @@ export default function FileBrowser() {
             setShowTextComposer(false); setTextFileName('یادداشت تازه'); setTextContent('');
             addToast('یادداشت روی دستگاه ذخیره شد؛ وقتی آنلاین بشی خودکار به کمد اضافه می‌شه 📝');
         };
-        if (!navigator.onLine) { await saveToOutbox(); return; }
+        if (!navigator.onLine || localStorage.getItem('komod-force-offline') === '1') { await saveToOutbox(); return; }
         try {
             await uploadFileMutation.mutateAsync({ file: new File([textContent], fileName, { type: 'text/markdown;charset=utf-8' }), folderId: incomingFolderId });
             setShowTextComposer(false);

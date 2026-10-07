@@ -849,7 +849,7 @@ async def send_playlist_media(client, callback: CallbackQuery, playlist_id: int,
          InlineKeyboardButton("✖️ بستن پیام", callback_data="plclose")],
     ])
     try:
-        preview = await client.copy_message(callback.message.chat.id, settings.telegram_storage_channel_id, item.file.channel_message_id)
+        preview = await client.copy_message(callback.message.chat.id, item.file.storage_channel_id or settings.telegram_storage_channel_id, item.file.channel_message_id)
         await safe_edit_reply_markup(preview, keyboard)
         asyncio.create_task(delete_preview_later(client, preview.chat.id, preview.id))
         if callback.message.video or callback.message.audio or callback.message.document:
@@ -1179,7 +1179,8 @@ async def _handle_file_impl(client, message: Message, status_msg: Message):
     
     try:
         # Forward to storage channel
-        forwarded = await asyncio.wait_for(forward_to_storage_channel(message), timeout=120)
+        target_channel_id = user.storage_channel_id or settings.telegram_storage_channel_id
+        forwarded = await asyncio.wait_for(forward_to_storage_channel(message, target_channel_id), timeout=120)
         stored_media = next((getattr(forwarded, field, None) for field in ("video", "audio", "voice", "animation", "video_note", "document") if getattr(forwarded, field, None)), None)
         if getattr(forwarded, "photo", None):
             stored_media = select_best_thumbnail(forwarded.photo.sizes)
@@ -1215,6 +1216,7 @@ async def _handle_file_impl(client, message: Message, status_msg: Message):
                 user_id=user.id,
                 folder_id=active_drawer_id,
                 channel_message_id=forwarded.id,
+                storage_channel_id=target_channel_id,
                 file_type=file_type,
                 **file_info
             )
@@ -1280,7 +1282,11 @@ async def handle_import_link(client, message: Message):
         await message.reply("⚙️ دانلود از لینک هنوز روی سرور تنظیم نشده. متغیر TELEGRAM_WORKER_SESSION باید اضافه شود.")
         message.stop_propagation()
         return
-    matches = re.findall(r"https?://(?:www\.)?(?:youtube\.com|youtu\.be|instagram\.com)/\S+", message.text or "", re.IGNORECASE)
+    matches = re.findall(
+        r"https?://(?:www\.)?(?:youtube\.com|youtu\.be|instagram\.com)/(?:(?!https?://|\s).)+",
+        message.text or "",
+        re.IGNORECASE,
+    )
     if not matches:
         return
     try:
@@ -1311,13 +1317,14 @@ async def handle_text_note(client, message: Message):
     )
     active_drawer_id = await get_active_drawer_id(message.from_user.id)
     try:
-        stored = await forward_to_storage_channel(message)
+        target_channel_id = user.storage_channel_id or settings.telegram_storage_channel_id
+        stored = await forward_to_storage_channel(message, target_channel_id)
         title = sanitize_filename(content.strip().splitlines()[0][:80])
         async with async_session() as db:
             if active_drawer_id is None:
                 active_drawer_id = (await ensure_default_folder(db, user.id)).id
             note = File(
-                user_id=user.id, folder_id=active_drawer_id, channel_message_id=stored.id,
+                user_id=user.id, folder_id=active_drawer_id, channel_message_id=stored.id, storage_channel_id=target_channel_id,
                 file_id=f"text:{stored.id}", file_unique_id=f"text:{stored.id}",
                 file_name=title, file_size=len(content.encode("utf-8")),
                 mime_type="text/plain; charset=utf-8", file_type="text",
@@ -1749,11 +1756,16 @@ async def handle_callback(client, callback: CallbackQuery):
         async with async_session() as db:
             user = (await db.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one_or_none()
             files = (await db.execute(select(File).where(File.user_id == user.id, File.id.in_(selected_ids)))).scalars().all() if user else []
-            message_ids = [file.channel_message_id for file in files]
-            for start in range(0, len(message_ids), 100):
-                if not await delete_from_storage_channel(message_ids[start:start + 100]):
-                    await callback.answer("حذف از فضای ذخیره‌سازی انجام نشد.", show_alert=True)
-                    return
+            messages_by_channel: dict[int | None, list[int]] = {}
+            for item in files:
+                messages_by_channel.setdefault(item.storage_channel_id, []).append(item.channel_message_id)
+            for channel_id, message_ids in messages_by_channel.items():
+                for start in range(0, len(message_ids), 100):
+                    batch = message_ids[start:start + 100]
+                    deleted = await delete_from_storage_channel(batch, channel_id) if channel_id is not None else await delete_from_storage_channel(batch)
+                    if not deleted:
+                        await callback.answer("حذف از فضای ذخیره‌سازی انجام نشد.", show_alert=True)
+                        return
             for file in files:
                 await db.delete(file)
             await db.commit()
@@ -2033,7 +2045,7 @@ async def handle_callback(client, callback: CallbackQuery):
             await callback.answer("فایل پیدا نشد.", show_alert=True)
             return
         try:
-            preview = await client.copy_message(callback.message.chat.id, settings.telegram_storage_channel_id, file.channel_message_id)
+            preview = await client.copy_message(callback.message.chat.id, file.storage_channel_id or settings.telegram_storage_channel_id, file.channel_message_id)
             await preview.edit_reply_markup(InlineKeyboardMarkup([[
                 InlineKeyboardButton("✖️ بستن پیش‌نمایش", callback_data=f"deletepreview:{preview.id}")
             ]]))
@@ -2562,7 +2574,7 @@ async def handle_callback(client, callback: CallbackQuery):
             file_name = file.file_name
             channel_msg_id = file.channel_message_id
             
-            if not await delete_from_storage_channel(channel_msg_id):
+            if not await delete_from_storage_channel(channel_msg_id, file.storage_channel_id):
                 await callback.answer("فایل از فضای ذخیره‌سازی پاک نشد؛ دوباره تلاش کن.", show_alert=True)
                 return
             await db.delete(file)

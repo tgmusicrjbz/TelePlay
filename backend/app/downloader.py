@@ -10,6 +10,7 @@ import re
 import tempfile
 import time
 import uuid
+from datetime import datetime
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
@@ -60,6 +61,43 @@ def _oembed_metadata(url: str) -> tuple[str, str | None]:
         except Exception:
             logger.debug("Could not resolve YouTube title from %s", endpoint, exc_info=True)
     return "youtube", None
+
+
+def _youtube_playlist_entries(url: str) -> tuple[str | None, list[dict[str, str]]]:
+    """Resolve a YouTube playlist without downloading its media."""
+    if "youtu" not in url.lower() or "list=" not in url.lower():
+        return None, []
+    try:
+        from yt_dlp import YoutubeDL
+        with YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": "in_playlist", "playlistend": 250}) as downloader:
+            info = downloader.extract_info(url, download=False)
+        entries = []
+        for item in (info or {}).get("entries") or []:
+            video_id = str(item.get("id") or "").strip()
+            item_url = str(item.get("webpage_url") or item.get("url") or "").strip()
+            if not item_url and video_id:
+                item_url = f"https://www.youtube.com/watch?v={video_id}"
+            if item_url and not item_url.startswith("http") and video_id:
+                item_url = f"https://www.youtube.com/watch?v={video_id}"
+            if item_url:
+                entries.append({"url": item_url, "title": str(item.get("title") or "ویدیو").strip()})
+        return str((info or {}).get("title") or "پلی‌لیست یوتیوب").strip(), entries
+    except Exception:
+        logger.warning("Could not expand YouTube playlist", exc_info=True)
+        return None, []
+
+
+def _friendly_import_error(error: Exception) -> str:
+    message = str(error).lower()
+    if isinstance(error, TimeoutError) or "timeout" in message or "زمان" in message:
+        return "سرویس دانلود در زمان مقرر فایل اصلی را آماده نکرد. کمی بعد دوباره امتحان کن."
+    if "private" in message or "خصوص" in message:
+        return "این محتوا خصوصی است و سرویس دانلود به آن دسترسی ندارد."
+    if "not found" in message or "deleted" in message or "حذف" in message:
+        return "این محتوا پیدا نشد؛ ممکن است حذف شده باشد یا لینک آن تغییر کرده باشد."
+    if "copyright" in message or "restricted" in message:
+        return "دسترسی به این محتوا محدود شده و امکان دریافتش وجود ندارد."
+    return "فایل اصلی آماده نشد. لینک را بررسی کن و کمی بعد دوباره امتحان کن."
 
 
 class LinkImportService:
@@ -159,7 +197,22 @@ class LinkImportService:
                 self.statuses[job.id].update(state="downloading", message="دارم فایل اصلی رو آماده می‌کنم…")
                 if job.notify:
                     await self._notify(job, "⏳ نوبت لینک تو رسید؛ دارم فایل اصلی رو آماده می‌کنم…")
-                items = await self._download(job.url, job.quality)
+                playlist_title, playlist_entries = await asyncio.to_thread(_youtube_playlist_entries, job.url)
+                sources = playlist_entries or [{"url": job.url, "title": ""}]
+                items: list[dict] = []
+                for source_index, source in enumerate(sources, 1):
+                    if not await self._checkpoint(job):
+                        break
+                    if len(sources) > 1:
+                        self.statuses[job.id].update(message=f"دارم مورد {source_index} از {len(sources)} را آماده می‌کنم…")
+                    downloaded = await self._download(source["url"], job.quality)
+                    for item_index, item in enumerate(downloaded, 1):
+                        item["source_url"] = source["url"]
+                        item["collection_title"] = playlist_title
+                        item["sequence"] = source_index if playlist_entries else item_index
+                        if source.get("title") and item.get("title") in {"youtube", "instagram", ""}:
+                            item["title"] = source["title"]
+                    items.extend(downloaded)
                 if not await self._checkpoint(job):
                     continue
                 saved = await self._store(job, items)
@@ -173,9 +226,10 @@ class LinkImportService:
                 raise
             except Exception as error:
                 logger.exception("Link import failed for %s", job.url)
+                friendly_error = _friendly_import_error(error)
                 if job.notify:
-                    await self._notify(job, "❌ این لینک آماده نشد. ممکنه پست خصوصی، حذف‌شده یا موقتاً خارج از دسترس باشه؛ کمی بعد دوباره امتحانش کن.")
-                self.statuses[job.id].update(state="error", message="آماده‌سازی این لینک انجام نشد.")
+                    await self._notify(job, f"❌ {friendly_error}")
+                self.statuses[job.id].update(state="error", message=friendly_error)
             finally:
                 if self.active_job_id == job.id:
                     self.active_job_id = None
@@ -281,14 +335,14 @@ class LinkImportService:
             raise TimeoutError("زمان دریافت فایل از سرویس دانلود تمام شد")
         return sorted(found, key=lambda item: item["message"].id)
 
-    async def _copy_to_storage(self, message, item_type: str, filename: str):
+    async def _copy_to_storage(self, message, item_type: str, filename: str, channel_id: int):
         """Copy server-side when possible; fall back to bot re-upload.
 
         The Telegram account behind TELEGRAM_WORKER_SESSION does not need to be
         a member of the storage channel when the fallback is used.
         """
         try:
-            return await message.copy(settings.telegram_storage_channel_id)
+            return await message.copy(channel_id)
         except Exception:
             logger.warning("Worker could not copy media to storage; using bot upload fallback", exc_info=True)
         if telegram.tg_client is None:
@@ -299,12 +353,12 @@ class LinkImportService:
             if not downloaded:
                 raise RuntimeError("دریافت فایل اصلی کامل نشد")
             if item_type == "video":
-                return await telegram.tg_client.send_video(settings.telegram_storage_channel_id, downloaded, supports_streaming=True)
+                return await telegram.tg_client.send_video(channel_id, downloaded, supports_streaming=True)
             if item_type == "audio":
-                return await telegram.tg_client.send_audio(settings.telegram_storage_channel_id, downloaded)
+                return await telegram.tg_client.send_audio(channel_id, downloaded)
             if item_type == "image":
-                return await telegram.tg_client.send_photo(settings.telegram_storage_channel_id, downloaded)
-            return await telegram.tg_client.send_document(settings.telegram_storage_channel_id, downloaded)
+                return await telegram.tg_client.send_photo(channel_id, downloaded)
+            return await telegram.tg_client.send_document(channel_id, downloaded)
 
     async def _store(self, job: ImportJob, items: list[dict]) -> list[File]:
         if self.client is None:
@@ -314,6 +368,7 @@ class LinkImportService:
             user = await db.get(User, job.user_id)
             if user is None:
                 raise RuntimeError("کاربر پیدا نشد")
+            target_channel_id = user.storage_channel_id or settings.telegram_storage_channel_id
             folder_id = job.folder_id
             if folder_id is None and job.default_folder:
                 default_name = "Youtube" if "youtu" in job.url.lower() else "Instagram"
@@ -323,11 +378,21 @@ class LinkImportService:
                     db.add(folder)
                     await db.flush()
                 folder_id = folder.id
+            if len(items) > 1:
+                collection_name = sanitize_filename(
+                    items[0].get("collection_title")
+                    or (f"پست اینستاگرام {datetime.now().strftime('%Y-%m-%d %H-%M')}" if "instagram" in job.url.lower() else "مجموعه دانلودشده")
+                )[:255]
+                collection = Folder(user_id=user.id, name=collection_name, parent_id=folder_id)
+                db.add(collection)
+                await db.flush()
+                folder_id = collection.id
             for index, item in enumerate(items, 1):
                 suffix = ".mp4" if item["type"] == "video" else ".mp3" if item["type"] == "audio" else ".jpg"
-                indexed = f"_{index}" if len(items) > 1 else ""
+                sequence = int(item.get("sequence") or index)
+                indexed = f" - {sequence:02d}" if len(items) > 1 else ""
                 filename = sanitize_filename(f"{item['title']}{indexed}{suffix}")
-                copied = await self._copy_to_storage(item["message"], item["type"], filename)
+                copied = await self._copy_to_storage(item["message"], item["type"], filename, target_channel_id)
                 media = copied.video or copied.audio or copied.voice or copied.document or (select_best_thumbnail(copied.photo.sizes) if copied.photo else None)
                 if media is None:
                     continue
@@ -335,12 +400,13 @@ class LinkImportService:
                     user_id=user.id,
                     folder_id=folder_id,
                     channel_message_id=copied.id,
+                    storage_channel_id=target_channel_id,
                     file_id=media.file_id,
                     file_unique_id=media.file_unique_id,
                     file_name=filename,
                     description=(
-                        f"{'📺' if 'youtu' in job.url.lower() else '📷'} {item.get('author')}\n\n🔗 {job.url}"
-                        if item.get("author") else f"🔗 {job.url}"
+                        f"{'📺' if 'youtu' in job.url.lower() else '📷'} {item.get('author')}\n\n🔗 {item.get('source_url') or job.url}"
+                        if item.get("author") else f"🔗 {item.get('source_url') or job.url}"
                     ),
                     file_size=getattr(media, "file_size", None) or 0,
                     mime_type=(getattr(media, "mime_type", None) or ("video/mp4" if item["type"] == "video" else "audio/mpeg" if item["type"] == "audio" else "image/jpeg")),
