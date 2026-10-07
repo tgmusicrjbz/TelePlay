@@ -20,9 +20,11 @@ class User(Base):
     display_name: Mapped[Optional[str]] = mapped_column(String(255))
     login_username: Mapped[Optional[str]] = mapped_column(String(64), unique=True, index=True)
     password_hash: Mapped[Optional[str]] = mapped_column(Text)
+    vault_password_hash: Mapped[Optional[str]] = mapped_column(Text)
     failed_login_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     login_locked_until: Mapped[Optional[datetime]] = mapped_column(DateTime)
     storage_channel_id: Mapped[Optional[int]] = mapped_column(BigInteger)
+    delete_storage_files: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     auth_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -70,6 +72,7 @@ class BotUserState(Base):
         ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
     current_drawer_id: Mapped[Optional[int]] = mapped_column(Integer)
+    upload_drawer_id: Mapped[Optional[int]] = mapped_column(Integer)
     library_filters_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
     search_filters_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
     search_query: Mapped[Optional[str]] = mapped_column(String(100))
@@ -93,6 +96,7 @@ class Folder(Base):
     is_favorite: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_pinned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_hidden: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
@@ -128,6 +132,7 @@ class File(Base):
     tags_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
     is_favorite: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_pinned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_hidden: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     file_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
     mime_type: Mapped[Optional[str]] = mapped_column(String(100))
     file_type: Mapped[str] = mapped_column(String(50), nullable=False)  # video, audio, document, image, text

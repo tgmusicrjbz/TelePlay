@@ -49,6 +49,7 @@ class FolderUpdate(BaseModel):
     parent_id: Optional[int] = None
     is_favorite: Optional[bool] = None
     is_pinned: Optional[bool] = None
+    is_hidden: Optional[bool] = None
 
 
 class FolderResponse(FolderBase):
@@ -60,6 +61,7 @@ class FolderResponse(FolderBase):
     is_favorite: bool = False
     is_pinned: bool = False
     is_default: bool = False
+    is_hidden: bool = False
     
     model_config = ConfigDict(from_attributes=True)
 
@@ -97,6 +99,7 @@ class FileUpdate(BaseModel):
     is_favorite: Optional[bool] = None
     is_pinned: Optional[bool] = None
     tags: Optional[List[str]] = None
+    is_hidden: Optional[bool] = None
 
 
 class BatchFileUpdate(BaseModel):
@@ -127,6 +130,7 @@ class FileResponse(FileBase):
     last_pos: int = 0
     is_favorite: bool = False
     is_pinned: bool = False
+    is_hidden: bool = False
     
     model_config = ConfigDict(from_attributes=True)
 
@@ -327,6 +331,22 @@ class StorageChannelResponse(BaseModel):
     configured: bool
     channel_id: Optional[int] = None
     title: Optional[str] = None
+
+
+class AccountPreferences(BaseModel):
+    delete_storage_files: bool = True
+
+
+class VaultStatus(BaseModel):
+    configured: bool
+
+
+class VaultPasswordRequest(BaseModel):
+    password: str = Field(min_length=6, max_length=128)
+
+
+class VaultTokenResponse(BaseModel):
+    token: str
 
 
 class BotInfoResponse(BaseModel):

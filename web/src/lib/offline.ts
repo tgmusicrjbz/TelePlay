@@ -1,17 +1,19 @@
 import { api, Playlist, TelegramFile } from './api';
 
 const DB_NAME = 'komod-offline';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const MEDIA_STORE = 'media';
 const PLAYLIST_STORE = 'playlists';
 const TEXT_STORE = 'texts';
 const TEXT_OUTBOX_STORE = 'text-outbox';
+const FOLDER_STORE = 'download-folders';
 export const OFFLINE_CHANGED_EVENT = 'komod-offline-changed';
 export const OFFLINE_PROGRESS_EVENT = 'komod-offline-progress';
 
-export interface OfflineMedia { id: number; file: TelegramFile; blob: Blob; savedAt: string; }
-export interface OfflinePlaylist { id: number; name: string; description?: string | null; fileIds: number[]; totalCount: number; failedCount?: number; savedAt: string; }
-export interface OfflineText { id: number; file: TelegramFile; content: string; savedAt: string; }
+export interface OfflineMedia { id: number; file: TelegramFile; blob: Blob; savedAt: string; folderId?: string | null; }
+export interface OfflinePlaylist { id: number; name: string; description?: string | null; fileIds: number[]; totalCount: number; failedCount?: number; savedAt: string; folderId?: string | null; }
+export interface OfflineText { id: number; file: TelegramFile; content: string; savedAt: string; folderId?: string | null; }
+export interface OfflineFolder { id: string; name: string; createdAt: string; }
 export interface OfflineTextDraft { id: number; name: string; content: string; folderId: number | null; createdAt: string; }
 export interface OfflineDownloadProgress { done: number; total: number; failed: number; currentName: string; loaded: number; size: number; }
 export interface OfflineJobProgress extends OfflineDownloadProgress { id: string; kind: 'file' | 'playlist'; title: string; state: 'queued' | 'downloading' | 'paused' | 'cancelled' | 'done' | 'error'; }
@@ -36,6 +38,7 @@ function openDatabase(): Promise<IDBDatabase> {
             if (!db.objectStoreNames.contains(PLAYLIST_STORE)) db.createObjectStore(PLAYLIST_STORE, { keyPath: 'id' });
             if (!db.objectStoreNames.contains(TEXT_STORE)) db.createObjectStore(TEXT_STORE, { keyPath: 'id' });
             if (!db.objectStoreNames.contains(TEXT_OUTBOX_STORE)) db.createObjectStore(TEXT_OUTBOX_STORE, { keyPath: 'id' });
+            if (!db.objectStoreNames.contains(FOLDER_STORE)) db.createObjectStore(FOLDER_STORE, { keyPath: 'id' });
         };
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error || new Error('باز کردن حافظه آفلاین انجام نشد'));
@@ -60,6 +63,35 @@ export const listOfflinePlaylists = () => transaction<OfflinePlaylist[]>(PLAYLIS
 export const getOfflineText = (id: number) => transaction<OfflineText | undefined>(TEXT_STORE, 'readonly', store => store.get(id));
 export const listOfflineTexts = () => transaction<OfflineText[]>(TEXT_STORE, 'readonly', store => store.getAll());
 export const listOfflineTextDrafts = () => transaction<OfflineTextDraft[]>(TEXT_OUTBOX_STORE, 'readonly', store => store.getAll());
+export const listOfflineFolders = () => transaction<OfflineFolder[]>(FOLDER_STORE, 'readonly', store => store.getAll());
+
+export async function createOfflineFolder(name: string): Promise<OfflineFolder> {
+    const cleanName = name.trim().slice(0, 80);
+    if (!cleanName) throw new Error('نام پوشه را وارد کن.');
+    const folder: OfflineFolder = { id: crypto.randomUUID(), name: cleanName, createdAt: new Date().toISOString() };
+    await transaction<IDBValidKey>(FOLDER_STORE, 'readwrite', store => store.put(folder));
+    window.dispatchEvent(new Event(OFFLINE_CHANGED_EVENT));
+    return folder;
+}
+
+export async function assignOfflineFolder(kind: 'media'|'text'|'playlist', id: number, folderId: string | null): Promise<void> {
+    const storeName = kind === 'media' ? MEDIA_STORE : kind === 'text' ? TEXT_STORE : PLAYLIST_STORE;
+    const record = await transaction<any>(storeName, 'readonly', store => store.get(id));
+    if (!record) throw new Error('مورد آفلاین پیدا نشد.');
+    await transaction<IDBValidKey>(storeName, 'readwrite', store => store.put({ ...record, folderId }));
+    window.dispatchEvent(new Event(OFFLINE_CHANGED_EVENT));
+}
+
+export async function removeOfflineFolder(id: string): Promise<void> {
+    for (const storeName of [MEDIA_STORE, TEXT_STORE, PLAYLIST_STORE]) {
+        const records = await transaction<any[]>(storeName, 'readonly', store => store.getAll());
+        for (const record of records.filter(item => item.folderId === id)) {
+            await transaction<IDBValidKey>(storeName, 'readwrite', store => store.put({ ...record, folderId: null }));
+        }
+    }
+    await transaction<undefined>(FOLDER_STORE, 'readwrite', store => store.delete(id) as IDBRequest<undefined>);
+    window.dispatchEvent(new Event(OFFLINE_CHANGED_EVENT));
+}
 
 async function performFileOffline(file: TelegramFile, onProgress?: (loaded: number, total: number) => void, options?: { silentProgress?: boolean }): Promise<void> {
     if (!navigator.onLine) throw new Error('برای ذخیره اولیه باید آنلاین باشی.');
@@ -189,7 +221,8 @@ export async function savePlaylistOffline(playlist: Playlist, onProgress?: (prog
         emitProgress({ id: jobId, kind: 'playlist', title: playlist.name, state: 'error', done, total: playable.length, failed, currentName: '', loaded: 0, size: totalSize });
         throw new Error('هیچ‌کدام از فایل‌های پلی‌لیست دانلود نشدند؛ اتصال ربات به کانال ذخیره‌سازی را بررسی کن.');
     }
-    const record: OfflinePlaylist = { id: playlist.id, name: playlist.name, description: playlist.description, fileIds: savedIds, totalCount: playable.length, failedCount: failed, savedAt: new Date().toISOString() };
+    const previous = (await listOfflinePlaylists()).find(item => item.id === playlist.id);
+    const record: OfflinePlaylist = { id: playlist.id, name: playlist.name, description: playlist.description, fileIds: savedIds, totalCount: playable.length, failedCount: failed, savedAt: new Date().toISOString(), folderId: previous?.folderId || null };
     await transaction<IDBValidKey>(PLAYLIST_STORE, 'readwrite', store => store.put(record));
     window.dispatchEvent(new Event(OFFLINE_CHANGED_EVENT));
     emitProgress({ id: jobId, kind: 'playlist', title: playlist.name, state: 'done', done, total: playable.length, failed, currentName: '', loaded: [...loadedByFile.values()].reduce((sum, value) => sum + value, 0), size: totalSize });

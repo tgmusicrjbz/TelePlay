@@ -37,6 +37,8 @@ export interface AuthSession { id: string; device_name: string; user_agent?: str
 export interface Workspace { user_id: number; telegram_id: number; name: string; username?: string | null; permission: 'owner' | 'read' | 'write'; }
 export interface AdminUser extends User { total_size: number; file_count: number; session_count: number; }
 export interface AdminStats { active_users: number; total_users: number; total_files: number; total_size: number; }
+export interface AccountPreferences { delete_storage_files: boolean; }
+export interface VaultStatus { configured: boolean; }
 export interface StorageChannel { configured: boolean; channel_id?: number | null; title?: string | null; }
 
 export interface Folder {
@@ -51,6 +53,7 @@ export interface Folder {
     is_favorite?: boolean;
     is_pinned?: boolean;
     is_default?: boolean;
+    is_hidden?: boolean;
     children?: Folder[];
 }
 
@@ -77,6 +80,7 @@ export interface TelegramFile {
     public_stream_url?: string;
     is_favorite?: boolean;
     is_pinned?: boolean;
+    is_hidden?: boolean;
     tags?: string[];
 }
 
@@ -179,7 +183,13 @@ const resolveResponseMediaUrls = (value: unknown): unknown => {
     if (!value || typeof value !== 'object') return value;
     const record = value as Record<string, unknown>;
     Object.entries(record).forEach(([key, item]) => {
-        if (MEDIA_URL_KEYS.has(key) && typeof item === 'string') record[key] = resolveServerUrl(item);
+        if (MEDIA_URL_KEYS.has(key) && typeof item === 'string') {
+            const resolved = resolveServerUrl(item);
+            const vaultToken = sessionStorage.getItem('komod-vault-token');
+            record[key] = vaultToken && key !== 'public_stream_url' && !resolved.startsWith('blob:')
+                ? `${resolved}${resolved.includes('?') ? '&' : '?'}vault_token=${encodeURIComponent(vaultToken)}`
+                : resolved;
+        }
         else if (key === 'cover_urls' && Array.isArray(item)) record[key] = item.map(url => typeof url === 'string' ? resolveServerUrl(url) : url);
         else resolveResponseMediaUrls(item);
     });
@@ -193,6 +203,8 @@ api.interceptors.request.use((config) => {
     if (token) {
         config.headers.Authorization = `Bearer ${token}`;
     }
+    const vaultToken = sessionStorage.getItem('komod-vault-token');
+    if (vaultToken) config.headers['X-Komod-Vault-Token'] = vaultToken;
     const workspace = localStorage.getItem('komod-active-workspace');
     if (workspace && !String(config.url || '').startsWith('/auth') && !String(config.url || '').startsWith('/accounts') && !String(config.url || '').startsWith('/admin')) {
         config.headers['X-Workspace-User'] = workspace;
@@ -369,9 +381,9 @@ export const useVerifyLoginCode = () => {
 
 // ============== Files Hooks ==============
 
-export const useFiles = (folderId?: number | null, fileType?: string, search?: string, page = 1, sort = '', favoriteOnly = false, includePlaylistCovers = false) => {
+export const useFiles = (folderId?: number | null, fileType?: string, search?: string, page = 1, sort = '', favoriteOnly = false, includePlaylistCovers = false, includeHidden = false) => {
     return useQuery({
-        queryKey: ['files', folderId, fileType, search, page, sort, favoriteOnly, includePlaylistCovers],
+        queryKey: ['files', folderId, fileType, search, page, sort, favoriteOnly, includePlaylistCovers, includeHidden],
         queryFn: async () => {
             const params: Record<string, any> = {};
             if (folderId !== undefined) params.folder_id = folderId;
@@ -382,6 +394,7 @@ export const useFiles = (folderId?: number | null, fileType?: string, search?: s
             if (sort) params.sort = sort;
             if (favoriteOnly) params.favorite_only = true;
             if (includePlaylistCovers) params.include_playlist_covers = true;
+            if (includeHidden) params.include_hidden = true;
             const { data } = await api.get<FileListResponse>('/files', { params });
             return data;
         },
@@ -403,7 +416,7 @@ export const useFile = (fileId: number) => {
 export const useUpdateFile = () => {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async ({ id, ...data }: { id: number; file_name?: string; description?: string; folder_id?: number | null; is_favorite?: boolean; is_pinned?: boolean; tags?: string[] }) => {
+        mutationFn: async ({ id, ...data }: { id: number; file_name?: string; description?: string; folder_id?: number | null; is_favorite?: boolean; is_pinned?: boolean; is_hidden?: boolean; tags?: string[] }) => {
             const { data: result } = await api.patch<TelegramFile>(`/files/${id}`, data);
             return result;
         },
@@ -534,14 +547,15 @@ export const useMoveFolders = () => {
     });
 };
 
-export const useFolders = (parentId?: number | null, sort = '', favoriteOnly = false) => {
+export const useFolders = (parentId?: number | null, sort = '', favoriteOnly = false, includeHidden = false) => {
     return useQuery({
-        queryKey: ['folders', parentId, sort, favoriteOnly],
+        queryKey: ['folders', parentId, sort, favoriteOnly, includeHidden],
         queryFn: async () => {
             const params: Record<string, any> = {};
             if (parentId !== undefined) params.parent_id = parentId;
             if (sort) params.sort = sort;
             if (favoriteOnly) params.favorite_only = true;
+            if (includeHidden) params.include_hidden = true;
             const { data } = await api.get<Folder[]>('/folders', { params });
             return data;
         },
@@ -577,7 +591,7 @@ export const useCreateFolder = () => {
 export const useUpdateFolder = () => {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async ({ id, ...data }: { id: number; name?: string; description?: string; parent_id?: number | null; is_favorite?: boolean; is_pinned?: boolean }) => {
+        mutationFn: async ({ id, ...data }: { id: number; name?: string; description?: string; parent_id?: number | null; is_favorite?: boolean; is_pinned?: boolean; is_hidden?: boolean }) => {
             const { data: result } = await api.patch<Folder>(`/folders/${id}`, data);
             return result;
         },
@@ -842,8 +856,25 @@ export const useRevokeWorkspace = () => {
     const queryClient = useQueryClient();
     return useMutation({ mutationFn: async (id: number) => api.delete(`/accounts/grants/${id}`), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['workspaceGrants'] }) });
 };
-export const useAdminUsers = (enabled: boolean) => useQuery({ queryKey: ['adminUsers'], queryFn: async () => (await api.get<AdminUser[]>('/admin/users')).data, enabled, retry: false });
-export const useAdminStats = (enabled: boolean) => useQuery({ queryKey: ['adminStats'], queryFn: async () => (await api.get<AdminStats>('/admin/stats')).data, enabled, retry: false });
+export const useAdminUsers = (enabled: boolean) => useQuery({ queryKey: ['adminUsers'], queryFn: async () => (await api.get<AdminUser[]>('/admin/users')).data, enabled, retry: 2, staleTime: 30_000 });
+export const useAdminStats = (enabled: boolean) => useQuery({ queryKey: ['adminStats'], queryFn: async () => (await api.get<AdminStats>('/admin/stats')).data, enabled, retry: 2, staleTime: 30_000 });
+export const useAccountPreferences = () => useQuery({ queryKey: ['accountPreferences'], queryFn: async () => (await api.get<AccountPreferences>('/accounts/preferences')).data });
+export const useVaultStatus = () => useQuery({ queryKey: ['vaultStatus'], queryFn: async () => (await api.get<VaultStatus>('/accounts/vault')).data });
+export const useSetVaultPassword = () => {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async (password: string) => (await api.put<{token:string}>('/accounts/vault', { password })).data,
+        onSuccess: data => { sessionStorage.setItem('komod-vault-token', data.token); queryClient.invalidateQueries({queryKey:['vaultStatus']}); },
+    });
+};
+export const useUnlockVault = () => useMutation({
+    mutationFn: async (password: string) => (await api.post<{token:string}>('/accounts/vault/unlock', { password })).data,
+    onSuccess: data => sessionStorage.setItem('komod-vault-token', data.token),
+});
+export const useUpdateAccountPreferences = () => {
+    const queryClient = useQueryClient();
+    return useMutation({ mutationFn: async (payload: AccountPreferences) => (await api.put<AccountPreferences>('/accounts/preferences', payload)).data, onSuccess: data => queryClient.setQueryData(['accountPreferences'], data) });
+};
 export const useStorageChannel = () => useQuery({ queryKey: ['storageChannel'], queryFn: async () => (await api.get<StorageChannel>('/accounts/storage-channel')).data });
 export const useSetStorageChannel = () => { const queryClient=useQueryClient(); return useMutation({ mutationFn: async (channel_id:number)=>(await api.put<StorageChannel>('/accounts/storage-channel',{channel_id})).data, onSuccess:()=>queryClient.invalidateQueries({queryKey:['storageChannel']}) }); };
 export const useResetStorageChannel = () => { const queryClient=useQueryClient(); return useMutation({ mutationFn: async()=>api.delete('/accounts/storage-channel'), onSuccess:()=>queryClient.invalidateQueries({queryKey:['storageChannel']}) }); };

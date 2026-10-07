@@ -76,6 +76,7 @@ def add_urls_to_file(file: File) -> dict:
         "updated_at": file.updated_at,
         "is_favorite": bool(file.is_favorite),
         "is_pinned": bool(file.is_pinned),
+        "is_hidden": bool(file.is_hidden),
         "stream_url": f"/api/stream/{file.id}?workspace={file.user_id}",
         "thumbnail_url": f"/api/stream/{file.id}/thumbnail?quality=best&workspace={file.user_id}" if file.thumbnail_file_id else None,
         "last_pos": file.watch_progress[0].position if file.watch_progress else 0,
@@ -91,7 +92,7 @@ async def fetch_recent_files(db: AsyncSession, user_id: int, limit: int) -> List
     """Get recently added files across all folders."""
     query = (
         select(File)
-        .where(File.user_id == user_id, ~exists().where(Playlist.cover_file_id == File.id, Playlist.user_id == user_id))
+        .where(File.user_id == user_id, File.is_hidden.is_(False), ~exists().where(Playlist.cover_file_id == File.id, Playlist.user_id == user_id))
         .options(selectinload(File.watch_progress))
         .order_by(desc(File.created_at))
         .limit(limit)
@@ -106,6 +107,7 @@ async def fetch_continue_watching_files(db: AsyncSession, user_id: int, limit: i
         .join(WatchProgress, File.id == WatchProgress.file_id)
         .where(
             File.user_id == user_id,
+            File.is_hidden.is_(False),
             WatchProgress.user_id == user_id,
             WatchProgress.position > 0,
             WatchProgress.completed == False

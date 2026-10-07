@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Check, Copy, Download, Maximize2, Minimize2, Minus, Moon, Pencil, Plus, Sun, WrapText, X } from 'lucide-react';
+import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, Check, Code2, Copy, Download, Heading1, Image as ImageIcon, Italic, Link, List, ListChecks, ListOrdered, Maximize2, Minimize2, Minus, Moon, Pencil, Plus, Quote, Strikethrough, Sun, Table2, Underline, WrapText, X } from 'lucide-react';
 import { api, canPreviewText } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { cacheTextFile, getOfflineText, updateOfflineTextDraft } from '../lib/offline';
@@ -21,6 +21,7 @@ export default function ContentPreview() {
     const [readerWrap, setReaderWrap] = useState(() => localStorage.getItem('komod-reader-wrap') !== 'off');
     const [readerAlign, setReaderAlign] = useState<'right' | 'left' | 'center' | 'justify'>(() => (localStorage.getItem('komod-reader-align') as 'right' | 'left' | 'center' | 'justify') || 'right');
     const previewRef = useRef<HTMLElement>(null);
+    const editorRef = useRef<HTMLTextAreaElement>(null);
     const show = !!file && (file.file_type === 'image' || canPreviewText(file));
 
     useEffect(() => { setImageFailed(false); setImageRetry(0); setReaderFullscreen(false); }, [file?.id]);
@@ -120,6 +121,29 @@ export default function ContentPreview() {
     };
     const cycleLineHeight = () => setReaderLineHeight(value => value >= 2.3 ? 1.7 : Number((value + 0.3).toFixed(1)));
     const wordCount = content.trim() ? content.trim().split(/\s+/).length : 0;
+    const insertMarkdown = (before: string, after = '', placeholder = 'متن', linePrefix = false) => {
+        const editor = editorRef.current;
+        if (!editor) return;
+        const start = editor.selectionStart;
+        const end = editor.selectionEnd;
+        const selected = draft.slice(start, end) || placeholder;
+        const prefix = linePrefix && start > 0 && draft[start - 1] !== '\n' ? '\n' : '';
+        const replacement = `${prefix}${before}${selected}${after}`;
+        setDraft(`${draft.slice(0, start)}${replacement}${draft.slice(end)}`);
+        requestAnimationFrame(() => {
+            editor.focus();
+            const selectionStart = start + prefix.length + before.length;
+            editor.setSelectionRange(selectionStart, selectionStart + selected.length);
+        });
+    };
+    const insertTemplate = (template: string) => {
+        const editor = editorRef.current;
+        if (!editor) return;
+        const start = editor.selectionStart;
+        const prefix = start > 0 && draft[start - 1] !== '\n' ? '\n' : '';
+        setDraft(`${draft.slice(0, start)}${prefix}${template}${draft.slice(editor.selectionEnd)}`);
+        requestAnimationFrame(() => editor.focus());
+    };
 
     return (
         <div className={`fixed inset-0 z-[140] flex items-center justify-center bg-black/85 backdrop-blur-md ${readerFullscreen ? 'p-0' : 'p-3 sm:p-8'}`} onClick={() => setContentPreviewFile(null)}>
@@ -158,13 +182,17 @@ export default function ContentPreview() {
                             </div>
                         </div>
                         <div className={`min-h-0 flex-1 overflow-auto p-4 transition-colors sm:p-8 ${readerTone === 'warm' ? 'bg-[#19160f]' : 'bg-dark-950/60'}`}>
-                            {loading ? <p className="text-dark-400">در حال بارگذاری متن…</p> : error ? <p className="text-red-400">{error}</p> : editing ? <div className="mx-auto max-w-5xl"><textarea dir="auto" value={draft} onChange={event => setDraft(event.target.value)} className="min-h-[65vh] w-full resize-y rounded-xl border border-white/10 bg-dark-900 p-4 font-mono text-dark-100 outline-none focus:border-primary-400" style={{ fontSize: readerFontSize, lineHeight: readerLineHeight }}/><div className="mt-3 flex justify-end gap-2"><button className="btn-secondary" onClick={() => { setDraft(content); setEditing(false); }}>لغو</button><button disabled={saving} className="btn-primary flex items-center gap-2" onClick={() => void saveText()}><Check className="h-4 w-4"/> {saving ? 'در حال ذخیره…' : 'ذخیره متن'}</button></div></div> : <MarkdownContent content={content} fontSize={readerFontSize} lineHeight={readerLineHeight} warm={readerTone === 'warm'} wrap={readerWrap} align={readerAlign} />}
+                            {loading ? <p className="text-dark-400">در حال بارگذاری متن…</p> : error ? <p className="text-red-400">{error}</p> : editing ? <div className="mx-auto max-w-5xl"><div className="mb-2 flex flex-wrap gap-1 rounded-2xl border border-white/[.08] bg-[#121722] p-1.5"><EditorTool title="سرتیتر" onClick={()=>insertMarkdown('# ','','عنوان',true)}><Heading1/></EditorTool><EditorTool title="بولد" onClick={()=>insertMarkdown('**','**')}><Bold/></EditorTool><EditorTool title="ایتالیک" onClick={()=>insertMarkdown('*','*')}><Italic/></EditorTool><EditorTool title="زیرخط" onClick={()=>insertMarkdown('<u>','</u>')}><Underline/></EditorTool><EditorTool title="خط‌خورده" onClick={()=>insertMarkdown('~~','~~')}><Strikethrough/></EditorTool><EditorTool title="کد کوتاه" onClick={()=>insertMarkdown('`','`','code')}><Code2/></EditorTool><EditorTool title="کدبلاک" onClick={()=>insertMarkdown('```\n','\n```','code',true)}><Code2/></EditorTool><EditorTool title="لینک" onClick={()=>insertMarkdown('[','](https://)','عنوان لینک')}><Link/></EditorTool><EditorTool title="تصویر" onClick={()=>insertMarkdown('![','](https://)','توضیح تصویر')}><ImageIcon/></EditorTool><EditorTool title="نقل‌قول" onClick={()=>insertMarkdown('> ','','متن نقل‌قول',true)}><Quote/></EditorTool><EditorTool title="فهرست" onClick={()=>insertMarkdown('- ','','مورد',true)}><List/></EditorTool><EditorTool title="فهرست شماره‌ای" onClick={()=>insertMarkdown('1. ','','مورد',true)}><ListOrdered/></EditorTool><EditorTool title="چک‌لیست" onClick={()=>insertMarkdown('- [ ] ','','کار',true)}><ListChecks/></EditorTool><EditorTool title="خط جداکننده" onClick={()=>insertTemplate('---\n')}><Minus/></EditorTool><EditorTool title="جدول" onClick={()=>insertTemplate('| ستون ۱ | ستون ۲ |\n| --- | --- |\n| مقدار ۱ | مقدار ۲ |\n')}><Table2/></EditorTool></div><textarea ref={editorRef} dir="auto" value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='b'){event.preventDefault();insertMarkdown('**','**')}if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='i'){event.preventDefault();insertMarkdown('*','*')}}} className="min-h-[65vh] w-full resize-y rounded-2xl border border-white/10 bg-[#0f131c] p-4 font-mono text-slate-100 caret-primary-300 outline-none selection:bg-primary-500/30 focus:border-primary-400" style={{ fontSize: readerFontSize, lineHeight: readerLineHeight }}/><div className="mt-3 flex justify-end gap-2"><button className="btn-secondary" onClick={() => { setDraft(content); setEditing(false); }}>لغو</button><button disabled={saving} className="btn-primary flex items-center gap-2" onClick={() => void saveText()}><Check className="h-4 w-4"/> {saving ? 'در حال ذخیره…' : 'ذخیره متن'}</button></div></div> : <MarkdownContent content={content} fontSize={readerFontSize} lineHeight={readerLineHeight} warm={readerTone === 'warm'} wrap={readerWrap} align={readerAlign} />}
                         </div>
                     </>
                 )}
             </section>
         </div>
     );
+}
+
+function EditorTool({ title, onClick, children }: { title: string; onClick: () => void; children: React.ReactNode }) {
+    return <button type="button" title={title} aria-label={title} onClick={onClick} className="flex h-9 w-9 items-center justify-center rounded-xl text-slate-400 transition hover:bg-white/[.07] hover:text-primary-200 [&>svg]:h-4 [&>svg]:w-4">{children}</button>;
 }
 
 function inlineMarkdown(text: string) {
@@ -187,14 +215,14 @@ function MarkdownCodeBlock({ code, language }: { code: string; language?: string
         setCopied(true);
         window.setTimeout(() => setCopied(false), 1200);
     };
-    return <div dir="ltr" className="my-5 min-w-0 max-w-full overflow-hidden rounded-2xl border border-cyan-400/15 bg-[#071018] shadow-[0_16px_45px_rgba(0,0,0,.25)]">
+    return <div dir="ltr" className="my-5 min-w-0 max-w-full overflow-hidden rounded-2xl border border-slate-700/70 bg-[#10141d] shadow-[0_14px_36px_rgba(0,0,0,.22)]">
         <div className="grid min-w-0 grid-cols-[auto_1fr_auto] items-center gap-3 border-b border-white/[.06] bg-white/[.035] px-3 py-2">
             <div className="flex items-center gap-1.5" aria-hidden="true"><span className="h-2.5 w-2.5 rounded-full bg-rose-400/80"/><span className="h-2.5 w-2.5 rounded-full bg-amber-300/80"/><span className="h-2.5 w-2.5 rounded-full bg-emerald-400/80"/></div>
-            <span className="min-w-0 truncate text-center font-mono text-[11px] uppercase tracking-wider text-cyan-200/70">{language || 'code'}</span>
+            <span className="min-w-0 truncate text-center font-mono text-[11px] uppercase tracking-wider text-slate-400">{language || 'code'}</span>
             <button dir="rtl" onClick={() => void copy()} className="flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] text-dark-300 transition hover:bg-white/[.06] hover:text-white"><Copy className="h-3.5 w-3.5"/>{copied ? 'کپی شد' : 'کپی'}</button>
         </div>
         <div className="max-w-full overflow-x-auto overscroll-x-contain">
-            <pre className="m-0 w-max min-w-full whitespace-pre p-4 text-left font-mono text-sm leading-7 text-cyan-100 selection:bg-cyan-400/25" style={{ tabSize: 4 }}><code className="block">{code}</code></pre>
+            <pre className="m-0 w-max min-w-full whitespace-pre p-4 text-left font-mono text-sm leading-7 text-slate-200 selection:bg-primary-400/25" style={{ tabSize: 4 }}><code className="block">{code}</code></pre>
         </div>
     </div>;
 }
@@ -231,5 +259,5 @@ function MarkdownContent({ content, fontSize = 15, lineHeight = 2, warm = false,
         if (codeLines.length) result.push(<MarkdownCodeBlock key="code-final" code={codeLines.join('\n')} language={language}/>);
         return result;
     }, [content]);
-    return <article dir="auto" className={`mx-auto max-w-3xl overflow-hidden rounded-2xl border p-4 shadow-inner transition-colors sm:p-6 ${warm ? 'border-amber-100/[.1] bg-[#211d14] text-amber-50/95' : 'border-white/[.04] bg-dark-900/35 text-dark-100'} ${wrap ? 'break-words' : 'overflow-x-auto whitespace-pre'}`} style={{ fontSize, lineHeight, textAlign: align }}>{blocks}</article>;
+    return <article dir="auto" className={`mx-auto max-w-3xl overflow-hidden rounded-2xl border p-4 shadow-inner transition-colors sm:p-6 ${warm ? 'border-amber-100/[.1] bg-[#211d14] text-amber-50/95' : 'border-slate-700/45 bg-[#111620] text-slate-100'} ${wrap ? 'break-words' : 'overflow-x-auto whitespace-pre'}`} style={{ fontSize, lineHeight, textAlign: align }}>{blocks}</article>;
 }

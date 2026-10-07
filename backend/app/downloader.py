@@ -262,6 +262,16 @@ class LinkImportService:
                 logger.debug("Downloader button click failed", exc_info=True)
                 return False
 
+        def button_key(message, button) -> str:
+            callback = getattr(button, "callback_data", None)
+            if isinstance(callback, bytes):
+                callback = callback.hex()
+            return f"{message.id}:{callback or button.text}"
+
+        def button_ready(button) -> bool:
+            text = (getattr(button, "text", "") or "").strip()
+            return bool(text) and not any(marker in text for marker in ("⏳", "⌛", "…"))
+
         def media_kind(message) -> str | None:
             mime = (getattr(message.document, "mime_type", "") or "").lower() if message.document else ""
             if audio_mode:
@@ -311,20 +321,39 @@ class LinkImportService:
                 if not message.reply_markup:
                     continue
                 buttons = [button for row in message.reply_markup.inline_keyboard for button in row if not getattr(button, "url", None)]
-                if audio_mode:
-                    audio_button = next((button for button in buttons if any(word in button.text.lower() for word in ("audio", "صوت", "mp3")) and "⏳" not in button.text), None)
-                    if audio_button and audio_button.text not in clicked and await click_button(message, audio_button):
-                        clicked.add(audio_button.text)
+                ready_buttons = [button for button in buttons if button_ready(button)]
+                # AllSaver sometimes first asks for a language and may only
+                # expose an English/UK option. Select it before looking for a
+                # quality button. Timer buttons are deliberately left alone;
+                # the same edited message is fetched again on the next pass.
+                language_button = next((button for button in ready_buttons if (
+                    any(flag in button.text for flag in ("🇬🇧", "🇺🇸", "🌐", "🌏"))
+                    or re.search(r"\b(english|en)\b", button.text, re.IGNORECASE)
+                ) and button_key(message, button) not in clicked), None)
+                if language_button and not re.search(r"\b(360|480|720|1080)p?\b", language_button.text, re.IGNORECASE):
+                    if await click_button(message, language_button):
+                        clicked.add(button_key(message, language_button))
                         break
-                quality_buttons = [button for button in buttons if re.search(r"\b(360|480|720|1080)p?\b", button.text, re.IGNORECASE)] if not audio_mode else []
-                candidates = quality_buttons or [button for button in buttons if not any(word in button.text.lower() for word in ("back", "بازگشت", "назад"))]
-                globe = next((button for button in buttons if ("🌏" in button.text or "🌐" in button.text) and button.text not in clicked), None)
-                target = next((button for button in candidates if quality != "auto" and quality in button.text and "⏳" not in button.text), None) if quality_buttons else None
-                target = target or globe
-                target = target or next((button for button in candidates if "⏳" not in button.text and button.text not in clicked), None)
+                if audio_mode:
+                    audio_button = next((button for button in ready_buttons if any(word in button.text.lower() for word in ("audio", "صوت", "صدا", "mp3")) and button_key(message, button) not in clicked), None)
+                    if audio_button and await click_button(message, audio_button):
+                        clicked.add(button_key(message, audio_button))
+                        break
+                quality_buttons = [button for button in ready_buttons if re.search(r"\b(360|480|720|1080)p?\b", button.text, re.IGNORECASE)] if not audio_mode else []
+                candidates = quality_buttons or [button for button in ready_buttons if not any(word in button.text.lower() for word in ("back", "بازگشت", "назад"))]
+                target = next((button for button in candidates if quality != "auto" and quality in button.text and button_key(message, button) not in clicked), None) if quality_buttons else None
+                if target is None and quality_buttons:
+                    # If the requested resolution is unavailable, choose the
+                    # best ready option instead of leaving the job stuck.
+                    target = max(
+                        (button for button in quality_buttons if button_key(message, button) not in clicked),
+                        key=lambda button: int(re.search(r"(360|480|720|1080)", button.text).group(1)),
+                        default=None,
+                    )
+                target = target or next((button for button in candidates if button_key(message, button) not in clicked), None)
                 if target:
                     if await click_button(message, target):
-                        clicked.add(target.text)
+                        clicked.add(button_key(message, target))
                         break
             async for message in self.client.get_chat_history("allsaverbot", limit=3):
                 if message.id > sent.id and message.text and not message.reply_markup and any(word in message.text.lower() for word in ("error", "ошибка", "не удалось")):

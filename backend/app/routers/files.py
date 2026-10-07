@@ -3,7 +3,7 @@ File management API endpoints.
 """
 from typing import Optional
 import json
-from fastapi import APIRouter, Depends, File as FormFile, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File as FormFile, Form, HTTPException, Query, Request, UploadFile
 import secrets
 import logging
 import os
@@ -20,7 +20,7 @@ from urllib.parse import urlparse
 from ..database import get_db
 from ..models import File, User, WatchProgress, Folder, Playlist
 from ..schemas import ActivityResponse, BatchFileUpdate, FileResponse, FileListResponse, FileUpdate, WatchProgressUpdate
-from ..auth import get_current_user
+from ..auth import get_current_user, has_vault_access, require_vault_access
 from ..telegram import delete_from_storage_channel, get_message_from_channel
 from .. import telegram
 from ..config import get_settings
@@ -251,6 +251,7 @@ def apply_file_sort(query, sort: Optional[str]):
 @router.get("/{file_id}/text")
 async def get_text_preview(
     file_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -260,6 +261,8 @@ async def get_text_preview(
     ))).scalar_one_or_none()
     if file is None:
         raise HTTPException(status_code=404, detail="File not found")
+    if file.is_hidden:
+        require_vault_access(request, current_user)
     is_text_document = file.file_type == "document" and (
         (file.mime_type or "").startswith("text/")
         or (file.mime_type or "") in {"application/json", "application/xml"}
@@ -289,6 +292,7 @@ async def get_text_preview(
 async def update_text_content(
     file_id: int,
     payload: TextContentUpdate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -296,6 +300,8 @@ async def update_text_content(
     file = (await db.execute(select(File).where(File.id == file_id, File.user_id == current_user.id))).scalar_one_or_none()
     if file is None:
         raise HTTPException(status_code=404, detail="File not found")
+    if file.is_hidden:
+        require_vault_access(request, current_user)
     if file.file_type != "text":
         raise HTTPException(status_code=415, detail="Only saved text notes can be edited")
     message = await get_message_from_channel(file.channel_message_id, file.storage_channel_id)
@@ -335,6 +341,7 @@ async def update_text_content(
 
 @router.get("", response_model=FileListResponse)
 async def list_files(
+    request: Request,
     folder_id: Optional[int] = Query(None, description="Filter by folder ID (null for root)"),
     file_type: Optional[str] = Query(None, description="Comma-separated file types"),
     search: Optional[str] = Query(None, description="Search by filename"),
@@ -345,9 +352,14 @@ async def list_files(
     sort: Optional[str] = None,
     favorite_only: bool = False,
     include_playlist_covers: bool = False,
+    include_hidden: bool = False,
 ):
     """List user's files with optional filtering."""
     query = select(File).where(File.user_id == current_user.id).options(selectinload(File.watch_progress))
+    if include_hidden:
+        require_vault_access(request, current_user)
+    else:
+        query = query.where(File.is_hidden.is_(False))
 
     if not include_playlist_covers:
         query = query.where(~exists().where(Playlist.cover_file_id == File.id, Playlist.user_id == current_user.id))
@@ -401,7 +413,7 @@ async def get_recent_files(
     current_user: User = Depends(get_current_user),
 ):
     """Get recently added files across all folders."""
-    query = select(File).where(File.user_id == current_user.id, ~exists().where(Playlist.cover_file_id == File.id, Playlist.user_id == current_user.id)).options(selectinload(File.watch_progress))
+    query = select(File).where(File.user_id == current_user.id, File.is_hidden.is_(False), ~exists().where(Playlist.cover_file_id == File.id, Playlist.user_id == current_user.id)).options(selectinload(File.watch_progress))
     files = (await db.execute(apply_file_sort(query, sort).limit(limit))).scalars().all()
     
     return FileListResponse(
@@ -423,7 +435,7 @@ async def get_activity(
     recent = await fetch_recent_files(db, current_user.id, limit)
     favorites = (await db.execute(
         select(File)
-        .where(File.user_id == current_user.id, File.is_favorite.is_(True), ~exists().where(Playlist.cover_file_id == File.id, Playlist.user_id == current_user.id))
+        .where(File.user_id == current_user.id, File.is_hidden.is_(False), File.is_favorite.is_(True), ~exists().where(Playlist.cover_file_id == File.id, Playlist.user_id == current_user.id))
         .options(selectinload(File.watch_progress))
         .order_by(File.updated_at.desc(), File.id.desc())
         .limit(limit)
@@ -449,6 +461,7 @@ async def get_continue_watching(
             .join(WatchProgress, File.id == WatchProgress.file_id)
             .where(
                 File.user_id == current_user.id,
+                File.is_hidden.is_(False),
                 WatchProgress.user_id == current_user.id,
                 WatchProgress.position > 0,
                 WatchProgress.completed == False,
@@ -486,6 +499,7 @@ async def get_storage_stats(
 @router.get("/{file_id}", response_model=FileResponse)
 async def get_file(
     file_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -497,6 +511,8 @@ async def get_file(
     
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
+    if file.is_hidden:
+        require_vault_access(request, current_user)
     
     return FileResponse(**add_urls_to_file(file))
 
@@ -505,6 +521,7 @@ async def get_file(
 async def update_file(
     file_id: int,
     update_data: FileUpdate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -516,6 +533,8 @@ async def update_file(
     
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
+    if file.is_hidden and not has_vault_access(request, current_user):
+        require_vault_access(request, current_user)
     
     # Update fields
     if update_data.file_name is not None:
@@ -526,6 +545,12 @@ async def update_file(
         file.is_favorite = update_data.is_favorite
     if update_data.is_pinned is not None:
         file.is_pinned = update_data.is_pinned
+    if update_data.is_hidden is not None:
+        if update_data.is_hidden and not current_user.vault_password_hash:
+            raise HTTPException(status_code=409, detail="ابتدا برای گاوصندوق رمز تعیین کن")
+        file.is_hidden = update_data.is_hidden
+        if file.is_hidden:
+            file.public_hash = None
     if update_data.tags is not None:
         tags: list[str] = []
         for raw in update_data.tags:
@@ -559,6 +584,7 @@ async def update_file(
 @router.delete("/{file_id}")
 async def delete_file(
     file_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -567,13 +593,17 @@ async def delete_file(
         select(File).where(File.id == file_id, File.user_id == current_user.id)
     )
     file = result.scalar_one_or_none()
+    if file is not None and file.is_hidden:
+        require_vault_access(request, current_user)
     
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
     
     # Old Telegram messages may already be gone or belong to a previous storage
     # channel.  Their stale metadata must still be removable from Komod.
-    storage_deleted = await delete_from_storage_channel(file.channel_message_id, file.storage_channel_id)
+    storage_deleted = False
+    if current_user.delete_storage_files:
+        storage_deleted = await delete_from_storage_channel(file.channel_message_id, file.storage_channel_id)
     
     # Delete from database
     await db.delete(file)
@@ -585,6 +615,7 @@ async def delete_file(
 @router.post("/batch-delete")
 async def batch_delete_files(
     file_ids: list[int],
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -594,21 +625,24 @@ async def batch_delete_files(
         select(File).where(File.id.in_(file_ids), File.user_id == current_user.id)
     )
     files = result.scalars().all()
+    if any(file.is_hidden for file in files):
+        require_vault_access(request, current_user)
     
     if not files:
         return {"message": "No files found to delete"}
     
     # Telegram message ids are only unique inside their own channel.
-    messages_by_channel: dict[int | None, list[int]] = {}
-    for item in files:
-        messages_by_channel.setdefault(item.storage_channel_id, []).append(item.channel_message_id)
-    for channel_id, msg_ids in messages_by_channel.items():
-        for start in range(0, len(msg_ids), 100):
-            batch = msg_ids[start:start + 100]
-            if channel_id is None:
-                await delete_from_storage_channel(batch)
-            else:
-                await delete_from_storage_channel(batch, channel_id)
+    if current_user.delete_storage_files:
+        messages_by_channel: dict[int | None, list[int]] = {}
+        for item in files:
+            messages_by_channel.setdefault(item.storage_channel_id, []).append(item.channel_message_id)
+        for channel_id, msg_ids in messages_by_channel.items():
+            for start in range(0, len(msg_ids), 100):
+                batch = msg_ids[start:start + 100]
+                if channel_id is None:
+                    await delete_from_storage_channel(batch)
+                else:
+                    await delete_from_storage_channel(batch, channel_id)
     
     # Delete from DB
     for file in files:
@@ -622,6 +656,7 @@ async def batch_delete_files(
 @router.post("/batch-update")
 async def batch_update_files(
     update_data: BatchFileUpdate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -631,6 +666,8 @@ async def batch_update_files(
     ))).scalars().all()
     if not files:
         raise HTTPException(status_code=404, detail="No files found")
+    if any(file.is_hidden for file in files):
+        require_vault_access(request, current_user)
     if update_data.description_mode in {"set", "append"} and update_data.description is None:
         raise HTTPException(status_code=400, detail="Description is required")
     if update_data.rename_mode in {"prefix", "suffix"} and not update_data.rename_value:
@@ -821,12 +858,18 @@ async def revoke_share(
 @router.post("/batch-move")
 async def batch_move_files(
     move_data: dict,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Move multiple files to a folder."""
     file_ids = move_data.get("ids", [])
     folder_id = move_data.get("folder_id")
+    selected = (await db.execute(select(File).where(
+        File.id.in_(file_ids), File.user_id == current_user.id
+    ))).scalars().all()
+    if any(file.is_hidden for file in selected):
+        require_vault_access(request, current_user)
     
     if folder_id == 0:
         folder_id = None

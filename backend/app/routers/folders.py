@@ -3,14 +3,14 @@ Folder management API endpoints.
 """
 from typing import Optional, List
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, update, delete, text, asc, desc
 
 from ..database import get_db
 from ..models import Folder, File, User, WatchProgress
 from ..schemas import FolderResponse, FolderCreate, FolderUpdate, FolderWithChildren
-from ..auth import get_current_user
+from ..auth import get_current_user, has_vault_access, require_vault_access
 from ..telegram import delete_from_storage_channel
 
 
@@ -80,15 +80,17 @@ async def delete_folder_contents(db: AsyncSession, folder: Folder, delete_conten
     files = (await db.execute(select(File).where(
         File.folder_id.in_(folder_ids), File.user_id == folder.user_id
     ))).scalars().all()
-    messages_by_channel: dict[int | None, list[int]] = {}
-    for item in files:
-        messages_by_channel.setdefault(item.storage_channel_id, []).append(item.channel_message_id)
-    for channel_id, message_ids in messages_by_channel.items():
-        for start in range(0, len(message_ids), 100):
-            batch = message_ids[start:start + 100]
-            deleted = await delete_from_storage_channel(batch, channel_id) if channel_id is not None else await delete_from_storage_channel(batch)
-            if not deleted:
-                logger.warning("Telegram cleanup failed for folder %s; deleting stale database rows", folder.id)
+    owner = await db.get(User, folder.user_id)
+    if owner is None or owner.delete_storage_files:
+        messages_by_channel: dict[int | None, list[int]] = {}
+        for item in files:
+            messages_by_channel.setdefault(item.storage_channel_id, []).append(item.channel_message_id)
+        for channel_id, message_ids in messages_by_channel.items():
+            for start in range(0, len(message_ids), 100):
+                batch = message_ids[start:start + 100]
+                deleted = await delete_from_storage_channel(batch, channel_id) if channel_id is not None else await delete_from_storage_channel(batch)
+                if not deleted:
+                    logger.warning("Telegram cleanup failed for folder %s; deleting stale database rows", folder.id)
     file_ids = [file.id for file in files]
     if file_ids:
         await db.execute(delete(WatchProgress).where(WatchProgress.file_id.in_(file_ids)))
@@ -116,9 +118,11 @@ async def get_folder_file_count(db: AsyncSession, folder_id: int) -> int:
 
 @router.get("", response_model=List[FolderResponse])
 async def list_folders(
+    request: Request,
     parent_id: Optional[int] = Query(None, description="Filter by parent folder ID"),
     sort: Optional[str] = None,
     favorite_only: bool = False,
+    include_hidden: bool = False,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -127,6 +131,10 @@ async def list_folders(
         await ensure_default_folder(db, current_user.id)
         await db.commit()
     stmt = select(Folder).where(Folder.user_id == current_user.id)
+    if include_hidden:
+        require_vault_access(request, current_user)
+    else:
+        stmt = stmt.where(Folder.is_hidden.is_(False))
     stmt = stmt.where(Folder.parent_id == parent_id) if parent_id is not None else stmt.where(Folder.parent_id.is_(None))
     if favorite_only:
         stmt = stmt.where(Folder.is_favorite.is_(True))
@@ -148,26 +156,33 @@ async def list_folders(
         parent_id=folder.parent_id, user_id=folder.user_id,
         created_at=folder.created_at, updated_at=folder.updated_at,
         file_count=counts.get(folder.id, 0), is_favorite=folder.is_favorite,
-        is_pinned=folder.is_pinned, is_default=folder.is_default,
+        is_pinned=folder.is_pinned, is_default=folder.is_default, is_hidden=folder.is_hidden,
     ) for folder in folders]
 
 
 @router.get("/tree", response_model=List[FolderWithChildren])
 async def get_folder_tree(
+    request: Request,
+    include_hidden: bool = False,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Get the complete drawer tree with recursive counts."""
     await ensure_default_folder(db, current_user.id)
     await db.commit()
-    folders = (await db.execute(select(Folder).where(Folder.user_id == current_user.id).order_by(Folder.name))).scalars().all()
+    stmt = select(Folder).where(Folder.user_id == current_user.id)
+    if include_hidden:
+        require_vault_access(request, current_user)
+    else:
+        stmt = stmt.where(Folder.is_hidden.is_(False))
+    folders = (await db.execute(stmt.order_by(Folder.name))).scalars().all()
     counts = await get_all_folder_counts(db, current_user.id)
     folder_map = {folder.id: {
         "id": folder.id, "name": folder.name, "description": folder.description,
         "parent_id": folder.parent_id, "user_id": folder.user_id,
         "created_at": folder.created_at, "updated_at": folder.updated_at,
         "file_count": counts.get(folder.id, 0), "is_favorite": folder.is_favorite,
-        "is_pinned": folder.is_pinned, "is_default": folder.is_default, "children": [],
+        "is_pinned": folder.is_pinned, "is_default": folder.is_default, "is_hidden": folder.is_hidden, "children": [],
     } for folder in folders}
     roots = []
     for folder_data in folder_map.values():
@@ -182,6 +197,7 @@ async def get_folder_tree(
 @router.get("/{folder_id}", response_model=FolderResponse)
 async def get_folder(
     folder_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -190,13 +206,15 @@ async def get_folder(
     ))).scalar_one_or_none()
     if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
+    if folder.is_hidden:
+        require_vault_access(request, current_user)
     return FolderResponse(
         id=folder.id, name=folder.name, description=folder.description,
         parent_id=folder.parent_id, user_id=folder.user_id,
         created_at=folder.created_at, updated_at=folder.updated_at,
         file_count=await get_folder_file_count(db, folder.id),
         is_favorite=folder.is_favorite, is_pinned=folder.is_pinned,
-        is_default=folder.is_default,
+        is_default=folder.is_default, is_hidden=folder.is_hidden,
     )
 
 
@@ -258,6 +276,7 @@ async def create_folder(
 async def update_folder(
     folder_id: int,
     update_data: FolderUpdate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -269,6 +288,8 @@ async def update_folder(
     
     if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
+    if folder.is_hidden and not has_vault_access(request, current_user):
+        require_vault_access(request, current_user)
     
     # Update fields
     if update_data.name is not None:
@@ -282,6 +303,10 @@ async def update_folder(
         folder.is_favorite = update_data.is_favorite
     if update_data.is_pinned is not None:
         folder.is_pinned = update_data.is_pinned
+    if update_data.is_hidden is not None:
+        if update_data.is_hidden and not current_user.vault_password_hash:
+            raise HTTPException(status_code=409, detail="ابتدا برای گاوصندوق رمز تعیین کن")
+        folder.is_hidden = update_data.is_hidden
     if update_data.parent_id is not None:
         if folder.is_default:
             raise HTTPException(status_code=400, detail="Default folder must stay at the root")
@@ -335,13 +360,14 @@ async def update_folder(
         file_count=file_count,
         is_favorite=folder.is_favorite,
         is_pinned=folder.is_pinned,
-        is_default=folder.is_default,
+        is_default=folder.is_default, is_hidden=folder.is_hidden,
     )
 
 
 @router.delete("/{folder_id}")
 async def delete_folder(
     folder_id: int,
+    request: Request,
     delete_contents: bool = Query(False, description="Also delete files and subfolders"),
     move_files_to: Optional[int] = Query(None, description="Legacy destination for retained contents"),
     db: AsyncSession = Depends(get_db),
@@ -355,6 +381,8 @@ async def delete_folder(
     
     if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
+    if folder.is_hidden:
+        require_vault_access(request, current_user)
     if folder.is_default:
         raise HTTPException(status_code=400, detail="Default folder cannot be deleted")
     
@@ -376,6 +404,7 @@ async def delete_folder(
 @router.post("/batch-delete")
 async def batch_delete_folders(
     folder_ids: List[int],
+    request: Request,
     delete_contents: bool = Query(False, description="Also delete files and subfolders"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -388,6 +417,8 @@ async def batch_delete_folders(
         ))).scalar_one_or_none()
         if folder is None:
             continue
+        if folder.is_hidden:
+            require_vault_access(request, current_user)
         if folder.is_default:
             continue
         await delete_folder_contents(db, folder, delete_contents)
@@ -400,12 +431,18 @@ async def batch_delete_folders(
 @router.post("/batch-move")
 async def batch_move_folders(
     move_data: dict,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Move multiple folders to another folder."""
     folder_ids = move_data.get("ids", [])
     target_id = move_data.get("folder_id")
+    selected = (await db.execute(select(Folder).where(
+        Folder.id.in_(folder_ids), Folder.user_id == current_user.id
+    ))).scalars().all()
+    if any(folder.is_hidden for folder in selected):
+        require_vault_access(request, current_user)
     
     if target_id == 0:
         target_id = None

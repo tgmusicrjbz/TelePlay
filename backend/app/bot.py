@@ -46,6 +46,7 @@ sort_return_targets: dict[int, str] = {}
 batch_selections: dict[int, set[int]] = {}
 batch_return_targets: dict[int, str] = {}
 current_drawers: dict[int, int | None] = {}
+upload_drawers: dict[int, int | None] = {}
 loaded_ui_state_users: set[int] = set()
 PAGE_SIZE = 8
 PREVIEW_TTL_SECONDS = 300
@@ -272,6 +273,7 @@ async def load_user_ui_state(telegram_id: int, *, force: bool = False) -> None:
             db.add(state)
             await db.commit()
         current_drawers[telegram_id] = state.current_drawer_id
+        upload_drawers[telegram_id] = state.upload_drawer_id
         library_filters[telegram_id] = set(_json_list(state.library_filters_json, []))
         search_filters[telegram_id] = set(_json_list(state.search_filters_json, []))
         if state.search_query:
@@ -306,6 +308,7 @@ async def persist_user_ui_state(telegram_id: int) -> None:
             state = BotUserState(user_id=user.id)
             db.add(state)
         state.current_drawer_id = current_drawers.get(telegram_id)
+        state.upload_drawer_id = upload_drawers.get(telegram_id)
         state.library_filters_json = json.dumps(sorted(library_filters.get(telegram_id, set())))
         state.search_filters_json = json.dumps(sorted(search_filters.get(telegram_id, set())))
         state.search_query = search_queries.get(telegram_id)
@@ -325,15 +328,22 @@ async def set_current_drawer(telegram_id: int, folder_id: int | None) -> None:
 
 async def get_active_drawer_id(telegram_id: int) -> int | None:
     await load_user_ui_state(telegram_id)
-    folder_id = current_drawers.get(telegram_id)
+    folder_id = upload_drawers.get(telegram_id)
     if folder_id is None:
         return None
     async with async_session() as db:
         folder = (await db.execute(owned_folder(folder_id, telegram_id))).scalar_one_or_none()
     if folder is None:
-        await set_current_drawer(telegram_id, None)
+        upload_drawers[telegram_id] = None
+        await persist_user_ui_state(telegram_id)
         return None
     return folder_id
+
+
+async def set_upload_drawer(telegram_id: int, folder_id: int | None) -> None:
+    await load_user_ui_state(telegram_id)
+    upload_drawers[telegram_id] = folder_id
+    await persist_user_ui_state(telegram_id)
 
 
 def get_web_app_button(telegram_id: int, text: str = "🌐 Open Web") -> InlineKeyboardButton:
@@ -481,8 +491,9 @@ async def render_folder_page(message: Message, telegram_id: int, parent_id: int 
         folders = (await db.execute(select(Folder).where(
             Folder.user_id == user.id,
             Folder.parent_id == parent_id,
+            Folder.is_hidden.is_(False),
         ).order_by(Folder.name))).scalars().all()
-        file_query = select(File).where(File.user_id == user.id, File.folder_id == parent_id)
+        file_query = select(File).where(File.user_id == user.id, File.folder_id == parent_id, File.is_hidden.is_(False))
         if selected_types:
             file_query = file_query.where(File.file_type.in_(selected_types))
         files = (await db.execute(file_query)).scalars().all()
@@ -552,7 +563,7 @@ async def render_root_files(message: Message, telegram_id: int, page: int = 0) -
         if not user:
             await message.edit("برای شروع، دستور /start رو بفرست.")
             return
-        query = select(File).where(File.user_id == user.id, File.folder_id.is_(None))
+        query = select(File).where(File.user_id == user.id, File.folder_id.is_(None), File.is_hidden.is_(False))
         if selected_types:
             query = query.where(File.file_type.in_(selected_types))
         files = (await db.execute(query)).scalars().all()
@@ -585,7 +596,7 @@ async def render_recent_files(message: Message, telegram_id: int, page: int = 0)
         if not user:
             await message.edit("برای شروع، دستور /start رو بفرست.")
             return
-        query = select(File).where(File.user_id == user.id)
+        query = select(File).where(File.user_id == user.id, File.is_hidden.is_(False))
         if selected_types:
             query = query.where(File.file_type.in_(selected_types))
         files = (await db.execute(query)).scalars().all()
@@ -740,7 +751,55 @@ def main_menu_keyboard(telegram_id: int) -> InlineKeyboardMarkup:
          InlineKeyboardButton("🔍 بگرد تو کمد", callback_data="search_choose")],
         [InlineKeyboardButton("🎧 پلی‌لیست‌ها", callback_data="playlists:0"),
          get_web_app_button(telegram_id, "🌐 باز کردن کمد")],
+        [InlineKeyboardButton("📥 محل ذخیرهٔ فایل‌های بعدی", callback_data="storage_target:0")],
     ])
+
+
+async def render_storage_target(message: Message, telegram_id: int, page: int = 0) -> None:
+    """Choose the drawer used for subsequent Telegram uploads."""
+    await load_user_ui_state(telegram_id)
+    async with async_session() as db:
+        user = (await db.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
+        if user is None:
+            await safe_edit(message, "برای شروع، دستور /start رو بفرست.")
+            return
+        await ensure_default_folder(db, user.id)
+        await db.commit()
+        folders = (await db.execute(
+            select(Folder).where(Folder.user_id == user.id, Folder.is_hidden.is_(False)).order_by(Folder.name, Folder.id)
+        )).scalars().all()
+        folder_map = {folder.id: folder for folder in folders}
+
+        def label_for(folder: Folder) -> str:
+            names = [folder.name]
+            parent_id = folder.parent_id
+            visited = {folder.id}
+            while parent_id and parent_id in folder_map and parent_id not in visited:
+                visited.add(parent_id)
+                parent = folder_map[parent_id]
+                names.append(parent.name)
+                parent_id = parent.parent_id
+            return " / ".join(reversed(names))
+
+        choices = [(folder.id, label_for(folder), folder.is_default) for folder in folders]
+
+    current_id = upload_drawers.get(telegram_id)
+    page = min(max(page, 0), max(0, (len(choices) - 1) // PAGE_SIZE))
+    shown = choices[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
+    buttons = [[InlineKeyboardButton(
+        f"{'\u2705' if folder_id == current_id else '\ud83d\uddc3\ufe0f'} {name[:48]}{' · پیش‌فرض' if is_default else ''}",
+        callback_data=f"storage_set:{folder_id}",
+    )] for folder_id, name, is_default in shown]
+    if len(choices) > PAGE_SIZE:
+        buttons.append(pagination_row("storage_target", page, len(choices)))
+    buttons.append([InlineKeyboardButton("➕ ساخت کشوی تازه", callback_data="create_folder")])
+    buttons.append([InlineKeyboardButton("↩️ منوی اصلی", callback_data="home")])
+    current_name = next((name for folder_id, name, _ in choices if folder_id == current_id), "کشوی پیش‌فرض")
+    await safe_edit(
+        message,
+        f"📥 **محل ذخیرهٔ فایل‌های بعدی**\nالان: **{escape_markdown(current_name)}**\n\nیک کشو انتخاب کن؛ هر فایلی که بعدش بفرستی همون‌جا می‌ره.",
+        reply_markup=InlineKeyboardMarkup(buttons),
+    )
 
 
 def help_keyboard(telegram_id: int) -> InlineKeyboardMarkup:
@@ -1348,6 +1407,21 @@ async def handle_callback(client, callback: CallbackQuery):
 
     elif data == "noop":
         await callback.answer()
+
+    elif data.startswith("storage_target:"):
+        await render_storage_target(callback.message, callback.from_user.id, int(data.split(":", 1)[1]))
+        await callback.answer()
+
+    elif data.startswith("storage_set:"):
+        folder_id = int(data.split(":", 1)[1])
+        async with async_session() as db:
+            folder = (await db.execute(owned_folder(folder_id, callback.from_user.id))).scalar_one_or_none()
+        if folder is None:
+            await callback.answer("این کشو پیدا نشد.", show_alert=True)
+            return
+        await set_upload_drawer(callback.from_user.id, folder.id)
+        await render_storage_target(callback.message, callback.from_user.id, 0)
+        await callback.answer(f"فایل‌های بعدی داخل «{folder.name[:32]}» ذخیره می‌شن.")
 
     elif data.startswith("playlists:"):
         await render_playlists(callback.message, callback.from_user.id, int(data.split(":")[1]))

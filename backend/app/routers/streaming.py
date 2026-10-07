@@ -13,7 +13,7 @@ from slowapi.util import get_remote_address
 
 from ..database import get_db
 from ..models import File, User
-from ..auth import get_current_user
+from ..auth import get_current_user, require_vault_access
 from .. import telegram
 from ..telegram import get_message_from_channel
 from ..streaming import stream_file as stream_file_generator
@@ -113,6 +113,8 @@ async def stream_file(
     
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
+    if file.is_hidden:
+        require_vault_access(request, current_user)
     
     # Get message from channel
     message = await get_message_from_channel(file.channel_message_id, file.storage_channel_id)
@@ -169,6 +171,7 @@ async def stream_file(
 @router.get("/{file_id}/thumbnail")
 async def get_thumbnail(
     file_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -181,6 +184,8 @@ async def get_thumbnail(
     
     if not file or not file.thumbnail_file_id:
         raise HTTPException(status_code=404, detail="Thumbnail not found")
+    if file.is_hidden:
+        require_vault_access(request, current_user)
     
     try:
         # Get the message and download thumbnail

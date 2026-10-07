@@ -74,11 +74,17 @@ async def init_db():
             await conn.execute(text("ALTER TABLE users ADD COLUMN display_name VARCHAR(255)"))
         if "storage_channel_id" not in user_columns:
             await conn.execute(text("ALTER TABLE users ADD COLUMN storage_channel_id BIGINT"))
+        if "delete_storage_files" not in user_columns:
+            delete_default = "TRUE" if url.drivername.startswith("postgresql") else "1"
+            delete_type = "BOOLEAN" if url.drivername.startswith("postgresql") else "INTEGER"
+            await conn.execute(text(f"ALTER TABLE users ADD COLUMN delete_storage_files {delete_type} NOT NULL DEFAULT {delete_default}"))
         if "login_username" not in user_columns:
             await conn.execute(text("ALTER TABLE users ADD COLUMN login_username VARCHAR(64)"))
         await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_login_username ON users (login_username)"))
         if "password_hash" not in user_columns:
             await conn.execute(text("ALTER TABLE users ADD COLUMN password_hash TEXT"))
+        if "vault_password_hash" not in user_columns:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN vault_password_hash TEXT"))
         if "failed_login_attempts" not in user_columns:
             await conn.execute(text("ALTER TABLE users ADD COLUMN failed_login_attempts INTEGER NOT NULL DEFAULT 0"))
         if "login_locked_until" not in user_columns:
@@ -104,6 +110,10 @@ async def init_db():
             favorite_type = "BOOLEAN" if url.drivername.startswith("postgresql") else "INTEGER"
             favorite_default = "FALSE" if url.drivername.startswith("postgresql") else "0"
             await conn.execute(text(f"ALTER TABLE files ADD COLUMN is_pinned {favorite_type} NOT NULL DEFAULT {favorite_default}"))
+        if "is_hidden" not in columns:
+            hidden_type = "BOOLEAN" if url.drivername.startswith("postgresql") else "INTEGER"
+            hidden_default = "FALSE" if url.drivername.startswith("postgresql") else "0"
+            await conn.execute(text(f"ALTER TABLE files ADD COLUMN is_hidden {hidden_type} NOT NULL DEFAULT {hidden_default}"))
         playlist_columns = await conn.run_sync(
             lambda sync_conn: {column["name"] for column in inspect(sync_conn).get_columns("playlists")}
         )
@@ -126,3 +136,10 @@ async def init_db():
             await conn.execute(text(f"ALTER TABLE folders ADD COLUMN is_pinned {favorite_type} NOT NULL DEFAULT {favorite_default}"))
         if "is_default" not in folder_columns:
             await conn.execute(text(f"ALTER TABLE folders ADD COLUMN is_default {favorite_type} NOT NULL DEFAULT {favorite_default}"))
+        if "is_hidden" not in folder_columns:
+            await conn.execute(text(f"ALTER TABLE folders ADD COLUMN is_hidden {favorite_type} NOT NULL DEFAULT {favorite_default}"))
+        bot_state_columns = await conn.run_sync(
+            lambda sync_conn: {column["name"] for column in inspect(sync_conn).get_columns("bot_user_states")}
+        )
+        if "upload_drawer_id" not in bot_state_columns:
+            await conn.execute(text("ALTER TABLE bot_user_states ADD COLUMN upload_drawer_id INTEGER"))

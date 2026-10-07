@@ -2,19 +2,21 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Response
+from passlib.context import CryptContext
 from pyrogram.enums import ChatMemberStatus, ChatType
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth import get_current_user
+from ..auth import create_vault_token, get_current_user
 from ..config import get_settings
 from ..database import get_db
 from ..models import AuthSession, File, User, WorkspaceGrant
-from ..schemas import AdminStatsResponse, AdminUserResponse, AdminUserUpdate, StorageChannelResponse, StorageChannelUpdate, WorkspaceGrantCreate, WorkspaceResponse
+from ..schemas import AccountPreferences, AdminStatsResponse, AdminUserResponse, AdminUserUpdate, StorageChannelResponse, StorageChannelUpdate, VaultPasswordRequest, VaultStatus, VaultTokenResponse, WorkspaceGrantCreate, WorkspaceResponse
 from .. import telegram
 
 router = APIRouter(tags=["Accounts"])
 settings = get_settings()
+vault_password_context = CryptContext(schemes=["pbkdf2_sha256"], pbkdf2_sha256__default_rounds=600_000, deprecated="auto")
 
 
 def user_name(user: User) -> str:
@@ -129,6 +131,45 @@ async def reset_storage_channel(current_user: User = Depends(get_current_user), 
     return Response(status_code=204)
 
 
+@router.get("/accounts/preferences", response_model=AccountPreferences)
+async def get_account_preferences(current_user: User = Depends(get_current_user)):
+    return AccountPreferences(delete_storage_files=current_user.delete_storage_files)
+
+
+@router.put("/accounts/preferences", response_model=AccountPreferences)
+async def update_account_preferences(
+    payload: AccountPreferences,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    current_user.delete_storage_files = payload.delete_storage_files
+    await db.commit()
+    return AccountPreferences(delete_storage_files=current_user.delete_storage_files)
+
+
+@router.get("/accounts/vault", response_model=VaultStatus)
+async def get_vault_status(current_user: User = Depends(get_current_user)):
+    return VaultStatus(configured=bool(current_user.vault_password_hash))
+
+
+@router.put("/accounts/vault", response_model=VaultTokenResponse)
+async def set_vault_password(
+    payload: VaultPasswordRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    current_user.vault_password_hash = vault_password_context.hash(payload.password)
+    await db.commit()
+    return VaultTokenResponse(token=create_vault_token(current_user.telegram_id, current_user.auth_version))
+
+
+@router.post("/accounts/vault/unlock", response_model=VaultTokenResponse)
+async def unlock_vault(payload: VaultPasswordRequest, current_user: User = Depends(get_current_user)):
+    if not current_user.vault_password_hash or not vault_password_context.verify(payload.password, current_user.vault_password_hash):
+        raise HTTPException(status_code=401, detail="رمز گاوصندوق درست نیست")
+    return VaultTokenResponse(token=create_vault_token(current_user.telegram_id, current_user.auth_version))
+
+
 @router.get("/admin/stats", response_model=AdminStatsResponse)
 async def admin_stats(_: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
     total_users, active_users = (await db.execute(select(
@@ -145,13 +186,32 @@ async def admin_stats(_: User = Depends(require_admin), db: AsyncSession = Depen
 
 @router.get("/admin/users", response_model=list[AdminUserResponse])
 async def admin_users(_: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
-    users = (await db.execute(select(User).order_by(User.created_at.desc()))).scalars().all()
-    result = []
-    for user in users:
-        size, files = (await db.execute(select(func.coalesce(func.sum(File.file_size), 0), func.count(File.id)).where(File.user_id == user.id))).one()
-        sessions = (await db.execute(select(func.count(AuthSession.id)).where(AuthSession.user_id == user.id, AuthSession.revoked_at.is_(None)))).scalar_one()
-        result.append(AdminUserResponse.model_validate(user, from_attributes=True).model_copy(update={"total_size": int(size or 0), "file_count": int(files or 0), "session_count": int(sessions or 0)}))
-    return result
+    file_stats = select(
+        File.user_id.label("user_id"),
+        func.coalesce(func.sum(File.file_size), 0).label("total_size"),
+        func.count(File.id).label("file_count"),
+    ).group_by(File.user_id).subquery()
+    session_stats = select(
+        AuthSession.user_id.label("user_id"),
+        func.count(AuthSession.id).label("session_count"),
+    ).where(AuthSession.revoked_at.is_(None)).group_by(AuthSession.user_id).subquery()
+    rows = (await db.execute(
+        select(
+            User,
+            func.coalesce(file_stats.c.total_size, 0),
+            func.coalesce(file_stats.c.file_count, 0),
+            func.coalesce(session_stats.c.session_count, 0),
+        )
+        .outerjoin(file_stats, file_stats.c.user_id == User.id)
+        .outerjoin(session_stats, session_stats.c.user_id == User.id)
+        .order_by(User.created_at.desc())
+    )).all()
+    return [
+        AdminUserResponse.model_validate(user, from_attributes=True).model_copy(update={
+            "total_size": int(size or 0), "file_count": int(files or 0), "session_count": int(sessions or 0),
+        })
+        for user, size, files, sessions in rows
+    ]
 
 
 @router.patch("/admin/users/{user_id}", response_model=AdminUserResponse)

@@ -41,7 +41,7 @@ export default function BatchEditModal({ open, count, onClose, onSave }: Props) 
         } finally { setSaving(false); }
     };
     return <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onMouseDown={onClose}>
-        <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-dark-900 p-5" onMouseDown={event => event.stopPropagation()} dir="rtl">
+        <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-white/10 bg-dark-900 p-5" onMouseDown={event => event.stopPropagation()} dir="rtl">
             <div className="flex items-center justify-between"><div><h2 className="text-lg font-bold">ویرایش گروهی</h2><p className="text-xs text-dark-400">{count} فایل انتخاب شده</p></div><button className="btn-icon" onClick={onClose}><X className="h-5 w-5" /></button></div>
             <label className="mt-5 block text-sm text-dark-300">توضیحات</label>
             <CustomSelect className="mt-2" value={descriptionMode} onChange={setDescriptionMode} options={[{value:'none',label:'بدون تغییر'},{value:'set',label:'جایگزینی'},{value:'append',label:'افزودن به توضیحات فعلی'},{value:'clear',label:'پاک‌کردن'}]}/>
@@ -50,9 +50,9 @@ export default function BatchEditModal({ open, count, onClose, onSave }: Props) 
             <CustomSelect className="mt-2" value={renameMode} onChange={setRenameMode} options={[{value:'none',label:'بدون تغییر'},{value:'prefix',label:'افزودن پیشوند'},{value:'suffix',label:'افزودن پسوند'},{value:'replace',label:'پیدا و جایگزین'}]}/>
             {renameMode === 'replace' && <input className="mt-2 w-full rounded-xl border border-white/10 bg-dark-800 p-3" value={renameSearch} onChange={e => setRenameSearch(e.target.value)} placeholder="عبارت موردنظر" />}
             {renameMode !== 'none' && <input className="mt-2 w-full rounded-xl border border-white/10 bg-dark-800 p-3" value={renameValue} onChange={e => setRenameValue(e.target.value)} placeholder={renameMode === 'replace' ? 'عبارت جایگزین (می‌تواند خالی باشد)' : 'متن موردنظر'} />}
-            <label className="mt-4 flex items-center gap-2 text-sm text-dark-300"><Tags className="h-4 w-4 text-primary-300"/> مدیریت تگ‌ها</label>
-            <CustomSelect className="mt-2" value={tagsMode} onChange={setTagsMode} options={[{value:'none',label:'بدون تغییر'},{value:'add',label:'افزودن تگ'},{value:'remove',label:'حذف تگ'},{value:'replace',label:'جایگزینی همه تگ‌ها'}]}/>
-            {tagsMode !== 'none' && <><input className="mt-2 w-full rounded-xl border border-white/10 bg-dark-800 p-3" value={tagsText} onChange={e => setTagsText(e.target.value)} placeholder={tagsMode === 'replace' ? 'تگ‌های جدید؛ برای پاک‌کردن همه، خالی بگذار' : 'مثلاً مهم، آموزش، موسیقی'} /><p className="mt-1 text-[10px] text-dark-500">چند تگ را با ویرگول از هم جدا کن.</p></>}
+            <div className="mt-4 rounded-2xl border border-primary-500/15 bg-primary-500/[.04] p-3"><label className="flex items-center gap-2 text-sm font-semibold text-primary-200"><Tags className="h-4 w-4"/> تغییر دسته‌ای تگ‌ها</label>
+            <CustomSelect className="mt-2" value={tagsMode} onChange={setTagsMode} options={[{value:'none',label:'بدون تغییر'},{value:'add',label:'افزودن تگ به همه'},{value:'remove',label:'حذف تگ از همه'},{value:'replace',label:'جایگزینی تگ‌های همه فایل‌ها'}]}/>
+            {tagsMode !== 'none' && <><input className="mt-2 w-full rounded-xl border border-white/10 bg-dark-800 p-3" value={tagsText} onChange={e => setTagsText(e.target.value)} placeholder={tagsMode === 'replace' ? 'تگ‌های جدید؛ برای پاک‌کردن همه، خالی بگذار' : 'مثلاً مهم، آموزش، موسیقی'} /><p className="mt-1 text-[10px] text-dark-500">چند تگ را با ویرگول از هم جدا کن.</p></>}</div>
             <div className="mt-5 flex gap-2"><button className="btn-primary flex-1" disabled={saving || !valid} onClick={submit}>{saving ? 'در حال ذخیره…' : 'اعمال روی فایل‌ها'}</button><button className="btn-secondary" onClick={onClose}>لغو</button></div>
         </div>
     </div>;

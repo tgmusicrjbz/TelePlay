@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../lib/store';
 import { TelegramFile, Folder, api, canPreviewText, useUpdateFile, useUpdateFolder } from '../lib/api';
-import { Play, Download, DownloadCloud, Link, Edit, FolderInput, Trash2, Globe, ShieldOff, HardDriveDownload, Eye, AlignLeft, ListPlus, Heart, Info, Pin, Tags } from 'lucide-react';
+import { Play, Download, DownloadCloud, Link, Edit, FolderInput, Trash2, Globe, ShieldOff, HardDriveDownload, Eye, EyeOff, AlignLeft, ListPlus, Heart, Info, Pin, Tags } from 'lucide-react';
 import { saveFileOffline } from '../lib/offline';
 
 export default function GlobalContextMenu() {
@@ -273,6 +273,10 @@ export default function GlobalContextMenu() {
                                     <FolderInput className="w-4 h-4" />
                                     جابه‌جایی به…
                                 </button>
+                                <button className="context-menu-item w-full text-right text-amber-200" onClick={async () => { const file=activeContextMenu.item as TelegramFile; setActiveContextMenu(null); try { await updateFile.mutateAsync({id:file.id,is_hidden:!file.is_hidden}); addToast(file.is_hidden?'فایل از گاوصندوق بیرون آمد.':'فایل داخل گاوصندوق مخفی شد 🔒'); } catch(error:any) { addToast(error?.response?.data?.detail || 'از تنظیمات امنیتی برای گاوصندوق رمز تعیین کن.', 'error'); } }}>
+                                    {activeContextMenu.item.is_hidden ? <Eye className="h-4 w-4"/> : <EyeOff className="h-4 w-4"/>}
+                                    {activeContextMenu.item.is_hidden ? 'خارج کردن از گاوصندوق' : 'مخفی کردن در گاوصندوق'}
+                                </button>
                                 
                                 <hr className="border-white/[0.08] my-1" />
                                 
@@ -304,6 +308,10 @@ export default function GlobalContextMenu() {
                         <button className="context-menu-item w-full text-right" onClick={() => handleAction(() => setMoveItems({ files: [], folders: [activeContextMenu.item as Folder] }))}>
                             <FolderInput className="w-4 h-4" />
                             جابه‌جایی به…
+                        </button>
+                        <button className="context-menu-item w-full text-right text-amber-200" onClick={async () => { const folder=activeContextMenu.item as Folder; setActiveContextMenu(null); try { await updateFolder.mutateAsync({id:folder.id,is_hidden:!folder.is_hidden}); addToast(folder.is_hidden?'کشو از گاوصندوق بیرون آمد.':'کشو داخل گاوصندوق مخفی شد 🔒'); } catch(error:any) { addToast(error?.response?.data?.detail || 'از تنظیمات امنیتی برای گاوصندوق رمز تعیین کن.', 'error'); } }}>
+                            {activeContextMenu.item.is_hidden ? <Eye className="h-4 w-4"/> : <EyeOff className="h-4 w-4"/>}
+                            {activeContextMenu.item.is_hidden ? 'خارج کردن از گاوصندوق' : 'مخفی کردن در گاوصندوق'}
                         </button>
                         <hr className="border-white/[0.08] my-1" />
                         <button

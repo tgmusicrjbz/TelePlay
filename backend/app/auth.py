@@ -48,6 +48,30 @@ def create_refresh_token(telegram_id: int, version: int = 0, session_id: str | N
     return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
 
 
+def create_vault_token(telegram_id: int, version: int = 0) -> str:
+    """Create a short-lived token for viewing protected hidden content."""
+    payload = {
+        "sub": str(telegram_id), "exp": datetime.utcnow() + timedelta(minutes=30),
+        "type": "vault", "ver": version,
+    }
+    return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
+
+
+def has_vault_access(request: Request | None, user: User) -> bool:
+    if not user.vault_password_hash:
+        return False
+    token = None
+    if request is not None:
+        token = request.headers.get("X-Komod-Vault-Token") or request.query_params.get("vault_token")
+    payload = verify_token_payload(token, "vault") if token else None
+    return bool(payload and payload.get("sub") == str(user.telegram_id) and payload.get("ver") == user.auth_version)
+
+
+def require_vault_access(request: Request | None, user: User) -> None:
+    if not has_vault_access(request, user):
+        raise HTTPException(status_code=423, detail="گاوصندوق قفل است")
+
+
 def verify_token_payload(token: str, token_type: str = "access") -> Optional[dict]:
     """Verify JWT token and return full payload if valid."""
     try:

@@ -2,7 +2,7 @@
  * Main FileBrowser component - the core of the web interface
  */
 import { useEffect, useCallback, useMemo, useRef, useState } from 'react';
-import { FolderPlus, Folder as FolderIcon, Grid, LayoutGrid, List, Search, ChevronRight, Home, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, StickyNote, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ChevronDown, ChevronUp, Plus, CheckSquare, Square, ListChecks, ListPlus, Upload, Star, RefreshCw, Link2, DownloadCloud, Download, Eye, Minus, Pause, Play } from 'lucide-react';
+import { FolderPlus, Folder as FolderIcon, Grid, LayoutGrid, List, Search, ChevronRight, Home, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, StickyNote, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ChevronDown, ChevronUp, Plus, CheckSquare, Square, ListChecks, ListPlus, Upload, Star, RefreshCw, Link2, DownloadCloud, Download, Eye, EyeOff, Minus, Pause, Play, Tags, Cloud, CloudOff } from 'lucide-react';
 import { api, useFiles, useFolders, useFolderTree, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useActivityFeed, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile, useImportLink } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { cacheAllTextNotes, queueOfflineText, saveFileOffline } from '../lib/offline';
@@ -103,6 +103,8 @@ export default function FileBrowser() {
     const [uploadPanelMode, setUploadPanelMode] = useState<'open'|'collapsed'|'hidden'>('open');
     const [importJobs, setImportJobs] = useState<Array<{id:string; url:string; state:'queued'|'downloading'|'paused'|'cancelled'|'done'|'error'; message:string; saved:number}>>([]);
     const [importPanelMode, setImportPanelMode] = useState<'open'|'collapsed'|'hidden'>('open');
+    const [forceOffline, setForceOffline] = useState(() => localStorage.getItem('komod-force-offline') === '1');
+    const [showHidden, setShowHidden] = useState(false);
     const uploadAbortRef = useRef<AbortController | null>(null);
     const importUrls = useMemo(() => extractImportUrls(importUrl), [importUrl]);
     const importPlatform = useMemo<'youtube' | 'instagram' | null>(() => {
@@ -116,6 +118,23 @@ export default function FileBrowser() {
         } catch { /* incomplete URL */ }
         return null;
     }, [importUrls]);
+    useEffect(() => {
+        const syncConnectionMode = () => setForceOffline(localStorage.getItem('komod-force-offline') === '1');
+        window.addEventListener('komod-connectivity-mode', syncConnectionMode);
+        return () => window.removeEventListener('komod-connectivity-mode', syncConnectionMode);
+    }, []);
+    useEffect(() => {
+        const lockVault = () => setShowHidden(false);
+        window.addEventListener('komod-vault-changed', lockVault);
+        return () => window.removeEventListener('komod-vault-changed', lockVault);
+    }, []);
+    const toggleConnectionMode = () => {
+        const next = !forceOffline;
+        if (next) localStorage.setItem('komod-force-offline', '1'); else localStorage.removeItem('komod-force-offline');
+        setForceOffline(next);
+        window.dispatchEvent(new Event('komod-connectivity-mode'));
+        addToast(next ? 'حالت آفلاین فعال شد.' : navigator.onLine ? 'حالت آنلاین فعال شد.' : 'اینترنت دستگاه هنوز قطع است.', navigator.onLine || next ? 'success' : 'error');
+    };
     const [textFileName, setTextFileName] = useState('یادداشت تازه');
     const [textContent, setTextContent] = useState('');
     const [contentScope, setContentScope] = useState<'all' | 'files' | 'folders'>('all');
@@ -127,7 +146,7 @@ export default function FileBrowser() {
     const folderSortValue = serializeSort(sortCriteria.filter(item => ['name', 'created', 'updated', 'count'].includes(item.field)));
     const [rootFilesMode, setRootFilesMode] = useState(() => localStorage.getItem('komod-root-files-mode') || 'folder');
     const [incomingFolderSetting, setIncomingFolderSetting] = useState(() => localStorage.getItem('komod-incoming-folder') || 'default');
-    const { data: rootFolders } = useFolders(null, folderSortValue, false);
+    const { data: rootFolders } = useFolders(null, folderSortValue, false, showHidden);
     const { data: folderTree } = useFolderTree();
     const importFolderOptions = useMemo(() => {
         const result:{value:string;label:string}[]=[];
@@ -148,7 +167,7 @@ export default function FileBrowser() {
     }, []);
 
     // Data Fetching
-    const { data: filesList, isLoading: filesLoading, isFetching: filesFetching, refetch: refetchFiles } = useFiles(searchQuery.trim() ? undefined : effectiveFolderId, fileTypeFilter.join(',') || undefined, searchQuery || undefined, page, sortValue, favoriteOnly);
+    const { data: filesList, isLoading: filesLoading, isFetching: filesFetching, refetch: refetchFiles } = useFiles(searchQuery.trim() ? undefined : effectiveFolderId, fileTypeFilter.join(',') || undefined, searchQuery || undefined, page, sortValue, favoriteOnly, false, showHidden);
     const { data: activityFeed, isLoading: activityLoading, isError: activityError, refetch: refetchActivity } = useActivityFeed(activeSection === 'activity', 50);
     
 
@@ -188,7 +207,7 @@ export default function FileBrowser() {
     }
 
     // Folder and file visibility is controlled from one shared content switcher.
-    const { data: folders, isLoading: foldersLoading, refetch: refetchFolders } = useFolders(currentFolderId, folderSortValue, favoriteOnly);
+    const { data: folders, isLoading: foldersLoading, refetch: refetchFolders } = useFolders(currentFolderId, folderSortValue, favoriteOnly, showHidden);
     const visibleFolders = folders?.filter(folder => {
         if (currentFolderId === null && rootFilesMode === 'files' && folder.is_default) return false;
         if (!searchQuery.trim()) return true;
@@ -873,6 +892,7 @@ export default function FileBrowser() {
 
                     {/* Right: Actions */}
                     <div className="mr-2 flex shrink-0 items-center gap-1 sm:mr-4 sm:gap-2">
+                        <button onClick={toggleConnectionMode} className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border transition ${forceOffline?'border-amber-400/25 bg-amber-500/10 text-amber-200':'border-emerald-400/20 bg-emerald-500/[.08] text-emerald-300'}`} title={forceOffline?'رفتن به حالت آنلاین':'رفتن به حالت آفلاین'} aria-label={forceOffline?'فعال‌کردن حالت آنلاین':'فعال‌کردن حالت آفلاین'}>{forceOffline?<CloudOff className="h-4 w-4"/>:<Cloud className="h-4 w-4"/>}</button>
                         {clipboard && (clipboard.files.length > 0 || clipboard.folders.length > 0) && (
                             <button
                                 onClick={handlePaste}
@@ -914,7 +934,8 @@ export default function FileBrowser() {
                         <div className="fixed inset-x-4 top-20 z-40 mx-auto flex min-h-14 w-auto max-w-7xl flex-nowrap items-center gap-1 overflow-x-auto rounded-2xl border border-primary-500/25 bg-dark-900/95 p-1.5 shadow-2xl backdrop-blur-xl sm:hidden">
                             <span className="shrink-0 px-2 text-xs font-semibold text-primary-200">{selectedItems.length ? `${selectedItems.length.toLocaleString('fa-IR')} انتخاب` : 'یک کارت را لمس کن'}</span>
                             {selectedItems.length === 1 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-200 hover:bg-white/10" aria-label="تغییر نام" title="تغییر نام" onClick={() => selectedFilesForActions[0] ? setRenameFile(selectedFilesForActions[0]) : setRenameFolder(selectedFoldersForActions[0])}><Pencil className="h-5 w-5" /></button>}
-                            {selectedFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-200 hover:bg-white/10" aria-label="ویرایش گروهی" title="ویرایش گروهی" onClick={() => setShowBatchEdit(true)}><SlidersHorizontal className="h-5 w-5" /></button>}
+                            {selectedFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-200 hover:bg-white/10" aria-label="تگ‌ها و ویرایش گروهی" title="افزودن، حذف یا جایگزینی تگ‌ها" onClick={() => setShowBatchEdit(true)}><Tags className="h-5 w-5" /></button>}
+                            {selectedPlayableFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-emerald-300 hover:bg-emerald-500/10" aria-label="ساخت صف پخش موقت" title="پخش پشت‌سرهم فایل‌های انتخاب‌شده" onClick={() => { startQueue(selectedPlayableFilesForActions,0); cancelSelection(); addToast('صف پخش موقت ساخته شد.'); }}><Play className="h-5 w-5" /></button>}
                             {selectedPlayableFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-500/10 text-primary-200 hover:bg-primary-500/20" aria-label="افزودن به پلی‌لیست" title="افزودن فایل‌های صدا و ویدیو به پلی‌لیست" onClick={() => setPlaylistFiles(selectedPlayableFilesForActions)}><ListPlus className="h-5 w-5" /></button>}
                             {selectedFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-primary-200 hover:bg-primary-500/10" aria-label="ذخیره آفلاین" title="افزودن همه به صف ذخیره آفلاین" onClick={() => { selectedFilesForActions.forEach(file => void saveFileOffline(file)); addToast(`${selectedFilesForActions.length.toLocaleString('fa-IR')} فایل به صف ذخیره آفلاین اضافه شد.`); }}><DownloadCloud className="h-5 w-5" /></button>}
                             {selectedFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-200 hover:bg-white/10" aria-label="دانلود" title="دانلود فایل‌های انتخاب‌شده" onClick={() => void downloadSelectedFiles()}><Download className="h-5 w-5" /></button>}
@@ -933,7 +954,8 @@ export default function FileBrowser() {
                             <div className="fixed left-6 right-6 top-20 z-40 mx-auto hidden max-w-7xl flex-wrap items-center gap-1.5 rounded-2xl border border-primary-500/20 bg-dark-900/95 p-1.5 shadow-2xl backdrop-blur-xl sm:flex md:right-32 lg:left-8">
                                 <span className="text-sm font-medium text-primary-200 px-2">{selectedItems.length.toLocaleString('fa-IR')} مورد انتخاب شده</span>
                                 {selectedItems.length === 1 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => selectedFilesForActions[0] ? setRenameFile(selectedFilesForActions[0]) : setRenameFolder(selectedFoldersForActions[0])}><Pencil className="w-4 h-4" /> تغییر نام</button>}
-                                {selectedFilesForActions.length > 0 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => setShowBatchEdit(true)}><SlidersHorizontal className="w-4 h-4" /> ویرایش گروهی</button>}
+                                {selectedFilesForActions.length > 0 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => setShowBatchEdit(true)}><Tags className="w-4 h-4" /> تگ‌ها و ویرایش</button>}
+                                {selectedPlayableFilesForActions.length > 0 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2 text-emerald-200" onClick={() => { startQueue(selectedPlayableFilesForActions,0); cancelSelection(); addToast('صف پخش موقت ساخته شد.'); }}><Play className="w-4 h-4" /> پخش پشت‌سرهم</button>}
                                 {selectedPlayableFilesForActions.length > 0 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => setPlaylistFiles(selectedPlayableFilesForActions)}><ListPlus className="w-4 h-4" /> افزودن به پلی‌لیست</button>}
                                 {selectedFilesForActions.length > 0 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => { selectedFilesForActions.forEach(file => void saveFileOffline(file)); addToast(`${selectedFilesForActions.length.toLocaleString('fa-IR')} فایل به صف ذخیره آفلاین اضافه شد.`); }}><DownloadCloud className="w-4 h-4" /> ذخیره آفلاین</button>}
                                 {selectedFilesForActions.length > 0 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => void downloadSelectedFiles()}><Download className="w-4 h-4" /> دانلود</button>}
@@ -969,6 +991,7 @@ export default function FileBrowser() {
                                         <ArrowDown className="h-4 w-4" />
                                     </button>
                                     <button title="فقط نشان‌شده‌ها" aria-label="فقط نشان‌شده‌ها" onClick={() => { setFavoriteOnly(value => !value); setPage(1); setAllFiles([]); }} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs transition-colors ${favoriteOnly ? 'bg-amber-400/15 text-amber-200' : 'text-dark-400 hover:text-white'}`}><Star className={`h-4 w-4 ${favoriteOnly ? 'fill-current' : ''}`}/></button>
+                                    <button title={showHidden?'بستن گاوصندوق':'نمایش موارد مخفی'} aria-label={showHidden?'بستن گاوصندوق':'نمایش موارد مخفی'} onClick={() => { if (showHidden) { setShowHidden(false); setPage(1); setAllFiles([]); return; } if (!sessionStorage.getItem('komod-vault-token')) { addToast('اول از تنظیمات امنیتی، گاوصندوق را باز کن.', 'error'); setActiveSection('settings'); return; } setShowHidden(true); setPage(1); setAllFiles([]); }} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs transition-colors ${showHidden ? 'bg-amber-400/15 text-amber-200' : 'text-dark-400 hover:text-white'}`}>{showHidden?<Eye className="h-4 w-4"/>:<EyeOff className="h-4 w-4"/>}</button>
                                     {!readOnlyWorkspace && <button title="انتخاب گروهی" aria-label="انتخاب گروهی" onClick={toggleSelectionMode} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs transition-colors ${selectionMode ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:text-white'}`}>
                                         <ListChecks className="h-4 w-4" />
                                     </button>}
