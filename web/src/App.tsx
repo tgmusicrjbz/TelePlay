@@ -1,6 +1,6 @@
 import { Routes, Route, Navigate, useSearchParams, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import { api, AuthResponse, getKomodDeviceId, resolveServerUrl, useCurrentUser, useLoginWithCode, useBotInfo, useGenerateLoginCode, useVerifyLoginCode } from './lib/api';
+import { api, AuthResponse, getKomodDeviceId, resolveServerUrl, useCurrentUser, useLoginWithCode, usePasswordLogin, useBotInfo, useGenerateLoginCode, useVerifyLoginCode } from './lib/api';
 import FileBrowser from './components/FileBrowser';
 import GlobalContextMenu from './components/GlobalContextMenu';
 import PwaManager from './components/PwaManager';
@@ -160,13 +160,18 @@ function LoginPage() {
     const { mutate: loginByCode, isPending: isVerifying } = useLoginWithCode();
     const { mutate: generateCode, isPending: isGenerating } = useGenerateLoginCode();
     const { mutate: verifyCode } = useVerifyLoginCode();
+    const passwordLogin = usePasswordLogin();
     
     const [code, setCode] = useState('');
     const [isPolling, setIsPolling] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [loginMode, setLoginMode] = useState<'password'|'telegram'>('password');
+    const [loginUsername, setLoginUsername] = useState('');
+    const [loginPassword, setLoginPassword] = useState('');
 
     // Initial code generation
     useEffect(() => {
+        if (loginMode !== 'telegram' || code) return;
         generateCode(undefined, {
             onSuccess: (data) => {
                 setCode(data.code);
@@ -176,7 +181,7 @@ function LoginPage() {
                 setError(err.response?.data?.detail || 'ساخت کد ورود انجام نشد.');
             }
         });
-    }, [generateCode]);
+    }, [generateCode, loginMode, code]);
 
     // Polling logic
     useEffect(() => {
@@ -215,6 +220,19 @@ function LoginPage() {
         });
     };
 
+    const handlePasswordLogin = (event: React.FormEvent) => {
+        event.preventDefault();
+        setError(null);
+        passwordLogin.mutate({ username: loginUsername.trim(), password: loginPassword }, {
+            onSuccess: data => {
+                saveAuthenticatedAccount(data);
+                localStorage.setItem('komod-manual-account', String(data.user.telegram_id));
+                window.location.href = '/';
+            },
+            onError: (err: any) => setError(err.response?.data?.detail || 'ورود انجام نشد.'),
+        });
+    };
+
     return (
         <div dir="rtl" className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
             {/* Gradient mesh background */}
@@ -235,9 +253,15 @@ function LoginPage() {
                     درایو ابری و پخش‌کننده شخصی تو روی تلگرام
                 </p>
 
+                <div className="mb-5 grid grid-cols-2 rounded-xl border border-white/[.07] bg-dark-950/50 p-1">
+                    <button onClick={()=>{setLoginMode('password');setError(null);}} className={`min-h-10 rounded-lg text-sm transition ${loginMode==='password'?'bg-primary-500 text-white':'text-dark-400'}`}>نام کاربری</button>
+                    <button onClick={()=>{setLoginMode('telegram');setError(null);}} className={`min-h-10 rounded-lg text-sm transition ${loginMode==='telegram'?'bg-primary-500 text-white':'text-dark-400'}`}>ورود با تلگرام</button>
+                </div>
+
                 <div className="space-y-6">
+                    {loginMode === 'password' && <div className="glass-card p-6 text-right"><h3 className="mb-4 text-center font-medium text-white">ورود به کمد</h3><form onSubmit={handlePasswordLogin} className="space-y-3"><input dir="ltr" autoComplete="username" value={loginUsername} onChange={event=>setLoginUsername(event.target.value)} className="input w-full text-left" placeholder="نام کاربری"/><input dir="ltr" type="password" autoComplete="current-password" value={loginPassword} onChange={event=>setLoginPassword(event.target.value)} className="input w-full text-left" placeholder="رمز عبور"/><button disabled={passwordLogin.isPending||loginUsername.trim().length<4||loginPassword.length<10} className="btn-primary min-h-11 w-full disabled:opacity-50">{passwordLogin.isPending?'در حال ورود…':'ورود'}</button>{error&&<p className="text-center text-sm text-red-300">{error}</p>}</form><button onClick={()=>setLoginMode('telegram')} className="mt-4 w-full text-center text-xs text-primary-300">اولین ورود یا بازیابی با تلگرام</button></div>}
                     {/* Login Code Section */}
-                    <div className="glass-card p-6">
+                    <div className={`${loginMode === 'telegram' ? 'block' : 'hidden'} glass-card p-6`}>
                         <h3 className="text-white font-medium mb-4 flex items-center justify-center gap-2">
                             <svg className="w-5 h-5 text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
@@ -292,7 +316,7 @@ function LoginPage() {
                         </div>
                     </div>
 
-                    <div className="relative">
+                    <div className={`${loginMode === 'telegram' ? 'block' : 'hidden'} relative`}>
                         <div className="absolute inset-0 flex items-center">
                             <div className="w-full border-t border-white/[0.06]"></div>
                         </div>
@@ -301,7 +325,7 @@ function LoginPage() {
                         </div>
                     </div>
 
-                    <BotLink code={code} />
+                    {loginMode === 'telegram' && <BotLink code={code} />}
                 </div>
             </div>
         </div>

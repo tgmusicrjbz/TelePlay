@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../lib/store';
 import { TelegramFile, Folder, api, canPreviewText, useUpdateFile, useUpdateFolder } from '../lib/api';
-import { Play, Download, DownloadCloud, Link, Edit, FolderInput, Trash2, Globe, ShieldOff, HardDriveDownload, Eye, AlignLeft, ListPlus, Heart, Info, Pin } from 'lucide-react';
+import { Play, Download, DownloadCloud, Link, Edit, FolderInput, Trash2, Globe, ShieldOff, HardDriveDownload, Eye, AlignLeft, ListPlus, Heart, Info, Pin, Tags } from 'lucide-react';
 import { saveFileOffline } from '../lib/offline';
 
 export default function GlobalContextMenu() {
@@ -264,6 +264,10 @@ export default function GlobalContextMenu() {
                                 <button className="context-menu-item w-full text-right" onClick={() => handleAction(() => setDescriptionItem({ type: 'file', item: activeContextMenu.item as TelegramFile }))}>
                                     <AlignLeft className="w-4 h-4" />
                                     {(activeContextMenu.item as TelegramFile).description ? 'ویرایش توضیحات' : 'افزودن توضیحات'}
+                                </button>
+                                <button className="context-menu-item w-full text-right" onClick={() => handleAction(() => setDetailsFile(activeContextMenu.item as TelegramFile))}>
+                                    <Tags className="h-4 w-4" />
+                                    ویرایش تگ‌ها
                                 </button>
                                 <button className="context-menu-item w-full text-right" onClick={() => handleAction(() => setMoveItems({ files: [activeContextMenu.item as TelegramFile], folders: [] }))}>
                                     <FolderInput className="w-4 h-4" />

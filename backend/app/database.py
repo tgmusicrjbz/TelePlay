@@ -74,6 +74,15 @@ async def init_db():
             await conn.execute(text("ALTER TABLE users ADD COLUMN display_name VARCHAR(255)"))
         if "storage_channel_id" not in user_columns:
             await conn.execute(text("ALTER TABLE users ADD COLUMN storage_channel_id BIGINT"))
+        if "login_username" not in user_columns:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN login_username VARCHAR(64)"))
+        await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_login_username ON users (login_username)"))
+        if "password_hash" not in user_columns:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN password_hash TEXT"))
+        if "failed_login_attempts" not in user_columns:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN failed_login_attempts INTEGER NOT NULL DEFAULT 0"))
+        if "login_locked_until" not in user_columns:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN login_locked_until TIMESTAMP"))
         if "is_active" not in user_columns:
             active_type = "BOOLEAN" if url.drivername.startswith("postgresql") else "INTEGER"
             active_default = "TRUE" if url.drivername.startswith("postgresql") else "1"

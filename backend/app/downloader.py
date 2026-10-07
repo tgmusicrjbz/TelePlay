@@ -149,7 +149,7 @@ class LinkImportService:
         if self.client is None or self.task is None or self.task.done():
             await self.start()
         job.id = job.id or uuid.uuid4().hex
-        self.statuses[job.id] = {"id": job.id, "user_id": job.user_id, "state": "queued", "message": "توی صفه و به‌زودی شروع می‌شه.", "saved": 0}
+        self.statuses[job.id] = {"id": job.id, "user_id": job.user_id, "state": "queued", "message": "در صف", "saved": 0}
         self.controls[job.id] = {"paused": False, "cancelled": False}
         await self.queue.put(job)
         return self.queue.qsize()
@@ -165,10 +165,10 @@ class LinkImportService:
             return status
         control["paused"] = not control["paused"]
         if control["paused"]:
-            status.update(state="paused", message="فعلاً متوقف شده؛ هر وقت خواستی ادامه بده.")
+            status.update(state="paused", message="متوقف شد")
         else:
             state = "downloading" if self.active_job_id == job_id else "queued"
-            status.update(state=state, message="دوباره ادامه پیدا کرد.")
+            status.update(state=state, message="ادامه یافت")
         return status
 
     def cancel(self, job_id: str, user_id: int) -> dict | None:
@@ -178,7 +178,7 @@ class LinkImportService:
             return status
         control["cancelled"] = True
         control["paused"] = False
-        status.update(state="cancelled", message="این مورد از صف کنار گذاشته شد.")
+        status.update(state="cancelled", message="لغو شد")
         return status
 
     async def _checkpoint(self, job: ImportJob) -> bool:
@@ -194,9 +194,7 @@ class LinkImportService:
                 self.active_job_id = job.id
                 if not await self._checkpoint(job):
                     continue
-                self.statuses[job.id].update(state="downloading", message="دارم فایل اصلی رو آماده می‌کنم…")
-                if job.notify:
-                    await self._notify(job, "⏳ نوبت لینک تو رسید؛ دارم فایل اصلی رو آماده می‌کنم…")
+                self.statuses[job.id].update(state="downloading", message="در حال دریافت فایل اصلی")
                 playlist_title, playlist_entries = await asyncio.to_thread(_youtube_playlist_entries, job.url)
                 sources = playlist_entries or [{"url": job.url, "title": ""}]
                 items: list[dict] = []
@@ -204,7 +202,7 @@ class LinkImportService:
                     if not await self._checkpoint(job):
                         break
                     if len(sources) > 1:
-                        self.statuses[job.id].update(message=f"دارم مورد {source_index} از {len(sources)} را آماده می‌کنم…")
+                        self.statuses[job.id].update(message=f"مورد {source_index} از {len(sources)}")
                     downloaded = await self._download(source["url"], job.quality)
                     for item_index, item in enumerate(downloaded, 1):
                         item["source_url"] = source["url"]
@@ -220,8 +218,8 @@ class LinkImportService:
                     raise RuntimeError("هیچ فایل قابل ذخیره‌ای در پاسخ پیدا نشد")
                 if job.notify:
                     count = str(len(saved)).translate(str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹"))
-                    await self._notify(job, f"✅ آماده شد! {count} فایل توی کمدت قرار گرفت.")
-                self.statuses[job.id].update(state="done", message="فایل‌ها با موفقیت به کمد اضافه شدند.", saved=len(saved))
+                    await self._notify(job, f"✅ {count} فایل به کمد اضافه شد.")
+                self.statuses[job.id].update(state="done", message="آماده شد", saved=len(saved))
             except asyncio.CancelledError:
                 raise
             except Exception as error:

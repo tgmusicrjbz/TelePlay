@@ -30,6 +30,7 @@ export interface User {
     display_name?: string | null;
     is_active?: boolean;
     is_admin?: boolean;
+    login_username?: string | null;
 }
 
 export interface AuthSession { id: string; device_name: string; user_agent?: string | null; ip_address?: string | null; created_at: string; last_seen_at: string; current: boolean; }
@@ -154,6 +155,7 @@ export interface AuthResponse {
     refresh_token: string;
     user: User;
 }
+export interface CredentialsStatus { enabled: boolean; username?: string | null; }
 
 export function getKomodDeviceId(): string {
     const storageKey = 'komod-device-id';
@@ -691,6 +693,30 @@ export const useReorderPlaylistCatalog = () => {
     });
 };
 
+export const usePasswordLogin = () => useMutation({
+    mutationFn: async (payload: { username: string; password: string }) => (await api.post<AuthResponse>('/auth/password/login', payload)).data,
+});
+
+export const useCredentials = () => useQuery({
+    queryKey: ['credentials'],
+    queryFn: async () => (await api.get<CredentialsStatus>('/auth/credentials')).data,
+});
+
+export const useUpdateCredentials = () => {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async (payload: { username: string; current_password?: string; new_password?: string }) => (await api.put<AuthResponse>('/auth/credentials', payload)).data,
+        onSuccess: data => {
+            localStorage.setItem('access_token', data.access_token);
+            localStorage.setItem('refresh_token', data.refresh_token);
+            localStorage.setItem('user', JSON.stringify(data.user));
+            queryClient.setQueryData(['currentUser'], data.user);
+            queryClient.invalidateQueries({ queryKey: ['credentials'] });
+            queryClient.invalidateQueries({ queryKey: ['sessions'] });
+        },
+    });
+};
+
 export const useImportLink = () => useMutation({
     mutationFn: async (payload: { url: string; folder_id?: number | null; new_folder_name?: string; quality?: 'auto' | 'audio' | '480' | '720' | '1080' }) =>
         (await api.post<{ message: string; queue_position: number; job_id: string }>('/files/import-link', payload)).data,
@@ -757,6 +783,9 @@ export interface BatchFileEdit {
     rename_mode?: 'prefix' | 'suffix' | 'replace';
     rename_value?: string;
     rename_search?: string;
+    tags_add?: string[];
+    tags_remove?: string[];
+    tags_replace?: string[];
 }
 
 export const useBatchUpdateFiles = () => {

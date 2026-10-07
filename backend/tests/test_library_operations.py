@@ -3,6 +3,7 @@ import os
 import io
 import sys
 import asyncio
+import json
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -21,11 +22,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from fastapi import HTTPException
 from starlette.datastructures import Headers, UploadFile
+from starlette.requests import Request
 from sqlalchemy import select
 
 from app.database import Base, async_session, engine
 from app.models import AuthSession, BotUserState, File, Folder, Playlist, PlaylistItem, User, WatchProgress
-from app.routers.auth import _session_for_device
+from app.routers.auth import _session_for_device, password_login, update_credentials
 from app.routers.files import (
     batch_update_files,
     get_activity,
@@ -37,7 +39,7 @@ from app.routers.files import (
 from app.routers.folders import delete_folder_contents, list_folders, update_folder
 from app.routers.streaming import stored_message_response
 from app.routers.playlists import add_playlist_items, create_playlist, reorder_playlist, shuffle_playlist
-from app.schemas import BatchFileUpdate, FileUpdate, FolderUpdate, PlaylistAddItems, PlaylistCreate, PlaylistReorder
+from app.schemas import BatchFileUpdate, CredentialsUpdate, FileUpdate, FolderUpdate, PasswordLoginRequest, PlaylistAddItems, PlaylistCreate, PlaylistReorder
 from app.telegram import configure_main_client, start_one_client
 from app import telegram
 
@@ -69,6 +71,34 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             self.user_id, self.parent_id, self.folder_id, self.child_id = user.id, parent.id, folder.id, child.id
             self.direct_file_id = direct.id
             self.nested_file_id = nested.id
+
+    @staticmethod
+    def auth_request() -> Request:
+        return Request({
+            "type": "http", "method": "POST", "path": "/api/auth/password/login",
+            "headers": [(b"user-agent", b"Komod Test"), (b"x-komod-device-id", b"test-device")],
+            "client": ("127.0.0.1", 1234),
+        })
+
+    async def test_password_credentials_can_be_enabled_and_used(self):
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            response = await update_credentials(
+                self.auth_request(),
+                CredentialsUpdate(username="mahdi.komod", new_password="safe-password-1405"),
+                user, db,
+            )
+            self.assertEqual(response.user.login_username, "mahdi.komod")
+            login = await password_login(
+                self.auth_request(),
+                PasswordLoginRequest(username="MAHDI.KOMOD", password="safe-password-1405"),
+                db,
+            )
+            self.assertEqual(login.user.telegram_id, 111)
+            sessions = (await db.execute(select(AuthSession).where(
+                AuthSession.user_id == self.user_id, AuthSession.revoked_at.is_(None)
+            ))).scalars().all()
+            self.assertEqual(len(sessions), 1)
 
     async def asyncTearDown(self):
         await engine.dispose()
@@ -293,6 +323,33 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual([item.file_name for item in refreshed], ["fav-one.mp4", "fav-two.mp3"])
             self.assertEqual([item.description for item in refreshed], ["old\nnew", "new"])
 
+    async def test_batch_edit_adds_removes_and_replaces_tags(self):
+        async with async_session() as db:
+            first = self.make_file(self.user_id, None, 126)
+            first.tags_json = '["مهم", "قدیمی"]'
+            second = self.make_file(self.user_id, None, 127)
+            second.tags_json = '["موسیقی"]'
+            db.add_all([first, second])
+            await db.commit()
+            user = await db.get(User, self.user_id)
+
+            await batch_update_files(BatchFileUpdate(
+                ids=[first.id, second.id], tags_add=["جدید", "مهم"], tags_remove=["قدیمی"],
+            ), db, user)
+            refreshed = (await db.execute(select(File).where(
+                File.id.in_([first.id, second.id])
+            ).order_by(File.id))).scalars().all()
+            self.assertEqual(json.loads(refreshed[0].tags_json), ["مهم", "جدید"])
+            self.assertEqual(json.loads(refreshed[1].tags_json), ["موسیقی", "جدید", "مهم"])
+
+            await batch_update_files(BatchFileUpdate(
+                ids=[first.id, second.id], tags_replace=["یکسان", "یکسان"],
+            ), db, user)
+            refreshed = (await db.execute(select(File).where(
+                File.id.in_([first.id, second.id])
+            ).order_by(File.id))).scalars().all()
+            self.assertEqual([json.loads(item.tags_json) for item in refreshed], [["یکسان"], ["یکسان"]])
+
     async def test_folder_management_groups_edit_actions(self):
         from app.telegram import build_clients
         build_clients()
@@ -513,7 +570,7 @@ class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(settings, "auth_users_str", ""):
             await handle_callback(None, callback)
         callback.message.edit.assert_awaited_once()
-        self.assertIn("رسیدیم به کُمدت", callback.message.edit.await_args.args[0])
+        self.assertIn("کمد من", callback.message.edit.await_args.args[0])
 
     async def test_main_client_failure_aborts_startup(self):
         client = SimpleNamespace(start=AsyncMock(side_effect=RuntimeError("invalid credentials")), is_connected=False)

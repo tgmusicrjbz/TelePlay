@@ -26,6 +26,7 @@ class UserResponse(UserBase):
     display_name: Optional[str] = None
     is_active: bool = True
     is_admin: bool = False
+    login_username: Optional[str] = None
     
     model_config = ConfigDict(from_attributes=True)
 
@@ -105,6 +106,9 @@ class BatchFileUpdate(BaseModel):
     rename_mode: Optional[Literal["prefix", "suffix", "replace"]] = None
     rename_value: Optional[str] = None
     rename_search: Optional[str] = None
+    tags_add: List[str] = Field(default_factory=list, max_length=20)
+    tags_remove: List[str] = Field(default_factory=list, max_length=20)
+    tags_replace: Optional[List[str]] = Field(default=None, max_length=20)
 
 
 class FileResponse(FileBase):
@@ -255,6 +259,22 @@ class AuthResponse(Token):
 
 class TelegramWebAppRequest(BaseModel):
     init_data: str = Field(min_length=1)
+
+
+class PasswordLoginRequest(BaseModel):
+    username: str = Field(min_length=4, max_length=32)
+    password: str = Field(min_length=10, max_length=128)
+
+
+class CredentialsUpdate(BaseModel):
+    username: str = Field(min_length=4, max_length=32)
+    current_password: Optional[str] = Field(default=None, max_length=128)
+    new_password: Optional[str] = Field(default=None, min_length=10, max_length=128)
+
+
+class CredentialsStatus(BaseModel):
+    enabled: bool
+    username: Optional[str] = None
 
 
 class SessionResponse(BaseModel):

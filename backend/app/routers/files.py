@@ -638,7 +638,23 @@ async def batch_update_files(
     if update_data.rename_mode == "replace" and not update_data.rename_search:
         raise HTTPException(status_code=400, detail="Search text is required")
 
+    def clean_tags(values: list[str]) -> list[str]:
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        for raw in values:
+            tag = raw.strip()[:40]
+            key = tag.casefold()
+            if tag and key not in seen:
+                cleaned.append(tag)
+                seen.add(key)
+            if len(cleaned) >= 20:
+                break
+        return cleaned
+
     description = (update_data.description or "").strip()[:1024]
+    tags_to_add = clean_tags(update_data.tags_add)
+    tags_to_remove = {tag.casefold() for tag in clean_tags(update_data.tags_remove)}
+    replacement_tags = clean_tags(update_data.tags_replace) if update_data.tags_replace is not None else None
     for file in files:
         if update_data.description_mode == "clear":
             file.description = None
@@ -659,6 +675,23 @@ async def batch_update_files(
             else:
                 stem = stem.replace(update_data.rename_search or "", update_data.rename_value or "")
             file.file_name = sanitize_filename(f"{stem}.{extension}" if extension else stem)
+
+        if replacement_tags is not None:
+            tags = list(replacement_tags)
+        else:
+            try:
+                stored_tags = json.loads(file.tags_json or "[]")
+                tags = clean_tags(stored_tags if isinstance(stored_tags, list) else [])
+            except (TypeError, ValueError, json.JSONDecodeError):
+                tags = []
+            if tags_to_remove:
+                tags = [tag for tag in tags if tag.casefold() not in tags_to_remove]
+            existing = {tag.casefold() for tag in tags}
+            for tag in tags_to_add:
+                if tag.casefold() not in existing and len(tags) < 20:
+                    tags.append(tag)
+                    existing.add(tag.casefold())
+        file.tags_json = json.dumps(tags, ensure_ascii=False)
 
     await db.commit()
     return {"message": f"Updated {len(files)} files", "updated": len(files)}

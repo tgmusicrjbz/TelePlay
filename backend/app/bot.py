@@ -727,13 +727,8 @@ def file_detail_keyboard_for_user(file: File, telegram_id: int) -> InlineKeyboar
 
 
 HELP_TEXT = (
-    "💡 **راهنمای کمد 🗄️**\n\n"
-    "📥 فیلم، آهنگ، عکس، سند یا متن رو بفرست تا برات نگه دارم.\n"
-    "📝 کپشن هر فایل هم به‌عنوان توضیحاتش ذخیره می‌شه و بعداً می‌تونی تغییرش بدی.\n"
-    "🔍 برای پیدا کردن فایل‌ها، هم عبارت جست‌وجو داری هم انتخاب چند نوع محتوا.\n"
-    "🎧 آهنگ‌ها و ویدیوها رو داخل پلی‌لیست بچین و پشت‌سرهم پخش کن.\n"
-    "🗃️ کشوها می‌تونن چندلایه باشن و هر کدوم اسم و توضیحات خودشون رو داشته باشن.\n\n"
-    "روی هر فایل یا کشو بزن تا گزینه‌های دیدن، ویرایش، انتقال، اشتراک و حذف رو ببینی ✨"
+    "💡 **راهنمای کمد**\n\n"
+    "فایل یا متن بفرست تا ذخیره شود. از منوی زیر هم می‌توانی کشوها، جست‌وجو و پلی‌لیست‌ها را باز کنی."
 )
 
 
@@ -743,9 +738,8 @@ def main_menu_keyboard(telegram_id: int) -> InlineKeyboardMarkup:
          InlineKeyboardButton("📦 همه‌ی فایل‌ها", callback_data="files:0")],
         [InlineKeyboardButton("➕ کشوی تازه", callback_data="create_folder"),
          InlineKeyboardButton("🔍 بگرد تو کمد", callback_data="search_choose")],
-        [InlineKeyboardButton("🎧 پلی‌لیست‌های من", callback_data="playlists:0")],
-        [get_web_app_button(telegram_id, "✨ باز کردن نسخهٔ وب")],
-        [InlineKeyboardButton("💡 راهنمای کمد", callback_data="show_help")],
+        [InlineKeyboardButton("🎧 پلی‌لیست‌ها", callback_data="playlists:0"),
+         get_web_app_button(telegram_id, "🌐 باز کردن کمد")],
     ])
 
 
@@ -925,10 +919,7 @@ async def start_command(client, message: Message):
                      return
 
     await message.reply(
-        f"👋 **سلام {message.from_user.first_name or 'رفیق'} عزیز! به کمدت خوش اومدی 🗄️**\n\n"
-        "اینجا می‌تونی 🎬 فیلم، 🎵 آهنگ، 🖼 عکس، 📄 سند و 📝 متن‌هات رو یک‌جا نگه داری. "
-        "هرچی بفرستی برات ذخیره می‌کنم و کپشنش هم به‌عنوان توضیحات کنار فایل می‌مونه 😉\n\n"
-        "آماده‌ای کمدتو بچینیم؟ از یکی از گزینه‌های پایین شروع کن 👇",
+        f"🗄️ **سلام {message.from_user.first_name or 'رفیق'}!**\nفایل بفرست یا یکی از بخش‌ها را باز کن.",
         reply_markup=main_menu_keyboard(message.from_user.id),
     )
 
@@ -1227,23 +1218,12 @@ async def _handle_file_impl(client, message: Message, status_msg: Message):
         # Build response
         emoji = {"video": "🎬", "audio": "🎵", "document": "📄", "image": "🖼"}.get(file_type, "📎")
         
-        response = (
-            f"✅ **ذخیره شد**\n\n"
-            f"{emoji} **{display_filename(file_info['file_name'])}**\n"
-            f"📦 {format_size(file_info['file_size'])}\n"
-        )
-        
-        if file_info['duration']:
-            response += f"⏱ {format_duration(file_info['duration'])}\n"
-        response += "\nبا دکمه‌های پایین فایل رو مدیریت کن."
-        
-        if file.description:
-            response += f"\n📝 {escape_markdown(file.description[:250])}"
+        response = f"✅ ذخیره شد\n{emoji} **{display_filename(file_info['file_name'])}**"
         if active_drawer_id:
             async with async_session() as db:
                 drawer = await db.get(Folder, active_drawer_id)
             if drawer:
-                response += f"\n🗃️ در کشوی «{escape_markdown(drawer.name)}» ذخیره شد."
+                response += f"\n🗃️ در کشوی «{escape_markdown(drawer.name)}»"
         detail_back_targets[message.from_user.id] = "files:0"
         await status_msg.edit(response, reply_markup=file_detail_keyboard(file))
         chat_id = getattr(getattr(status_msg, "chat", None), "id", None) or getattr(getattr(message, "chat", None), "id", message.from_user.id)
@@ -1262,7 +1242,7 @@ async def handle_file(client, message: Message):
     status_msg = None
     try:
         logger.info("Incoming Telegram media user=%s message=%s", message.from_user.id, message.id)
-        status_msg = await message.reply("📥 گرفتمش؛ دارم توی کمد ذخیره‌اش می‌کنم…")
+        status_msg = await message.reply("⏳ در حال ذخیره…")
         await _handle_file_impl(client, message, status_msg)
     except Exception as error:
         user_id = getattr(getattr(message, "from_user", None), "id", "unknown")
@@ -1295,7 +1275,7 @@ async def handle_import_link(client, message: Message):
             url = raw_url.rstrip(".,;!?)]}>'\"")
             positions.append(await link_importer.enqueue(ImportJob(url=url, user_id=user.id, telegram_id=user.telegram_id, folder_id=None, notify=True, default_folder=True)))
         count = to_persian_digits(str(len(matches)))
-        reply = await message.reply(f"🔗 {count} لینک رفت توی صف دانلود.\nلازم نیست منتظر بمونی؛ هرکدوم آماده بشه خبرت می‌کنم ✨")
+        reply = await message.reply(f"⏳ {count} لینک در صف است؛ پس از آماده‌شدن خبرت می‌کنم.")
         asyncio.create_task(delete_preview_later(client, reply.chat.id, reply.id, 30))
     except Exception as error:
         logger.exception("Could not enqueue link import: %s", error)
@@ -1903,7 +1883,7 @@ async def handle_callback(client, callback: CallbackQuery):
         current_drawers[callback.from_user.id] = None
         await persist_user_ui_state(callback.from_user.id)
         await safe_edit(callback.message,
-            "🗄️ **رسیدیم به کُمدت!**\n\nهمه‌چیز مرتب سر جاشه؛ می‌تونی فایل‌هات رو ببینی، کشوهاتو باز کنی یا فایلی رو پیدا کنی. از کجا ادامه بدیم؟ 👇",
+            "🗄️ **کمد من**\nفایل بفرست یا یک بخش را باز کن.",
             reply_markup=main_menu_keyboard(callback.from_user.id),
         )
         await callback.answer()
@@ -1999,7 +1979,7 @@ async def handle_callback(client, callback: CallbackQuery):
         if search_filter_returns.pop(callback.from_user.id, "home") == "results" and search_queries.get(callback.from_user.id):
             await render_search_results(callback.message, callback.from_user.id)
         else:
-            await callback.message.edit("🗄️ **رسیدیم به کُمدت!**\n\nهمه‌چیز مرتب سر جاشه؛ می‌تونی فایل‌هات رو ببینی، کشوهاتو باز کنی یا فایلی رو پیدا کنی. از کجا ادامه بدیم؟ 👇", reply_markup=main_menu_keyboard(callback.from_user.id))
+            await callback.message.edit("🗄️ **کمد من**\nفایل بفرست یا یک بخش را باز کن.", reply_markup=main_menu_keyboard(callback.from_user.id))
         await callback.answer("جست‌وجو لغو شد.")
 
     elif data in ("search_filter_apply", "search_prompt", "search_again"):
