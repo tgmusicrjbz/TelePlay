@@ -651,12 +651,13 @@ async def render_search_results(message: Message, telegram_id: int, page: int = 
     async with async_session() as db:
         user = (await db.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
         pattern = f"%{escape_like(query)}%"
-        file_conditions = [File.user_id == user.id, or_(File.file_name.ilike(pattern, escape="\\"), File.description.ilike(pattern, escape="\\"))] if user else []
+        file_conditions = [File.user_id == user.id, File.is_hidden.is_(False), or_(File.file_name.ilike(pattern, escape="\\"), File.description.ilike(pattern, escape="\\"))] if user else []
         if file_types:
             file_conditions.append(File.file_type.in_(file_types))
         files = (await db.execute(select(File).where(*file_conditions).order_by(File.created_at.desc()))).scalars().all() if user and include_files else []
         folders = (await db.execute(select(Folder).where(
             Folder.user_id == user.id,
+            Folder.is_hidden.is_(False),
             or_(Folder.name.ilike(pattern, escape="\\"), Folder.description.ilike(pattern, escape="\\")),
         ).order_by(Folder.name))).scalars().all() if user and include_folders else []
     items = sort_library_items([("folder", folder) for folder in folders] + [("file", file) for file in files], telegram_id)
@@ -1555,7 +1556,7 @@ async def handle_callback(client, callback: CallbackQuery):
             playlist = (await db.execute(owned_playlist(playlist_id, callback.from_user.id))).scalar_one_or_none()
             user = (await db.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one_or_none()
             existing = {item.file_id for item in playlist.items} if playlist else set()
-            files = (await db.execute(select(File).where(File.user_id == user.id, File.file_type.in_(("audio", "video"))).order_by(File.created_at.desc()))).scalars().all() if user and playlist else []
+            files = (await db.execute(select(File).where(File.user_id == user.id, File.is_hidden.is_(False), File.file_type.in_(("audio", "video"))).order_by(File.created_at.desc()))).scalars().all() if user and playlist else []
         page = min(max(page, 0), max(0, (len(files) - 1) // PAGE_SIZE))
         shown = files[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
         buttons = [[InlineKeyboardButton(
@@ -1588,7 +1589,7 @@ async def handle_callback(client, callback: CallbackQuery):
             playlist = (await db.execute(owned_playlist(playlist_id, callback.from_user.id))).scalar_one()
             user = (await db.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one()
             existing = {item.file_id for item in playlist.items}
-            files = (await db.execute(select(File).where(File.user_id == user.id, File.file_type.in_(("audio", "video"))).order_by(File.created_at.desc()))).scalars().all()
+            files = (await db.execute(select(File).where(File.user_id == user.id, File.is_hidden.is_(False), File.file_type.in_(("audio", "video"))).order_by(File.created_at.desc()))).scalars().all()
         shown = files[int(page_value) * PAGE_SIZE:(int(page_value) + 1) * PAGE_SIZE]
         buttons = [[InlineKeyboardButton(
             f"{'✅' if item.id in existing else '➕'} {FILE_ICONS.get(item.file_type, '🎵')} \u200e{item.file_name[:32]}\u200e",
@@ -1797,7 +1798,7 @@ async def handle_callback(client, callback: CallbackQuery):
             await callback.answer("اول حداقل یک فایل انتخاب کن.", show_alert=True)
             return
         await callback.message.edit(
-            f"🗑️ **حذف {to_persian_digits(str(count))} فایل**\nاین فایل‌ها از کمد و کانال ذخیره‌سازی حذف می‌شن. مطمئنی؟",
+            f"🗑️ **حذف {to_persian_digits(str(count))} فایل**\nاین کار قابل برگشت نیست. مطمئنی؟",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🗑️ بله، حذفشون کن", callback_data="batch_delete_confirm", style=enums.ButtonStyle.DANGER)],
                 [InlineKeyboardButton("↩️ برگشت", callback_data="batch_return")],
@@ -1810,16 +1811,17 @@ async def handle_callback(client, callback: CallbackQuery):
         async with async_session() as db:
             user = (await db.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one_or_none()
             files = (await db.execute(select(File).where(File.user_id == user.id, File.id.in_(selected_ids)))).scalars().all() if user else []
-            messages_by_channel: dict[int | None, list[int]] = {}
-            for item in files:
-                messages_by_channel.setdefault(item.storage_channel_id, []).append(item.channel_message_id)
-            for channel_id, message_ids in messages_by_channel.items():
-                for start in range(0, len(message_ids), 100):
-                    batch = message_ids[start:start + 100]
-                    deleted = await delete_from_storage_channel(batch, channel_id) if channel_id is not None else await delete_from_storage_channel(batch)
-                    if not deleted:
-                        await callback.answer("حذف از فضای ذخیره‌سازی انجام نشد.", show_alert=True)
-                        return
+            if user and user.delete_storage_files:
+                messages_by_channel: dict[int | None, list[int]] = {}
+                for item in files:
+                    messages_by_channel.setdefault(item.storage_channel_id, []).append(item.channel_message_id)
+                for channel_id, message_ids in messages_by_channel.items():
+                    for start in range(0, len(message_ids), 100):
+                        batch = message_ids[start:start + 100]
+                        deleted = await delete_from_storage_channel(batch, channel_id) if channel_id is not None else await delete_from_storage_channel(batch)
+                        if not deleted:
+                            await callback.answer("حذف از فضای ذخیره‌سازی انجام نشد.", show_alert=True)
+                            return
             for file in files:
                 await db.delete(file)
             await db.commit()
@@ -1840,7 +1842,7 @@ async def handle_callback(client, callback: CallbackQuery):
         page = int(data.split(":", 1)[1])
         async with async_session() as db:
             user = (await db.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one_or_none()
-            folders = (await db.execute(select(Folder).where(Folder.user_id == user.id).order_by(Folder.name))).scalars().all() if user else []
+            folders = (await db.execute(select(Folder).where(Folder.user_id == user.id, Folder.is_hidden.is_(False)).order_by(Folder.name))).scalars().all() if user else []
             targets = [(folder, await folder_path(db, folder)) for folder in folders]
         page = min(max(page, 0), max(0, (len(targets) - 1) // PAGE_SIZE))
         shown = targets[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]

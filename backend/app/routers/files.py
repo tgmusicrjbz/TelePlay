@@ -251,9 +251,9 @@ def apply_file_sort(query, sort: Optional[str]):
 @router.get("/{file_id}/text")
 async def get_text_preview(
     file_id: int,
-    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
     """Preview a saved text message or a small UTF-8 text document."""
     file = (await db.execute(select(File).where(
@@ -292,9 +292,9 @@ async def get_text_preview(
 async def update_text_content(
     file_id: int,
     payload: TextContentUpdate,
-    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
     """Edit a saved Telegram text note and keep the file metadata in sync."""
     file = (await db.execute(select(File).where(File.id == file_id, File.user_id == current_user.id))).scalar_one_or_none()
@@ -341,7 +341,6 @@ async def update_text_content(
 
 @router.get("", response_model=FileListResponse)
 async def list_files(
-    request: Request,
     folder_id: Optional[int] = Query(None, description="Filter by folder ID (null for root)"),
     file_type: Optional[str] = Query(None, description="Comma-separated file types"),
     search: Optional[str] = Query(None, description="Search by filename"),
@@ -353,6 +352,7 @@ async def list_files(
     favorite_only: bool = False,
     include_playlist_covers: bool = False,
     include_hidden: bool = False,
+    request: Request = None,
 ):
     """List user's files with optional filtering."""
     query = select(File).where(File.user_id == current_user.id).options(selectinload(File.watch_progress))
@@ -499,9 +499,9 @@ async def get_storage_stats(
 @router.get("/{file_id}", response_model=FileResponse)
 async def get_file(
     file_id: int,
-    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
     """Get a specific file by ID."""
     result = await db.execute(
@@ -521,9 +521,9 @@ async def get_file(
 async def update_file(
     file_id: int,
     update_data: FileUpdate,
-    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
     """Update file metadata (rename, move to folder)."""
     result = await db.execute(
@@ -584,9 +584,9 @@ async def update_file(
 @router.delete("/{file_id}")
 async def delete_file(
     file_id: int,
-    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
     """Delete a file from database and Telegram channel."""
     result = await db.execute(
@@ -615,9 +615,9 @@ async def delete_file(
 @router.post("/batch-delete")
 async def batch_delete_files(
     file_ids: list[int],
-    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
     """Delete multiple files."""
     # Fetch all files
@@ -656,9 +656,9 @@ async def batch_delete_files(
 @router.post("/batch-update")
 async def batch_update_files(
     update_data: BatchFileUpdate,
-    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
     """Edit descriptions and names for a selected group of files."""
     files = (await db.execute(select(File).where(
@@ -813,6 +813,8 @@ async def share_file(
     
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
+    if file.is_hidden:
+        raise HTTPException(status_code=409, detail="فایل مخفی را نمی‌توان عمومی کرد")
     
     # Generate hash if not exists or regenerate
     # Using 16 bytes = 32 hex chars
@@ -858,9 +860,9 @@ async def revoke_share(
 @router.post("/batch-move")
 async def batch_move_files(
     move_data: dict,
-    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
     """Move multiple files to a folder."""
     file_ids = move_data.get("ids", [])

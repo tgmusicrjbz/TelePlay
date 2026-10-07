@@ -1,13 +1,13 @@
 """Account switching, shared spaces and administrator controls."""
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from passlib.context import CryptContext
 from pyrogram.enums import ChatMemberStatus, ChatType
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth import create_vault_token, get_current_user
+from ..auth import create_vault_token, get_current_user, require_vault_access
 from ..config import get_settings
 from ..database import get_db
 from ..models import AuthSession, File, User, WorkspaceGrant
@@ -155,9 +155,12 @@ async def get_vault_status(current_user: User = Depends(get_current_user)):
 @router.put("/accounts/vault", response_model=VaultTokenResponse)
 async def set_vault_password(
     payload: VaultPasswordRequest,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    if current_user.vault_password_hash:
+        require_vault_access(request, current_user)
     current_user.vault_password_hash = vault_password_context.hash(payload.password)
     await db.commit()
     return VaultTokenResponse(token=create_vault_token(current_user.telegram_id, current_user.auth_version))

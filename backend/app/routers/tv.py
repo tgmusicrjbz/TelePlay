@@ -41,7 +41,7 @@ async def tv_browse(
     # Get top-level folders
     folders_query = (
         select(Folder)
-        .where(Folder.user_id == current_user.id, Folder.parent_id == None)
+        .where(Folder.user_id == current_user.id, Folder.parent_id == None, Folder.is_hidden.is_(False))
         .order_by(Folder.name)
     )
     folders_result = await db.execute(folders_query)
@@ -97,6 +97,7 @@ async def tv_search(
         select(File)
         .where(
             File.user_id == current_user.id,
+            File.is_hidden.is_(False),
             File.file_name.ilike(f"%{escape_like(q)}%", escape="\\")
         )
         .options(selectinload(File.watch_progress))
@@ -111,6 +112,7 @@ async def tv_search(
         select(Folder)
         .where(
             Folder.user_id == current_user.id,
+            Folder.is_hidden.is_(False),
             Folder.name.ilike(f"%{escape_like(q)}%", escape="\\")
         )
         .order_by(Folder.name)
@@ -146,7 +148,7 @@ async def tv_folder_detail(
     
     # Get the folder
     folder_result = await db.execute(
-        select(Folder).where(Folder.id == folder_id, Folder.user_id == current_user.id)
+        select(Folder).where(Folder.id == folder_id, Folder.user_id == current_user.id, Folder.is_hidden.is_(False))
     )
     folder = folder_result.scalar_one_or_none()
     
@@ -156,7 +158,7 @@ async def tv_folder_detail(
     # Get subfolders
     subfolders_result = await db.execute(
         select(Folder)
-        .where(Folder.user_id == current_user.id, Folder.parent_id == folder_id)
+        .where(Folder.user_id == current_user.id, Folder.parent_id == folder_id, Folder.is_hidden.is_(False))
         .order_by(Folder.name)
     )
     subfolders = subfolders_result.scalars().all()
@@ -164,7 +166,7 @@ async def tv_folder_detail(
     # Get files in this folder
     files_result = await db.execute(
         select(File)
-        .where(File.user_id == current_user.id, File.folder_id == folder_id)
+        .where(File.user_id == current_user.id, File.folder_id == folder_id, File.is_hidden.is_(False))
         .options(selectinload(File.watch_progress))
         .order_by(File.file_name)
     )

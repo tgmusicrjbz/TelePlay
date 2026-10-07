@@ -42,7 +42,7 @@ async def ensure_default_folder(db: AsyncSession, user_id: int) -> Folder:
     return folder
 
 
-async def get_all_folder_counts(db: AsyncSession, user_id: int) -> dict[int, int]:
+async def get_all_folder_counts(db: AsyncSession, user_id: int, include_hidden: bool = False) -> dict[int, int]:
     result = await db.execute(text("""
         WITH RECURSIVE hierarchy(ancestor_id, descendant_id) AS (
             SELECT id, id FROM folders WHERE user_id = :user_id
@@ -54,8 +54,9 @@ async def get_all_folder_counts(db: AsyncSession, user_id: int) -> dict[int, int
         SELECT h.ancestor_id, COUNT(fi.id)
         FROM hierarchy h
         LEFT JOIN files fi ON fi.folder_id = h.descendant_id AND fi.user_id = :user_id
+            AND (:include_hidden OR NOT fi.is_hidden)
         GROUP BY h.ancestor_id
-    """), {"user_id": user_id})
+    """), {"user_id": user_id, "include_hidden": include_hidden})
     return {int(folder_id): int(count) for folder_id, count in result.all()}
 
 
@@ -118,13 +119,13 @@ async def get_folder_file_count(db: AsyncSession, folder_id: int) -> int:
 
 @router.get("", response_model=List[FolderResponse])
 async def list_folders(
-    request: Request,
     parent_id: Optional[int] = Query(None, description="Filter by parent folder ID"),
     sort: Optional[str] = None,
     favorite_only: bool = False,
     include_hidden: bool = False,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
     """List drawers with recursive file counts."""
     if parent_id is None:
@@ -139,7 +140,7 @@ async def list_folders(
     if favorite_only:
         stmt = stmt.where(Folder.is_favorite.is_(True))
     folders = (await db.execute(stmt)).scalars().all()
-    counts = await get_all_folder_counts(db, current_user.id)
+    counts = await get_all_folder_counts(db, current_user.id, include_hidden)
     criteria = []
     for raw in (sort or "name:asc").split(",")[:4]:
         field, _, direction = raw.strip().partition(":")
@@ -162,10 +163,10 @@ async def list_folders(
 
 @router.get("/tree", response_model=List[FolderWithChildren])
 async def get_folder_tree(
-    request: Request,
     include_hidden: bool = False,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
     """Get the complete drawer tree with recursive counts."""
     await ensure_default_folder(db, current_user.id)
@@ -176,7 +177,7 @@ async def get_folder_tree(
     else:
         stmt = stmt.where(Folder.is_hidden.is_(False))
     folders = (await db.execute(stmt.order_by(Folder.name))).scalars().all()
-    counts = await get_all_folder_counts(db, current_user.id)
+    counts = await get_all_folder_counts(db, current_user.id, include_hidden)
     folder_map = {folder.id: {
         "id": folder.id, "name": folder.name, "description": folder.description,
         "parent_id": folder.parent_id, "user_id": folder.user_id,
@@ -197,9 +198,9 @@ async def get_folder_tree(
 @router.get("/{folder_id}", response_model=FolderResponse)
 async def get_folder(
     folder_id: int,
-    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
     folder = (await db.execute(select(Folder).where(
         Folder.id == folder_id, Folder.user_id == current_user.id
@@ -276,9 +277,9 @@ async def create_folder(
 async def update_folder(
     folder_id: int,
     update_data: FolderUpdate,
-    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
     """Update a folder (rename, move)."""
     result = await db.execute(
@@ -306,6 +307,23 @@ async def update_folder(
     if update_data.is_hidden is not None:
         if update_data.is_hidden and not current_user.vault_password_hash:
             raise HTTPException(status_code=409, detail="ابتدا برای گاوصندوق رمز تعیین کن")
+        descendants = (await db.execute(text("""
+            WITH RECURSIVE subtree AS (
+                SELECT id FROM folders WHERE id = :folder_id AND user_id = :user_id
+                UNION ALL
+                SELECT child.id FROM folders child JOIN subtree parent ON child.parent_id = parent.id
+                WHERE child.user_id = :user_id
+            ) SELECT id FROM subtree
+        """), {"folder_id": folder.id, "user_id": current_user.id})).scalars().all()
+        await db.execute(update(Folder).where(
+            Folder.id.in_(descendants), Folder.user_id == current_user.id
+        ).values(is_hidden=update_data.is_hidden))
+        file_values = {"is_hidden": update_data.is_hidden}
+        if update_data.is_hidden:
+            file_values["public_hash"] = None
+        await db.execute(update(File).where(
+            File.folder_id.in_(descendants), File.user_id == current_user.id
+        ).values(**file_values))
         folder.is_hidden = update_data.is_hidden
     if update_data.parent_id is not None:
         if folder.is_default:
@@ -367,11 +385,11 @@ async def update_folder(
 @router.delete("/{folder_id}")
 async def delete_folder(
     folder_id: int,
-    request: Request,
     delete_contents: bool = Query(False, description="Also delete files and subfolders"),
     move_files_to: Optional[int] = Query(None, description="Legacy destination for retained contents"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
     """Delete a folder; retain contents by default for older clients."""
     result = await db.execute(
@@ -404,10 +422,10 @@ async def delete_folder(
 @router.post("/batch-delete")
 async def batch_delete_folders(
     folder_ids: List[int],
-    request: Request,
     delete_contents: bool = Query(False, description="Also delete files and subfolders"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
     """Delete selected folders with the same explicit content choice."""
     deleted = 0
@@ -431,9 +449,9 @@ async def batch_delete_folders(
 @router.post("/batch-move")
 async def batch_move_folders(
     move_data: dict,
-    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
     """Move multiple folders to another folder."""
     folder_ids = move_data.get("ids", [])
