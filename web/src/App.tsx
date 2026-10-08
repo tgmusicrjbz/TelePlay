@@ -9,7 +9,7 @@ import ContentPreview from './components/ContentPreview';
 import AddToPlaylistDialog from './components/AddToPlaylistDialog';
 import FileDetailsSheet from './components/FileDetailsSheet';
 import OfflineDownloadProgressPanel from './components/OfflineDownloadProgress';
-import { saveAuthenticatedAccount } from './lib/accounts';
+import { restoreSavedSession, saveAuthenticatedAccount } from './lib/accounts';
 import { syncOfflineTextOutbox } from './lib/offline';
 
 function AuthCallback() {
@@ -105,11 +105,9 @@ function TelegramWebAppBootstrap({ children }: { children: React.ReactNode }) {
             }
             if (syncing) return;
             syncing = true;
-            if (currentId && currentId !== identity.userId) {
-                localStorage.removeItem('access_token');
-                localStorage.removeItem('refresh_token');
-                localStorage.removeItem('komod-active-workspace');
-            }
+            // Keep the last working account until Telegram authentication for the
+            // newly detected account succeeds. This makes transient/offline opens
+            // safe instead of leaving the app without a usable local session.
             if (!cancelled) setReady(false);
             const controller = new AbortController();
             const timeout = window.setTimeout(() => controller.abort(), 12000);
@@ -354,9 +352,11 @@ function BotLink({ code }: { code?: string }) {
 }
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
+    restoreSavedSession();
     const { isLoading, error } = useCurrentUser();
     const token = localStorage.getItem('access_token');
     const [online, setOnline] = useState(navigator.onLine && localStorage.getItem('komod-force-offline') !== '1');
+    const [authWaitExpired, setAuthWaitExpired] = useState(false);
 
     useEffect(() => {
         const update = () => setOnline(navigator.onLine && localStorage.getItem('komod-force-offline') !== '1');
@@ -370,13 +370,19 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
         };
     }, []);
 
+    useEffect(() => {
+        if (!isLoading) { setAuthWaitExpired(false); return; }
+        const timer = window.setTimeout(() => setAuthWaitExpired(true), 3000);
+        return () => window.clearTimeout(timer);
+    }, [isLoading]);
+
     if (!token) {
         return <Navigate to="/login" replace />;
     }
 
     if (!online) return <>{children}</>;
 
-    if (isLoading) {
+    if (isLoading && !authWaitExpired) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-dark-950">
                 <div className="text-center">

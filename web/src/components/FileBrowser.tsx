@@ -254,12 +254,14 @@ export default function FileBrowser() {
     }, []);
 
     useEffect(() => {
-        const applyConnectionMode = () => {
-            if (localStorage.getItem('komod-force-offline') === '1') setActiveSection('downloads');
+        const applyConnectionMode = (event?: Event) => {
+            if (event?.type === 'komod-server-unreachable' || !navigator.onLine || localStorage.getItem('komod-force-offline') === '1') setActiveSection('downloads');
         };
         applyConnectionMode();
         window.addEventListener('komod-connectivity-mode', applyConnectionMode);
-        return () => window.removeEventListener('komod-connectivity-mode', applyConnectionMode);
+        window.addEventListener('offline', applyConnectionMode);
+        window.addEventListener('komod-server-unreachable', applyConnectionMode);
+        return () => { window.removeEventListener('komod-connectivity-mode', applyConnectionMode); window.removeEventListener('offline', applyConnectionMode); window.removeEventListener('komod-server-unreachable', applyConnectionMode); };
     }, [setActiveSection]);
 
     useEffect(() => {

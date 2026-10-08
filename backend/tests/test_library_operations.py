@@ -410,12 +410,11 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
         async with async_session() as db:
             self.assertIsNotNone(await db.get(BotUserState, self.user_id))
 
-    async def test_telegram_upload_uses_current_drawer(self):
+    async def test_telegram_upload_uses_selected_upload_drawer(self):
         from app.telegram import build_clients
         build_clients()
-        from app.bot import current_drawers, handle_file, persist_user_ui_state
-        current_drawers[111] = self.folder_id
-        await persist_user_ui_state(111)
+        from app.bot import handle_file, set_upload_drawer
+        await set_upload_drawer(111, self.folder_id)
         media = SimpleNamespace(
             file_id="telegram-current", file_unique_id="telegram-current-unique",
             file_name="inside.mp4", file_size=1024, mime_type="video/mp4",

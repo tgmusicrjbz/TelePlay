@@ -3,6 +3,7 @@
  */
 import axios from 'axios';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { cachedCurrentUser } from './accounts';
 
 const normalizeServerOrigin = (value?: string | null) => {
     const trimmed = String(value || '').trim().replace(/\/+$/, '');
@@ -175,6 +176,7 @@ export function getKomodDeviceId(): string {
 // API client
 export const api = axios.create({
     baseURL: `${getServerOrigin()}/api`,
+    timeout: 15000,
 });
 
 const MEDIA_URL_KEYS = new Set(['stream_url', 'thumbnail_url', 'cover_url', 'public_stream_url']);
@@ -237,9 +239,17 @@ const processQueue = (error: any, token: string | null = null) => {
 
 // Handle 401 and 429 errors
 api.interceptors.response.use(
-    (response) => { resolveResponseMediaUrls(response.data); return response; },
+    (response) => {
+        window.dispatchEvent(new Event('komod-server-reachable'));
+        resolveResponseMediaUrls(response.data);
+        return response;
+    },
     async (error) => {
         const originalRequest = error.config;
+
+        if (!error.response && error.code !== 'ERR_CANCELED') {
+            window.dispatchEvent(new Event('komod-server-unreachable'));
+        }
 
         if (error.response?.status === 401 && !originalRequest._retry) {
             if (originalRequest.url.includes('/auth/refresh')) {
@@ -322,13 +332,16 @@ api.interceptors.response.use(
 // ============== Auth Hooks ==============
 
 export const useCurrentUser = () => {
+    const cachedUser = cachedCurrentUser();
     return useQuery({
         queryKey: ['currentUser'],
         queryFn: async () => {
-            const { data } = await api.get<User>('/auth/me');
+            const { data } = await api.get<User>('/auth/me', { timeout: 5000 });
             return data;
         },
         enabled: !!localStorage.getItem('access_token'),
+        initialData: cachedUser,
+        initialDataUpdatedAt: cachedUser ? 0 : undefined,
         retry: false,
     });
 };

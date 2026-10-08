@@ -1,16 +1,18 @@
-const CACHE_NAME = 'komod-shell-v13';
+const CACHE_NAME = 'komod-shell-v14';
 const COVER_CACHE = 'komod-covers-v3';
 const CORE_ASSETS = ['/', '/index.html', '/offline.html', '/manifest.webmanifest', '/komod.svg'];
 
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME).then(async cache => {
-      await cache.addAll(CORE_ASSETS);
+      // One optional asset must not abort installation of the whole offline app.
+      await Promise.allSettled(CORE_ASSETS.map(asset => cache.add(asset)));
       const response = await fetch('/index.html', { cache: 'no-store' });
+      if (!response.ok) throw new Error('Unable to cache the application shell');
       const html = await response.clone().text();
       await cache.put('/index.html', response);
       const assetPaths = [...html.matchAll(/(?:src|href)="(\/assets\/[^\"]+)"/g)].map(match => match[1]);
-      if (assetPaths.length) await cache.addAll([...new Set(assetPaths)]);
+      if (assetPaths.length) await Promise.allSettled([...new Set(assetPaths)].map(asset => cache.add(asset)));
     }).then(() => self.skipWaiting())
   );
 });
@@ -78,7 +80,7 @@ self.addEventListener('fetch', event => {
       const network = fetch(request).then(response => {
         if (response.ok) caches.open(CACHE_NAME).then(cache => cache.put(request, response.clone()));
         return response;
-      });
+      }).catch(() => cached);
       return cached || network;
     })
   );
