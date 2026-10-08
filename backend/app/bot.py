@@ -788,7 +788,7 @@ async def render_storage_target(message: Message, telegram_id: int, page: int = 
     page = min(max(page, 0), max(0, (len(choices) - 1) // PAGE_SIZE))
     shown = choices[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
     buttons = [[InlineKeyboardButton(
-        f"{'\u2705' if folder_id == current_id else '\ud83d\uddc3\ufe0f'} {name[:48]}{' · پیش‌فرض' if is_default else ''}",
+        f"{'✅' if folder_id == current_id else '🗃️'} {name[:48]}{' · پیش‌فرض' if is_default else ''}",
         callback_data=f"storage_set:{folder_id}",
     )] for folder_id, name, is_default in shown]
     if len(choices) > PAGE_SIZE:
