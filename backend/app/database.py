@@ -34,7 +34,16 @@ engine_options = {
     "echo": False,
     "pool_pre_ping": True,
 }
-if url.drivername == "postgresql+asyncpg" and url.port == 6543:
+is_supabase_pooler = url.drivername == "postgresql+asyncpg" and (
+    url.port == 6543 or (url.host or "").endswith(".pooler.supabase.com")
+)
+if is_supabase_pooler:
+    # Supavisor's session endpoint (usually port 5432) has the same small
+    # client budget as its transaction endpoint. Holding an application pool
+    # on Railway can exhaust that budget during overlapping deployments.
+    query = dict(url.query)
+    query["prepared_statement_cache_size"] = "0"
+    url = url.set(query=query)
     engine_options.update(
         poolclass=NullPool,
         connect_args={"statement_cache_size": 0},

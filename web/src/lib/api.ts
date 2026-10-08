@@ -220,6 +220,7 @@ api.interceptors.request.use((config) => {
 
 // Queue for failed requests during token refresh
 let isRefreshing = false;
+let consecutiveNetworkFailures = 0;
 let failedQueue: Array<{
     resolve: (token: string) => void;
     reject: (error: any) => void;
@@ -240,6 +241,7 @@ const processQueue = (error: any, token: string | null = null) => {
 // Handle 401 and 429 errors
 api.interceptors.response.use(
     (response) => {
+        consecutiveNetworkFailures = 0;
         window.dispatchEvent(new Event('komod-server-reachable'));
         resolveResponseMediaUrls(response.data);
         return response;
@@ -248,7 +250,12 @@ api.interceptors.response.use(
         const originalRequest = error.config;
 
         if (!error.response && error.code !== 'ERR_CANCELED') {
-            window.dispatchEvent(new Event('komod-server-unreachable'));
+            consecutiveNetworkFailures += 1;
+            // A single slow request, especially a large media transfer, does
+            // not mean that the whole device is offline.
+            if (!navigator.onLine || consecutiveNetworkFailures >= 3) {
+                window.dispatchEvent(new Event('komod-server-unreachable'));
+            }
         }
 
         if (error.response?.status === 401 && !originalRequest._retry) {
@@ -720,6 +727,11 @@ export const useReorderPlaylistCatalog = () => {
     });
 };
 
+export const useLogoutOthers = () => {
+    const queryClient = useQueryClient();
+    return useMutation({ mutationFn: async () => (await api.post<{revoked:number}>('/auth/logout-others')).data, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['sessions'] }) });
+};
+
 export const usePasswordLogin = () => useMutation({
     mutationFn: async (payload: { username: string; password: string }) => (await api.post<AuthResponse>('/auth/password/login', payload)).data,
 });
@@ -894,4 +906,12 @@ export const useResetStorageChannel = () => { const queryClient=useQueryClient()
 export const useUpdateAdminUser = () => {
     const queryClient = useQueryClient();
     return useMutation({ mutationFn: async ({ id, ...payload }: { id: number; display_name?: string; is_active?: boolean }) => (await api.patch<AdminUser>(`/admin/users/${id}`, payload)).data, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['adminUsers'] }) });
+};
+export const useAddAdminUser = () => {
+    const queryClient = useQueryClient();
+    return useMutation({ mutationFn: async (payload: { telegram_id:number; display_name?:string }) => (await api.post<AdminUser>('/admin/users', payload)).data, onSuccess: () => { queryClient.invalidateQueries({queryKey:['adminUsers']}); queryClient.invalidateQueries({queryKey:['adminStats']}); } });
+};
+export const useRemoveAdminUser = () => {
+    const queryClient = useQueryClient();
+    return useMutation({ mutationFn: async (id:number) => api.delete(`/admin/users/${id}`), onSuccess: () => { queryClient.invalidateQueries({queryKey:['adminUsers']}); queryClient.invalidateQueries({queryKey:['adminStats']}); } });
 };

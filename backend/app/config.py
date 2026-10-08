@@ -39,6 +39,15 @@ class Settings(BaseSettings):
             except ValueError:
                 return []
         return self.auth_users[:1]
+
+    @property
+    def restrict_users(self) -> bool:
+        """Whether unknown Telegram accounts require administrator approval."""
+        return bool(self.auth_users_str.strip() or self.admin_users_str.strip())
+
+    @property
+    def bootstrap_users(self) -> set[int]:
+        return set(self.auth_users) | set(self.admin_users)
     
     @property
     def telegram_helper_bot_tokens(self) -> list[str]:

@@ -1,0 +1,35 @@
+{
+  "name": "Komod",
+  "short_name": "Komod",
+  "description": "کمد شخصی فایل‌های تلگرام؛ ذخیره، جست‌وجو، پخش و مرتب‌سازی در کشوها",
+  "lang": "fa",
+  "dir": "rtl",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "any",
+  "share_target": {
+    "action": "/share-target",
+    "method": "POST",
+    "enctype": "application/x-www-form-urlencoded",
+    "params": { "title": "title", "text": "text", "url": "url" }
+  },
+  "background_color": "#07090f",
+  "theme_color": "#7c3aed",
+  "categories": ["productivity", "utilities", "entertainment"],
+  "icons": [
+    {
+      "src": "/komod.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/komod.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

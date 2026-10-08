@@ -330,6 +330,30 @@ async def logout_all(
     return {"message": "All sessions have been invalidated"}
 
 
+@router.post("/logout-others")
+async def logout_other_sessions(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Revoke every active login except the bearer token's current session."""
+    credentials = request.headers.get("authorization", "").removeprefix("Bearer ")
+    payload = verify_token_payload(credentials) if credentials else None
+    current_id = payload.get("sid") if payload else None
+    if not current_id:
+        raise HTTPException(status_code=400, detail="نشست فعلی قابل تشخیص نیست.")
+    sessions = (await db.execute(select(AuthSession).where(
+        AuthSession.user_id == current_user.id,
+        AuthSession.revoked_at.is_(None),
+        AuthSession.id != current_id,
+    ))).scalars().all()
+    now = datetime.utcnow()
+    for session in sessions:
+        session.revoked_at = now
+    await db.commit()
+    return {"revoked": len(sessions)}
+
+
 @router.get("/sessions", response_model=list[SessionResponse])
 async def list_sessions(request: Request, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     credentials = request.headers.get("authorization", "").removeprefix("Bearer ")
@@ -402,9 +426,9 @@ async def login_from_telegram_webapp(
     """Authenticate the Telegram account that opened the persistent Mini App button."""
     tg_user = _telegram_webapp_user(payload.init_data)
     telegram_id = int(tg_user["id"])
-    if settings.auth_users and telegram_id not in settings.auth_users:
-        raise HTTPException(status_code=403, detail="This Telegram account is not authorized")
     user = (await db.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
+    if settings.restrict_users and telegram_id not in settings.bootstrap_users and (user is None or not user.is_active):
+        raise HTTPException(status_code=403, detail="This Telegram account is not authorized")
     if user is None:
         user = User(
             telegram_id=telegram_id,

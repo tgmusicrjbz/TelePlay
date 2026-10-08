@@ -109,6 +109,8 @@ async function performFileOffline(file: TelegramFile, onProgress?: (loaded: numb
         const source = file.stream_url.replace(/^\/api/, '');
         const response = await api.get<Blob>(source, {
             responseType: 'blob',
+            // Large Telegram-backed streams can take minutes on mobile data.
+            timeout: 0,
             signal: controller.signal,
             onDownloadProgress: event => {
                 const total = event.total || file.file_size || 0;

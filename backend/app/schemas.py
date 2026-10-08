@@ -310,6 +310,11 @@ class AdminUserUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 
+class AdminUserCreate(BaseModel):
+    telegram_id: int
+    display_name: Optional[str] = Field(default=None, max_length=255)
+
+
 class AdminUserResponse(UserResponse):
     total_size: int = 0
     file_count: int = 0

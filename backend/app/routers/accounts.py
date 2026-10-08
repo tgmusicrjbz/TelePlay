@@ -11,7 +11,7 @@ from ..auth import create_vault_token, get_current_user, require_vault_access
 from ..config import get_settings
 from ..database import get_db
 from ..models import AuthSession, File, User, WorkspaceGrant
-from ..schemas import AccountPreferences, AdminStatsResponse, AdminUserResponse, AdminUserUpdate, StorageChannelResponse, StorageChannelUpdate, VaultPasswordRequest, VaultStatus, VaultTokenResponse, WorkspaceGrantCreate, WorkspaceResponse
+from ..schemas import AccountPreferences, AdminStatsResponse, AdminUserCreate, AdminUserResponse, AdminUserUpdate, StorageChannelResponse, StorageChannelUpdate, VaultPasswordRequest, VaultStatus, VaultTokenResponse, WorkspaceGrantCreate, WorkspaceResponse
 from .. import telegram
 
 router = APIRouter(tags=["Accounts"])
@@ -215,6 +215,41 @@ async def admin_users(_: User = Depends(require_admin), db: AsyncSession = Depen
         })
         for user, size, files, sessions in rows
     ]
+
+
+@router.post("/admin/users", response_model=AdminUserResponse)
+async def add_authorized_user(payload: AdminUserCreate, _: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    """Add an allowed Telegram account without deleting any previous data."""
+    if payload.telegram_id <= 0:
+        raise HTTPException(status_code=422, detail="آیدی تلگرام معتبر نیست.")
+    user = (await db.execute(select(User).where(User.telegram_id == payload.telegram_id))).scalar_one_or_none()
+    if user is None:
+        user = User(telegram_id=payload.telegram_id, display_name=(payload.display_name or "").strip() or None)
+        db.add(user)
+    else:
+        user.is_active = True
+        if payload.display_name is not None:
+            user.display_name = payload.display_name.strip() or None
+    await db.commit()
+    await db.refresh(user)
+    return AdminUserResponse.model_validate(user, from_attributes=True)
+
+
+@router.delete("/admin/users/{user_id}", status_code=204)
+async def remove_authorized_user(user_id: int, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    """Revoke access while preserving the user's files and account record."""
+    user = await db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="کاربر پیدا نشد.")
+    if user.id == admin.id:
+        raise HTTPException(status_code=400, detail="نمی‌توانی دسترسی حساب مدیر فعلی را حذف کنی.")
+    user.is_active = False
+    user.auth_version += 1
+    sessions = (await db.execute(select(AuthSession).where(AuthSession.user_id == user.id, AuthSession.revoked_at.is_(None)))).scalars().all()
+    for session in sessions:
+        session.revoked_at = datetime.utcnow()
+    await db.commit()
+    return Response(status_code=204)
 
 
 @router.patch("/admin/users/{user_id}", response_model=AdminUserResponse)

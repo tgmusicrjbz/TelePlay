@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Play, MoreVertical, Film, Music, FileText, Image, Check, Star, Pin } from 'lucide-react';
 import { TelegramFile, formatFileSize, formatDuration, useUpdateFile } from '../lib/api';
 import { useAppStore } from '../lib/store';
+import TagChips from './TagChips';
 
 interface FileCardProps {
     file: TelegramFile;
@@ -119,6 +120,7 @@ export default function FileCard({
                 <div className="flex-1 min-w-0">
                     <p className={`font-medium truncate text-sm ${selected ? 'text-primary-200' : 'text-white'}`}>{file.file_name}</p>
                     {file.description && <p dir="auto" className="text-xs text-dark-400 line-clamp-2 mt-0.5" title={file.description}>{file.description}</p>}
+                    <TagChips tags={file.tags}/>
                     <div className="flex items-center gap-3 text-xs text-dark-400 mt-1">
                         <span className="flex items-center gap-1">
                             {getSmallIcon()}
@@ -227,6 +229,7 @@ export default function FileCard({
                         {file.file_name}
                     </p>
                     {!dense && file.description && <p dir="auto" className="text-xs text-dark-400 line-clamp-2 mt-0.5" title={file.description}>{file.description}</p>}
+                    {!dense && <TagChips tags={file.tags}/>}
                     <div className="flex items-center gap-2 mt-1">
                         <span className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md border ${
                             selected 
