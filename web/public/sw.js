@@ -1,4 +1,4 @@
-const CACHE_NAME = 'komod-shell-v14';
+const CACHE_NAME = 'komod-shell-v15';
 const COVER_CACHE = 'komod-covers-v3';
 const CORE_ASSETS = ['/', '/index.html', '/offline.html', '/manifest.webmanifest', '/komod.svg'];
 
@@ -31,9 +31,23 @@ self.addEventListener('message', event => {
 
 self.addEventListener('fetch', event => {
   const request = event.request;
+  const requestUrl = new URL(request.url);
+  if (request.method === 'POST' && requestUrl.origin === self.location.origin && requestUrl.pathname === '/share-target') {
+    event.respondWith((async () => {
+      const form = await request.formData();
+      const params = new URLSearchParams({
+        'share-target': '1',
+        title: String(form.get('title') || ''),
+        text: String(form.get('text') || ''),
+        url: String(form.get('url') || ''),
+      });
+      return Response.redirect(`/?${params.toString()}`, 303);
+    })());
+    return;
+  }
   if (request.method !== 'GET') return;
 
-  const url = new URL(request.url);
+  const url = requestUrl;
   if (url.origin !== self.location.origin) return;
 
   const isCoverRequest = request.destination === 'image' && url.pathname.startsWith('/api/stream/');

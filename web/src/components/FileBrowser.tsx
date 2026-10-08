@@ -2,8 +2,8 @@
  * Main FileBrowser component - the core of the web interface
  */
 import { useEffect, useCallback, useMemo, useRef, useState } from 'react';
-import { FolderPlus, Folder as FolderIcon, Grid, LayoutGrid, List, Search, ChevronRight, Home, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, StickyNote, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ChevronDown, ChevronUp, Plus, CheckSquare, Square, ListChecks, ListPlus, Upload, Star, RefreshCw, Link2, DownloadCloud, Download, Eye, Minus, Pause, Play, Tags, Cloud, CloudOff } from 'lucide-react';
-import { api, useFiles, useFolders, useFolderTree, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useActivityFeed, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile, useImportLink } from '../lib/api';
+import { FolderPlus, Folder as FolderIcon, Grid, LayoutGrid, List, Search, ChevronRight, Home, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, StickyNote, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ChevronDown, ChevronUp, Plus, CheckSquare, Square, ListChecks, ListPlus, Upload, Star, RefreshCw, Link2, DownloadCloud, Download, Eye, EyeOff, Minus, Pause, Play, Tags, Cloud, CloudOff } from 'lucide-react';
+import { api, useFiles, useFolders, useFolderTree, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useActivityFeed, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile, useImportLink, useTagSettings } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { cacheAllTextNotes, queueOfflineText, saveFileOffline } from '../lib/offline';
 import FileCard from './FileCard';
@@ -105,6 +105,9 @@ export default function FileBrowser() {
     const [importPanelMode, setImportPanelMode] = useState<'open'|'collapsed'|'hidden'>('open');
     const [forceOffline, setForceOffline] = useState(() => localStorage.getItem('komod-force-offline') === '1');
     const [showHidden, setShowHidden] = useState(() => sessionStorage.getItem('komod-show-hidden') === '1');
+    useTagSettings();
+    const hiddenPressTimer = useRef<number | null>(null);
+    const hiddenPressTriggered = useRef(false);
     const uploadAbortRef = useRef<AbortController | null>(null);
     const importUrls = useMemo(() => extractImportUrls(importUrl), [importUrl]);
     const importPlatform = useMemo<'youtube' | 'instagram' | null>(() => {
@@ -149,7 +152,7 @@ export default function FileBrowser() {
     const [textContent, setTextContent] = useState('');
     const [contentScope, setContentScope] = useState<'all' | 'files' | 'folders'>('all');
     const [sortCriteria, setSortCriteria] = useState<SortCriterion[]>(() => {
-        try { return JSON.parse(localStorage.getItem('komod-sort') || '') || [{ field: 'created', direction: 'desc' }]; }
+        try { return (JSON.parse(localStorage.getItem('komod-sort') || '') || [{ field: 'created', direction: 'desc' }]).slice(0,1); }
         catch { return [{ field: 'created', direction: 'desc' }]; }
     });
     const sortValue = serializeSort(sortCriteria.filter(item => item.field !== 'count'));
@@ -805,6 +808,8 @@ export default function FileBrowser() {
     const selectScope = (scope: 'all' | 'files' | 'folders') => {
         setContentScope(scope);
         if (scope === 'folders') setFileTypeFilter(null);
+        const allowed:SortField[]=scope==='files'?['name','type','size','duration','created','updated']:scope==='folders'?['name','count','created','updated']:['name','created','updated'];
+        if(!allowed.includes(sortCriteria[0]?.field))setSortCriteria([{field:'created',direction:'desc'}]);
         clearSelection();
     };
     const toggleFileType = (type: string | null) => {
@@ -812,7 +817,8 @@ export default function FileBrowser() {
         setFileTypeFilter(type);
         clearSelection();
     };
-    const availableSortFields = (Object.keys(sortLabels) as SortField[]).filter(field => !sortCriteria.some(item => item.field === field));
+    const scopeSortFields:SortField[]=contentScope==='files'?['name','type','size','duration','created','updated']:contentScope==='folders'?['name','count','created','updated']:['name','created','updated'];
+    const availableSortFields = scopeSortFields.filter(field => !sortCriteria.some(item => item.field === field));
     const updateSort = (index: number, next: SortCriterion) => setSortCriteria(sortCriteria.map((item, itemIndex) => itemIndex === index ? next : item));
     const moveSort = (index: number, offset: number) => {
         const target = index + offset;
@@ -839,6 +845,26 @@ export default function FileBrowser() {
         clearSelection();
         setSelectionMode(false);
     };
+    const hideSelectedItems = async () => {
+        if (!sessionStorage.getItem('komod-vault-token')) { addToast('برای مخفی‌کردن، اول گاوصندوق را از تنظیمات باز کن.', 'error'); return; }
+        try {
+            if (selectedFileIds.size) await batchUpdateFilesMutation.mutateAsync({ids:Array.from(selectedFileIds),is_hidden:true});
+            for (const folder of (folders||[]).filter(item=>selectedFolderIds.has(item.id))) await updateFolderMutation.mutateAsync({id:folder.id,is_hidden:true});
+            addToast(`${selectedFileIds.size+selectedFolderIds.size} مورد مخفی شد.`,'success'); cancelSelection();
+        } catch(error:any) { addToast(error?.response?.data?.detail||'مخفی‌کردن انجام نشد.','error'); }
+    };
+    const beginHiddenPress = () => {
+        hiddenPressTriggered.current=false;
+        hiddenPressTimer.current=window.setTimeout(()=>{
+            hiddenPressTriggered.current=true;
+            if(!sessionStorage.getItem('komod-vault-token')){addToast('برای دیدن موارد مخفی، گاوصندوق را از تنظیمات باز کن.','error');return;}
+            const next=!showHidden;setShowHidden(next);setPage(1);setAllFiles([]);
+            if(next)sessionStorage.setItem('komod-show-hidden','1');else sessionStorage.removeItem('komod-show-hidden');
+            addToast(next?'موارد مخفی نمایش داده شدند.':'موارد مخفی دوباره بسته شدند.');
+        },650);
+    };
+    const endHiddenPress=()=>{if(hiddenPressTimer.current!==null){window.clearTimeout(hiddenPressTimer.current);hiddenPressTimer.current=null;}};
+    const toggleFavorites=()=>{if(hiddenPressTriggered.current){hiddenPressTriggered.current=false;return;}setFavoriteOnly(value=>!value);setPage(1);setAllFiles([]);};
     const toggleSelectionMode = () => {
         const nextMode = !selectionMode;
         clearSelection();
@@ -951,6 +977,7 @@ export default function FileBrowser() {
                             {selectedPlayableFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-500/10 text-primary-200 hover:bg-primary-500/20" aria-label="افزودن به پلی‌لیست" title="افزودن فایل‌های صدا و ویدیو به پلی‌لیست" onClick={() => setPlaylistFiles(selectedPlayableFilesForActions)}><ListPlus className="h-5 w-5" /></button>}
                             {selectedFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-primary-200 hover:bg-primary-500/10" aria-label="ذخیره آفلاین" title="افزودن همه به صف ذخیره آفلاین" onClick={() => { selectedFilesForActions.forEach(file => void saveFileOffline(file)); addToast(`${selectedFilesForActions.length.toLocaleString('fa-IR')} فایل به صف ذخیره آفلاین اضافه شد.`); }}><DownloadCloud className="h-5 w-5" /></button>}
                             {selectedFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-200 hover:bg-white/10" aria-label="دانلود" title="دانلود فایل‌های انتخاب‌شده" onClick={() => void downloadSelectedFiles()}><Download className="h-5 w-5" /></button>}
+                            <button disabled={!selectedItems.length} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-200 hover:bg-white/10 disabled:opacity-30" aria-label="مخفی‌کردن" title="انتقال انتخاب‌ها به گاوصندوق" onClick={()=>void hideSelectedItems()}><EyeOff className="h-5 w-5"/></button>
                             <button disabled={!selectedItems.length} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-200 hover:bg-white/10 disabled:opacity-30" aria-label="جابه‌جایی" title="جابه‌جایی" onClick={() => setMoveItems({ files: selectedFilesForActions, folders: selectedFoldersForActions })}><FolderInput className="h-5 w-5" /></button>
                             <button disabled={!selectedItems.length} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-red-300 hover:bg-red-500/10 disabled:opacity-30" aria-label="حذف" title="حذف" onClick={() => setDeleteConfirm({ type: selectedFoldersForActions.length && selectedFilesForActions.length ? 'multiple' : selectedFoldersForActions.length ? 'folder' : 'file', items: selectedItems })}><Trash2 className="h-5 w-5" /></button>
                             <button className="mr-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-300 hover:bg-white/10" aria-label="پایان انتخاب گروهی" title="پایان انتخاب" onClick={cancelSelection}><X className="h-5 w-5" /></button>
@@ -971,6 +998,7 @@ export default function FileBrowser() {
                                 {selectedPlayableFilesForActions.length > 0 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => setPlaylistFiles(selectedPlayableFilesForActions)}><ListPlus className="w-4 h-4" /> افزودن به پلی‌لیست</button>}
                                 {selectedFilesForActions.length > 0 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => { selectedFilesForActions.forEach(file => void saveFileOffline(file)); addToast(`${selectedFilesForActions.length.toLocaleString('fa-IR')} فایل به صف ذخیره آفلاین اضافه شد.`); }}><DownloadCloud className="w-4 h-4" /> ذخیره آفلاین</button>}
                                 {selectedFilesForActions.length > 0 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => void downloadSelectedFiles()}><Download className="w-4 h-4" /> دانلود</button>}
+                                <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={()=>void hideSelectedItems()}><EyeOff className="w-4 h-4"/> مخفی‌کردن</button>
                                 <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => setMoveItems({ files: selectedFilesForActions, folders: selectedFoldersForActions })}><FolderInput className="w-4 h-4" /> جابه‌جایی</button>
                                 <button className="btn-secondary shrink-0 text-sm flex items-center gap-2 text-red-300" onClick={() => setDeleteConfirm({ type: selectedFoldersForActions.length && selectedFilesForActions.length ? 'multiple' : selectedFoldersForActions.length ? 'folder' : 'file', items: selectedItems })}><Trash2 className="w-4 h-4" /> حذف</button>
                                 <button className="btn-icon shrink-0" title="پایان انتخاب" onClick={cancelSelection}><X className="w-4 h-4" /></button>
@@ -1002,7 +1030,7 @@ export default function FileBrowser() {
                                     <button title="مرتب‌سازی" aria-label="مرتب‌سازی" onClick={() => { setShowSort(value => !value); setShowFilters(false); }} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs transition-colors ${showSort ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:text-white'}`}>
                                         <ArrowDown className="h-4 w-4" />
                                     </button>
-                                    <button title="فقط نشان‌شده‌ها" aria-label="فقط نشان‌شده‌ها" onClick={() => { setFavoriteOnly(value => !value); setPage(1); setAllFiles([]); }} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs transition-colors ${favoriteOnly ? 'bg-amber-400/15 text-amber-200' : 'text-dark-400 hover:text-white'}`}><Star className={`h-4 w-4 ${favoriteOnly ? 'fill-current' : ''}`}/></button>
+                                    <button title="فقط نشان‌شده‌ها؛ نگه‌داشتن برای موارد مخفی" aria-label="فقط نشان‌شده‌ها" onPointerDown={beginHiddenPress} onPointerUp={endHiddenPress} onPointerCancel={endHiddenPress} onPointerLeave={endHiddenPress} onClick={toggleFavorites} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs transition-colors ${showHidden?'ring-1 ring-primary-400/50':favoriteOnly?'bg-amber-400/15 text-amber-200':'text-dark-400 hover:text-white'}`}><Star className={`h-4 w-4 ${favoriteOnly ? 'fill-current' : ''}`}/></button>
                                     {!readOnlyWorkspace && <button title="انتخاب گروهی" aria-label="انتخاب گروهی" onClick={toggleSelectionMode} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs transition-colors ${selectionMode ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:text-white'}`}>
                                         <ListChecks className="h-4 w-4" />
                                     </button>}
@@ -1037,23 +1065,22 @@ export default function FileBrowser() {
                             {showSort && (
                                 <div className="mt-3 border-t border-white/[0.06] pt-3">
                                     <div className="mb-3 flex items-center justify-between gap-3">
-                                        <p className="text-sm font-medium text-white">مرتب‌سازی چندمرحله‌ای ✨</p>
+                                        <p className="text-sm font-medium text-white">مرتب‌سازی</p>
                                         <button onClick={() => setSortCriteria([{ field: 'created', direction: 'desc' }])} className="shrink-0 text-xs text-dark-400 hover:text-white">حالت پیش‌فرض</button>
                                     </div>
                                     <div className="grid gap-1.5">
                                         {sortCriteria.map((item, index) => (
                                             <div key={item.field} className="flex min-w-0 items-center gap-1 rounded-xl border border-white/[0.08] bg-dark-800/60 p-1.5">
-                                                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary-500/15 text-xs text-primary-300">{(index + 1).toLocaleString('fa-IR')}</span>
+                                                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary-500/15 text-primary-300"><ArrowDown className="h-3.5 w-3.5"/></span>
                                                 <span className="min-w-0 flex-1 truncate text-xs sm:text-sm">{sortLabels[item.field]}</span>
                                                 <button className="shrink-0 rounded-lg bg-dark-700 px-2 py-1.5 text-xs hover:bg-dark-600" onClick={() => updateSort(index, { ...item, direction: item.direction === 'asc' ? 'desc' : 'asc' })}>
                                                     {item.direction === 'asc' ? <><ArrowUp className="inline h-3.5 w-3.5" /> صعودی</> : <><ArrowDown className="inline h-3.5 w-3.5" /> نزولی</>}
                                                 </button>
-                                                <button className="btn-icon shrink-0 p-1.5" disabled={index === 0} title="یک اولویت بالاتر" onClick={() => moveSort(index, -1)}><ChevronUp className="h-4 w-4" /></button><button className="btn-icon shrink-0 p-1.5" disabled={index === sortCriteria.length - 1} title="یک اولویت پایین‌تر" onClick={() => moveSort(index, 1)}><ChevronDown className="h-4 w-4" /></button><button className="btn-icon shrink-0 p-1.5 text-red-300" title="حذف این معیار" onClick={() => removeSort(index)}><X className="h-4 w-4" /></button>
                                             </div>
                                         ))}
                                     </div>
                                     {availableSortFields.length > 0 && <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
-                                        {availableSortFields.map(field => <button key={field} className="flex min-h-10 items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-dark-800 px-2 text-xs text-dark-300 hover:border-primary-500/30 hover:text-white" onClick={() => setSortCriteria([...sortCriteria, { field, direction: 'asc' }])}><Plus className="h-3.5 w-3.5" /> {sortLabels[field]}</button>)}
+                                        {availableSortFields.map(field => <button key={field} className="flex min-h-10 items-center justify-center rounded-xl border border-white/10 bg-dark-800 px-2 text-xs text-dark-300 hover:border-primary-500/30 hover:text-white" onClick={() => setSortCriteria([{ field, direction: field==='created'||field==='updated'?'desc':'asc' }])}>{sortLabels[field]}</button>)}
                                     </div>}
                                 </div>
                             )}

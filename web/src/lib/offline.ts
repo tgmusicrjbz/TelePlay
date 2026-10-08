@@ -74,6 +74,17 @@ export async function createOfflineFolder(name: string): Promise<OfflineFolder> 
     return folder;
 }
 
+export async function renameOfflineFolder(id: string, name: string): Promise<OfflineFolder> {
+    const cleanName=name.trim().slice(0,80);
+    if(!cleanName)throw new Error('نام پوشه را وارد کن.');
+    const current=await transaction<OfflineFolder|undefined>(FOLDER_STORE,'readonly',store=>store.get(id));
+    if(!current)throw new Error('پوشه دانلود پیدا نشد.');
+    const next={...current,name:cleanName};
+    await transaction<IDBValidKey>(FOLDER_STORE,'readwrite',store=>store.put(next));
+    window.dispatchEvent(new Event(OFFLINE_CHANGED_EVENT));
+    return next;
+}
+
 export async function assignOfflineFolder(kind: 'media'|'text'|'playlist', id: number, folderId: string | null): Promise<void> {
     const storeName = kind === 'media' ? MEDIA_STORE : kind === 'text' ? TEXT_STORE : PLAYLIST_STORE;
     const record = await transaction<any>(storeName, 'readonly', store => store.get(id));

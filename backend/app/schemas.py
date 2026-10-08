@@ -112,6 +112,28 @@ class BatchFileUpdate(BaseModel):
     tags_add: List[str] = Field(default_factory=list, max_length=20)
     tags_remove: List[str] = Field(default_factory=list, max_length=20)
     tags_replace: Optional[List[str]] = Field(default=None, max_length=20)
+    is_hidden: Optional[bool] = None
+
+
+class TagDefinition(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+    color: str = Field(pattern=r"^#[0-9a-fA-F]{6}$")
+
+
+class TagSettingsUpdate(BaseModel):
+    tags: List[TagDefinition] = Field(default_factory=list, max_length=100)
+    show_file_tags: bool = False
+    display_limit: int = Field(default=2, ge=1, le=6)
+
+
+class TagDefinitionResponse(TagDefinition):
+    file_count: int = 0
+
+
+class TagSettingsResponse(BaseModel):
+    tags: List[TagDefinitionResponse] = Field(default_factory=list)
+    show_file_tags: bool = False
+    display_limit: int = 2
 
 
 class FileResponse(FileBase):

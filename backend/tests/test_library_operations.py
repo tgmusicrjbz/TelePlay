@@ -28,6 +28,7 @@ from sqlalchemy import select
 from app.database import Base, async_session, engine
 from app.models import AuthSession, BotUserState, File, Folder, Playlist, PlaylistItem, User, WatchProgress
 from app.routers.auth import _session_for_device, password_login, update_credentials
+from app.routers.accounts import get_tag_settings, update_tag_settings
 from app.routers.files import (
     batch_update_files,
     get_activity,
@@ -39,7 +40,7 @@ from app.routers.files import (
 from app.routers.folders import delete_folder_contents, list_folders, update_folder
 from app.routers.streaming import stored_message_response
 from app.routers.playlists import add_playlist_items, create_playlist, reorder_playlist, shuffle_playlist
-from app.schemas import BatchFileUpdate, CredentialsUpdate, FileUpdate, FolderUpdate, PasswordLoginRequest, PlaylistAddItems, PlaylistCreate, PlaylistReorder
+from app.schemas import BatchFileUpdate, CredentialsUpdate, FileUpdate, FolderUpdate, PasswordLoginRequest, PlaylistAddItems, PlaylistCreate, PlaylistReorder, TagDefinition, TagSettingsUpdate
 from app.telegram import configure_main_client, start_one_client
 from app import telegram
 
@@ -99,6 +100,29 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
                 AuthSession.user_id == self.user_id, AuthSession.revoked_at.is_(None)
             ))).scalars().all()
             self.assertEqual(len(sessions), 1)
+
+    async def test_tag_settings_counts_and_hash_search(self):
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            direct = await db.get(File, self.direct_file_id)
+            direct.tags_json = json.dumps(["پروژه"], ensure_ascii=False)
+            await db.commit()
+            settings = await update_tag_settings(TagSettingsUpdate(
+                tags=[TagDefinition(name="پروژه", color="#14b8a6")],
+                show_file_tags=True, display_limit=3,
+            ), user, db)
+            self.assertEqual(settings.tags[0].file_count, 1)
+            result = await list_files(None, None, "#پروژه", 1, 20, db, user)
+            self.assertEqual(result.total, 1)
+            refreshed = await get_tag_settings(user, db)
+            self.assertTrue(refreshed.show_file_tags)
+
+    async def test_batch_files_can_be_hidden(self):
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            user.vault_password_hash = "configured"
+            await batch_update_files(BatchFileUpdate(ids=[self.direct_file_id], is_hidden=True), db, user)
+            self.assertTrue((await db.get(File, self.direct_file_id)).is_hidden)
 
     async def asyncTearDown(self):
         await engine.dispose()

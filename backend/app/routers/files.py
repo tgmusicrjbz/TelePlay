@@ -379,12 +379,19 @@ async def list_files(
     if favorite_only:
         query = query.where(File.is_favorite.is_(True))
     if search:
-        escaped = f"%{escape_like(search)}%"
-        query = query.where(
-            File.file_name.ilike(escaped, escape="\\") |
-            File.description.ilike(escaped, escape="\\") |
-            File.tags_json.ilike(escaped, escape="\\")
-        )
+        search_value = search.strip()
+        tag_only = search_value.startswith("#")
+        normalized = search_value[1:].strip() if tag_only else search_value
+        if normalized:
+            escaped = f"%{escape_like(normalized)}%"
+            if tag_only:
+                query = query.where(File.tags_json.ilike(escaped, escape="\\"))
+            else:
+                query = query.where(
+                    File.file_name.ilike(escaped, escape="\\") |
+                    File.description.ilike(escaped, escape="\\") |
+                    File.tags_json.ilike(escaped, escape="\\")
+                )
     
     # Get total count
     count_query = select(func.count()).select_from(query.subquery())
@@ -627,7 +634,6 @@ async def batch_delete_files(
     files = result.scalars().all()
     if any(file.is_hidden for file in files):
         require_vault_access(request, current_user)
-    
     if not files:
         return {"message": "No files found to delete"}
     
@@ -668,6 +674,8 @@ async def batch_update_files(
         raise HTTPException(status_code=404, detail="No files found")
     if any(file.is_hidden for file in files):
         require_vault_access(request, current_user)
+    if update_data.is_hidden and not current_user.vault_password_hash:
+        raise HTTPException(status_code=409, detail="ابتدا برای گاوصندوق رمز تعیین کن")
     if update_data.description_mode in {"set", "append"} and update_data.description is None:
         raise HTTPException(status_code=400, detail="Description is required")
     if update_data.rename_mode in {"prefix", "suffix"} and not update_data.rename_value:
@@ -693,6 +701,10 @@ async def batch_update_files(
     tags_to_remove = {tag.casefold() for tag in clean_tags(update_data.tags_remove)}
     replacement_tags = clean_tags(update_data.tags_replace) if update_data.tags_replace is not None else None
     for file in files:
+        if update_data.is_hidden is not None:
+            file.is_hidden = update_data.is_hidden
+            if update_data.is_hidden:
+                file.public_hash = None
         if update_data.description_mode == "clear":
             file.description = None
         elif update_data.description_mode == "set":

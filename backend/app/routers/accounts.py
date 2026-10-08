@@ -1,4 +1,5 @@
 """Account switching, shared spaces and administrator controls."""
+import json
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -11,7 +12,7 @@ from ..auth import create_vault_token, get_current_user, require_vault_access
 from ..config import get_settings
 from ..database import get_db
 from ..models import AuthSession, File, User, WorkspaceGrant
-from ..schemas import AccountPreferences, AdminStatsResponse, AdminUserCreate, AdminUserResponse, AdminUserUpdate, StorageChannelResponse, StorageChannelUpdate, VaultPasswordRequest, VaultStatus, VaultTokenResponse, WorkspaceGrantCreate, WorkspaceResponse
+from ..schemas import AccountPreferences, AdminStatsResponse, AdminUserCreate, AdminUserResponse, AdminUserUpdate, StorageChannelResponse, StorageChannelUpdate, TagDefinitionResponse, TagSettingsResponse, TagSettingsUpdate, VaultPasswordRequest, VaultStatus, VaultTokenResponse, WorkspaceGrantCreate, WorkspaceResponse
 from .. import telegram
 
 router = APIRouter(tags=["Accounts"])
@@ -21,6 +22,53 @@ vault_password_context = CryptContext(schemes=["pbkdf2_sha256"], pbkdf2_sha256__
 
 def user_name(user: User) -> str:
     return user.display_name or " ".join(filter(None, [user.first_name, user.last_name])) or user.username or f"کاربر {user.telegram_id}"
+
+
+def clean_tag_definitions(raw_tags) -> list[dict[str, str]]:
+    result: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in raw_tags:
+        name = str(item.name if hasattr(item, "name") else item.get("name", "")).strip().lstrip("#")[:40]
+        color = str(item.color if hasattr(item, "color") else item.get("color", "#a855f7")).lower()
+        key = name.casefold()
+        if name and key not in seen:
+            result.append({"name": name, "color": color})
+            seen.add(key)
+    return result[:100]
+
+
+@router.get("/accounts/tags", response_model=TagSettingsResponse)
+async def get_tag_settings(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    try:
+        stored = json.loads(current_user.tag_settings_json or "[]")
+        definitions = clean_tag_definitions(stored if isinstance(stored, list) else [])
+    except (TypeError, ValueError, json.JSONDecodeError):
+        definitions = []
+    counts = {item["name"].casefold(): 0 for item in definitions}
+    rows = (await db.execute(select(File.tags_json).where(File.user_id == current_user.id))).scalars().all()
+    for raw in rows:
+        try:
+            values = json.loads(raw or "[]")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            values = []
+        for value in set(str(tag).strip().casefold() for tag in values if str(tag).strip()):
+            if value in counts:
+                counts[value] += 1
+    return TagSettingsResponse(
+        tags=[TagDefinitionResponse(**item, file_count=counts.get(item["name"].casefold(), 0)) for item in definitions],
+        show_file_tags=current_user.show_file_tags,
+        display_limit=max(1, min(current_user.file_tag_limit or 2, 6)),
+    )
+
+
+@router.put("/accounts/tags", response_model=TagSettingsResponse)
+async def update_tag_settings(payload: TagSettingsUpdate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    definitions = clean_tag_definitions(payload.tags)
+    current_user.tag_settings_json = json.dumps(definitions, ensure_ascii=False)
+    current_user.show_file_tags = payload.show_file_tags
+    current_user.file_tag_limit = payload.display_limit
+    await db.commit()
+    return await get_tag_settings(current_user, db)
 
 
 @router.get("/accounts/workspaces", response_model=list[WorkspaceResponse])

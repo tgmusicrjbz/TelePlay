@@ -39,6 +39,8 @@ export interface Workspace { user_id: number; telegram_id: number; name: string;
 export interface AdminUser extends User { total_size: number; file_count: number; session_count: number; }
 export interface AdminStats { active_users: number; total_users: number; total_files: number; total_size: number; }
 export interface AccountPreferences { delete_storage_files: boolean; }
+export interface TagDefinition { name: string; color: string; file_count?: number; }
+export interface TagSettings { tags: TagDefinition[]; show_file_tags: boolean; display_limit: number; }
 export interface VaultStatus { configured: boolean; }
 export interface StorageChannel { configured: boolean; channel_id?: number | null; title?: string | null; }
 
@@ -825,6 +827,7 @@ export interface BatchFileEdit {
     tags_add?: string[];
     tags_remove?: string[];
     tags_replace?: string[];
+    is_hidden?: boolean;
 }
 
 export const useBatchUpdateFiles = () => {
@@ -857,6 +860,26 @@ export const getFileIcon = (fileType: string): string => {
         case 'document': return '📄';
         default: return '📎';
     }
+};
+
+const cacheTagSettings = (settings: TagSettings) => {
+    localStorage.setItem('komod-tag-settings', JSON.stringify(settings));
+    window.dispatchEvent(new Event('komod-tag-settings-changed'));
+    return settings;
+};
+
+export const useTagSettings = () => useQuery<TagSettings>({
+    queryKey: ['tag-settings'],
+    queryFn: async () => cacheTagSettings((await api.get<TagSettings>('/accounts/tags')).data),
+});
+
+export const useUpdateTagSettings = () => {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async (payload: Omit<TagSettings, 'tags'> & { tags: Array<{name:string;color:string}> }) =>
+            cacheTagSettings((await api.put<TagSettings>('/accounts/tags', payload)).data),
+        onSuccess: data => queryClient.setQueryData(['tag-settings'], data),
+    });
 };
 
 export const useSessions = () => useQuery({ queryKey: ['sessions'], queryFn: async () => (await api.get<AuthSession[]>('/auth/sessions')).data });

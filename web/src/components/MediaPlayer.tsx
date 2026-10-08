@@ -255,7 +255,15 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
 
     const handleWaiting = () => setIsLoading(true);
     const handlePlaying = () => { backgroundPlaybackRequested.current = true; setIsLoading(false); setIsPlaying(true); };
-    const handlePause = () => { if (!document.hidden) backgroundPlaybackRequested.current = false; setIsPlaying(false); };
+    const handlePause = () => {
+        if (!document.hidden) backgroundPlaybackRequested.current = false;
+        setIsPlaying(false);
+        // Some mobile WebViews emit a synthetic pause as soon as they are
+        // backgrounded. Resume only when the user had not requested a pause.
+        if (document.hidden && backgroundPlaybackRequested.current) {
+            window.setTimeout(() => void videoRef.current?.play().catch(() => undefined), 120);
+        }
+    };
 
     const handleEnded = () => {
         saveProgress();
@@ -327,9 +335,11 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
         };
         document.addEventListener('visibilitychange', keepPlaybackAlive);
         window.addEventListener('pageshow', keepPlaybackAlive);
+        window.addEventListener('pagehide', keepPlaybackAlive);
         return () => {
             document.removeEventListener('visibilitychange', keepPlaybackAlive);
             window.removeEventListener('pageshow', keepPlaybackAlive);
+            window.removeEventListener('pagehide', keepPlaybackAlive);
         };
     }, [file.id]);
 
