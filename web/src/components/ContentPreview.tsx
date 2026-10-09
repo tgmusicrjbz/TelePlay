@@ -26,7 +26,7 @@ export default function ContentPreview() {
     const editorRef = useRef<HTMLTextAreaElement>(null);
     const show = !!file && (file.file_type === 'image' || canPreviewText(file));
 
-    useEffect(() => { setImageFailed(false); setImageRetry(0); setImageScale(1); setReaderFullscreen(false); }, [file?.id]);
+    useEffect(() => { setImageFailed(false); setImageRetry(0); setImageScale(1); setImageDescriptionExpanded(false); setReaderFullscreen(false); }, [file?.id]);
 
     useEffect(() => {
         localStorage.setItem('komod-reader-font-size', String(readerFontSize));

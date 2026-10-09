@@ -30,6 +30,10 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
+class ImportCancelled(Exception):
+    """Raised internally when a queued or active import is cancelled."""
+
+
 @dataclass
 class ImportJob:
     url: str
@@ -207,7 +211,7 @@ class LinkImportService:
                         break
                     if len(sources) > 1:
                         self.statuses[job.id].update(message=f"مورد {source_index} از {len(sources)}")
-                    downloaded = await self._download(source["url"], job.quality)
+                    downloaded = await self._download(job, source["url"], job.quality)
                     for item_index, item in enumerate(downloaded, 1):
                         item["source_url"] = source["url"]
                         item["collection_title"] = playlist_title
@@ -226,6 +230,8 @@ class LinkImportService:
                 self.statuses[job.id].update(state="done", message="آماده شد", saved=len(saved))
             except asyncio.CancelledError:
                 raise
+            except ImportCancelled:
+                self.statuses[job.id].update(state="cancelled", message="لغو شد")
             except Exception as error:
                 logger.exception("Link import failed for %s", job.url)
                 friendly_error = _friendly_import_error(error)
@@ -237,7 +243,7 @@ class LinkImportService:
                     self.active_job_id = None
                 self.queue.task_done()
 
-    async def _download(self, url: str, quality: str) -> list[dict]:
+    async def _download(self, job: ImportJob, url: str, quality: str) -> list[dict]:
         if self.client is None:
             raise RuntimeError("Import worker is unavailable")
         raw_title, source_author = await asyncio.to_thread(_oembed_metadata, url)
@@ -295,6 +301,8 @@ class LinkImportService:
         last_media_at: float | None = None
         while time.monotonic() - started_at < 180:
             await asyncio.sleep(2)
+            if not await self._checkpoint(job):
+                raise ImportCancelled()
             received_now = 0
             async for message in self.client.get_chat_history("allsaverbot", limit=60):
                 if message.id <= sent.id or message.id in seen or message.reply_markup:
@@ -334,6 +342,10 @@ class LinkImportService:
                     any(flag in button.text for flag in ("🇬🇧", "🇺🇸", "🌐", "🌏"))
                     or re.search(r"\b(english|en)\b", button.text, re.IGNORECASE)
                 )]
+                if language_buttons and not any(button_ready(button) for button in language_buttons):
+                    self.statuses[job.id].update(message="منتظر آماده‌شدن انتخاب زبان")
+                    if time.monotonic() - started_at > 45:
+                        raise TimeoutError("گزینه زبان سرویس دانلود آماده نشد")
                 language_button = next((button for button in language_buttons if button_key(message, button) not in clicked and (button_ready(button) or time.monotonic() - started_at > 8)), None)
                 if language_button and not re.search(r"\b(360|480|720|1080)p?\b", language_button.text, re.IGNORECASE):
                     if await click_button(message, language_button):

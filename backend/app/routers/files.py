@@ -3,6 +3,7 @@ File management API endpoints.
 """
 from typing import Optional
 import json
+import re
 from fastapi import APIRouter, Depends, File as FormFile, Form, HTTPException, Query, Request, UploadFile
 import secrets
 import logging
@@ -11,7 +12,7 @@ import shutil
 import tempfile
 from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, delete, asc, desc, exists, false, or_
+from sqlalchemy import select, func, delete, asc, desc, exists, false, and_, or_
 from sqlalchemy.orm import selectinload
 from pydantic import BaseModel, Field
 from datetime import datetime
@@ -145,12 +146,12 @@ async def cancel_import_link(job_id: str, current_user: User = Depends(get_curre
 
 @router.post("/upload", response_model=FileResponse, status_code=201)
 async def upload_file(
-    request: Request,
     upload: UploadFile = FormFile(...),
     folder_id: Optional[int] = Form(None),
     description: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
     """Upload a browser file into the Telegram storage channel."""
     filename = sanitize_filename(upload.filename or "file")
@@ -403,19 +404,33 @@ async def list_files(
     if favorite_only:
         query = query.where(File.is_favorite.is_(True))
     if search:
-        search_value = search.strip()
-        tag_only = search_value.startswith("#")
-        normalized = search_value[1:].strip() if tag_only else search_value
-        if normalized:
-            escaped = f"%{escape_like(normalized)}%"
-            if tag_only:
-                query = query.where(File.tags_json.ilike(escaped, escape="\\"))
-            else:
-                query = query.where(
-                    File.file_name.ilike(escaped, escape="\\") |
-                    File.description.ilike(escaped, escape="\\") |
-                    File.tags_json.ilike(escaped, escape="\\")
-                )
+        # Semicolon-separated groups are alternatives (OR). Terms separated by a
+        # comma inside each group must all match (AND). Persian punctuation is
+        # accepted too: `درس،مهم؛موسیقی`.
+        or_groups = []
+        for raw_group in re.split(r"[;؛]+", search.strip()):
+            and_terms = []
+            for raw_term in re.split(r"[,،]+", raw_group):
+                raw_term = raw_term.strip()
+                if not raw_term:
+                    continue
+                tag_only = raw_term.startswith("#")
+                normalized = raw_term[1:].strip() if tag_only else raw_term
+                if not normalized:
+                    continue
+                escaped = f"%{escape_like(normalized)}%"
+                if tag_only:
+                    and_terms.append(File.tags_json.ilike(escaped, escape="\\"))
+                else:
+                    and_terms.append(or_(
+                        File.file_name.ilike(escaped, escape="\\"),
+                        File.description.ilike(escaped, escape="\\"),
+                        File.tags_json.ilike(escaped, escape="\\"),
+                    ))
+            if and_terms:
+                or_groups.append(and_(*and_terms))
+        if or_groups:
+            query = query.where(or_(*or_groups))
     
     # Get total count
     count_query = select(func.count()).select_from(query.subquery())

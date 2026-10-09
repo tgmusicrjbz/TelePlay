@@ -117,6 +117,27 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             refreshed = await get_tag_settings(user, db)
             self.assertTrue(refreshed.show_file_tags)
 
+    async def test_search_supports_comma_and_semicolon_expressions(self):
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            direct = await db.get(File, self.direct_file_id)
+            nested = await db.get(File, self.nested_file_id)
+            direct.description = "آموزش پایتون"
+            direct.tags_json = json.dumps(["مهم", "پروژه"], ensure_ascii=False)
+            nested.description = "موسیقی آرام"
+            nested.tags_json = json.dumps(["تفریح"], ensure_ascii=False)
+            await db.commit()
+
+            and_result = await list_files(None, None, "آموزش،پروژه", 1, 20, db, user)
+            self.assertEqual(and_result.total, 1)
+            self.assertEqual(and_result.files[0].id, direct.id)
+
+            or_result = await list_files(None, None, "آموزش؛موسیقی", 1, 20, db, user)
+            self.assertEqual(or_result.total, 2)
+
+            tag_without_hash = await list_files(None, None, "مهم", 1, 20, db, user)
+            self.assertEqual(tag_without_hash.total, 1)
+
     async def test_batch_files_can_be_hidden(self):
         async with async_session() as db:
             user = await db.get(User, self.user_id)
