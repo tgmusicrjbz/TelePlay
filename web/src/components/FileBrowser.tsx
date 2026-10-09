@@ -930,7 +930,7 @@ export default function FileBrowser() {
 
                     {/* Right: Actions */}
                     <div className="mr-2 flex shrink-0 items-center gap-1 sm:mr-4 sm:gap-2">
-                        <button onClick={toggleConnectionMode} className={`btn-icon h-10 w-10 shrink-0 border ${forceOffline?'border-primary-400/30 bg-primary-500/15 text-primary-200':'border-white/[.08] bg-dark-800/70 text-dark-300'}`} title={forceOffline?'رفتن به حالت آنلاین':'رفتن به حالت آفلاین'} aria-label={forceOffline?'فعال‌کردن حالت آنلاین':'فعال‌کردن حالت آفلاین'}>{forceOffline?<CloudOff className="h-4 w-4"/>:<Cloud className="h-4 w-4"/>}</button>
+                        <button onClick={toggleConnectionMode} className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border p-0 leading-none transition ${forceOffline?'border-primary-400/30 bg-primary-500/15 text-primary-200':'border-white/[.08] bg-dark-800/70 text-dark-300 hover:text-white'}`} title={forceOffline?'رفتن به حالت آنلاین':'رفتن به حالت آفلاین'} aria-label={forceOffline?'فعال‌کردن حالت آنلاین':'فعال‌کردن حالت آفلاین'}>{forceOffline?<CloudOff className="block h-5 w-5"/>:<Cloud className="block h-5 w-5"/>}</button>
                         {clipboard && (clipboard.files.length > 0 || clipboard.folders.length > 0) && (
                             <button
                                 onClick={handlePaste}
@@ -944,7 +944,7 @@ export default function FileBrowser() {
                         {activeSection === 'files' && !readOnlyWorkspace && (
                             <>
                                 <input ref={uploadInputRef} type="file" multiple className="hidden" onChange={handleWebUpload} />
-                                <button onClick={() => setShowAddMenu(true)} className="btn-primary flex items-center gap-2 px-3 py-2 text-sm shadow-lg shadow-primary-500/20"><Plus className="h-4 w-4"/><span className="hidden sm:inline">افزودن به کمد</span></button>
+                                <button onClick={() => setShowAddMenu(true)} className="btn-primary flex h-10 items-center gap-2 px-3 py-0 text-sm shadow-lg shadow-primary-500/20"><Plus className="h-4 w-4"/><span className="hidden sm:inline">افزودن به کمد</span></button>
                             </>
                         )}
                     </div>
@@ -953,6 +953,7 @@ export default function FileBrowser() {
                 {/* Content Area */}
                 <div 
                     ref={containerRef}
+                    data-main-scroll="true"
                     className="relative flex-1 overflow-auto overscroll-y-contain p-4 pb-28 outline-none sm:p-6 md:pb-6 lg:p-8"
                     style={{ overscrollBehaviorY: 'contain' }}
                     onTouchStart={handlePullStart}

@@ -1,4 +1,5 @@
 import { api, Playlist, TelegramFile } from './api';
+import { cachedCurrentUser } from './accounts';
 
 const DB_NAME = 'komod-offline';
 const DB_VERSION = 4;
@@ -10,11 +11,11 @@ const FOLDER_STORE = 'download-folders';
 export const OFFLINE_CHANGED_EVENT = 'komod-offline-changed';
 export const OFFLINE_PROGRESS_EVENT = 'komod-offline-progress';
 
-export interface OfflineMedia { id: number; file: TelegramFile; blob: Blob; savedAt: string; folderId?: string | null; }
-export interface OfflinePlaylist { id: number; name: string; description?: string | null; fileIds: number[]; totalCount: number; failedCount?: number; savedAt: string; folderId?: string | null; }
-export interface OfflineText { id: number; file: TelegramFile; content: string; savedAt: string; folderId?: string | null; }
-export interface OfflineFolder { id: string; name: string; createdAt: string; }
-export interface OfflineTextDraft { id: number; name: string; content: string; folderId: number | null; createdAt: string; }
+export interface OfflineMedia { id: number; file: TelegramFile; blob: Blob; savedAt: string; folderId?: string | null; ownerUserId?: number; }
+export interface OfflinePlaylist { id: number; name: string; description?: string | null; fileIds: number[]; totalCount: number; failedCount?: number; savedAt: string; folderId?: string | null; ownerUserId?: number; }
+export interface OfflineText { id: number; file: TelegramFile; content: string; savedAt: string; folderId?: string | null; ownerUserId?: number; }
+export interface OfflineFolder { id: string; name: string; createdAt: string; ownerUserId?: number; }
+export interface OfflineTextDraft { id: number; name: string; content: string; folderId: number | null; createdAt: string; ownerUserId?: number; }
 export interface OfflineDownloadProgress { done: number; total: number; failed: number; currentName: string; loaded: number; size: number; }
 export interface OfflineJobProgress extends OfflineDownloadProgress { id: string; kind: 'file' | 'playlist'; title: string; state: 'queued' | 'downloading' | 'paused' | 'cancelled' | 'done' | 'error'; }
 let textOutboxSyncing = false;
@@ -57,18 +58,27 @@ async function transaction<T>(storeName: string, mode: IDBTransactionMode, actio
     });
 }
 
-export const listOfflineMedia = () => transaction<OfflineMedia[]>(MEDIA_STORE, 'readonly', store => store.getAll());
-export const getOfflineMedia = (id: number) => transaction<OfflineMedia | undefined>(MEDIA_STORE, 'readonly', store => store.get(id));
-export const listOfflinePlaylists = () => transaction<OfflinePlaylist[]>(PLAYLIST_STORE, 'readonly', store => store.getAll());
-export const getOfflineText = (id: number) => transaction<OfflineText | undefined>(TEXT_STORE, 'readonly', store => store.get(id));
-export const listOfflineTexts = () => transaction<OfflineText[]>(TEXT_STORE, 'readonly', store => store.getAll());
-export const listOfflineTextDrafts = () => transaction<OfflineTextDraft[]>(TEXT_OUTBOX_STORE, 'readonly', store => store.getAll());
-export const listOfflineFolders = () => transaction<OfflineFolder[]>(FOLDER_STORE, 'readonly', store => store.getAll());
+const activeUserId = () => cachedCurrentUser()?.id;
+const belongsToActiveUser = (record: {ownerUserId?:number;file?:TelegramFile}) => {
+    const userId=activeUserId();
+    return Boolean(userId && (record.ownerUserId===userId || record.file?.user_id===userId));
+};
+export const listOfflineMedia = async () => (await transaction<OfflineMedia[]>(MEDIA_STORE, 'readonly', store => store.getAll())).filter(belongsToActiveUser);
+export const getOfflineMedia = async (id: number) => { const record=await transaction<OfflineMedia | undefined>(MEDIA_STORE, 'readonly', store => store.get(id)); return record&&belongsToActiveUser(record)?record:undefined; };
+export const listOfflinePlaylists = async () => {
+    const records=await transaction<OfflinePlaylist[]>(PLAYLIST_STORE,'readonly',store=>store.getAll());
+    const media=await listOfflineMedia(); const ownedIds=new Set(media.map(item=>item.id)); const userId=activeUserId();
+    return records.filter(item=>item.ownerUserId===userId || (!item.ownerUserId&&item.fileIds.some(id=>ownedIds.has(id))));
+};
+export const getOfflineText = async (id: number) => { const record=await transaction<OfflineText | undefined>(TEXT_STORE,'readonly',store=>store.get(id)); return record&&belongsToActiveUser(record)?record:undefined; };
+export const listOfflineTexts = async () => (await transaction<OfflineText[]>(TEXT_STORE,'readonly',store=>store.getAll())).filter(belongsToActiveUser);
+export const listOfflineTextDrafts = async () => (await transaction<OfflineTextDraft[]>(TEXT_OUTBOX_STORE,'readonly',store=>store.getAll())).filter(item=>item.ownerUserId===activeUserId());
+export const listOfflineFolders = async () => (await transaction<OfflineFolder[]>(FOLDER_STORE,'readonly',store=>store.getAll())).filter(item=>item.ownerUserId===activeUserId());
 
 export async function createOfflineFolder(name: string): Promise<OfflineFolder> {
     const cleanName = name.trim().slice(0, 80);
     if (!cleanName) throw new Error('نام پوشه را وارد کن.');
-    const folder: OfflineFolder = { id: crypto.randomUUID(), name: cleanName, createdAt: new Date().toISOString() };
+    const folder: OfflineFolder = { id: crypto.randomUUID(), name: cleanName, createdAt: new Date().toISOString(), ownerUserId: activeUserId() };
     await transaction<IDBValidKey>(FOLDER_STORE, 'readwrite', store => store.put(folder));
     window.dispatchEvent(new Event(OFFLINE_CHANGED_EVENT));
     return folder;
@@ -131,7 +141,7 @@ async function performFileOffline(file: TelegramFile, onProgress?: (loaded: numb
         });
         const blob = response.data;
         if (!blob.size) throw new Error('فایل خالی دریافت شد.');
-        await transaction<IDBValidKey>(MEDIA_STORE, 'readwrite', store => store.put({ id: file.id, file, blob, savedAt: new Date().toISOString() } satisfies OfflineMedia));
+        await transaction<IDBValidKey>(MEDIA_STORE, 'readwrite', store => store.put({ id: file.id, file, blob, savedAt: new Date().toISOString(), ownerUserId: activeUserId() } satisfies OfflineMedia));
         window.dispatchEvent(new Event(OFFLINE_CHANGED_EVENT));
         if (!options?.silentProgress) emitProgress({ id: jobId, kind: 'file', title: file.file_name, state: 'done', done: 1, total: 1, failed: 0, currentName: file.file_name, loaded: blob.size, size: blob.size });
     } catch (error) {
@@ -235,7 +245,7 @@ export async function savePlaylistOffline(playlist: Playlist, onProgress?: (prog
         throw new Error('هیچ‌کدام از فایل‌های پلی‌لیست دانلود نشدند؛ اتصال ربات به کانال ذخیره‌سازی را بررسی کن.');
     }
     const previous = (await listOfflinePlaylists()).find(item => item.id === playlist.id);
-    const record: OfflinePlaylist = { id: playlist.id, name: playlist.name, description: playlist.description, fileIds: savedIds, totalCount: playable.length, failedCount: failed, savedAt: new Date().toISOString(), folderId: previous?.folderId || null };
+    const record: OfflinePlaylist = { id: playlist.id, name: playlist.name, description: playlist.description, fileIds: savedIds, totalCount: playable.length, failedCount: failed, savedAt: new Date().toISOString(), folderId: previous?.folderId || null, ownerUserId: activeUserId() };
     await transaction<IDBValidKey>(PLAYLIST_STORE, 'readwrite', store => store.put(record));
     window.dispatchEvent(new Event(OFFLINE_CHANGED_EVENT));
     emitProgress({ id: jobId, kind: 'playlist', title: playlist.name, state: 'done', done, total: playable.length, failed, currentName: '', loaded: [...loadedByFile.values()].reduce((sum, value) => sum + value, 0), size: totalSize });
@@ -270,21 +280,21 @@ export async function offlinePlaybackFile(record: OfflineMedia): Promise<Telegra
 
 export async function cacheTextFile(file: TelegramFile, content?: string): Promise<void> {
     const text = content ?? (await api.get<{ content: string }>(`/files/${file.id}/text`)).data.content;
-    await transaction<IDBValidKey>(TEXT_STORE, 'readwrite', store => store.put({ id: file.id, file, content: text, savedAt: new Date().toISOString() } satisfies OfflineText));
+    await transaction<IDBValidKey>(TEXT_STORE, 'readwrite', store => store.put({ id: file.id, file, content: text, savedAt: new Date().toISOString(), ownerUserId: activeUserId() } satisfies OfflineText));
 }
 
 export async function queueOfflineText(name: string, content: string, folderId: number | null): Promise<OfflineTextDraft> {
     const id = -Date.now();
     const createdAt = new Date().toISOString();
-    const draft: OfflineTextDraft = { id, name, content, folderId, createdAt };
+    const draft: OfflineTextDraft = { id, name, content, folderId, createdAt, ownerUserId: activeUserId() };
     const file: TelegramFile = {
-        id, user_id: 0, folder_id: folderId, file_id: `offline-${Math.abs(id)}`, file_unique_id: `offline-${Math.abs(id)}`,
+        id, user_id: activeUserId() || 0, folder_id: folderId, file_id: `offline-${Math.abs(id)}`, file_unique_id: `offline-${Math.abs(id)}`,
         file_name: name, description: 'در انتظار همگام‌سازی', file_size: new Blob([content]).size,
         mime_type: 'text/markdown', file_type: 'text', duration: null, width: null, height: null,
         created_at: createdAt, updated_at: createdAt, stream_url: '', thumbnail_url: null,
     };
     await transaction<IDBValidKey>(TEXT_OUTBOX_STORE, 'readwrite', store => store.put(draft));
-    await transaction<IDBValidKey>(TEXT_STORE, 'readwrite', store => store.put({ id, file, content, savedAt: createdAt } satisfies OfflineText));
+    await transaction<IDBValidKey>(TEXT_STORE, 'readwrite', store => store.put({ id, file, content, savedAt: createdAt, ownerUserId: activeUserId() } satisfies OfflineText));
     window.dispatchEvent(new Event(OFFLINE_CHANGED_EVENT));
     return draft;
 }
@@ -311,7 +321,7 @@ export async function syncOfflineTextOutbox(): Promise<{ synced: number; failed:
             form.append('upload', new File([draft.content], draft.name, { type: 'text/markdown;charset=utf-8' }), draft.name);
             if (draft.folderId !== null) form.append('folder_id', String(draft.folderId));
             const { data: file } = await api.post<TelegramFile>('/files/upload', form);
-            await transaction<IDBValidKey>(TEXT_STORE, 'readwrite', store => store.put({ id: file.id, file, content: draft.content, savedAt: new Date().toISOString() } satisfies OfflineText));
+            await transaction<IDBValidKey>(TEXT_STORE, 'readwrite', store => store.put({ id: file.id, file, content: draft.content, savedAt: new Date().toISOString(), ownerUserId: activeUserId() } satisfies OfflineText));
             await transaction<undefined>(TEXT_STORE, 'readwrite', store => store.delete(draft.id) as IDBRequest<undefined>);
             await transaction<undefined>(TEXT_OUTBOX_STORE, 'readwrite', store => store.delete(draft.id) as IDBRequest<undefined>);
             synced += 1;

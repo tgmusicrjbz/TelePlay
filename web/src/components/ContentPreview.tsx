@@ -120,7 +120,6 @@ export default function ContentPreview() {
             // full-viewport reader still remains active.
         }
     };
-    const cycleLineHeight = () => setReaderLineHeight(value => value >= 2.3 ? 1.7 : Number((value + 0.3).toFixed(1)));
     const wordCount = content.trim() ? content.trim().split(/\s+/).length : 0;
     const insertMarkdown = (before: string, after = '', placeholder = 'متن', linePrefix = false) => {
         const editor = editorRef.current;
@@ -149,21 +148,20 @@ export default function ContentPreview() {
     return (
         <div className={`fixed inset-0 z-[140] flex items-center justify-center bg-black/85 backdrop-blur-md ${readerFullscreen ? 'p-0' : 'p-3 sm:p-8'}`} onClick={() => setContentPreviewFile(null)}>
             <section ref={previewRef} className={`flex w-full flex-col overflow-hidden border border-white/10 bg-dark-900 shadow-2xl ${readerFullscreen ? 'h-dvh max-h-none max-w-none rounded-none border-0' : 'max-h-full max-w-5xl rounded-2xl'}`} onClick={(event) => event.stopPropagation()}>
-                <header className="flex flex-wrap items-center gap-2 border-b border-white/10 px-3 py-3 sm:gap-3 sm:px-5 sm:py-4">
+                <header className="flex items-start gap-3 border-b border-white/10 px-3 py-3 sm:px-5 sm:py-4">
                     <div className="flex-1 min-w-0">
                         <h2 className="truncate font-semibold" title={file.file_name}>{file.file_name}</h2>
                         {file.description && <p dir="auto" className="mt-1 line-clamp-2 max-w-2xl whitespace-pre-wrap text-sm text-dark-400" title={file.description}>{file.description}</p>}
                     </div>
-                    {file.file_type !== 'text' && <a href={`${url}&download=1`} download={file.file_name} className="btn-icon" title="دانلود"><Download className="w-5 h-5" /></a>}
-                    {file.file_type !== 'image' && <button onClick={async () => { await navigator.clipboard.writeText(editing ? draft : content); addToast('متن کپی شد 📋'); }} className="btn-icon" title="کپی متن"><Copy className="h-5 w-5" /></button>}
-                    {file.file_type === 'text' && <button onClick={() => setEditing(value => !value)} className="btn-secondary flex shrink-0 items-center gap-2 px-3 py-2 text-xs" title="ویرایش متن"><Pencil className="h-4 w-4" /><span className="hidden sm:inline">ویرایش متن</span></button>}
-                    {file.file_type === 'image' && <><button onClick={()=>setImageScale(value=>Math.max(.5,Number((value-.25).toFixed(2))))} className="btn-icon" title="کوچک‌نمایی"><ZoomOut className="h-5 w-5"/></button><span dir="ltr" className="min-w-10 text-center text-xs text-dark-400">{Math.round(imageScale*100)}%</span><button onClick={()=>setImageScale(value=>Math.min(4,Number((value+.25).toFixed(2))))} className="btn-icon" title="بزرگ‌نمایی"><ZoomIn className="h-5 w-5"/></button></>}
-                    <button onClick={() => void toggleReaderFullscreen()} className="btn-icon" title={readerFullscreen ? 'خروج از تمام‌صفحه' : file.file_type==='image'?'نمایش تمام‌صفحه':'مطالعه در تمام‌صفحه'}>{readerFullscreen ? <Minimize2 className="h-5 w-5"/> : <Maximize2 className="h-5 w-5"/>}</button>
-                    <button onClick={() => setContentPreviewFile(null)} className="btn-icon" title="بستن"><X className="w-5 h-5" /></button>
+                    <div className="flex shrink-0 items-center gap-1">
+                        {file.file_type !== 'image' && <><button onClick={async () => { await navigator.clipboard.writeText(editing ? draft : content); addToast('متن کپی شد 📋'); }} className="btn-icon" title="کپی متن"><Copy className="h-5 w-5" /></button>{file.file_type === 'text' && <button onClick={() => setEditing(value => !value)} className="btn-secondary flex shrink-0 items-center gap-2 px-3 py-2 text-xs" title="ویرایش متن"><Pencil className="h-4 w-4" /><span className="hidden sm:inline">ویرایش</span></button>}<button onClick={() => void toggleReaderFullscreen()} className="btn-icon" title={readerFullscreen ? 'خروج از تمام‌صفحه' : 'مطالعه در تمام‌صفحه'}>{readerFullscreen ? <Minimize2 className="h-5 w-5"/> : <Maximize2 className="h-5 w-5"/>}</button></>}
+                        <button onClick={() => setContentPreviewFile(null)} className="btn-icon" title="بستن"><X className="w-5 h-5" /></button>
+                    </div>
                 </header>
                 {file.file_type === 'image' ? (
-                    <div className="min-h-0 flex-1 overflow-auto p-4 text-center" onDoubleClick={()=>setImageScale(value=>value===1?2:1)}>
+                    <div className="relative min-h-0 flex-1 overflow-auto p-4 pb-20 text-center" onDoubleClick={()=>setImageScale(value=>value===1?2:1)}>
                         {imageFailed ? <div className="mx-auto rounded-2xl border border-dashed border-white/10 p-8 text-center"><p className="text-sm text-dark-400">نمایش عکس انجام نشد.</p><button className="btn-secondary mt-4" onClick={() => { setImageFailed(false); setImageRetry(Date.now()); }}>تلاش دوباره</button></div> : <img src={url} alt={file.file_name} draggable={false} className="mx-auto rounded-lg object-contain transition-[width] duration-200" style={{width:imageScale===1?'auto':`${imageScale*100}%`,maxWidth:imageScale===1?'100%':'none',maxHeight:imageScale===1?(readerFullscreen?'calc(100dvh - 6rem)':'75vh'):'none'}} onError={() => setImageFailed(true)} />}
+                        <div className="sticky bottom-2 mx-auto mt-4 flex w-fit max-w-full items-center gap-1 rounded-2xl border border-white/10 bg-dark-900/90 p-1.5 shadow-2xl backdrop-blur-xl"><button onClick={()=>setImageScale(value=>Math.max(.5,Number((value-.25).toFixed(2))))} className="btn-icon" title="کوچک‌نمایی"><ZoomOut className="h-5 w-5"/></button><span dir="ltr" className="min-w-12 text-center text-xs text-dark-300">{Math.round(imageScale*100)}%</span><button onClick={()=>setImageScale(value=>Math.min(4,Number((value+.25).toFixed(2))))} className="btn-icon" title="بزرگ‌نمایی"><ZoomIn className="h-5 w-5"/></button><span className="mx-1 h-6 w-px bg-white/10"/><a href={`${url}&download=1`} download={file.file_name} className="btn-icon" title="دانلود"><Download className="h-5 w-5"/></a><button onClick={() => void toggleReaderFullscreen()} className="btn-icon" title={readerFullscreen?'خروج از تمام‌صفحه':'تمام‌صفحه'}>{readerFullscreen?<Minimize2 className="h-5 w-5"/>:<Maximize2 className="h-5 w-5"/>}</button></div>
                     </div>
                 ) : (
                     <>
@@ -178,7 +176,7 @@ export default function ContentPreview() {
                                 <div className="hidden items-center rounded-xl border border-white/[.07] bg-dark-800/70 p-1 sm:flex">
                                     {([['right', AlignRight], ['center', AlignCenter], ['left', AlignLeft], ['justify', AlignJustify]] as const).map(([value, Icon]) => <button key={value} onClick={() => setReaderAlign(value)} className={`flex h-8 w-8 items-center justify-center rounded-lg ${readerAlign === value ? 'bg-primary-500/20 text-primary-200' : 'text-dark-400 hover:text-white'}`} title={value === 'right' ? 'راست‌چین' : value === 'left' ? 'چپ‌چین' : value === 'center' ? 'وسط‌چین' : 'تراز دوطرفه'}><Icon className="h-4 w-4"/></button>)}
                                 </div>
-                                <button onClick={cycleLineHeight} className="btn-icon h-10 w-10" title="تغییر فاصله خط‌ها"><AlignJustify className="h-4 w-4"/></button>
+                                <label className="flex h-10 items-center gap-2 rounded-xl border border-white/[.07] bg-dark-800/70 px-2" title="فاصله بین خط‌ها"><span className="hidden text-[10px] text-dark-400 sm:inline">فاصله</span><input type="range" min="1.4" max="2.8" step="0.1" value={readerLineHeight} onChange={event=>setReaderLineHeight(Number(event.target.value))} className="w-16 accent-primary-500"/><span dir="ltr" className="w-6 text-[10px] text-dark-300">{readerLineHeight.toFixed(1)}</span></label>
                                 <button onClick={() => setReaderWrap(value => !value)} className={`btn-icon h-10 w-10 ${readerWrap ? 'text-primary-200' : ''}`} title={readerWrap ? 'خاموش‌کردن شکستن خط‌ها' : 'شکستن خودکار خط‌ها'}><WrapText className="h-4 w-4"/></button>
                                 <button onClick={() => setReaderTone(tone => tone === 'dark' ? 'warm' : 'dark')} className="btn-icon h-10 w-10" title={readerTone === 'dark' ? 'حالت مطالعه گرم' : 'حالت تاریک'}>{readerTone === 'dark' ? <Sun className="h-4 w-4"/> : <Moon className="h-4 w-4"/>}</button>
                             </div>
