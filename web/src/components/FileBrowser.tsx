@@ -1026,6 +1026,7 @@ export default function FileBrowser() {
                             </div>
                         ) : null}
                     </div>
+                    {activeSection === 'files' && hiddenOnly && <div className="mx-auto mb-4 flex max-w-7xl items-center gap-3 rounded-2xl border border-amber-400/20 bg-amber-500/[.07] p-3 shadow-lg shadow-black/5"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-400/10 text-amber-200"><EyeOff className="h-5 w-5"/></span><div className="min-w-0 flex-1"><strong className="block text-sm text-amber-100">فقط موارد مخفی</strong><p className="mt-0.5 truncate text-xs text-amber-100/60">{shownFolderCount+shownFileCount ? `${(shownFolderCount+shownFileCount).toLocaleString('fa-IR')} مورد پیدا شد` : 'مورد مخفی‌ای در این بخش نیست'}</p></div><button onClick={closeVaultItems} className="flex min-h-10 shrink-0 items-center gap-2 rounded-xl bg-white/[.07] px-3 text-xs text-white transition hover:bg-white/[.12]"><ChevronRight className="h-4 w-4"/> بازگشت به کمد</button></div>}
                     {activeSection === 'files' && (
                         <div className="max-w-7xl mx-auto mb-4">
                             <div className="flex flex-col gap-2">

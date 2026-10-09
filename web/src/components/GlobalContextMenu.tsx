@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../lib/store';
 import { TelegramFile, Folder, api, canPreviewText, useUpdateFile, useUpdateFolder } from '../lib/api';
-import { Play, Download, DownloadCloud, Link, Edit, FolderInput, Trash2, Globe, ShieldOff, HardDriveDownload, Eye, EyeOff, AlignLeft, ListPlus, Heart, Info, Pin, Tags } from 'lucide-react';
+import { Play, Download, DownloadCloud, Link, Edit, FolderInput, Trash2, Globe, ShieldOff, HardDriveDownload, Eye, EyeOff, AlignLeft, ListPlus, Heart, Info, Pin, Tags, ChevronDown, ChevronUp, X } from 'lucide-react';
 import { saveFileOffline } from '../lib/offline';
 
 export default function GlobalContextMenu() {
@@ -10,6 +10,9 @@ export default function GlobalContextMenu() {
     const updateFolder = useUpdateFolder();
     const menuRef = useRef<HTMLDivElement>(null);
     const [copiedId, setCopiedId] = useState<string | null>(null);
+    const [showMore, setShowMore] = useState(false);
+
+    useEffect(() => setShowMore(false), [activeContextMenu?.type, activeContextMenu?.item.id]);
 
     // Close menu on escape
     useEffect(() => {
@@ -33,9 +36,9 @@ export default function GlobalContextMenu() {
 
     // Adjust position to keep within viewport
     const getMenuPosition = () => {
-        const menuWidth = 220;
+        const menuWidth = 340;
         const padding = 10;
-        const menuHeight = Math.min(window.innerHeight * 0.82, 620);
+        const menuHeight = Math.min(window.innerHeight * 0.76, 560);
 
         let posX = x;
         let posY = y;
@@ -146,185 +149,67 @@ export default function GlobalContextMenu() {
         );
     };
 
-    // --- Render ---
+    const file = activeContextMenu.type === 'file' ? activeContextMenu.item as TelegramFile : null;
+    const folder = activeContextMenu.type === 'folder' ? activeContextMenu.item as Folder : null;
+    const previewable = Boolean(file && (file.file_type === 'image' || canPreviewText(file)));
+    const playable = Boolean(file && (file.file_type === 'video' || file.file_type === 'audio'));
 
-    return (
-        <>
-            {/* Overlay to catch clicks outside */}
-            <div
-                className="fixed inset-0 z-[99998]"
-                onClick={(e) => {
-                    e.stopPropagation();
-                    setActiveContextMenu(null);
-                }}
-            />
-
-            {/* Context Menu */}
-            <div
-                ref={menuRef}
-                dir="rtl"
-                className={`fixed z-[99999] max-h-[82vh] overflow-y-auto border border-white/[0.08] bg-dark-800/95 py-1.5 text-right shadow-2xl backdrop-blur-xl ${isMobile ? 'inset-x-0 bottom-0 rounded-t-3xl px-2 pb-[calc(.5rem+env(safe-area-inset-bottom))] animate-slide-up' : 'min-w-[220px] rounded-xl animate-scale-in'}`}
-                style={isMobile ? undefined : { left: position.left, top: position.top, transformOrigin: 'top left' }}
-                onClick={(e) => e.stopPropagation()}
-                onContextMenu={(e) => e.preventDefault()}
-            >
-                {activeContextMenu.type === 'file' ? (
-                    // File Context Menu
-                    <>
-                        {isMultiSelect ? (
-                            <>
-                                <div className="px-3 py-2 text-xs font-medium text-dark-400 uppercase tracking-wider">
-                                    {selectedFileIds.size.toLocaleString('fa-IR')} فایل انتخاب شده
-                                </div>
-                                {readOnlyWorkspace ? <p className="px-3 py-3 text-sm text-amber-200">این کمد با دسترسی فقط مشاهده باز شده است.</p> : <><button className="context-menu-item w-full text-right" onClick={() => handleAction(() => setMoveFiles(selectedFiles))}>
-                                    <FolderInput className="w-4 h-4" />
-                                    جابه‌جایی فایل‌های انتخاب‌شده
-                                </button>
-                                <button className="context-menu-item w-full text-right text-red-400 hover:bg-red-500/10" onClick={() => handleAction(() => setDeleteConfirm({ type: 'file', items: Array.from(selectedFileIds).map(id => ({ id } as any)) }))}>
-                                    <Trash2 className="w-4 h-4" />
-                                    حذف فایل‌های انتخاب‌شده
-                                </button>
-                                </>}
-                            </>
-                        ) : (
-                            <>
-                                {(activeContextMenu.item.file_type === 'video' || activeContextMenu.item.file_type === 'audio') && (
-                                    <><button className="context-menu-item w-full text-right" onClick={() => handleAction(() => handlePlay(activeContextMenu.item as TelegramFile))}>
-                                        <Play className="w-4 h-4" />
-                                        پخش
-                                    </button>{!readOnlyWorkspace && <button className="context-menu-item w-full text-right" onClick={() => handleAction(() => setPlaylistFile(activeContextMenu.item as TelegramFile))}><ListPlus className="h-4 w-4"/> افزودن به پلی‌لیست</button>}</>
-                                )}
-                                {!readOnlyWorkspace && <><button className="context-menu-item w-full text-right" onClick={async () => { const file=activeContextMenu.item as TelegramFile; setActiveContextMenu(null); await updateFile.mutateAsync({id:file.id,is_favorite:!file.is_favorite}); addToast(file.is_favorite?'از نشان‌شده‌ها برداشته شد':'به نشان‌شده‌ها اضافه شد ⭐'); setActiveContextMenu(null); }}><Heart className={`h-4 w-4 ${(activeContextMenu.item as TelegramFile).is_favorite?'fill-current text-pink-400':''}`}/>{(activeContextMenu.item as TelegramFile).is_favorite?'برداشتن نشان':'نشان کردن'}</button>
-                                <button className="context-menu-item w-full text-right" onClick={async () => { const file=activeContextMenu.item as TelegramFile; setActiveContextMenu(null); await updateFile.mutateAsync({id:file.id,is_pinned:!file.is_pinned}); addToast(file.is_pinned?'از بالای کمد برداشته شد':'بالای کمد پین شد 📌'); setActiveContextMenu(null); }}><Pin className={`h-4 w-4 ${(activeContextMenu.item as TelegramFile).is_pinned?'fill-current text-primary-300':''}`}/>{(activeContextMenu.item as TelegramFile).is_pinned?'برداشتن پین':'پین بالای کمد'}</button></>}
-                                {(activeContextMenu.item.file_type === 'image' || canPreviewText(activeContextMenu.item as TelegramFile)) && (
-                                    <button className="context-menu-item w-full text-right" onClick={() => handleAction(() => setContentPreviewFile(activeContextMenu.item as TelegramFile))}>
-                                        <Eye className="w-4 h-4" />
-                                        پیش‌نمایش
-                                    </button>
-                                )}
-                                <button className="context-menu-item w-full text-right" onClick={() => handleAction(() => setDetailsFile(activeContextMenu.item as TelegramFile))}><Info className="h-4 w-4"/> جزئیات فایل</button>
-                                <button className="context-menu-item w-full text-right" onClick={() => handleOfflineSave(activeContextMenu.item as TelegramFile)}><DownloadCloud className="h-4 w-4"/> ذخیره برای پخش آفلاین</button>
-                                <button
-                                    className="context-menu-item w-full text-right"
-                                    onClick={() => { handleDownload(activeContextMenu.item as TelegramFile); setActiveContextMenu(null); }}
-                                >
-                                    <Download className="w-4 h-4" />
-                                    دانلود
-                                </button>
-                                
-                                {!readOnlyWorkspace && <><hr className="border-white/[0.08] my-1" />
-
-                                <button className="context-menu-item w-full text-right" onClick={async () => {
-                                    setActiveContextMenu(null);
-                                    addToast('در حال آماده‌سازی پیوند…', 'info');
-                                    const url = await ensurePublicLink(activeContextMenu.item as TelegramFile);
-                                    handleCopy(url, 'stream');
-                                }}>
-                                    <Link className="w-4 h-4" />
-                                    {copiedId === 'stream' ? '✓ کپی شد' : 'کپی پیوند پخش'}
-                                </button>
-
-                                <button className="context-menu-item w-full text-right" onClick={async () => {
-                                    setActiveContextMenu(null);
-                                    addToast('در حال آماده‌سازی پیوند…', 'info');
-                                    const url = await ensurePublicLink(activeContextMenu.item as TelegramFile);
-                                    const downloadUrl = url + (url.includes('?') ? '&' : '?') + 'download=1';
-                                    handleCopy(downloadUrl, 'download');
-                                }}>
-                                    <HardDriveDownload className="w-4 h-4" />
-                                    {copiedId === 'download' ? '✓ کپی شد' : 'کپی پیوند دانلود'}
-                                </button>
-
-                                <hr className="border-white/[0.08] my-1" />
-
-                                {(activeContextMenu.item as TelegramFile).public_stream_url ? (
-                                    <>
-                                        <button className="context-menu-item w-full text-right" onClick={() => handleCopy(`${window.location.protocol}//${window.location.host}${(activeContextMenu.item as TelegramFile).public_stream_url}`, 'public')}>
-                                            <Globe className="w-4 h-4 text-emerald-400" />
-                                            {copiedId === 'public' ? '✓ کپی شد' : 'کپی پیوند عمومی'}
-                                        </button>
-                                        <button className="context-menu-item w-full text-right text-orange-400 hover:bg-orange-500/10" onClick={() => handleRevokeShare(activeContextMenu.item as TelegramFile)}>
-                                            <ShieldOff className="w-4 h-4" />
-                                            لغو پیوند عمومی
-                                        </button>
-                                    </>
-                                ) : (
-                                    <button className="context-menu-item w-full text-right" onClick={() => handleShare(activeContextMenu.item as TelegramFile)}>
-                                        <Globe className="w-4 h-4" />
-                                        ساخت پیوند عمومی
-                                    </button>
-                                )}
-
-                                <hr className="border-white/[0.08] my-1" />
-                                
-                                <button className="context-menu-item w-full text-right" onClick={() => handleAction(() => setRenameFile(activeContextMenu.item as TelegramFile))}>
-                                    <Edit className="w-4 h-4" />
-                                    تغییر نام
-                                </button>
-                                <button className="context-menu-item w-full text-right" onClick={() => handleAction(() => setDescriptionItem({ type: 'file', item: activeContextMenu.item as TelegramFile }))}>
-                                    <AlignLeft className="w-4 h-4" />
-                                    {(activeContextMenu.item as TelegramFile).description ? 'ویرایش توضیحات' : 'افزودن توضیحات'}
-                                </button>
-                                <button className="context-menu-item w-full text-right" onClick={() => handleAction(() => setDetailsFile(activeContextMenu.item as TelegramFile))}>
-                                    <Tags className="h-4 w-4" />
-                                    ویرایش تگ‌ها
-                                </button>
-                                <button className="context-menu-item w-full text-right" onClick={() => handleAction(() => setMoveItems({ files: [activeContextMenu.item as TelegramFile], folders: [] }))}>
-                                    <FolderInput className="w-4 h-4" />
-                                    جابه‌جایی به…
-                                </button>
-                                <button className="context-menu-item w-full text-right text-amber-200" onClick={async () => { const file=activeContextMenu.item as TelegramFile; setActiveContextMenu(null); try { await updateFile.mutateAsync({id:file.id,is_hidden:!file.is_hidden}); addToast(file.is_hidden?'فایل از گاوصندوق بیرون آمد.':'فایل داخل گاوصندوق مخفی شد 🔒'); } catch(error:any) { addToast(error?.response?.data?.detail || 'از تنظیمات امنیتی برای گاوصندوق رمز تعیین کن.', 'error'); } }}>
-                                    {activeContextMenu.item.is_hidden ? <Eye className="h-4 w-4"/> : <EyeOff className="h-4 w-4"/>}
-                                    {activeContextMenu.item.is_hidden ? 'خارج کردن از گاوصندوق' : 'مخفی کردن در گاوصندوق'}
-                                </button>
-                                
-                                <hr className="border-white/[0.08] my-1" />
-                                
-                                <button className="context-menu-item w-full text-right text-red-400 hover:bg-red-500/10" onClick={() => handleAction(() => setDeleteConfirm({ type: 'file', items: [activeContextMenu.item] }))}>
-                                    <Trash2 className="w-4 h-4" />
-                                    حذف
-                                </button>
-                                </>}
-                            </>
-                        )}
-                    </>
-                ) : (
-                    // Folder Context Menu
-                    <>
-                        {readOnlyWorkspace ? <p className="px-3 py-3 text-sm text-amber-200">این کمد با دسترسی فقط مشاهده باز شده است.</p> : <>
-                        <button className="context-menu-item w-full text-right" onClick={async () => { const folder=activeContextMenu.item as Folder; setActiveContextMenu(null); await updateFolder.mutateAsync({id:folder.id,is_favorite:!folder.is_favorite}); addToast(folder.is_favorite?'از نشان‌شده‌ها برداشته شد':'کشو نشان شد ⭐'); setActiveContextMenu(null); }}><Heart className={`h-4 w-4 ${(activeContextMenu.item as Folder).is_favorite?'fill-current text-pink-400':''}`}/>{(activeContextMenu.item as Folder).is_favorite?'برداشتن نشان':'نشان کردن کشو'}</button>
-                        <button className="context-menu-item w-full text-right" onClick={async () => { const folder=activeContextMenu.item as Folder; setActiveContextMenu(null); await updateFolder.mutateAsync({id:folder.id,is_pinned:!folder.is_pinned}); addToast(folder.is_pinned?'پین کشو برداشته شد':'کشو بالای کمد پین شد 📌'); setActiveContextMenu(null); }}><Pin className={`h-4 w-4 ${(activeContextMenu.item as Folder).is_pinned?'fill-current text-primary-300':''}`}/>{(activeContextMenu.item as Folder).is_pinned?'برداشتن پین':'پین بالای کمد'}</button>
-                        <button
-                            className="context-menu-item w-full text-right"
-                            onClick={() => handleAction(() => setRenameFolder(activeContextMenu.item as Folder))}
-                        >
-                            <Edit className="w-4 h-4" />
-                            تغییر نام
-                        </button>
-                        <button className="context-menu-item w-full text-right" onClick={() => handleAction(() => setDescriptionItem({ type: 'folder', item: activeContextMenu.item as Folder }))}>
-                            <AlignLeft className="w-4 h-4" />
-                            {(activeContextMenu.item as Folder).description ? 'ویرایش توضیحات' : 'افزودن توضیحات'}
-                        </button>
-                        <button className="context-menu-item w-full text-right" onClick={() => handleAction(() => setMoveItems({ files: [], folders: [activeContextMenu.item as Folder] }))}>
-                            <FolderInput className="w-4 h-4" />
-                            جابه‌جایی به…
-                        </button>
-                        <button className="context-menu-item w-full text-right text-amber-200" onClick={async () => { const folder=activeContextMenu.item as Folder; setActiveContextMenu(null); try { await updateFolder.mutateAsync({id:folder.id,is_hidden:!folder.is_hidden}); addToast(folder.is_hidden?'کشو از گاوصندوق بیرون آمد.':'کشو داخل گاوصندوق مخفی شد 🔒'); } catch(error:any) { addToast(error?.response?.data?.detail || 'از تنظیمات امنیتی برای گاوصندوق رمز تعیین کن.', 'error'); } }}>
-                            {activeContextMenu.item.is_hidden ? <Eye className="h-4 w-4"/> : <EyeOff className="h-4 w-4"/>}
-                            {activeContextMenu.item.is_hidden ? 'خارج کردن از گاوصندوق' : 'مخفی کردن در گاوصندوق'}
-                        </button>
-                        <hr className="border-white/[0.08] my-1" />
-                        <button
-                            className="context-menu-item w-full text-right text-red-400 hover:bg-red-500/10"
-                            onClick={() => handleAction(() => setDeleteConfirm({ type: 'folder', items: [activeContextMenu.item] }))}
-                        >
-                            <Trash2 className="w-4 h-4" />
-                            حذف
-                        </button>
-                        </>}
-                    </>
-                )}
+    return <>
+        <div className={`fixed inset-0 z-[99998] ${isMobile ? 'bg-black/60 backdrop-blur-sm' : ''}`} onClick={event => { event.stopPropagation(); setActiveContextMenu(null); }}/>
+        <div ref={menuRef} dir="rtl" className={`fixed z-[99999] flex max-h-[76dvh] flex-col overflow-hidden border border-white/[.09] bg-dark-900/95 text-right shadow-2xl backdrop-blur-xl ${isMobile ? 'inset-x-0 bottom-0 rounded-t-[2rem] pb-[env(safe-area-inset-bottom)] animate-slide-up' : 'w-[340px] rounded-2xl animate-scale-in'}`} style={isMobile ? undefined : {left:position.left,top:position.top,transformOrigin:'top left'}} onClick={event=>event.stopPropagation()} onContextMenu={event=>event.preventDefault()}>
+            <header className="flex shrink-0 items-center gap-3 border-b border-white/[.07] px-4 py-3">
+                {isMobile&&<span className="absolute left-1/2 top-2 h-1 w-10 -translate-x-1/2 rounded-full bg-white/20"/>}
+                <div className="min-w-0 flex-1 pt-1"><p className="text-[10px] text-dark-500">{file?'گزینه‌های فایل':'گزینه‌های کشو'}</p><strong dir="auto" className="block truncate text-sm">{file?.file_name||folder?.name}</strong></div>
+                <button className="btn-icon h-9 w-9" aria-label="بستن منو" onClick={()=>setActiveContextMenu(null)}><X className="h-4 w-4"/></button>
+            </header>
+            <div className="min-h-0 overflow-y-auto p-3">
+                {isMultiSelect ? <div className="space-y-3"><p className="rounded-xl bg-primary-500/10 px-3 py-2 text-sm text-primary-200">{selectedFileIds.size.toLocaleString('fa-IR')} فایل انتخاب شده</p>{readOnlyWorkspace?<p className="text-sm text-amber-200">این کمد فقط قابل مشاهده است.</p>:<div className="grid grid-cols-2 gap-2"><ActionTile icon={<FolderInput/>} label="جابه‌جایی" onClick={()=>handleAction(()=>setMoveFiles(selectedFiles))}/><ActionTile danger icon={<Trash2/>} label="حذف" onClick={()=>handleAction(()=>setDeleteConfirm({type:'file',items:Array.from(selectedFileIds).map(id=>({id} as any))}))}/></div>}</div> : file ? <>
+                    <div className="grid grid-cols-2 gap-2">
+                        {playable&&<ActionTile icon={<Play/>} label="پخش" onClick={()=>handleAction(()=>handlePlay(file))}/>}
+                        {previewable&&<ActionTile icon={<Eye/>} label="پیش‌نمایش" onClick={()=>handleAction(()=>setContentPreviewFile(file))}/>}
+                        <ActionTile icon={<Download/>} label="دانلود" onClick={()=>{void handleDownload(file);setActiveContextMenu(null);}}/>
+                        <ActionTile icon={<DownloadCloud/>} label="ذخیره آفلاین" onClick={()=>handleOfflineSave(file)}/>
+                        <ActionTile icon={<Info/>} label="جزئیات" onClick={()=>handleAction(()=>setDetailsFile(file))}/>
+                    </div>
+                    {!readOnlyWorkspace&&<>
+                        <button className="mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-white/[.07] bg-white/[.035] text-sm text-dark-300 transition hover:bg-white/[.07]" onClick={()=>setShowMore(value=>!value)}>{showMore?<ChevronUp className="h-4 w-4"/>:<ChevronDown className="h-4 w-4"/>}{showMore?'بستن گزینه‌های بیشتر':'مدیریت و اشتراک‌گذاری'}</button>
+                        {showMore&&<div className="mt-3 space-y-3 border-t border-white/[.07] pt-3">
+                            <div className="grid grid-cols-2 gap-2">
+                                {playable&&<ActionTile icon={<ListPlus/>} label="افزودن به پلی‌لیست" onClick={()=>handleAction(()=>setPlaylistFile(file))}/>}
+                                <ActionTile icon={<Heart className={file.is_favorite?'fill-current text-pink-400':''}/>} label={file.is_favorite?'برداشتن نشان':'نشان کردن'} onClick={async()=>{setActiveContextMenu(null);await updateFile.mutateAsync({id:file.id,is_favorite:!file.is_favorite});addToast(file.is_favorite?'نشان برداشته شد.':'فایل نشان شد ⭐');}}/>
+                                <ActionTile icon={<Pin className={file.is_pinned?'fill-current text-primary-300':''}/>} label={file.is_pinned?'برداشتن پین':'پین بالای کمد'} onClick={async()=>{setActiveContextMenu(null);await updateFile.mutateAsync({id:file.id,is_pinned:!file.is_pinned});addToast(file.is_pinned?'پین برداشته شد.':'فایل پین شد 📌');}}/>
+                                <ActionTile icon={<Edit/>} label="تغییر نام" onClick={()=>handleAction(()=>setRenameFile(file))}/>
+                                <ActionTile icon={<AlignLeft/>} label={file.description?'ویرایش توضیحات':'افزودن توضیحات'} onClick={()=>handleAction(()=>setDescriptionItem({type:'file',item:file}))}/>
+                                <ActionTile icon={<Tags/>} label="ویرایش تگ‌ها" onClick={()=>handleAction(()=>setDetailsFile(file))}/>
+                                <ActionTile icon={<FolderInput/>} label="جابه‌جایی" onClick={()=>handleAction(()=>setMoveItems({files:[file],folders:[]}))}/>
+                                <ActionTile icon={file.is_hidden?<Eye/>:<EyeOff/>} label={file.is_hidden?'خروج از گاوصندوق':'مخفی کردن'} onClick={async()=>{setActiveContextMenu(null);try{await updateFile.mutateAsync({id:file.id,is_hidden:!file.is_hidden});addToast(file.is_hidden?'فایل از گاوصندوق بیرون آمد.':'فایل مخفی شد 🔒');}catch(error:any){addToast(error?.response?.data?.detail||'ابتدا برای گاوصندوق رمز تعیین کن.','error');}}}/>
+                            </div>
+                            <div className="rounded-2xl border border-white/[.07] bg-dark-950/40 p-1.5">
+                                <button className="context-menu-item w-full" onClick={async()=>{setActiveContextMenu(null);addToast('در حال آماده‌سازی پیوند…','info');handleCopy(await ensurePublicLink(file),'stream');}}><Link className="h-4 w-4"/>{copiedId==='stream'?'کپی شد':'کپی پیوند پخش'}</button>
+                                <button className="context-menu-item w-full" onClick={async()=>{setActiveContextMenu(null);addToast('در حال آماده‌سازی پیوند…','info');const url=await ensurePublicLink(file);handleCopy(url+(url.includes('?')?'&':'?')+'download=1','download');}}><HardDriveDownload className="h-4 w-4"/>{copiedId==='download'?'کپی شد':'کپی پیوند دانلود'}</button>
+                                {file.public_stream_url?<><button className="context-menu-item w-full" onClick={()=>handleCopy(`${window.location.protocol}//${window.location.host}${file.public_stream_url}`,'public')}><Globe className="h-4 w-4 text-emerald-400"/>کپی پیوند عمومی</button><button className="context-menu-item w-full text-orange-300" onClick={()=>void handleRevokeShare(file)}><ShieldOff className="h-4 w-4"/>لغو پیوند عمومی</button></>:<button className="context-menu-item w-full" onClick={()=>void handleShare(file)}><Globe className="h-4 w-4"/>ساخت پیوند عمومی</button>}
+                            </div>
+                            <button className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-red-500/10 text-sm text-red-300 hover:bg-red-500/15" onClick={()=>handleAction(()=>setDeleteConfirm({type:'file',items:[file]}))}><Trash2 className="h-4 w-4"/>حذف فایل</button>
+                        </div>}
+                    </>}
+                    {readOnlyWorkspace&&<p className="mt-3 rounded-xl bg-amber-500/[.08] px-3 py-2 text-xs text-amber-200">این کمد با دسترسی فقط مشاهده باز شده است.</p>}
+                </> : folder ? <>
+                    {readOnlyWorkspace?<p className="rounded-xl bg-amber-500/[.08] px-3 py-3 text-sm text-amber-200">این کمد با دسترسی فقط مشاهده باز شده است.</p>:<>
+                        <div className="grid grid-cols-2 gap-2">
+                            <ActionTile icon={<Heart className={folder.is_favorite?'fill-current text-pink-400':''}/>} label={folder.is_favorite?'برداشتن نشان':'نشان کردن'} onClick={async()=>{setActiveContextMenu(null);await updateFolder.mutateAsync({id:folder.id,is_favorite:!folder.is_favorite});addToast(folder.is_favorite?'نشان برداشته شد.':'کشو نشان شد ⭐');}}/>
+                            <ActionTile icon={<Pin className={folder.is_pinned?'fill-current text-primary-300':''}/>} label={folder.is_pinned?'برداشتن پین':'پین بالای کمد'} onClick={async()=>{setActiveContextMenu(null);await updateFolder.mutateAsync({id:folder.id,is_pinned:!folder.is_pinned});addToast(folder.is_pinned?'پین برداشته شد.':'کشو پین شد 📌');}}/>
+                            <ActionTile icon={<Edit/>} label="تغییر نام" onClick={()=>handleAction(()=>setRenameFolder(folder))}/>
+                            <ActionTile icon={<FolderInput/>} label="جابه‌جایی" onClick={()=>handleAction(()=>setMoveItems({files:[],folders:[folder]}))}/>
+                        </div>
+                        <button className="mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-white/[.07] bg-white/[.035] text-sm text-dark-300" onClick={()=>setShowMore(value=>!value)}>{showMore?<ChevronUp className="h-4 w-4"/>:<ChevronDown className="h-4 w-4"/>}{showMore?'بستن گزینه‌های بیشتر':'گزینه‌های بیشتر'}</button>
+                        {showMore&&<div className="mt-3 grid grid-cols-2 gap-2 border-t border-white/[.07] pt-3"><ActionTile icon={<AlignLeft/>} label={folder.description?'ویرایش توضیحات':'افزودن توضیحات'} onClick={()=>handleAction(()=>setDescriptionItem({type:'folder',item:folder}))}/><ActionTile icon={folder.is_hidden?<Eye/>:<EyeOff/>} label={folder.is_hidden?'خروج از گاوصندوق':'مخفی کردن'} onClick={async()=>{setActiveContextMenu(null);try{await updateFolder.mutateAsync({id:folder.id,is_hidden:!folder.is_hidden});addToast(folder.is_hidden?'کشو از گاوصندوق بیرون آمد.':'کشو مخفی شد 🔒');}catch(error:any){addToast(error?.response?.data?.detail||'ابتدا برای گاوصندوق رمز تعیین کن.','error');}}}/><ActionTile danger icon={<Trash2/>} label="حذف کشو" onClick={()=>handleAction(()=>setDeleteConfirm({type:'folder',items:[folder]}))}/></div>}
+                    </>}
+                </> : null}
             </div>
-        </>
-    );
+        </div>
+    </>;
+}
+
+function ActionTile({icon,label,onClick,danger=false}:{icon:React.ReactElement;label:string;onClick:()=>void|Promise<void>;danger?:boolean}){
+    return <button onClick={()=>void onClick()} className={`flex min-h-14 min-w-0 items-center gap-2 rounded-2xl border px-3 py-2 text-right text-xs transition active:scale-[.98] ${danger?'border-red-500/15 bg-red-500/[.07] text-red-300 hover:bg-red-500/12':'border-white/[.06] bg-white/[.035] text-dark-200 hover:border-primary-400/20 hover:bg-primary-500/[.07]'}`}><span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${danger?'bg-red-500/10':'bg-primary-500/10 text-primary-300'} [&>svg]:h-4 [&>svg]:w-4`}>{icon}</span><span className="min-w-0 leading-5">{label}</span></button>;
 }
