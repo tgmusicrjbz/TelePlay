@@ -8,6 +8,14 @@ export const colorThemes = {
 
 export type ColorTheme = keyof typeof colorThemes;
 export type ActiveTheme = ColorTheme | 'custom';
+export type AppearanceMode = 'dark' | 'light';
+
+export const getStoredAppearanceMode = (): AppearanceMode => localStorage.getItem('komod-appearance-mode') === 'light' ? 'light' : 'dark';
+export const applyAppearanceMode = (mode: AppearanceMode) => {
+    document.documentElement.classList.toggle('light', mode === 'light');
+    document.documentElement.classList.toggle('dark', mode === 'dark');
+    document.documentElement.style.colorScheme = mode;
+};
 
 export const getStoredTheme = (): ActiveTheme => {
     const saved = localStorage.getItem('komod-color-theme');

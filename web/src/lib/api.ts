@@ -35,7 +35,7 @@ export interface User {
 }
 
 export interface AuthSession { id: string; device_name: string; user_agent?: string | null; ip_address?: string | null; created_at: string; last_seen_at: string; current: boolean; }
-export interface Workspace { user_id: number; telegram_id: number; name: string; username?: string | null; permission: 'owner' | 'read' | 'write'; }
+export interface Workspace { user_id: number; telegram_id: number; name: string; username?: string | null; permission: 'owner' | 'read' | 'write'; folder_ids: number[]; file_ids: number[]; }
 export interface AdminUser extends User { total_size: number; file_count: number; session_count: number; }
 export interface AdminStats { active_users: number; total_users: number; total_files: number; total_size: number; }
 export interface AccountPreferences { delete_storage_files: boolean; }
@@ -898,7 +898,7 @@ export const useWorkspaces = () => useQuery({ queryKey: ['workspaces'], queryFn:
 export const useWorkspaceGrants = () => useQuery({ queryKey: ['workspaceGrants'], queryFn: async () => (await api.get<Workspace[]>('/accounts/grants')).data });
 export const useGrantWorkspace = () => {
     const queryClient = useQueryClient();
-    return useMutation({ mutationFn: async (payload: { telegram_id?: number; identifier?: string; permission: 'read' | 'write' }) => (await api.post<Workspace>('/accounts/grants', payload)).data, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['workspaceGrants'] }) });
+    return useMutation({ mutationFn: async (payload: { telegram_id?: number; identifier?: string; permission: 'read' | 'write'; folder_ids?: number[]; file_ids?: number[] }) => (await api.post<Workspace>('/accounts/grants', payload)).data, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['workspaceGrants'] }) });
 };
 export const useRevokeWorkspace = () => {
     const queryClient = useQueryClient();

@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import create_vault_token, get_current_user, require_vault_access
 from ..config import get_settings
 from ..database import get_db
-from ..models import AuthSession, File, User, WorkspaceGrant
+from ..models import AuthSession, File, Folder, User, WorkspaceGrant
 from ..schemas import AccountPreferences, AdminStatsResponse, AdminUserCreate, AdminUserResponse, AdminUserUpdate, StorageChannelResponse, StorageChannelUpdate, TagDefinitionResponse, TagSettingsResponse, TagSettingsUpdate, VaultPasswordRequest, VaultStatus, VaultTokenResponse, WorkspaceGrantCreate, WorkspaceResponse
 from .. import telegram
 
@@ -22,6 +22,22 @@ vault_password_context = CryptContext(schemes=["pbkdf2_sha256"], pbkdf2_sha256__
 
 def user_name(user: User) -> str:
     return user.display_name or " ".join(filter(None, [user.first_name, user.last_name])) or user.username or f"کاربر {user.telegram_id}"
+
+
+def grant_scope(grant: WorkspaceGrant) -> dict[str, list[int]]:
+    try:
+        raw = json.loads(grant.scope_json or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        raw = {}
+    return {
+        "folder_ids": [int(value) for value in raw.get("folder_ids", []) if str(value).isdigit()],
+        "file_ids": [int(value) for value in raw.get("file_ids", []) if str(value).isdigit()],
+    }
+
+
+def workspace_response(user: User, permission: str, grant: WorkspaceGrant | None = None) -> WorkspaceResponse:
+    scope = grant_scope(grant) if grant else {"folder_ids": [], "file_ids": []}
+    return WorkspaceResponse(user_id=user.id, telegram_id=user.telegram_id, name=user_name(user), username=user.username, permission=permission, **scope)
 
 
 def clean_tag_definitions(raw_tags) -> list[dict[str, str]]:
@@ -76,8 +92,8 @@ async def list_workspaces(current_user: User = Depends(get_current_user), db: As
     grants = (await db.execute(select(WorkspaceGrant, User).join(User, User.id == WorkspaceGrant.owner_user_id).where(
         WorkspaceGrant.member_user_id == current_user.id, User.is_active.is_(True)
     ))).all()
-    result = [WorkspaceResponse(user_id=current_user.id, telegram_id=current_user.telegram_id, name=user_name(current_user), username=current_user.username, permission="owner")]
-    result.extend(WorkspaceResponse(user_id=owner.id, telegram_id=owner.telegram_id, name=user_name(owner), username=owner.username, permission=grant.permission) for grant, owner in grants)
+    result = [workspace_response(current_user, "owner")]
+    result.extend(workspace_response(owner, grant.permission, grant) for grant, owner in grants)
     return result
 
 
@@ -86,7 +102,7 @@ async def list_grants(current_user: User = Depends(get_current_user), db: AsyncS
     rows = (await db.execute(select(WorkspaceGrant, User).join(User, User.id == WorkspaceGrant.member_user_id).where(
         WorkspaceGrant.owner_user_id == current_user.id
     ))).all()
-    return [WorkspaceResponse(user_id=member.id, telegram_id=member.telegram_id, name=user_name(member), username=member.username, permission=grant.permission) for grant, member in rows]
+    return [workspace_response(member, grant.permission, grant) for grant, member in rows]
 
 
 @router.post("/accounts/grants", response_model=WorkspaceResponse)
@@ -103,6 +119,17 @@ async def grant_workspace(payload: WorkspaceGrantCreate, current_user: User = De
         raise HTTPException(status_code=404, detail="این کاربر باید حداقل یک بار وارد کمد شده باشد.")
     if member.id == current_user.id:
         raise HTTPException(status_code=400, detail="فضای خودت از قبل در دسترس است.")
+    folder_ids = sorted(set(payload.folder_ids))
+    file_ids = sorted(set(payload.file_ids))
+    if folder_ids:
+        valid_folders = set((await db.execute(select(Folder.id).where(Folder.user_id == current_user.id, Folder.id.in_(folder_ids)))).scalars().all())
+        if valid_folders != set(folder_ids):
+            raise HTTPException(status_code=400, detail="یکی از کشوهای انتخاب‌شده معتبر نیست.")
+    if file_ids:
+        valid_files = set((await db.execute(select(File.id).where(File.user_id == current_user.id, File.id.in_(file_ids)))).scalars().all())
+        if valid_files != set(file_ids):
+            raise HTTPException(status_code=400, detail="یکی از فایل‌های انتخاب‌شده معتبر نیست.")
+    scope_json = json.dumps({"folder_ids": folder_ids, "file_ids": file_ids}, ensure_ascii=False)
     grant = (await db.execute(select(WorkspaceGrant).where(
         WorkspaceGrant.owner_user_id == current_user.id, WorkspaceGrant.member_user_id == member.id
     ))).scalar_one_or_none()
@@ -111,8 +138,9 @@ async def grant_workspace(payload: WorkspaceGrantCreate, current_user: User = De
         db.add(grant)
     else:
         grant.permission = payload.permission
+    grant.scope_json = scope_json
     await db.commit()
-    return WorkspaceResponse(user_id=member.id, telegram_id=member.telegram_id, name=user_name(member), username=member.username, permission=grant.permission)
+    return workspace_response(member, grant.permission, grant)
 
 
 @router.delete("/accounts/grants/{member_user_id}", status_code=204)

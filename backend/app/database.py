@@ -76,6 +76,11 @@ async def init_db():
     """Create all tables."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        grant_columns = await conn.run_sync(
+            lambda sync_conn: {column["name"] for column in inspect(sync_conn).get_columns("workspace_grants")}
+        )
+        if "scope_json" not in grant_columns:
+            await conn.execute(text("ALTER TABLE workspace_grants ADD COLUMN scope_json TEXT NOT NULL DEFAULT '{}'"))
         user_columns = await conn.run_sync(
             lambda sync_conn: {column["name"] for column in inspect(sync_conn).get_columns("users")}
         )

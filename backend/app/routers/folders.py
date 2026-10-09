@@ -10,7 +10,7 @@ from sqlalchemy import select, func, update, delete, text, asc, desc
 from ..database import get_db
 from ..models import Folder, File, User, WatchProgress
 from ..schemas import FolderResponse, FolderCreate, FolderUpdate, FolderWithChildren
-from ..auth import get_current_user, has_vault_access, require_vault_access
+from ..auth import get_current_user, has_vault_access, require_vault_access, workspace_scope
 from ..telegram import delete_from_storage_channel
 
 
@@ -132,11 +132,19 @@ async def list_folders(
         await ensure_default_folder(db, current_user.id)
         await db.commit()
     stmt = select(Folder).where(Folder.user_id == current_user.id)
+    scope = workspace_scope(request)
+    if scope and (scope["folder_ids"] or scope["file_ids"]):
+        stmt = stmt.where(Folder.id.in_(getattr(request.state, "workspace_allowed_folder_ids", set())))
     if include_hidden:
         require_vault_access(request, current_user)
     else:
         stmt = stmt.where(Folder.is_hidden.is_(False))
-    stmt = stmt.where(Folder.parent_id == parent_id) if parent_id is not None else stmt.where(Folder.parent_id.is_(None))
+    if parent_id is not None:
+        stmt = stmt.where(Folder.parent_id == parent_id)
+    elif scope and scope["folder_ids"]:
+        stmt = stmt.where(Folder.id.in_(scope["folder_ids"]))
+    else:
+        stmt = stmt.where(Folder.parent_id.is_(None))
     if favorite_only:
         stmt = stmt.where(Folder.is_favorite.is_(True))
     folders = (await db.execute(stmt)).scalars().all()
@@ -172,6 +180,9 @@ async def get_folder_tree(
     await ensure_default_folder(db, current_user.id)
     await db.commit()
     stmt = select(Folder).where(Folder.user_id == current_user.id)
+    scope = workspace_scope(request)
+    if scope and (scope["folder_ids"] or scope["file_ids"]):
+        stmt = stmt.where(Folder.id.in_(getattr(request.state, "workspace_allowed_folder_ids", set())))
     if include_hidden:
         require_vault_access(request, current_user)
     else:

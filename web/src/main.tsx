@@ -4,6 +4,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter } from 'react-router-dom'
 import App from './App'
 import './index.css'
+import { applyAppearanceMode, applyTheme, getStoredAppearanceMode, getStoredTheme } from './lib/theme'
+
+applyAppearanceMode(getStoredAppearanceMode())
+applyTheme(getStoredTheme())
 
 const queryClient = new QueryClient({
     defaultOptions: {

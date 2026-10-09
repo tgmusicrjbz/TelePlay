@@ -2,21 +2,49 @@
 JWT authentication utilities.
 """
 from datetime import datetime, timedelta
+import json
 from typing import Optional
 
 from jose import jwt, JWTError
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import bindparam, select, text
 
 from .config import get_settings
 from .database import get_db
-from .models import AuthSession, User, WorkspaceGrant
+from .models import AuthSession, File, Folder, User, WorkspaceGrant
 from .schemas import TokenPayload
 
 settings = get_settings()
 security = HTTPBearer(auto_error=False)
+
+
+def workspace_scope(request: Request | None) -> dict[str, list[int]] | None:
+    return getattr(request.state, "workspace_scope", None) if request else None
+
+
+def require_scoped_folder(request: Request | None, folder_id: int | None) -> None:
+    scope = workspace_scope(request)
+    if not scope or not (scope["folder_ids"] or scope["file_ids"]):
+        return
+    if folder_id is None or folder_id not in getattr(request.state, "workspace_allowed_folder_ids", set()):
+        raise HTTPException(status_code=403, detail="این کشوی مقصد با تو به اشتراک گذاشته نشده است.")
+
+
+async def scoped_folder_ids(db: AsyncSession, owner_user_id: int, roots: list[int]) -> set[int]:
+    if not roots:
+        return set()
+    statement = text("""
+        WITH RECURSIVE descendants AS (
+            SELECT id FROM folders WHERE user_id = :user_id AND id IN :root_ids
+            UNION ALL
+            SELECT f.id FROM folders f JOIN descendants d ON f.parent_id = d.id
+            WHERE f.user_id = :user_id
+        ) SELECT id FROM descendants
+    """).bindparams(bindparam("root_ids", expanding=True))
+    result = await db.execute(statement, {"user_id": owner_user_id, "root_ids": roots})
+    return {int(value) for value in result.scalars().all()}
 
 
 
@@ -183,6 +211,28 @@ async def get_current_user(
                 owner = await db.get(User, workspace_user_id)
                 if owner is None or not owner.is_active:
                     raise HTTPException(status_code=404, detail="Workspace is unavailable")
+                try:
+                    raw_scope = json.loads(grant.scope_json or "{}")
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    raw_scope = {}
+                scope = {
+                    "folder_ids": [int(value) for value in raw_scope.get("folder_ids", []) if str(value).isdigit()],
+                    "file_ids": [int(value) for value in raw_scope.get("file_ids", []) if str(value).isdigit()],
+                }
+                request.state.workspace_scope = scope
+                if scope["folder_ids"] or scope["file_ids"]:
+                    allowed_folders = await scoped_folder_ids(db, owner.id, scope["folder_ids"])
+                    request.state.workspace_allowed_folder_ids = allowed_folders
+                    file_id = request.path_params.get("file_id")
+                    if file_id is not None:
+                        item = await db.get(File, int(file_id))
+                        if item is None or item.user_id != owner.id or (item.id not in scope["file_ids"] and item.folder_id not in allowed_folders):
+                            raise HTTPException(status_code=403, detail="این فایل با تو به اشتراک گذاشته نشده است.")
+                    folder_id = request.path_params.get("folder_id")
+                    if folder_id is not None and int(folder_id) not in allowed_folders:
+                        raise HTTPException(status_code=403, detail="این کشو با تو به اشتراک گذاشته نشده است.")
+                    if request.method not in {"GET", "HEAD", "OPTIONS"} and file_id is None and folder_id is None and request.url.path not in {"/api/files/upload", "/api/files/import-link"}:
+                        raise HTTPException(status_code=403, detail="این عملیات خارج از محدودهٔ اشتراک‌گذاری است.")
                 return owner
 
     return user

@@ -11,7 +11,7 @@ import shutil
 import tempfile
 from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, delete, asc, desc, exists
+from sqlalchemy import select, func, delete, asc, desc, exists, false, or_
 from sqlalchemy.orm import selectinload
 from pydantic import BaseModel, Field
 from datetime import datetime
@@ -20,7 +20,7 @@ from urllib.parse import urlparse
 from ..database import get_db
 from ..models import File, User, WatchProgress, Folder, Playlist
 from ..schemas import ActivityResponse, BatchFileUpdate, FileResponse, FileListResponse, FileUpdate, WatchProgressUpdate
-from ..auth import get_current_user, has_vault_access, require_vault_access
+from ..auth import get_current_user, has_vault_access, require_scoped_folder, require_vault_access, workspace_scope
 from ..telegram import delete_from_storage_channel, get_message_from_channel
 from .. import telegram
 from ..config import get_settings
@@ -49,7 +49,7 @@ class LinkImportRequest(BaseModel):
     url: str = Field(min_length=8, max_length=2048)
     folder_id: Optional[int] = None
     new_folder_name: Optional[str] = Field(default=None, max_length=255)
-    quality: Optional[str] = Field(default="720", pattern="^(auto|audio|480|720|1080)$")
+    quality: Optional[str] = Field(default="480", pattern="^(auto|audio|480|720|1080)$")
 
 
 FILE_SORT_FIELDS = {
@@ -79,6 +79,7 @@ def detect_upload_type(filename: str, mime_type: str | None) -> str:
 @router.post("/import-link", status_code=202)
 async def import_link(
     payload: LinkImportRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -88,6 +89,9 @@ async def import_link(
     if not link_importer.available:
         raise HTTPException(status_code=503, detail="دانلود از لینک هنوز روی سرور تنظیم نشده است.")
     folder_id = payload.folder_id
+    scoped_new_folder = bool(payload.new_folder_name and payload.new_folder_name.strip())
+    if scoped_new_folder:
+        require_scoped_folder(request, payload.folder_id)
     if payload.new_folder_name and payload.new_folder_name.strip():
         name = payload.new_folder_name.strip()
         folder = Folder(user_id=current_user.id, parent_id=payload.folder_id, name=name)
@@ -102,7 +106,9 @@ async def import_link(
     else:
         folder_id = (await ensure_default_folder(db, current_user.id)).id
         await db.commit()
-    quality = "auto" if host == "instagram.com" or host.endswith(".instagram.com") else (payload.quality or "720")
+    if not scoped_new_folder:
+        require_scoped_folder(request, folder_id)
+    quality = "auto" if host == "instagram.com" or host.endswith(".instagram.com") else (payload.quality or "480")
     job = ImportJob(url=payload.url.strip(), user_id=current_user.id, telegram_id=current_user.telegram_id, folder_id=folder_id, quality=quality, notify=True)
     position = await link_importer.enqueue(job)
     return {"message": "لینک رفت توی صف؛ وضعیتش همین‌جا هم به‌روز می‌شه.", "queue_position": position, "job_id": job.id}
@@ -114,6 +120,11 @@ async def import_link_status(job_id: str, current_user: User = Depends(get_curre
     if status is None:
         raise HTTPException(status_code=404, detail="وضعیت این لینک پیدا نشد.")
     return status
+
+
+@router.get("/import-link/status")
+async def import_link_queue(current_user: User = Depends(get_current_user)):
+    return link_importer.list_statuses(current_user.id)
 
 
 @router.post("/import-link/status/{job_id}/pause")
@@ -134,6 +145,7 @@ async def cancel_import_link(job_id: str, current_user: User = Depends(get_curre
 
 @router.post("/upload", response_model=FileResponse, status_code=201)
 async def upload_file(
+    request: Request,
     upload: UploadFile = FormFile(...),
     folder_id: Optional[int] = Form(None),
     description: Optional[str] = Form(None),
@@ -149,6 +161,7 @@ async def upload_file(
         folder = (await db.execute(select(Folder).where(Folder.id == folder_id, Folder.user_id == current_user.id))).scalar_one_or_none()
         if folder is None:
             raise HTTPException(status_code=404, detail="Folder not found")
+    require_scoped_folder(request, folder_id)
 
     temporary_dir: str | None = None
     temporary_path: str | None = None
@@ -356,6 +369,15 @@ async def list_files(
 ):
     """List user's files with optional filtering."""
     query = select(File).where(File.user_id == current_user.id).options(selectinload(File.watch_progress))
+    scope = workspace_scope(request)
+    if scope and (scope["folder_ids"] or scope["file_ids"]):
+        allowed_folders = getattr(request.state, "workspace_allowed_folder_ids", set())
+        clauses = []
+        if scope["file_ids"]:
+            clauses.append(File.id.in_(scope["file_ids"]))
+        if allowed_folders:
+            clauses.append(File.folder_id.in_(allowed_folders))
+        query = query.where(or_(*clauses))
     if include_hidden:
         require_vault_access(request, current_user)
     else:
@@ -368,7 +390,9 @@ async def list_files(
     # Apply filters
     if folder_id is not None:
         query = query.where(File.folder_id == folder_id)
-    elif not search and not file_type and not favorite_only:
+    elif scope and (scope["folder_ids"] or scope["file_ids"]) and not search and not file_type and not favorite_only:
+        query = query.where(File.id.in_(scope["file_ids"]) if scope["file_ids"] else false())
+    elif not search and not file_type and not favorite_only and not (scope and (scope["folder_ids"] or scope["file_ids"])):
         # If simply browsing (no search/filter), only show files in root (folder_id is NULL)
         query = query.where(File.folder_id.is_(None))
         

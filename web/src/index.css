@@ -3,6 +3,20 @@
 @tailwind utilities;
 
 :root {
+  color-scheme: dark;
+  --app-white: 255 255 255;
+  --dark-50: 248 250 252;
+  --dark-100: 241 245 249;
+  --dark-200: 226 232 240;
+  --dark-300: 203 213 225;
+  --dark-400: 148 163 184;
+  --dark-500: 100 116 139;
+  --dark-600: 71 85 105;
+  --dark-700: 51 65 85;
+  --dark-800: 30 41 59;
+  --dark-850: 23 32 50;
+  --dark-900: 15 23 42;
+  --dark-950: 2 6 23;
   --primary-50: 250 245 255;
   --primary-100: 243 232 255;
   --primary-200: 233 213 255;
@@ -218,6 +232,23 @@ body {
   direction: ltr !important;
 }
 
+:root.light {
+  color-scheme: light;
+  --app-white: 15 23 42;
+  --dark-50: 2 6 23;
+  --dark-100: 15 23 42;
+  --dark-200: 30 41 59;
+  --dark-300: 51 65 85;
+  --dark-400: 71 85 105;
+  --dark-500: 100 116 139;
+  --dark-600: 148 163 184;
+  --dark-700: 203 213 225;
+  --dark-800: 241 245 249;
+  --dark-850: 248 250 252;
+  --dark-900: 255 255 255;
+  --dark-950: 248 250 252;
+}
+
 .font-player {
   font-family: "Segoe UI Variable", Inter, "SF Pro Display", Roboto, sans-serif;
   font-variant-numeric: tabular-nums;
@@ -370,6 +401,11 @@ body {
         bottom: max(1rem, env(safe-area-inset-bottom));
         right: max(1rem, env(safe-area-inset-right));
     }
+}
+
+:root.light body {
+  background: linear-gradient(135deg, #f8fafc 0%, #eef2ff 100%);
+  color: #0f172a;
 }
 
 /* Keep video controls compact on short landscape screens. */

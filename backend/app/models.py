@@ -62,6 +62,7 @@ class WorkspaceGrant(Base):
     owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     member_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     permission: Mapped[str] = mapped_column(String(16), default="read", nullable=False)
+    scope_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (UniqueConstraint("owner_user_id", "member_user_id", name="uq_workspace_grant"),)

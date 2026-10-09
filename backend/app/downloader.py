@@ -36,7 +36,7 @@ class ImportJob:
     user_id: int
     telegram_id: int
     folder_id: int | None = None
-    quality: str = "720"
+    quality: str = "480"
     notify: bool = True
     default_folder: bool = False
     id: str = ""
@@ -149,7 +149,7 @@ class LinkImportService:
         if self.client is None or self.task is None or self.task.done():
             await self.start()
         job.id = job.id or uuid.uuid4().hex
-        self.statuses[job.id] = {"id": job.id, "user_id": job.user_id, "state": "queued", "message": "در صف", "saved": 0}
+        self.statuses[job.id] = {"id": job.id, "user_id": job.user_id, "url": job.url, "quality": job.quality, "folder_id": job.folder_id, "state": "queued", "message": "در صف", "saved": 0, "created_at": datetime.utcnow().isoformat()}
         self.controls[job.id] = {"paused": False, "cancelled": False}
         await self.queue.put(job)
         return self.queue.qsize()
@@ -157,6 +157,10 @@ class LinkImportService:
     def status(self, job_id: str, user_id: int) -> dict | None:
         status = self.statuses.get(job_id)
         return status if status and status["user_id"] == user_id else None
+
+    def list_statuses(self, user_id: int) -> list[dict]:
+        jobs = [dict(item) for item in self.statuses.values() if item["user_id"] == user_id]
+        return sorted(jobs, key=lambda item: item.get("created_at", ""), reverse=True)[:100]
 
     def toggle_pause(self, job_id: str, user_id: int) -> dict | None:
         status = self.status(job_id, user_id)
@@ -326,10 +330,11 @@ class LinkImportService:
                 # expose an English/UK option. Select it before looking for a
                 # quality button. Timer buttons are deliberately left alone;
                 # the same edited message is fetched again on the next pass.
-                language_button = next((button for button in ready_buttons if (
+                language_buttons = [button for button in buttons if (
                     any(flag in button.text for flag in ("🇬🇧", "🇺🇸", "🌐", "🌏"))
                     or re.search(r"\b(english|en)\b", button.text, re.IGNORECASE)
-                ) and button_key(message, button) not in clicked), None)
+                )]
+                language_button = next((button for button in language_buttons if button_key(message, button) not in clicked and (button_ready(button) or time.monotonic() - started_at > 8)), None)
                 if language_button and not re.search(r"\b(360|480|720|1080)p?\b", language_button.text, re.IGNORECASE):
                     if await click_button(message, language_button):
                         clicked.add(button_key(message, language_button))

@@ -317,6 +317,8 @@ class WorkspaceGrantCreate(BaseModel):
     telegram_id: Optional[int] = None
     identifier: Optional[str] = Field(default=None, min_length=1, max_length=255)
     permission: Literal["read", "write"] = "read"
+    folder_ids: list[int] = Field(default_factory=list)
+    file_ids: list[int] = Field(default_factory=list)
 
 
 class WorkspaceResponse(BaseModel):
@@ -325,6 +327,8 @@ class WorkspaceResponse(BaseModel):
     name: str
     username: Optional[str] = None
     permission: Literal["owner", "read", "write"]
+    folder_ids: list[int] = Field(default_factory=list)
+    file_ids: list[int] = Field(default_factory=list)
 
 
 class AdminUserUpdate(BaseModel):

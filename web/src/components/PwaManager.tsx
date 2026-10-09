@@ -114,11 +114,11 @@ export default function PwaManager() {
             <WifiOff className="h-4 w-4" /> آفلاینی؛ فایل‌های ذخیره‌شده در بخش دانلودها آمادهٔ پخش‌اند.
         </div>}
 
-        {((showInstall && showNudge) || waitingWorker) && <div className="pwa-safe-bottom fixed bottom-2 left-1/2 z-[190] flex max-w-[calc(100vw-2rem)] -translate-x-1/2 flex-col gap-2 sm:flex-row" dir="rtl">
+        {((showInstall && showNudge) || waitingWorker) && <div className="pwa-safe-bottom fixed bottom-[calc(env(safe-area-inset-bottom)+5.25rem)] left-3 z-[190] flex max-w-[calc(100vw-1.5rem)] flex-col items-end gap-2 md:bottom-4 md:left-4" dir="rtl">
             {waitingWorker && <button onClick={applyUpdate} className="flex items-center justify-center gap-2 rounded-xl border border-primary-400/30 bg-dark-900/95 px-4 py-3 text-sm font-semibold text-white shadow-2xl backdrop-blur">
                 <RefreshCw className="h-4 w-4 text-primary-300" /> نسخه جدید آماده است
             </button>}
-            {showInstall && showNudge && <div className="flex items-center rounded-xl bg-primary-600 shadow-2xl shadow-primary-900/40"><button onClick={install} className="flex items-center justify-center gap-2 px-3 py-2.5 text-xs font-semibold text-white"><Download className="h-4 w-4" /> نصب Komod</button><button onClick={dismissNudge} className="p-2 text-white/70" title="فعلاً نه"><X className="h-4 w-4"/></button></div>}
+            {showInstall && showNudge && <div className="flex w-[min(20rem,calc(100vw-1.5rem))] items-center gap-2 rounded-2xl border border-primary-400/25 bg-dark-900/95 p-2 shadow-2xl backdrop-blur-xl"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-500/15 text-primary-200"><Download className="h-5 w-5"/></span><button onClick={install} className="min-w-0 flex-1 text-right"><strong className="block text-sm">نصب کمد</strong><small className="block truncate text-[10px] text-dark-400">دسترسی سریع از صفحهٔ اصلی دستگاه</small></button><button onClick={install} className="rounded-xl bg-primary-500 px-3 py-2 text-xs font-semibold text-white">نصب</button><button onClick={dismissNudge} className="btn-icon h-9 w-9" title="فعلاً نه"><X className="h-4 w-4"/></button></div>}
         </div>}
 
         {showIosHelp && <div className="fixed inset-0 z-[210] flex items-end justify-center bg-black/70 p-4 backdrop-blur-sm sm:items-center" onClick={() => setShowIosHelp(false)}>
