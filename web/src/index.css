@@ -115,7 +115,7 @@ body {
 }
 
 .btn-icon {
-  @apply p-2 rounded-lg bg-transparent hover:bg-white/[0.08] 
+  @apply inline-flex items-center justify-center p-2 leading-none rounded-lg bg-transparent hover:bg-white/[0.08]
          text-dark-400 hover:text-white
          transition-all duration-200;
 }

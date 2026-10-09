@@ -32,6 +32,7 @@ from app.routers.accounts import get_tag_settings, update_tag_settings
 from app.routers.files import (
     batch_update_files,
     get_activity,
+    get_storage_stats,
     get_text_preview,
     list_files,
     update_file,
@@ -105,7 +106,9 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
         async with async_session() as db:
             user = await db.get(User, self.user_id)
             direct = await db.get(File, self.direct_file_id)
+            nested = await db.get(File, self.nested_file_id)
             direct.tags_json = json.dumps(["پروژه"], ensure_ascii=False)
+            nested.description = "پروژه‌ای که فقط در توضیحات آمده"
             await db.commit()
             settings = await update_tag_settings(TagSettingsUpdate(
                 tags=[TagDefinition(name="پروژه", color="#14b8a6")],
@@ -114,6 +117,7 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(settings.tags[0].file_count, 1)
             result = await list_files(None, None, "#پروژه", 1, 20, db, user)
             self.assertEqual(result.total, 1)
+            self.assertEqual(result.files[0].id, direct.id)
             refreshed = await get_tag_settings(user, db)
             self.assertTrue(refreshed.show_file_tags)
 
@@ -144,6 +148,30 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             user.vault_password_hash = "configured"
             await batch_update_files(BatchFileUpdate(ids=[self.direct_file_id], is_hidden=True), db, user)
             self.assertTrue((await db.get(File, self.direct_file_id)).is_hidden)
+
+    async def test_hidden_only_returns_hidden_files_without_visible_page_noise(self):
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            direct = await db.get(File, self.direct_file_id)
+            direct.is_hidden = True
+            await db.commit()
+            with patch("app.routers.files.require_vault_access"):
+                result = await list_files(
+                    folder_id=None, file_type=None, search=None, page=1, per_page=20,
+                    db=db, current_user=user, hidden_only=True,
+                )
+            self.assertEqual(result.total, 1)
+            self.assertEqual(result.files[0].id, direct.id)
+            self.assertTrue(result.files[0].is_hidden)
+
+    async def test_shared_storage_stats_only_count_granted_scope(self):
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            request = self.auth_request()
+            request.state.workspace_scope = {"folder_ids": [], "file_ids": [self.direct_file_id]}
+            request.state.workspace_allowed_folder_ids = set()
+            result = await get_storage_stats(db, user, request)
+            self.assertEqual(result["total_size"], 5)
 
     async def asyncTearDown(self):
         await engine.dispose()

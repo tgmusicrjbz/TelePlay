@@ -144,6 +144,12 @@ async def cancel_import_link(job_id: str, current_user: User = Depends(get_curre
     return status
 
 
+@router.delete("/import-link/status")
+async def clear_finished_import_links(current_user: User = Depends(get_current_user)):
+    removed = link_importer.clear_finished(current_user.id)
+    return {"removed": removed}
+
+
 @router.post("/upload", response_model=FileResponse, status_code=201)
 async def upload_file(
     upload: UploadFile = FormFile(...),
@@ -367,6 +373,7 @@ async def list_files(
     include_playlist_covers: bool = False,
     include_hidden: bool = False,
     request: Request = None,
+    hidden_only: bool = False,
 ):
     """List user's files with optional filtering."""
     query = select(File).where(File.user_id == current_user.id).options(selectinload(File.watch_progress))
@@ -379,7 +386,10 @@ async def list_files(
         if allowed_folders:
             clauses.append(File.folder_id.in_(allowed_folders))
         query = query.where(or_(*clauses))
-    if include_hidden:
+    if hidden_only:
+        require_vault_access(request, current_user)
+        query = query.where(File.is_hidden.is_(True))
+    elif include_hidden:
         require_vault_access(request, current_user)
     else:
         query = query.where(File.is_hidden.is_(False))
@@ -393,7 +403,7 @@ async def list_files(
         query = query.where(File.folder_id == folder_id)
     elif scope and (scope["folder_ids"] or scope["file_ids"]) and not search and not file_type and not favorite_only:
         query = query.where(File.id.in_(scope["file_ids"]) if scope["file_ids"] else false())
-    elif not search and not file_type and not favorite_only and not (scope and (scope["folder_ids"] or scope["file_ids"])):
+    elif not hidden_only and not search and not file_type and not favorite_only and not (scope and (scope["folder_ids"] or scope["file_ids"])):
         # If simply browsing (no search/filter), only show files in root (folder_id is NULL)
         query = query.where(File.folder_id.is_(None))
         
@@ -530,9 +540,19 @@ async def get_continue_watching(
 async def get_storage_stats(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
     """Get total storage usage."""
     query = select(func.sum(File.file_size)).where(File.user_id == current_user.id)
+    scope = workspace_scope(request)
+    if scope and (scope["folder_ids"] or scope["file_ids"]):
+        clauses = []
+        if scope["file_ids"]:
+            clauses.append(File.id.in_(scope["file_ids"]))
+        allowed_folders = getattr(request.state, "workspace_allowed_folder_ids", set())
+        if allowed_folders:
+            clauses.append(File.folder_id.in_(allowed_folders))
+        query = query.where(or_(*clauses))
     result = await db.execute(query)
     total_size = result.scalar() or 0
     

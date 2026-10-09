@@ -3,7 +3,7 @@
  */
 import { useEffect, useCallback, useMemo, useRef, useState } from 'react';
 import { FolderPlus, Folder as FolderIcon, Grid, LayoutGrid, List, Search, ChevronRight, Home, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, StickyNote, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ChevronDown, ChevronUp, Plus, CheckSquare, Square, ListChecks, ListPlus, Upload, Star, RefreshCw, Link2, DownloadCloud, Download, Eye, EyeOff, Minus, Pause, Play, Tags, Cloud, CloudOff } from 'lucide-react';
-import { api, useFiles, useFolders, useFolderTree, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useActivityFeed, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile, useImportLink, useTagSettings, useUnlockVault } from '../lib/api';
+import { api, useFiles, useFolders, useFolderTree, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useActivityFeed, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile, useImportLink, useTagSettings, useUnlockVault, useWorkspaces } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { cacheAllTextNotes, queueOfflineText, saveFileOffline } from '../lib/offline';
 import FileCard from './FileCard';
@@ -37,6 +37,9 @@ const extractImportUrls = (value: string) => {
 
 export default function FileBrowser() {
     const readOnlyWorkspace = Boolean(localStorage.getItem('komod-active-workspace')) && localStorage.getItem('komod-active-workspace-permission') === 'read';
+    const activeWorkspaceId = Number(localStorage.getItem('komod-active-workspace') || 0);
+    const {data:workspaces=[]} = useWorkspaces();
+    const activeSharedWorkspace = activeWorkspaceId ? workspaces.find(space=>space.user_id===activeWorkspaceId) : undefined;
     const {
         currentFolderId,
         setCurrentFolderId,
@@ -101,7 +104,7 @@ export default function FileBrowser() {
     const [importQuality, setImportQuality] = useState<'auto' | 'audio' | '480' | '720' | '1080'>('480');
     const [uploadProgress, setUploadProgress] = useState<{name:string; index:number; total:number; percent:number}|null>(null);
     const [uploadPanelMode, setUploadPanelMode] = useState<'open'|'collapsed'|'hidden'>('open');
-    const [importJobs, setImportJobs] = useState<Array<{id:string; url:string; state:'queued'|'downloading'|'paused'|'cancelled'|'done'|'error'; message:string; saved:number}>>([]);
+    const [importJobs, setImportJobs] = useState<Array<{id:string; url:string; quality?:string; folder_id?:number|null; created_at?:string; state:'queued'|'downloading'|'paused'|'cancelled'|'done'|'error'; message:string; saved:number}>>([]);
     const [importPanelMode, setImportPanelMode] = useState<'open'|'collapsed'|'hidden'>('open');
     const [forceOffline, setForceOffline] = useState(() => localStorage.getItem('komod-force-offline') === '1');
     const [showHidden, setShowHidden] = useState(() => sessionStorage.getItem('komod-show-hidden') === '1');
@@ -200,7 +203,7 @@ export default function FileBrowser() {
     }, []);
 
     // Data Fetching
-    const { data: filesList, isLoading: filesLoading, isFetching: filesFetching, refetch: refetchFiles } = useFiles(searchQuery.trim() ? undefined : effectiveFolderId, fileTypeFilter.join(',') || undefined, searchQuery || undefined, page, sortValue, favoriteOnly, false, showHidden);
+    const { data: filesList, isLoading: filesLoading, isFetching: filesFetching, error: filesError, refetch: refetchFiles } = useFiles(hiddenOnly || searchQuery.trim() ? undefined : effectiveFolderId, fileTypeFilter.join(',') || undefined, searchQuery || undefined, page, sortValue, favoriteOnly, false, showHidden, hiddenOnly);
     const { data: activityFeed, isLoading: activityLoading, isError: activityError, refetch: refetchActivity } = useActivityFeed(activeSection === 'activity', 50);
     
 
@@ -241,7 +244,7 @@ export default function FileBrowser() {
     if (hiddenOnly) displayFiles = displayFiles?.filter(item => item.is_hidden);
 
     // Folder and file visibility is controlled from one shared content switcher.
-    const { data: folders, isLoading: foldersLoading, refetch: refetchFolders } = useFolders(currentFolderId, folderSortValue, favoriteOnly, showHidden);
+    const { data: folders, isLoading: foldersLoading, error: foldersError, refetch: refetchFolders } = useFolders(currentFolderId, folderSortValue, favoriteOnly, showHidden);
     const visibleFolders = folders?.filter(folder => {
         if (hiddenOnly && !folder.is_hidden) return false;
         if (currentFolderId === null && rootFilesMode === 'files' && folder.is_default) return false;
@@ -844,13 +847,47 @@ export default function FileBrowser() {
     };
     const visibleFileIds = showFiles ? displayFiles?.map(file => file.id) || [] : [];
     const visibleFolderIds = showFolders ? visibleFolders?.map(folder => folder.id) || [] : [];
-    const visibleItemCount = visibleFileIds.length + visibleFolderIds.length;
+    const totalSelectableFiles = showFiles ? (filesList?.total ?? visibleFileIds.length) : 0;
+    const visibleItemCount = totalSelectableFiles + visibleFolderIds.length;
     const allVisibleSelected = visibleItemCount > 0
+        && selectedFileIds.size >= totalSelectableFiles
         && visibleFileIds.every(id => selectedFileIds.has(id))
         && visibleFolderIds.every(id => selectedFolderIds.has(id));
-    const toggleSelectAll = () => {
+    const toggleSelectAll = async () => {
         if (allVisibleSelected) clearSelection();
-        else selectAll(visibleFileIds, visibleFolderIds);
+        else {
+            try {
+                let fileIds = visibleFileIds;
+                if (showFiles && totalSelectableFiles > visibleFileIds.length) {
+                    const collected = new Set<number>();
+                    const perPage = 100;
+                    const totalPages = Math.ceil(totalSelectableFiles / perPage);
+                    for (let requestedPage = 1; requestedPage <= totalPages; requestedPage += 1) {
+                        const params:Record<string,unknown> = {page:requestedPage,per_page:perPage};
+                        if (!hiddenOnly && !searchQuery.trim() && effectiveFolderId !== undefined) params.folder_id = effectiveFolderId;
+                        if (fileTypeFilter.length) params.file_type = fileTypeFilter.join(',');
+                        if (searchQuery.trim()) params.search = searchQuery.trim();
+                        if (sortValue) params.sort = sortValue;
+                        if (favoriteOnly) params.favorite_only = true;
+                        if (showHidden) params.include_hidden = true;
+                        if (hiddenOnly) params.hidden_only = true;
+                        const {data} = await api.get<{files:TelegramFile[]}>('/files',{params});
+                        data.files.forEach(file=>collected.add(file.id));
+                    }
+                    fileIds = Array.from(collected);
+                }
+                selectAll(fileIds, visibleFolderIds);
+            } catch {
+                addToast('انتخاب همهٔ نتایج انجام نشد؛ دوباره تلاش کن.', 'error');
+            }
+        }
+    };
+    const clearFinishedImportJobs = async () => {
+        try {
+            await api.delete('/files/import-link/status');
+            setImportJobs(jobs=>jobs.filter(job=>!['done','error','cancelled'].includes(job.state)));
+            addToast('موارد پایان‌یافته از صف پاک شدند.');
+        } catch { addToast('پاک‌کردن صف انجام نشد.', 'error'); }
     };
     const cancelSelection = () => {
         clearSelection();
@@ -877,14 +914,42 @@ export default function FileBrowser() {
     const showVaultItems = async (onlyHidden:boolean) => {
         try {
             if(!sessionStorage.getItem('komod-vault-token')) await unlockVault.mutateAsync(vaultPassword);
+            if (onlyHidden) {
+                setCurrentFolderId(null);
+                setBreadcrumbs([{id:null,name:'کمد من'}]);
+                setSearchQuery('');
+                setFileTypeFilter(null);
+                setContentScope('all');
+                setFavoriteOnly(false);
+                setShowFilters(false);
+                setShowSort(false);
+                clearSelection();
+            }
             setShowHidden(true); setHiddenOnly(onlyHidden); setPage(1); setAllFiles([]);
             sessionStorage.setItem('komod-show-hidden','1');
             if(onlyHidden) sessionStorage.setItem('komod-hidden-only','1'); else sessionStorage.removeItem('komod-hidden-only');
             setShowVaultPrompt(false); setVaultPassword('');
+            requestAnimationFrame(()=>containerRef.current?.scrollTo({top:0,behavior:'smooth'}));
             addToast(onlyHidden?'فقط موارد مخفی نمایش داده می‌شوند.':'موارد مخفی هم نمایش داده می‌شوند.');
         } catch(error:any) { addToast(error?.response?.data?.detail||'رمز گاوصندوق درست نیست.','error'); }
     };
-    const closeVaultItems = () => { setShowHidden(false); setHiddenOnly(false); sessionStorage.removeItem('komod-show-hidden'); sessionStorage.removeItem('komod-hidden-only'); setPage(1); setAllFiles([]); setShowVaultPrompt(false); };
+    const closeVaultItems = useCallback(() => {
+        setShowHidden(false);
+        setHiddenOnly(false);
+        sessionStorage.removeItem('komod-show-hidden');
+        sessionStorage.removeItem('komod-hidden-only');
+        setPage(1);
+        setAllFiles([]);
+        setShowVaultPrompt(false);
+        requestAnimationFrame(()=>containerRef.current?.scrollTo({top:0}));
+    }, []);
+    const vaultAccessError = hiddenOnly && [filesError, foldersError].some(error => [401, 403, 423].includes(Number((error as any)?.response?.status)));
+    useEffect(() => {
+        if (!vaultAccessError) return;
+        closeVaultItems();
+        sessionStorage.removeItem('komod-vault-token');
+        addToast('دسترسی گاوصندوق منقضی شده؛ دوباره رمز را وارد کن.', 'error');
+    }, [addToast, closeVaultItems, vaultAccessError]);
     const toggleSelectionMode = () => {
         const nextMode = !selectionMode;
         clearSelection();
@@ -950,6 +1015,7 @@ export default function FileBrowser() {
 
                     {/* Right: Actions */}
                     <div className="mr-2 flex shrink-0 items-center gap-1 sm:mr-4 sm:gap-2">
+                        {activeSection === 'files' && hiddenOnly && <button onClick={closeVaultItems} className="flex h-10 shrink-0 items-center gap-2 rounded-xl border border-amber-400/25 bg-amber-500/10 px-2.5 text-xs text-amber-100 transition hover:bg-amber-500/15" title="خروج از نمایش موارد مخفی"><ChevronRight className="h-4 w-4"/><span className="hidden sm:inline">بازگشت به کمد</span></button>}
                         <button onClick={toggleConnectionMode} className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border p-0 leading-none transition ${forceOffline?'border-primary-400/30 bg-primary-500/15 text-primary-200':'border-white/[.08] bg-dark-800/70 text-dark-300 hover:text-white'}`} title={forceOffline?'رفتن به حالت آنلاین':'رفتن به حالت آفلاین'} aria-label={forceOffline?'فعال‌کردن حالت آنلاین':'فعال‌کردن حالت آفلاین'}>{forceOffline?<CloudOff className="block h-5 w-5"/>:<Cloud className="block h-5 w-5"/>}</button>
                         {clipboard && (clipboard.files.length > 0 || clipboard.folders.length > 0) && (
                             <button
@@ -1026,6 +1092,7 @@ export default function FileBrowser() {
                             </div>
                         ) : null}
                     </div>
+                    {activeSection === 'files' && activeSharedWorkspace && <div className="mx-auto mb-3 flex max-w-7xl items-center gap-3 rounded-2xl border border-primary-400/20 bg-primary-500/[.07] px-3 py-2.5"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary-500/15">🤝</span><div className="min-w-0 flex-1"><strong dir="auto" className="block truncate text-sm text-primary-100">فضای {activeSharedWorkspace.name}</strong><p className="text-xs text-primary-100/60">{activeSharedWorkspace.permission==='write'?'اجازهٔ مشاهده و ذخیره داری':'این فضا فقط قابل مشاهده است'}</p></div><button className="rounded-xl bg-white/[.06] px-3 py-2 text-xs" onClick={()=>{localStorage.removeItem('komod-active-workspace');localStorage.removeItem('komod-active-workspace-permission');window.location.reload()}}>کمد من</button></div>}
                     {activeSection === 'files' && hiddenOnly && <div className="mx-auto mb-4 flex max-w-7xl items-center gap-3 rounded-2xl border border-amber-400/20 bg-amber-500/[.07] p-3 shadow-lg shadow-black/5"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-400/10 text-amber-200"><EyeOff className="h-5 w-5"/></span><div className="min-w-0 flex-1"><strong className="block text-sm text-amber-100">فقط موارد مخفی</strong><p className="mt-0.5 truncate text-xs text-amber-100/60">{shownFolderCount+shownFileCount ? `${(shownFolderCount+shownFileCount).toLocaleString('fa-IR')} مورد پیدا شد` : 'مورد مخفی‌ای در این بخش نیست'}</p></div><button onClick={closeVaultItems} className="flex min-h-10 shrink-0 items-center gap-2 rounded-xl bg-white/[.07] px-3 text-xs text-white transition hover:bg-white/[.12]"><ChevronRight className="h-4 w-4"/> بازگشت به کمد</button></div>}
                     {activeSection === 'files' && (
                         <div className="max-w-7xl mx-auto mb-4">
@@ -1207,11 +1274,12 @@ export default function FileBrowser() {
                                         <ArrowUp className="w-10 h-10 text-dark-600 animate-bounce" />
                                     </div>
                                     <h3 className="text-xl font-bold text-white mb-2">
-                                        {contentScope === 'folders' ? 'کشویی پیدا نشد' : 'چیزی پیدا نشد'}
+                                        {hiddenOnly ? 'گاوصندوق خالی است' : contentScope === 'folders' ? 'کشویی پیدا نشد' : 'چیزی پیدا نشد'}
                                     </h3>
                                     <p className="text-dark-400 max-w-xs">
-                                        {searchQuery ? 'عبارت جست‌وجو یا فیلترها را تغییر بده.' : 'فایل‌ها را برای ربات تلگرام بفرست تا به کمدت اضافه شوند.'}
+                                        {hiddenOnly ? 'در حال حاضر فایل یا کشوی مخفی‌ای نداری.' : searchQuery ? 'عبارت جست‌وجو یا فیلترها را تغییر بده.' : 'فایل‌ها را برای ربات تلگرام بفرست تا به کمدت اضافه شوند.'}
                                     </p>
+                                    {hiddenOnly&&<button onClick={closeVaultItems} className="btn-primary mt-5 flex items-center gap-2"><ChevronRight className="h-4 w-4"/>بازگشت به کمد</button>}
                                 </div>
                             )}
 
@@ -1309,7 +1377,18 @@ export default function FileBrowser() {
             />
             {showVaultPrompt && <div className="fixed inset-0 z-[190] flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-4" onClick={()=>setShowVaultPrompt(false)}><div className="w-full max-w-sm rounded-t-3xl border border-white/10 bg-dark-900 p-5 sm:rounded-3xl" onClick={event=>event.stopPropagation()}><div className="flex items-center gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary-500/15 text-primary-200"><EyeOff className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h2 className="font-bold">گاوصندوق</h2><p className="text-xs text-dark-400">نحوهٔ نمایش موارد مخفی را انتخاب کن.</p></div><button className="btn-icon" onClick={()=>setShowVaultPrompt(false)}><X className="h-5 w-5"/></button></div>{!sessionStorage.getItem('komod-vault-token')&&<input autoFocus type="password" value={vaultPassword} onChange={event=>setVaultPassword(event.target.value)} className="input mt-4 w-full" placeholder="رمز گاوصندوق"/>}<div className="mt-4 grid gap-2"><button disabled={unlockVault.isPending||(!sessionStorage.getItem('komod-vault-token')&&!vaultPassword)} onClick={()=>void showVaultItems(true)} className="btn-primary min-h-11 disabled:opacity-40">فقط موارد مخفی</button><button disabled={unlockVault.isPending||(!sessionStorage.getItem('komod-vault-token')&&!vaultPassword)} onClick={()=>void showVaultItems(false)} className="btn-secondary min-h-11 disabled:opacity-40">همهٔ موارد</button>{showHidden&&<button onClick={closeVaultItems} className="min-h-10 rounded-xl text-sm text-red-300 hover:bg-red-500/10">بستن گاوصندوق</button>}</div></div></div>}            {showAddMenu && <div className="fixed inset-0 z-[165] flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-4" onClick={() => setShowAddMenu(false)}><div className="w-full max-w-md rounded-t-3xl border border-white/10 bg-dark-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:rounded-3xl" onClick={event => event.stopPropagation()}><div className="mx-auto mb-4 h-1 w-12 rounded-full bg-white/20 sm:hidden"/><div className="flex items-center justify-between"><h2 className="font-bold">➕ افزودن به کمد</h2><button className="btn-icon" onClick={() => setShowAddMenu(false)}><X className="h-5 w-5"/></button></div><div className="mt-4 grid grid-cols-2 gap-2"><button className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-2xl border border-white/[.07] bg-dark-800/60 text-sm" onClick={() => { setShowAddMenu(false); uploadInputRef.current?.click(); }}><Upload className="h-6 w-6 text-primary-300"/> آپلود فایل</button><button className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-2xl border border-white/[.07] bg-dark-800/60 text-sm" onClick={() => { setShowAddMenu(false); setShowTextComposer(true); }}><StickyNote className="h-6 w-6 text-primary-300"/> یادداشت متنی</button><button className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-2xl border border-white/[.07] bg-dark-800/60 text-sm" onClick={() => { setShowAddMenu(false); setShowNewFolder(true); }}><FolderPlus className="h-6 w-6 text-primary-300"/> ساخت کشو</button><button className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-2xl border border-white/[.07] bg-dark-800/60 text-sm" onClick={openImportLink}><Link2 className="h-6 w-6 text-primary-300"/> ذخیره از لینک</button></div></div></div>}
             {uploadProgress&&uploadPanelMode!=='hidden'&&(uploadPanelMode==='collapsed'?<button onClick={()=>setUploadPanelMode('open')} className="fixed bottom-24 left-3 z-[175] flex h-12 items-center gap-2 rounded-full border border-primary-500/25 bg-dark-900/95 px-3 text-xs shadow-2xl backdrop-blur-xl" title="نمایش جزئیات آپلود"><Upload className="h-4 w-4 animate-pulse text-primary-300"/><span>{uploadProgress.index.toLocaleString('fa-IR')}/{uploadProgress.total.toLocaleString('fa-IR')}</span><span dir="ltr" className="font-bold text-primary-200">{uploadProgress.percent}%</span><ChevronUp className="h-3.5 w-3.5"/></button>:<div className="fixed bottom-24 left-4 right-4 z-[175] mx-auto max-w-md rounded-2xl border border-primary-500/25 bg-dark-900/95 p-3 shadow-2xl backdrop-blur-xl"><div className="flex items-center gap-3"><Upload className="h-5 w-5 text-primary-300"/><div className="min-w-0 flex-1"><div className="flex justify-between gap-2 text-xs"><span className="truncate">{uploadProgress.name}</span><span dir="ltr">{uploadProgress.index}/{uploadProgress.total} · {uploadProgress.percent}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-dark-700"><div className="h-full rounded-full bg-primary-500 transition-[width]" style={{width:`${uploadProgress.percent}%`}}/></div><p className="mt-1 text-[10px] text-dark-500">فایل {uploadProgress.index.toLocaleString('fa-IR')} از {uploadProgress.total.toLocaleString('fa-IR')}</p></div><button className="btn-icon h-8 w-8" onClick={()=>setUploadPanelMode('collapsed')} title="نمایش خیلی کوچک"><Minus className="h-4 w-4"/></button><button className="btn-icon h-8 w-8" onClick={()=>setUploadPanelMode('hidden')} title="بستن وضعیت"><Eye className="h-4 w-4"/></button><button onClick={() => uploadAbortRef.current?.abort()} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-red-500/10 text-red-300 hover:bg-red-500/20" title="لغو آپلود"><X className="h-4 w-4"/></button></div></div>)}
-            {importJobs.length>0&&importPanelMode!=='hidden'&&(importPanelMode==='collapsed'?<button onClick={()=>setImportPanelMode('open')} className="fixed bottom-24 left-3 z-[174] flex h-12 items-center gap-2 rounded-full border border-white/10 bg-dark-900/95 px-3 text-xs shadow-2xl backdrop-blur-xl" title="نمایش صف لینک‌ها"><Link2 className="h-4 w-4 animate-pulse text-primary-300"/><span>{importJobs.filter(job=>!['done','error','cancelled'].includes(job.state)).length.toLocaleString('fa-IR')} فعال</span><ChevronUp className="h-3.5 w-3.5"/></button>:<div className="fixed bottom-24 left-4 right-4 z-[174] mx-auto max-w-md overflow-hidden rounded-2xl border border-white/10 bg-dark-900/95 shadow-2xl backdrop-blur-xl"><div className="flex h-11 items-center gap-2 border-b border-white/[.06] px-3"><Link2 className="h-4 w-4 text-primary-300"/><strong className="flex-1 text-sm">صف افزودن از لینک</strong><span className="text-[10px] text-dark-500">{importJobs.length.toLocaleString('fa-IR')} مورد</span><button className="btn-icon h-8 w-8" onClick={()=>setImportPanelMode('collapsed')} title="نمایش خیلی کوچک"><Minus className="h-4 w-4"/></button><button className="btn-icon h-8 w-8" onClick={()=>setImportPanelMode('hidden')} title="بستن وضعیت"><X className="h-4 w-4"/></button></div><div className="max-h-56 space-y-1 overflow-y-auto p-2">{importJobs.map(job=><div key={job.id} className="rounded-xl bg-white/[.025] p-2.5"><div className="flex items-center gap-2"><span className={`h-2.5 w-2.5 shrink-0 rounded-full ${job.state==='done'?'bg-emerald-400':job.state==='error'||job.state==='cancelled'?'bg-red-400':job.state==='paused'?'bg-amber-400':'animate-pulse bg-primary-400'}`}/><span dir="ltr" className="min-w-0 flex-1 truncate text-xs text-dark-300">{job.url}</span><span className="text-[10px] text-dark-500">{job.state==='queued'?'در صف':job.state==='downloading'?'در حال آماده‌سازی':job.state==='paused'?'متوقف':job.state==='cancelled'?'لغو شد':job.state==='done'?'آماده شد':'ناموفق'}</span>{['queued','downloading','paused'].includes(job.state)&&<><button className="btn-icon h-7 w-7" onClick={()=>void controlImportJob(job.id,'pause')} title={job.state==='paused'?'ادامه':'توقف موقت'}>{job.state==='paused'?<Play className="h-3.5 w-3.5"/>:<Pause className="h-3.5 w-3.5"/>}</button><button className="btn-icon h-7 w-7 text-red-300" onClick={()=>void controlImportJob(job.id,'cancel')} title="لغو"><X className="h-3.5 w-3.5"/></button></>}</div><p className="mt-1 truncate pr-4 text-[10px] text-dark-500">{job.message}</p></div>)}</div></div>)}
+            {importJobs.length>0&&importPanelMode!=='hidden'&&(importPanelMode==='collapsed'?
+                <button onClick={()=>setImportPanelMode('open')} className="fixed bottom-24 left-3 z-[174] flex h-12 items-center gap-2 rounded-full border border-white/10 bg-dark-900/95 px-3 text-xs shadow-2xl backdrop-blur-xl" title="نمایش صف لینک‌ها"><Link2 className="h-4 w-4 animate-pulse text-primary-300"/><span>{importJobs.filter(job=>!['done','error','cancelled'].includes(job.state)).length.toLocaleString('fa-IR')} فعال</span><ChevronUp className="h-3.5 w-3.5"/></button>:
+                <div className="fixed bottom-24 left-4 right-4 z-[174] mx-auto max-w-md overflow-hidden rounded-2xl border border-white/10 bg-dark-900/95 shadow-2xl backdrop-blur-xl">
+                    <div className="flex min-h-12 items-center gap-1 border-b border-white/[.06] px-2.5">
+                        <Link2 className="h-4 w-4 shrink-0 text-primary-300"/><strong className="min-w-0 flex-1 truncate text-sm">صف افزودن از لینک</strong>
+                        <button className="btn-icon h-8 w-8" onClick={()=>{setShowImportLink(true);setImportPanelMode('collapsed')}} title="افزودن لینک"><Plus className="h-4 w-4"/></button>
+                        <button className="btn-icon h-8 w-8" onClick={()=>void clearFinishedImportJobs()} title="پاک‌کردن موارد پایان‌یافته"><Trash2 className="h-4 w-4"/></button>
+                        <button className="btn-icon h-8 w-8" onClick={()=>setImportPanelMode('collapsed')} title="نمایش خیلی کوچک"><Minus className="h-4 w-4"/></button>
+                        <button className="btn-icon h-8 w-8" onClick={()=>setImportPanelMode('hidden')} title="پنهان‌کردن وضعیت"><X className="h-4 w-4"/></button>
+                    </div>
+                    <div className="max-h-64 space-y-1 overflow-y-auto p-2">{importJobs.map(job=><div key={job.id} className="rounded-xl bg-white/[.025] p-2.5"><div className="flex items-center gap-2"><span className={`h-2.5 w-2.5 shrink-0 rounded-full ${job.state==='done'?'bg-emerald-400':job.state==='error'||job.state==='cancelled'?'bg-red-400':job.state==='paused'?'bg-amber-400':'animate-pulse bg-primary-400'}`}/><span dir="ltr" className="min-w-0 flex-1 truncate text-xs text-dark-300">{job.url}</span><span className="text-[10px] text-dark-500">{job.state==='queued'?'در صف':job.state==='downloading'?'در حال آماده‌سازی':job.state==='paused'?'متوقف':job.state==='cancelled'?'لغو شد':job.state==='done'?'آماده شد':'ناموفق'}</span>{['queued','downloading','paused'].includes(job.state)&&<><button className="btn-icon h-7 w-7" onClick={()=>void controlImportJob(job.id,'pause')} title={job.state==='paused'?'ادامه':'توقف موقت'}>{job.state==='paused'?<Play className="h-3.5 w-3.5"/>:<Pause className="h-3.5 w-3.5"/>}</button><button className="btn-icon h-7 w-7 text-red-300" onClick={()=>void controlImportJob(job.id,'cancel')} title="لغو"><X className="h-3.5 w-3.5"/></button></>}</div><div className="mt-1 flex items-center gap-2 pr-4 text-[10px] text-dark-500"><span className="min-w-0 flex-1 truncate">{job.message}</span>{job.quality&&<span className="shrink-0 rounded-full bg-white/[.05] px-1.5 py-0.5" dir="ltr">{job.quality==='audio'?'Audio':`${job.quality}p`}</span>}{job.saved>0&&<span className="shrink-0">{job.saved.toLocaleString('fa-IR')} فایل</span>}</div></div>)}</div>
+                </div>)}
             {showImportLink && <div className="fixed inset-0 z-[170] flex items-end justify-center overflow-hidden bg-black/70 backdrop-blur-sm sm:items-center sm:p-4" onClick={() => setShowImportLink(false)}><form className="max-h-[92dvh] w-full max-w-lg overflow-x-hidden overflow-y-auto overscroll-contain rounded-t-3xl border border-white/10 bg-dark-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:max-h-[calc(100dvh-2rem)] sm:rounded-3xl sm:p-5" onClick={event => event.stopPropagation()} onSubmit={submitImportLink}><div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary-500/15 text-primary-200"><Link2 className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h2 className="font-bold">ذخیره از لینک</h2><p className="text-xs text-dark-400">لینک یوتیوب یا اینستاگرام را بفرست.</p></div><button type="button" className="btn-icon" onClick={() => setShowImportLink(false)}><X className="h-5 w-5"/></button></div><div className="mt-4"><textarea dir="ltr" autoFocus rows={3} className="input w-full resize-none" value={importUrl} onChange={event => setImportUrl(event.target.value)} placeholder="هر لینک را در یک خط بگذار…"/></div>{importUrl.trim() && <p className={`mt-2 text-xs ${importPlatform || importUrls.length > 1 ? 'text-emerald-300' : 'text-red-300'}`}>{importUrls.length > 1 ? `✓ ${importUrls.length.toLocaleString('fa-IR')} لینک برای افزودن دسته‌ای` : importPlatform === 'youtube' ? '✓ لینک یوتیوب شناسایی شد' : importPlatform === 'instagram' ? '✓ لینک اینستاگرام شناسایی شد' : 'لینک معتبر یوتیوب یا اینستاگرام نیست'}</p>}<CustomSelect className="mt-3" placement="top" label="کشوی مقصد" value={importFolder === 'new' ? 'new' : String(importFolder ?? 'root')} onChange={value => setImportFolder(value === 'new' ? 'new' : value === 'root' ? null : Number(value))} options={[{value:'root',label:'🗃️ فایل‌های من'},...(currentFolderId !== null?[{value:String(currentFolderId),label:'📍 کشوی فعلی'}]:[]),...importFolderOptions.filter(option => option.value !== String(currentFolderId)),{value:'new',label:'➕ ساخت کشوی تازه…'}]}/>{importFolder === 'new' && <input className="input mt-3 w-full" value={importFolderName} onChange={event => setImportFolderName(event.target.value)} placeholder="نام کشوی تازه"/>}{(importPlatform === 'youtube' || importUrls.length > 1) && <CustomSelect className="mt-3" placement="top" label="خروجی" value={importQuality} onChange={setImportQuality} options={[{value:'audio',label:'🎧 صدا'},{value:'480',label:'🎬 480p'},{value:'720',label:'🎬 720p'},{value:'1080',label:'🎬 1080p'}]}/>}<div className="mt-5 flex gap-2"><button type="button" className="btn-secondary flex-1" onClick={() => setShowImportLink(false)}>لغو</button><button disabled={!importUrl.trim() || (!importPlatform && importUrls.length < 2) || importLinkMutation.isPending || (importFolder === 'new' && !importFolderName.trim())} className="btn-primary flex-1 disabled:opacity-50">{importLinkMutation.isPending ? 'در حال ثبت…' : 'افزودن به صف'}</button></div></form></div>}
             {showTextComposer && (
                 <div className="fixed inset-0 z-[170] flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-4" onClick={() => setShowTextComposer(false)}>

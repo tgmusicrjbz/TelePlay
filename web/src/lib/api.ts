@@ -403,9 +403,9 @@ export const useVerifyLoginCode = () => {
 
 // ============== Files Hooks ==============
 
-export const useFiles = (folderId?: number | null, fileType?: string, search?: string, page = 1, sort = '', favoriteOnly = false, includePlaylistCovers = false, includeHidden = false) => {
+export const useFiles = (folderId?: number | null, fileType?: string, search?: string, page = 1, sort = '', favoriteOnly = false, includePlaylistCovers = false, includeHidden = false, hiddenOnly = false) => {
     return useQuery({
-        queryKey: ['files', folderId, fileType, search, page, sort, favoriteOnly, includePlaylistCovers, includeHidden],
+        queryKey: ['files', folderId, fileType, search, page, sort, favoriteOnly, includePlaylistCovers, includeHidden, hiddenOnly],
         queryFn: async () => {
             const params: Record<string, any> = {};
             if (folderId !== undefined) params.folder_id = folderId;
@@ -417,6 +417,7 @@ export const useFiles = (folderId?: number | null, fileType?: string, search?: s
             if (favoriteOnly) params.favorite_only = true;
             if (includePlaylistCovers) params.include_playlist_covers = true;
             if (includeHidden) params.include_hidden = true;
+            if (hiddenOnly) params.hidden_only = true;
             const { data } = await api.get<FileListResponse>('/files', { params });
             return data;
         },

@@ -189,6 +189,16 @@ class LinkImportService:
         status.update(state="cancelled", message="لغو شد")
         return status
 
+    def clear_finished(self, user_id: int) -> int:
+        removable = [
+            job_id for job_id, status in self.statuses.items()
+            if status.get("user_id") == user_id and status.get("state") in {"done", "error", "cancelled"}
+        ]
+        for job_id in removable:
+            self.statuses.pop(job_id, None)
+            self.controls.pop(job_id, None)
+        return len(removable)
+
     async def _checkpoint(self, job: ImportJob) -> bool:
         control = self.controls.get(job.id, {})
         while control.get("paused") and not control.get("cancelled"):
