@@ -153,6 +153,7 @@ export default function GlobalContextMenu() {
     const folder = activeContextMenu.type === 'folder' ? activeContextMenu.item as Folder : null;
     const previewable = Boolean(file && (file.file_type === 'image' || canPreviewText(file)));
     const playable = Boolean(file && (file.file_type === 'video' || file.file_type === 'audio'));
+    const previewLabel = file?.file_type === 'image' ? 'نمایش عکس' : 'پیش‌نمایش';
 
     return <>
         <div className={`fixed inset-0 z-[99998] ${isMobile ? 'bg-black/60 backdrop-blur-sm' : ''}`} onClick={event => { event.stopPropagation(); setActiveContextMenu(null); }}/>
@@ -166,32 +167,34 @@ export default function GlobalContextMenu() {
                 {isMultiSelect ? <div className="space-y-3"><p className="rounded-xl bg-primary-500/10 px-3 py-2 text-sm text-primary-200">{selectedFileIds.size.toLocaleString('fa-IR')} فایل انتخاب شده</p>{readOnlyWorkspace?<p className="text-sm text-amber-200">این کمد فقط قابل مشاهده است.</p>:<div className="grid grid-cols-2 gap-2"><ActionTile icon={<FolderInput/>} label="جابه‌جایی" onClick={()=>handleAction(()=>setMoveFiles(selectedFiles))}/><ActionTile danger icon={<Trash2/>} label="حذف" onClick={()=>handleAction(()=>setDeleteConfirm({type:'file',items:Array.from(selectedFileIds).map(id=>({id} as any))}))}/></div>}</div> : file ? <>
                     <div className="grid grid-cols-2 gap-2">
                         {playable&&<ActionTile icon={<Play/>} label="پخش" onClick={()=>handleAction(()=>handlePlay(file))}/>}
-                        {previewable&&<ActionTile icon={<Eye/>} label="پیش‌نمایش" onClick={()=>handleAction(()=>setContentPreviewFile(file))}/>}
-                        <ActionTile icon={<Download/>} label="دانلود" onClick={()=>{void handleDownload(file);setActiveContextMenu(null);}}/>
+                        {previewable&&<ActionTile icon={<Eye/>} label={previewLabel} onClick={()=>handleAction(()=>setContentPreviewFile(file))}/>}
                         <ActionTile icon={<DownloadCloud/>} label="ذخیره آفلاین" onClick={()=>handleOfflineSave(file)}/>
-                        <ActionTile icon={<Info/>} label="جزئیات" onClick={()=>handleAction(()=>setDetailsFile(file))}/>
+                        {!readOnlyWorkspace&&<><ActionTile icon={<FolderInput/>} label="جابه‌جایی" onClick={()=>handleAction(()=>setMoveItems({files:[file],folders:[]}))}/><ActionTile icon={<Heart className={file.is_favorite?'fill-current text-pink-400':''}/>} label={file.is_favorite?'برداشتن نشان':'نشان کردن'} onClick={async()=>{setActiveContextMenu(null);await updateFile.mutateAsync({id:file.id,is_favorite:!file.is_favorite});addToast(file.is_favorite?'نشان برداشته شد.':'فایل نشان شد ⭐');}}/><ActionTile icon={<Pin className={file.is_pinned?'fill-current text-primary-300':''}/>} label={file.is_pinned?'برداشتن پین':'پین بالای کمد'} onClick={async()=>{setActiveContextMenu(null);await updateFile.mutateAsync({id:file.id,is_pinned:!file.is_pinned});addToast(file.is_pinned?'پین برداشته شد.':'فایل پین شد 📌');}}/><ActionTile icon={<Edit/>} label="تغییر نام" onClick={()=>handleAction(()=>setRenameFile(file))}/></>}
                     </div>
-                    {!readOnlyWorkspace&&<>
-                        <button className="mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-white/[.07] bg-white/[.035] text-sm text-dark-300 transition hover:bg-white/[.07]" onClick={()=>setShowMore(value=>!value)}>{showMore?<ChevronUp className="h-4 w-4"/>:<ChevronDown className="h-4 w-4"/>}{showMore?'بستن گزینه‌های بیشتر':'مدیریت و اشتراک‌گذاری'}</button>
-                        {showMore&&<div className="mt-3 space-y-3 border-t border-white/[.07] pt-3">
+                    <button className="mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-white/[.07] bg-white/[.035] text-sm text-dark-300 transition hover:bg-white/[.07]" onClick={()=>setShowMore(value=>!value)}>{showMore?<ChevronUp className="h-4 w-4"/>:<ChevronDown className="h-4 w-4"/>}{showMore?'بستن گزینه‌های بیشتر':'گزینه‌های بیشتر'}</button>
+                    {showMore&&<div className="mt-3 space-y-3 border-t border-white/[.07] pt-3">
                             <div className="grid grid-cols-2 gap-2">
-                                {playable&&<ActionTile icon={<ListPlus/>} label="افزودن به پلی‌لیست" onClick={()=>handleAction(()=>setPlaylistFile(file))}/>}
-                                <ActionTile icon={<Heart className={file.is_favorite?'fill-current text-pink-400':''}/>} label={file.is_favorite?'برداشتن نشان':'نشان کردن'} onClick={async()=>{setActiveContextMenu(null);await updateFile.mutateAsync({id:file.id,is_favorite:!file.is_favorite});addToast(file.is_favorite?'نشان برداشته شد.':'فایل نشان شد ⭐');}}/>
-                                <ActionTile icon={<Pin className={file.is_pinned?'fill-current text-primary-300':''}/>} label={file.is_pinned?'برداشتن پین':'پین بالای کمد'} onClick={async()=>{setActiveContextMenu(null);await updateFile.mutateAsync({id:file.id,is_pinned:!file.is_pinned});addToast(file.is_pinned?'پین برداشته شد.':'فایل پین شد 📌');}}/>
-                                <ActionTile icon={<Edit/>} label="تغییر نام" onClick={()=>handleAction(()=>setRenameFile(file))}/>
-                                <ActionTile icon={<AlignLeft/>} label={file.description?'ویرایش توضیحات':'افزودن توضیحات'} onClick={()=>handleAction(()=>setDescriptionItem({type:'file',item:file}))}/>
-                                <ActionTile icon={<Tags/>} label="ویرایش تگ‌ها" onClick={()=>handleAction(()=>setDetailsFile(file))}/>
-                                <ActionTile icon={<FolderInput/>} label="جابه‌جایی" onClick={()=>handleAction(()=>setMoveItems({files:[file],folders:[]}))}/>
-                                <ActionTile icon={file.is_hidden?<Eye/>:<EyeOff/>} label={file.is_hidden?'خروج از گاوصندوق':'مخفی کردن'} onClick={async()=>{setActiveContextMenu(null);try{await updateFile.mutateAsync({id:file.id,is_hidden:!file.is_hidden});addToast(file.is_hidden?'فایل از گاوصندوق بیرون آمد.':'فایل مخفی شد 🔒');}catch(error:any){addToast(error?.response?.data?.detail||'ابتدا برای گاوصندوق رمز تعیین کن.','error');}}}/>
+                                <ActionTile icon={<Download/>} label="دانلود" onClick={()=>{void handleDownload(file);setActiveContextMenu(null);}}/>
+                                <ActionTile icon={<Info/>} label="جزئیات فایل" onClick={()=>handleAction(()=>setDetailsFile(file))}/>
+                                {!readOnlyWorkspace&&<>
+                                    {playable&&<ActionTile icon={<ListPlus/>} label="افزودن به پلی‌لیست" onClick={()=>handleAction(()=>setPlaylistFile(file))}/>}
+                                    <ActionTile icon={<AlignLeft/>} label={file.description?'ویرایش توضیحات':'افزودن توضیحات'} onClick={()=>handleAction(()=>setDescriptionItem({type:'file',item:file}))}/>
+                                    <ActionTile icon={<Tags/>} label="ویرایش تگ‌ها" onClick={()=>handleAction(()=>setDetailsFile(file))}/>
+                                    <ActionTile icon={file.is_hidden?<Eye/>:<EyeOff/>} label={file.is_hidden?'خروج از گاوصندوق':'مخفی کردن'} onClick={async()=>{setActiveContextMenu(null);try{await updateFile.mutateAsync({id:file.id,is_hidden:!file.is_hidden});addToast(file.is_hidden?'فایل از گاوصندوق بیرون آمد.':'فایل مخفی شد 🔒');}catch(error:any){addToast(error?.response?.data?.detail||'ابتدا برای گاوصندوق رمز تعیین کن.','error');}}}/>
+                                </>}
                             </div>
-                            <div className="rounded-2xl border border-white/[.07] bg-dark-950/40 p-1.5">
-                                <button className="context-menu-item w-full" onClick={async()=>{setActiveContextMenu(null);addToast('در حال آماده‌سازی پیوند…','info');handleCopy(await ensurePublicLink(file),'stream');}}><Link className="h-4 w-4"/>{copiedId==='stream'?'کپی شد':'کپی پیوند پخش'}</button>
-                                <button className="context-menu-item w-full" onClick={async()=>{setActiveContextMenu(null);addToast('در حال آماده‌سازی پیوند…','info');const url=await ensurePublicLink(file);handleCopy(url+(url.includes('?')?'&':'?')+'download=1','download');}}><HardDriveDownload className="h-4 w-4"/>{copiedId==='download'?'کپی شد':'کپی پیوند دانلود'}</button>
-                                {file.public_stream_url?<><button className="context-menu-item w-full" onClick={()=>handleCopy(`${window.location.protocol}//${window.location.host}${file.public_stream_url}`,'public')}><Globe className="h-4 w-4 text-emerald-400"/>کپی پیوند عمومی</button><button className="context-menu-item w-full text-orange-300" onClick={()=>void handleRevokeShare(file)}><ShieldOff className="h-4 w-4"/>لغو پیوند عمومی</button></>:<button className="context-menu-item w-full" onClick={()=>void handleShare(file)}><Globe className="h-4 w-4"/>ساخت پیوند عمومی</button>}
+                            {!readOnlyWorkspace&&<><div className="rounded-2xl border border-white/[.07] bg-dark-950/40 p-2"><p className="mb-2 px-1 text-[10px] font-medium text-dark-500">پیوندها</p><div className="grid grid-cols-2 gap-2">
+                                <ActionTile icon={<Link/>} label={copiedId==='stream'?'کپی شد':'پیوند پخش'} onClick={async()=>{setActiveContextMenu(null);addToast('در حال آماده‌سازی پیوند…','info');handleCopy(await ensurePublicLink(file),'stream');}}/>
+                                <ActionTile icon={<HardDriveDownload/>} label={copiedId==='download'?'کپی شد':'پیوند دانلود'} onClick={async()=>{setActiveContextMenu(null);addToast('در حال آماده‌سازی پیوند…','info');const url=await ensurePublicLink(file);handleCopy(url+(url.includes('?')?'&':'?')+'download=1','download');}}/>
+                                {file.public_stream_url?<>
+                                    <ActionTile icon={<Globe className="text-emerald-400"/>} label="پیوند عمومی" onClick={()=>handleCopy(`${window.location.protocol}//${window.location.host}${file.public_stream_url}`,'public')}/>
+                                    <ActionTile icon={<ShieldOff/>} label="لغو پیوند عمومی" onClick={()=>handleRevokeShare(file)}/>
+                                </>:<ActionTile icon={<Globe/>} label="ساخت پیوند عمومی" onClick={()=>handleShare(file)}/>}
+                            </div>
                             </div>
                             <button className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-red-500/10 text-sm text-red-300 hover:bg-red-500/15" onClick={()=>handleAction(()=>setDeleteConfirm({type:'file',items:[file]}))}><Trash2 className="h-4 w-4"/>حذف فایل</button>
+                            </>}
                         </div>}
-                    </>}
                     {readOnlyWorkspace&&<p className="mt-3 rounded-xl bg-amber-500/[.08] px-3 py-2 text-xs text-amber-200">این کمد با دسترسی فقط مشاهده باز شده است.</p>}
                 </> : folder ? <>
                     {readOnlyWorkspace?<p className="rounded-xl bg-amber-500/[.08] px-3 py-3 text-sm text-amber-200">این کمد با دسترسی فقط مشاهده باز شده است.</p>:<>
