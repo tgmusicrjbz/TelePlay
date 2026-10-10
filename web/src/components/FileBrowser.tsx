@@ -176,10 +176,20 @@ export default function FileBrowser() {
     const [rootFilesMode, setRootFilesMode] = useState(() => localStorage.getItem('komod-root-files-mode') || 'folder');
     const [incomingFolderSetting, setIncomingFolderSetting] = useState(() => localStorage.getItem('komod-incoming-folder') || 'default');
     const { data: rootFolders } = useFolders(null, folderSortValue, false, showHidden);
-    const { data: folderTree } = useFolderTree();
+    const { data: folderTree } = useFolderTree(showHidden);
     const importFolderOptions = useMemo(() => {
         const result:{value:string;label:string}[]=[];
         const walk=(items:Folder[]|undefined,depth=0)=>items?.forEach(folder=>{result.push({value:String(folder.id),label:`${'— '.repeat(depth)}🗂️ ${folder.name}`});walk(folder.children,depth+1)});
+        walk(folderTree);
+        return result;
+    },[folderTree]);
+    const hiddenFolderRoots = useMemo(() => {
+        const result:Folder[]=[];
+        const walk=(items:Folder[]|undefined,parentHidden=false)=>items?.forEach(folder=>{
+            const hidden=Boolean(folder.is_hidden);
+            if(hidden&&!parentHidden) result.push(folder);
+            walk(folder.children,parentHidden||hidden);
+        });
         walk(folderTree);
         return result;
     },[folderTree]);
@@ -245,7 +255,7 @@ export default function FileBrowser() {
 
     // Folder and file visibility is controlled from one shared content switcher.
     const { data: folders, isLoading: foldersLoading, error: foldersError, refetch: refetchFolders } = useFolders(currentFolderId, folderSortValue, favoriteOnly, showHidden);
-    const visibleFolders = folders?.filter(folder => {
+    const visibleFolders = (hiddenOnly ? hiddenFolderRoots : folders)?.filter(folder => {
         if (hiddenOnly && !folder.is_hidden) return false;
         if (currentFolderId === null && rootFilesMode === 'files' && folder.is_default) return false;
         if (!searchQuery.trim()) return true;

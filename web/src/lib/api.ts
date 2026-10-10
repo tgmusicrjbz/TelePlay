@@ -586,11 +586,11 @@ export const useFolders = (parentId?: number | null, sort = '', favoriteOnly = f
     });
 };
 
-export const useFolderTree = () => {
+export const useFolderTree = (includeHidden = false) => {
     return useQuery({
-        queryKey: ['folderTree'],
+        queryKey: ['folderTree', includeHidden],
         queryFn: async () => {
-            const { data } = await api.get<Folder[]>('/folders/tree');
+            const { data } = await api.get<Folder[]>('/folders/tree', { params: includeHidden ? { include_hidden: true } : undefined });
             return data;
         },
         staleTime: 60000,
