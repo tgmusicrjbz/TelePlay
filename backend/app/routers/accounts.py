@@ -1,5 +1,6 @@
 """Account switching, shared spaces and administrator controls."""
 import json
+import hashlib
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -53,6 +54,13 @@ def clean_tag_definitions(raw_tags) -> list[dict[str, str]]:
     return result[:100]
 
 
+def automatic_tag_color(name: str) -> str:
+    """Return a stable readable color for tags first created on a file."""
+    palette = ("#a855f7", "#3b82f6", "#06b6d4", "#14b8a6", "#22c55e", "#eab308", "#f97316", "#ec4899")
+    digest = hashlib.sha256(name.casefold().encode("utf-8")).digest()
+    return palette[digest[0] % len(palette)]
+
+
 @router.get("/accounts/tags", response_model=TagSettingsResponse)
 async def get_tag_settings(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     try:
@@ -61,15 +69,26 @@ async def get_tag_settings(current_user: User = Depends(get_current_user), db: A
     except (TypeError, ValueError, json.JSONDecodeError):
         definitions = []
     counts = {item["name"].casefold(): 0 for item in definitions}
+    discovered: dict[str, str] = {}
     rows = (await db.execute(select(File.tags_json).where(File.user_id == current_user.id))).scalars().all()
     for raw in rows:
         try:
             values = json.loads(raw or "[]")
         except (TypeError, ValueError, json.JSONDecodeError):
             values = []
-        for value in set(str(tag).strip().casefold() for tag in values if str(tag).strip()):
-            if value in counts:
-                counts[value] += 1
+        unique: dict[str, str] = {}
+        for raw_tag in values:
+            name = " ".join(str(raw_tag).strip().lstrip("#").split())[:40]
+            if name:
+                unique.setdefault(name.casefold(), name)
+        for key, name in unique.items():
+            discovered.setdefault(key, name)
+            counts[key] = counts.get(key, 0) + 1
+    configured = {item["name"].casefold() for item in definitions}
+    for key, name in sorted(discovered.items(), key=lambda item: item[1].casefold()):
+        if key not in configured and len(definitions) < 100:
+            definitions.append({"name": name, "color": automatic_tag_color(name)})
+            configured.add(key)
     return TagSettingsResponse(
         tags=[TagDefinitionResponse(**item, file_count=counts.get(item["name"].casefold(), 0)) for item in definitions],
         show_file_tags=current_user.show_file_tags,

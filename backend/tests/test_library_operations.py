@@ -107,7 +107,7 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             user = await db.get(User, self.user_id)
             direct = await db.get(File, self.direct_file_id)
             nested = await db.get(File, self.nested_file_id)
-            direct.tags_json = json.dumps(["پروژه"], ensure_ascii=False)
+            direct.tags_json = json.dumps(["پروژه", "تگ مستقیم"], ensure_ascii=False)
             nested.description = "پروژه‌ای که فقط در توضیحات آمده"
             await db.commit()
             settings = await update_tag_settings(TagSettingsUpdate(
@@ -120,6 +120,9 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result.files[0].id, direct.id)
             refreshed = await get_tag_settings(user, db)
             self.assertTrue(refreshed.show_file_tags)
+            discovered = next(item for item in refreshed.tags if item.name == "تگ مستقیم")
+            self.assertEqual(discovered.file_count, 1)
+            self.assertRegex(discovered.color, r"^#[0-9a-f]{6}$")
 
     async def test_search_supports_comma_and_semicolon_expressions(self):
         async with async_session() as db:

@@ -448,6 +448,7 @@ export const useUpdateFile = () => {
             queryClient.invalidateQueries({ queryKey: ['folders'] });
             queryClient.invalidateQueries({ queryKey: ['folderTree'] });
             queryClient.invalidateQueries({ queryKey: ['activity'] });
+            queryClient.invalidateQueries({ queryKey: ['tag-settings'] });
         },
     });
 };
@@ -841,6 +842,7 @@ export const useBatchUpdateFiles = () => {
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['files'] });
             queryClient.invalidateQueries({ queryKey: ['folders'] });
+            queryClient.invalidateQueries({ queryKey: ['tag-settings'] });
         },
     });
 };
