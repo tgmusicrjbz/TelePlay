@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AudioLines, Check, Headphones, Pause, Play, Sparkles, Square, Trash2, Volume2, Wand2, X } from 'lucide-react';
+import { AudioLines, Check, Headphones, Pause, Play, RotateCcw, Sparkles, Square, Trash2, Volume2, Wand2, X } from 'lucide-react';
 import { api, Folder, useClearFinishedTTSJobs, useControlTTSJob, useCreateTTSJob, useDismissTTSJob, useFolderTree, useTTSJobs, useTTSSettings, useUpdateTTSSettings } from '../lib/api';
 import CustomSelect from './CustomSelect';
 
@@ -31,6 +31,42 @@ function TaggedTextPreview({text}:{text:string}){
     return <div className="mt-2 max-h-32 overflow-y-auto rounded-xl border border-white/[.07] bg-dark-950/35 p-3 text-xs leading-7 text-dark-300" dir="auto">{pieces.map((piece,index)=>TAG_LABELS[piece.toLowerCase()]?<span key={index} className="mx-1 inline-flex rounded-full bg-primary-500/15 px-2 py-0.5 text-[10px] font-medium text-primary-200">{TAG_LABELS[piece.toLowerCase()]}</span>:<span key={index}>{piece}</span>)}</div>;
 }
 
+const formatAudioTime=(value:number)=>{const safe=Number.isFinite(value)&&value>0?Math.floor(value):0;return `${Math.floor(safe/60)}:${String(safe%60).padStart(2,'0')}`};
+const authenticatedMediaUrl=(source:string)=>{
+    if(!source||source.startsWith('blob:')||source.startsWith('data:'))return source;
+    try{
+        const url=new URL(source,window.location.origin);
+        const token=localStorage.getItem('access_token');
+        const vaultToken=sessionStorage.getItem('komod-vault-token');
+        if(token&&!url.searchParams.has('token'))url.searchParams.set('token',token);
+        if(vaultToken&&!url.searchParams.has('vault_token'))url.searchParams.set('vault_token',vaultToken);
+        return url.toString();
+    }catch{return source}
+};
+
+function InlineAudioPlayer({src,label,autoPlay=false}:{src:string;label:string;autoPlay?:boolean}){
+    const audioRef=useRef<HTMLAudioElement|null>(null);
+    const [playing,setPlaying]=useState(false);
+    const [current,setCurrent]=useState(0);
+    const [duration,setDuration]=useState(0);
+    const [loading,setLoading]=useState(true);
+    const [failed,setFailed]=useState(false);
+    const resolvedSrc=useMemo(()=>authenticatedMediaUrl(src),[src]);
+    useEffect(()=>{setPlaying(false);setCurrent(0);setDuration(0);setLoading(true);setFailed(false)},[resolvedSrc]);
+    const toggle=async()=>{const audio=audioRef.current;if(!audio)return;try{if(audio.paused)await audio.play();else audio.pause()}catch{setFailed(true)}};
+    const restart=async()=>{const audio=audioRef.current;if(!audio)return;audio.currentTime=0;try{await audio.play()}catch{setFailed(true)}};
+    return <div className="overflow-hidden rounded-2xl border border-primary-400/15 bg-gradient-to-l from-primary-500/[.09] to-dark-800/70 p-3 shadow-inner">
+        <audio ref={audioRef} src={resolvedSrc} preload="metadata" autoPlay={autoPlay} onPlay={()=>setPlaying(true)} onPause={()=>setPlaying(false)} onEnded={()=>setPlaying(false)} onLoadStart={()=>setLoading(true)} onCanPlay={()=>setLoading(false)} onLoadedMetadata={event=>{setDuration(event.currentTarget.duration||0);setLoading(false)}} onTimeUpdate={event=>setCurrent(event.currentTarget.currentTime)} onError={()=>{setFailed(true);setLoading(false)}}/>
+        <div className="flex items-center gap-3">
+            <button type="button" onClick={()=>void toggle()} disabled={failed} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary-500 text-white shadow-lg shadow-primary-950/30 transition active:scale-95 disabled:opacity-40" aria-label={playing?'توقف':'پخش'}>{loading&&!failed?<span className="h-4 w-4 animate-spin rounded-full border-2 border-white/35 border-t-white"/>:playing?<Pause className="h-5 w-5 fill-current"/>:<Play className="mr-0.5 h-5 w-5 fill-current"/>}</button>
+            <div className="min-w-0 flex-1"><div className="flex items-center gap-2"><Volume2 className="h-4 w-4 shrink-0 text-primary-300"/><strong className="min-w-0 flex-1 truncate text-xs text-dark-100">{label}</strong><button type="button" onClick={()=>void restart()} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-dark-400 hover:bg-white/[.06] hover:text-white" title="پخش از ابتدا"><RotateCcw className="h-3.5 w-3.5"/></button></div>
+                <div dir="ltr" className="mt-2 flex items-center gap-2"><span className="w-9 text-left font-player text-[10px] tabular-nums text-dark-400">{formatAudioTime(current)}</span><input type="range" min="0" max={duration||0} step="0.1" value={Math.min(current,duration||0)} onChange={event=>{const audio=audioRef.current;if(audio)audio.currentTime=Number(event.target.value)}} className="h-1.5 min-w-0 flex-1 cursor-pointer accent-primary-500"/><span className="w-9 text-right font-player text-[10px] tabular-nums text-dark-400">{formatAudioTime(duration)}</span></div>
+            </div>
+        </div>
+        {failed&&<p className="mt-2 rounded-lg bg-red-500/10 px-2 py-1.5 text-[11px] text-red-300">پخش صدا انجام نشد. دوباره نمونه را بساز یا صفحه را تازه کن.</p>}
+    </div>;
+}
+
 export default function TTSSettingsPanel(){
     const {data:settings,isLoading}=useTTSSettings();
     const {data:jobs=[]}=useTTSJobs();
@@ -54,7 +90,6 @@ export default function TTSSettingsPanel(){
     const [previewing,setPreviewing]=useState(false);
     const [previewUrl,setPreviewUrl]=useState('');
     const textAreaRef=useRef<HTMLTextAreaElement|null>(null);
-    const previewAudioRef=useRef<HTMLAudioElement|null>(null);
 
     useEffect(()=>{if(settings){setVoice(settings.voice);setGender(settings.gender);setPitch(settings.pitch);setUseCase(settings.use_case);setStyle(settings.style);setSpeed(settings.speed);setAutoExpression(settings.auto_expression);setFolder(settings.folder_id?String(settings.folder_id):'default')}},[settings]);
     useEffect(()=>()=>{if(previewUrl.startsWith('blob:'))URL.revokeObjectURL(previewUrl)},[previewUrl]);
@@ -67,7 +102,7 @@ export default function TTSSettingsPanel(){
     const submit=async()=>{if(!text.trim())return;setMessage(null);try{await create.mutateAsync({text:text.trim(),title:title.trim()||'صدای ساخته‌شده',folder_id:folder==='default'?null:Number(folder),voice,gender,pitch,use_case:useCase,style,speed,auto_expression:autoExpression});setText('');setMessage({kind:'ok',text:'متن در صف ساخت صدا قرار گرفت.'})}catch(error:any){setMessage({kind:'error',text:error?.response?.data?.detail||'ساخت صدا شروع نشد.'})}};
     const insertText=(value:string,cursorOffset=value.length)=>{const target=textAreaRef.current;const start=target?.selectionStart??text.length;const end=target?.selectionEnd??start;setText(`${text.slice(0,start)}${value}${text.slice(end)}`);requestAnimationFrame(()=>{target?.focus();target?.setSelectionRange(start+cursorOffset,start+cursorOffset)})};
     const insertScopedCue=(tag:string)=>{const target=textAreaRef.current;const start=target?.selectionStart??text.length;const end=target?.selectionEnd??start;const selected=text.slice(start,end)||'متن این بخش';const value=`<${tag}>${selected}</${tag}>`;insertText(value,`<${tag}>`.length+(end>start?selected.length:0))};
-    const playVoicePreview=async()=>{if(!settings)return;setPreviewing(true);setMessage(null);try{const key=new Request(`${window.location.origin}/__komod_tts_preview__/${encodeURIComponent(settings.model)}/${encodeURIComponent(voice)}`);let cached:Response|undefined;try{cached=await (await caches.open('komod-tts-previews-v1')).match(key)}catch{/* Cache API may be unavailable */}let blob:Blob;if(cached)blob=await cached.blob();else{const response=await api.get<ArrayBuffer>(`/tts/preview/${encodeURIComponent(voice)}`,{responseType:'arraybuffer'});blob=new Blob([response.data],{type:'audio/wav'});try{await (await caches.open('komod-tts-previews-v1')).put(key,new Response(blob,{headers:{'Content-Type':'audio/wav'}}))}catch{/* normal playback still works */}}if(previewUrl.startsWith('blob:'))URL.revokeObjectURL(previewUrl);const url=URL.createObjectURL(blob);setPreviewUrl(url);requestAnimationFrame(()=>void previewAudioRef.current?.play())}catch(error:any){setMessage({kind:'error',text:error?.response?.data?.detail||'پخش نمونه صدا انجام نشد.'})}finally{setPreviewing(false)}};
+    const playVoicePreview=async()=>{if(!settings)return;setPreviewing(true);setMessage(null);try{const key=new Request(`${window.location.origin}/__komod_tts_preview__/${encodeURIComponent(settings.model)}/${encodeURIComponent(voice)}`);let cached:Response|undefined;try{cached=await (await caches.open('komod-tts-previews-v1')).match(key)}catch{/* Cache API may be unavailable */}let blob:Blob;if(cached)blob=await cached.blob();else{const response=await api.get<ArrayBuffer>(`/tts/preview/${encodeURIComponent(voice)}`,{responseType:'arraybuffer'});blob=new Blob([response.data],{type:'audio/wav'});try{await (await caches.open('komod-tts-previews-v1')).put(key,new Response(blob,{headers:{'Content-Type':'audio/wav'}}))}catch{/* normal playback still works */}}if(previewUrl.startsWith('blob:'))URL.revokeObjectURL(previewUrl);setPreviewUrl(URL.createObjectURL(blob))}catch(error:any){setMessage({kind:'error',text:error?.response?.data?.detail||'پخش نمونه صدا انجام نشد.'})}finally{setPreviewing(false)}};
     if(isLoading)return <div className="rounded-2xl bg-dark-900/70 p-5 text-sm text-dark-400">در حال دریافت تنظیمات صدا…</div>;
     return <div className="space-y-4">
         <section className="rounded-2xl border border-white/[.07] bg-dark-900/70 p-4 sm:p-5">
@@ -86,7 +121,7 @@ export default function TTSSettingsPanel(){
             <div className="mt-4 grid gap-3 sm:grid-cols-3"><CustomSelect label="جنس صدا" value={gender} onChange={setGender} options={[...GENDERS]}/><CustomSelect label="زیر و بمی" value={pitch} onChange={setPitch} options={[...PITCHES]}/><CustomSelect label="کاربرد" value={useCase} onChange={setUseCase} options={[...USE_CASES]}/></div>
             <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]"><CustomSelect label="گوینده" value={voice} onChange={setVoice} options={availableVoices.map(item=>({value:item.value,label:item.label}))}/><button disabled={previewing||!settings?.available} onClick={()=>void playVoicePreview()} className="btn-secondary mt-[1.375rem] flex min-h-11 items-center justify-center gap-2 px-4 disabled:opacity-40"><Headphones className="h-4 w-4"/>{previewing?'در حال آماده‌سازی…':'شنیدن نمونه'}</button></div>
             {selectedVoice&&<p className="mt-2 rounded-xl bg-white/[.035] px-3 py-2 text-xs leading-6 text-dark-400">{selectedVoice.description}</p>}
-            {previewUrl&&<audio ref={previewAudioRef} controls preload="auto" src={previewUrl} className="mt-3 h-11 w-full"/>}
+            {previewUrl&&<div className="mt-3"><InlineAudioPlayer src={previewUrl} label={`نمونهٔ ${selectedVoice?.label||voice}`} autoPlay/></div>}
             <label className="mt-3 block text-xs text-dark-400">سرعت خواندن<div className="mt-1.5 flex min-h-11 items-center gap-3 rounded-xl border border-white/10 bg-dark-800 px-3"><input className="min-w-0 flex-1 accent-primary-500" type="range" min="0.5" max="2" step="0.05" value={speed} onChange={event=>setSpeed(Number(event.target.value))}/><span dir="ltr" className="w-12 text-center text-sm tabular-nums">{speed.toFixed(2)}×</span></div></label>
             <label className="mt-3 block text-xs text-dark-400">سبک و دستور خواندن<input value={style} onChange={event=>setStyle(event.target.value)} className="input mt-1.5 w-full" placeholder="مثلاً آرام، صمیمی و داستانی" maxLength={500}/></label>
             <div className="mt-2 flex flex-wrap gap-2">{['آرام و صمیمی','رسمی و شمرده','پرانرژی و هیجان‌انگیز','داستانی و احساسی','نجواگونه و نزدیک','آموزشی و بسیار واضح'].map(item=><button key={item} onClick={()=>setStyle(item)} className="rounded-full border border-white/[.08] bg-dark-800 px-3 py-2 text-xs text-dark-300 hover:border-primary-400/30">{item}</button>)}</div>
@@ -94,6 +129,6 @@ export default function TTSSettingsPanel(){
             <button onClick={()=>void save()} disabled={update.isPending} className="btn-secondary mt-4 flex min-h-11 w-full items-center justify-center gap-2 disabled:opacity-50"><Check className="h-4 w-4"/> ذخیره تنظیمات و کشوی پیش‌فرض</button>
         </section>
         {message&&<p className={`rounded-xl px-3 py-2 text-sm ${message.kind==='ok'?'bg-emerald-500/10 text-emerald-300':'bg-red-500/10 text-red-300'}`}>{message.text}</p>}
-        {jobs.length>0&&<section className="rounded-2xl border border-white/[.07] bg-dark-900/70 p-4 sm:p-5"><div className="flex items-center justify-between gap-3"><h2 className="font-bold">صف ساخت صدا</h2>{jobs.some(job=>['done','error','cancelled'].includes(job.state))&&<button onClick={()=>void clearFinished.mutateAsync()} className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs text-dark-400 hover:bg-white/[.05] hover:text-white"><Trash2 className="h-3.5 w-3.5"/>پاک‌کردن تاریخچه</button>}</div><div className="mt-4 space-y-2">{jobs.map(job=>{const finished=['done','error','cancelled'].includes(job.state);return <article key={job.id} className="rounded-xl bg-dark-800/60 p-3"><div className="flex items-center gap-3"><div className="min-w-0 flex-1"><strong className="block truncate text-sm">{job.title}</strong><span className="mt-1 block text-xs text-dark-400">{STATES[job.state]||job.state} · {job.message}</span></div>{finished?<button title="حذف از تاریخچه" className="btn-icon text-dark-400" onClick={()=>void dismiss.mutateAsync(job.id)}><X className="h-4 w-4"/></button>:<><button title={job.state==='paused'?'ادامه':'توقف'} className="btn-icon" onClick={()=>void control.mutateAsync({id:job.id,action:'pause'})}>{job.state==='paused'?<Play className="h-4 w-4"/>:<Pause className="h-4 w-4"/>}</button><button title="لغو" className="btn-icon text-red-300" onClick={()=>void control.mutateAsync({id:job.id,action:'cancel'})}><Square className="h-4 w-4"/></button></>}</div><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-dark-950"><div className={`h-full rounded-full ${job.state==='error'?'bg-red-500':job.state==='cancelled'?'bg-dark-500':'bg-primary-500'}`} style={{width:`${job.progress||0}%`}}/></div>{job.state==='done'&&job.stream_url&&<div className="mt-3 flex items-center gap-2"><Volume2 className="h-4 w-4 shrink-0 text-primary-300"/><audio controls preload="metadata" src={job.stream_url} className="h-10 min-w-0 flex-1"/></div>}</article>})}</div></section>}
+        {jobs.length>0&&<section className="rounded-2xl border border-white/[.07] bg-dark-900/70 p-4 sm:p-5"><div className="flex items-center justify-between gap-3"><h2 className="font-bold">صف ساخت صدا</h2>{jobs.some(job=>['done','error','cancelled'].includes(job.state))&&<button onClick={()=>void clearFinished.mutateAsync()} className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs text-dark-400 hover:bg-white/[.05] hover:text-white"><Trash2 className="h-3.5 w-3.5"/>پاک‌کردن تاریخچه</button>}</div><div className="mt-4 space-y-2">{jobs.map(job=>{const finished=['done','error','cancelled'].includes(job.state);return <article key={job.id} className="rounded-xl bg-dark-800/60 p-3"><div className="flex items-center gap-3"><div className="min-w-0 flex-1"><strong className="block truncate text-sm">{job.title}</strong><span className="mt-1 block text-xs text-dark-400">{STATES[job.state]||job.state} · {job.message}</span></div>{finished?<button title="حذف از تاریخچه" className="btn-icon text-dark-400" onClick={()=>void dismiss.mutateAsync(job.id)}><X className="h-4 w-4"/></button>:<><button title={job.state==='paused'?'ادامه':'توقف'} className="btn-icon" onClick={()=>void control.mutateAsync({id:job.id,action:'pause'})}>{job.state==='paused'?<Play className="h-4 w-4"/>:<Pause className="h-4 w-4"/>}</button><button title="لغو" className="btn-icon text-red-300" onClick={()=>void control.mutateAsync({id:job.id,action:'cancel'})}><Square className="h-4 w-4"/></button></>}</div><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-dark-950"><div className={`h-full rounded-full ${job.state==='error'?'bg-red-500':job.state==='cancelled'?'bg-dark-500':'bg-primary-500'}`} style={{width:`${job.progress||0}%`}}/></div>{job.state==='done'&&job.stream_url&&<div className="mt-3"><InlineAudioPlayer src={job.stream_url} label={job.title}/></div>}</article>})}</div></section>}
     </div>;
 }
