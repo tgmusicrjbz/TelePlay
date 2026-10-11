@@ -1034,7 +1034,14 @@ async def tts_command(client, message: Message):
     replied = message.reply_to_message
     source_text = direct_text or ((replied.text or replied.caption or "").strip() if replied else "")
     if not source_text:
-        await message.reply("متن را بعد از `/tts` بنویس یا روی یک پیام متنی ریپلای کن و `/tts` بفرست.")
+        await message.reply(
+            "🎙️ متن را بعد از `/tts` بنویس یا روی یک پیام متنی ریپلای کن.\nلحن پیش‌فرض را هم می‌توانی همین‌جا انتخاب کنی:",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🙂 طبیعی", callback_data="tts_style:natural"), InlineKeyboardButton("🌙 آرام", callback_data="tts_style:calm")],
+                [InlineKeyboardButton("⚡ پرانرژی", callback_data="tts_style:energetic"), InlineKeyboardButton("📰 رسمی", callback_data="tts_style:formal")],
+                [InlineKeyboardButton("📖 داستانی", callback_data="tts_style:story"), InlineKeyboardButton("🎧 پادکست", callback_data="tts_style:podcast")],
+            ]),
+        )
         return
     user = await get_or_create_user(
         message.from_user.id, message.from_user.username,
@@ -1465,6 +1472,32 @@ async def handle_callback(client, callback: CallbackQuery):
         if queue.empty():
             queue.put_nowait(action)
         await callback.answer("عملیات لغو شد." if action == "cancel" else "توضیحات پاک می‌شه.")
+
+    elif data.startswith("tts_style:"):
+        selected = data.split(":", 1)[1]
+        presets = {
+            "natural": ("طبیعی، گرم و واضح", "general", "طبیعی"),
+            "calm": ("آرام، نرم و صمیمی", "general", "آرام"),
+            "energetic": ("پرانرژی، سرزنده و هیجان‌انگیز", "advertising", "پرانرژی"),
+            "formal": ("رسمی، دقیق و شمرده", "news", "رسمی"),
+            "story": ("داستانی، احساسی و تصویرساز", "story", "داستانی"),
+            "podcast": ("صمیمی، روان و مناسب پادکست", "podcast", "پادکست"),
+        }
+        preset = presets.get(selected)
+        if preset is None:
+            await callback.answer("این لحن پیدا نشد.", show_alert=True)
+            return
+        async with async_session() as db:
+            user = (await db.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one_or_none()
+            if user is None:
+                await callback.answer("اول /start رو بفرست.", show_alert=True)
+                return
+            preferences = load_tts_settings(user)
+            preferences.update(style=preset[0], use_case=preset[1])
+            user.tts_settings_json = json.dumps(preferences, ensure_ascii=False)
+            await db.commit()
+        await callback.answer(f"لحن {preset[2]} انتخاب شد.")
+        await callback.message.reply(f"✅ لحن پیش‌فرض روی «{preset[2]}» تنظیم شد. حالا `/tts متن` رو بفرست.")
 
     elif data == "noop":
         await callback.answer()

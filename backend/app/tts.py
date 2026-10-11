@@ -33,8 +33,8 @@ settings = get_settings()
 
 DEFAULT_TTS_SETTINGS = {
     "voice": "Kore",
-    "gender": "female",
-    "pitch": "medium",
+    "gender": "all",
+    "pitch": "all",
     "use_case": "general",
     "style": "طبیعی، گرم و واضح",
     "speed": 1.0,
@@ -107,14 +107,23 @@ def build_interaction_content(text: str, base_style: str) -> list[dict]:
     content: list[dict] = []
     cursor = 0
 
+    after_scoped_segment = False
+
     def append_part(value: str, scoped_style: str | None = None) -> None:
+        nonlocal after_scoped_segment
         if not value:
             return
         part: dict = {"type": "text", "text": value}
         styles = [item for item in (base_style, scoped_style) if item]
         if styles:
             part["annotations"] = [{"type": "speech_metadata", "style": "؛ ".join(styles)}]
+        if after_scoped_segment and scoped_style is None:
+            part.setdefault("annotations", []).append({
+                "type": "speech_metadata",
+                "style": "لحن بخش قبلی تمام شده است؛ از همین بخش دقیقاً به لحن پایه برگرد",
+            })
         content.append(part)
+        after_scoped_segment = scoped_style is not None
 
     for match in tag_pattern.finditer(text):
         append_part(text[cursor:match.start()])
@@ -282,10 +291,13 @@ class GeminiTTSProvider:
             except GeminiRequestError as error:
                 last_error = error
                 status = error.status
+                if status == 400:
+                    detail = error.user_detail()
+                    raise RuntimeError(f"متن یا تنظیمات صدا پذیرفته نشد: {detail}") from error
                 if status in {429, 500, 502, 503, 504}:
                     self.cooldowns[key] = datetime.utcnow() + timedelta(seconds=60 if status == 429 else 15)
                     continue
-                if status in {400, 401, 403}:
+                if status in {401, 403}:
                     logger.warning("Gemini TTS rejected one configured key (%s)", status)
                     self.cooldowns[key] = datetime.utcnow() + timedelta(minutes=10)
                     continue
@@ -356,7 +368,22 @@ class GeminiTTSProvider:
 class GeminiRequestError(RuntimeError):
     def __init__(self, status: int, detail: str = "") -> None:
         self.status = status
+        self.detail = detail
         super().__init__(detail or f"Gemini request failed ({status})")
+
+    def user_detail(self) -> str:
+        try:
+            payload = json.loads(self.detail)
+            message = payload.get("error", {}).get("message")
+            if message:
+                return str(message)[:350]
+        except (TypeError, ValueError, AttributeError):
+            pass
+        return "تگ‌ها، متن یا تنظیمات انتخاب‌شده با این مدل سازگار نیستند."
+
+
+def to_persian_digits(value: object) -> str:
+    return str(value).translate(str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹"))
 
 
 @dataclass
@@ -367,6 +394,7 @@ class TTSJob:
     title: str
     folder_id: int | None
     preferences: dict
+    output_mode: str = "save"
     id: str = ""
 
 
@@ -376,6 +404,7 @@ class TTSQueue:
         self.queue: asyncio.Queue[TTSJob] = asyncio.Queue()
         self.statuses: dict[str, dict] = {}
         self.controls: dict[str, dict[str, bool]] = {}
+        self.audio_outputs: dict[str, bytes] = {}
         self.task: asyncio.Task | None = None
         self.active_job_id: str | None = None
 
@@ -402,7 +431,7 @@ class TTSQueue:
         job.id = job.id or uuid.uuid4().hex
         chunks = split_long_text(job.text)
         self.statuses[job.id] = {
-            "id": job.id, "user_id": job.user_id, "state": "queued", "message": "در صف ساخت صدا",
+            "id": job.id, "user_id": job.user_id, "state": "queued", "message": "منتظر نوبت",
             "progress": 0, "chunks_total": len(chunks), "chunks_done": 0,
             "title": job.title, "created_at": datetime.utcnow().isoformat(),
         }
@@ -431,6 +460,7 @@ class TTSQueue:
             if expired:
                 self.statuses.pop(job_id, None)
                 self.controls.pop(job_id, None)
+                self.audio_outputs.pop(job_id, None)
 
     def dismiss(self, job_id: str, user_id: int) -> bool:
         item = self.statuses.get(job_id)
@@ -438,6 +468,7 @@ class TTSQueue:
             return False
         self.statuses.pop(job_id, None)
         self.controls.pop(job_id, None)
+        self.audio_outputs.pop(job_id, None)
         return True
 
     def clear_finished(self, user_id: int) -> int:
@@ -445,6 +476,7 @@ class TTSQueue:
         for job_id in job_ids:
             self.statuses.pop(job_id, None)
             self.controls.pop(job_id, None)
+            self.audio_outputs.pop(job_id, None)
         return len(job_ids)
 
     def toggle_pause(self, job_id: str, user_id: int) -> dict | None:
@@ -492,18 +524,53 @@ class TTSQueue:
         for index, chunk in enumerate(chunks, 1):
             if not await self._checkpoint(job):
                 return
-            self.statuses[job.id].update(state="synthesizing", message=f"ساخت بخش {index} از {len(chunks)}")
+            self.statuses[job.id].update(state="synthesizing", message=f"بخش {to_persian_digits(index)} از {to_persian_digits(len(chunks))}")
             parts.append(await self.provider.synthesize(chunk, job.preferences))
             self.statuses[job.id].update(chunks_done=index, progress=round(index / len(chunks) * 80))
         if not await self._checkpoint(job):
             return
-        self.statuses[job.id].update(state="merging", message="یکپارچه‌سازی صدا", progress=85)
+        self.statuses[job.id].update(state="merging", message="آماده‌سازی نهایی", progress=85)
         wav_data = await asyncio.to_thread(merge_wav, parts)
+        if job.output_mode == "preview":
+            self.audio_outputs[job.id] = wav_data
+            self.statuses[job.id].update(
+                state="done", message="آمادهٔ پخش", progress=100,
+                stream_url=f"/api/tts/jobs/{job.id}/audio", finished_at=datetime.utcnow().isoformat(),
+            )
+            return
+        if job.output_mode == "telegram":
+            await self._send_only(job, wav_data)
+            self.statuses[job.id].update(
+                state="done", message="در تلگرام فرستاده شد", progress=100,
+                finished_at=datetime.utcnow().isoformat(),
+            )
+            return
         stored = await self._store(job, wav_data)
         self.statuses[job.id].update(
             state="done", message="صدا آماده شد", progress=100, file_id=stored.id,
             stream_url=f"/api/stream/{stored.id}?workspace={stored.user_id}", finished_at=datetime.utcnow().isoformat(),
         )
+
+    async def _send_only(self, job: TTSJob, wav_data: bytes) -> None:
+        with tempfile.TemporaryDirectory(prefix="komod-tts-send-") as temporary_dir:
+            safe_title = sanitize_filename(job.title or "صدای ساخته‌شده")
+            wav_path = Path(temporary_dir) / f"{safe_title}.wav"
+            ogg_path = Path(temporary_dir) / f"{safe_title}.ogg"
+            wav_path.write_bytes(wav_data)
+            output_path = wav_path
+            if shutil.which("ffmpeg"):
+                command = ["ffmpeg", "-y", "-loglevel", "error", "-i", str(wav_path)]
+                speed = float(job.preferences.get("speed", 1))
+                if abs(speed - 1) > .01:
+                    command.extend(["-filter:a", f"atempo={speed:.2f}"])
+                command.extend(["-c:a", "libopus", "-b:a", "48k", str(ogg_path)])
+                await asyncio.to_thread(subprocess.run, command, check=True, capture_output=True)
+                output_path = ogg_path
+            self.statuses[job.id].update(state="uploading", message="ارسال به تلگرام", progress=90)
+            if output_path.suffix == ".ogg":
+                await telegram.tg_client.send_voice(job.telegram_id, str(output_path), caption=job.title[:1024])
+            else:
+                await telegram.tg_client.send_audio(job.telegram_id, str(output_path), caption=job.title[:1024])
 
     async def _store(self, job: TTSJob, wav_data: bytes) -> File:
         with tempfile.TemporaryDirectory(prefix="komod-tts-") as temporary_dir:

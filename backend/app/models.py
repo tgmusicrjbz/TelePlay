@@ -3,7 +3,7 @@ Database models for TelePlay streaming app.
 """
 from datetime import datetime
 from typing import Optional, List
-from sqlalchemy import BigInteger, String, Integer, Boolean, ForeignKey, DateTime, Text, Index, UniqueConstraint
+from sqlalchemy import BigInteger, String, Integer, Boolean, ForeignKey, DateTime, Text, Index, UniqueConstraint, LargeBinary
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .database import Base
 
@@ -87,6 +87,19 @@ class BotUserState(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
+
+
+class TTSVoicePreview(Base):
+    """A server-wide cached voice sample shared by every user."""
+    __tablename__ = "tts_voice_previews"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    model: Mapped[str] = mapped_column(String(120), nullable=False)
+    voice: Mapped[str] = mapped_column(String(80), nullable=False)
+    audio: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("model", "voice", name="uq_tts_preview_model_voice"),)
 
 
 class Folder(Base):

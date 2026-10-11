@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import get_current_user
 from ..database import get_db
-from ..models import Folder, User
+from ..models import Folder, TTSVoicePreview, User
 from ..tts import TTSJob, VOICE_OPTIONS, load_tts_settings, normalize_tts_settings, tts_queue
 
 router = APIRouter(prefix="/tts", tags=["Text to speech"])
@@ -23,8 +23,8 @@ class TTSSettingsUpdate(BaseModel):
     speed: float = Field(default=1, ge=.5, le=2)
     model: str = Field(min_length=1, max_length=120)
     auto_expression: bool = True
-    gender: Literal["all", "female", "male"] = "female"
-    pitch: Literal["all", "low", "medium", "high"] = "medium"
+    gender: Literal["all", "female", "male"] = "all"
+    pitch: Literal["all", "low", "medium", "high"] = "all"
     use_case: Literal["general", "audiobook", "podcast", "story", "education", "news", "advertising", "accessibility"] = "general"
     folder_id: int | None = None
 
@@ -40,6 +40,7 @@ class TTSCreate(BaseModel):
     gender: Literal["all", "female", "male"] | None = None
     pitch: Literal["all", "low", "medium", "high"] | None = None
     use_case: Literal["general", "audiobook", "podcast", "story", "education", "news", "advertising", "accessibility"] | None = None
+    output_mode: Literal["save", "preview", "telegram"] = "save"
 
 
 @router.get("/settings")
@@ -93,17 +94,18 @@ async def create_tts_job(
     job = TTSJob(
         user_id=current_user.id, telegram_id=current_user.telegram_id,
         text=payload.text.strip(), title=payload.title.strip(), folder_id=target_folder_id,
-        preferences=preferences,
+        preferences=preferences, output_mode=payload.output_mode,
     )
     position = await tts_queue.enqueue(job)
-    return {"job_id": job.id, "queue_position": position, "message": "متن در صف ساخت صدا قرار گرفت."}
-
-
-_preview_cache: dict[tuple[str, str], bytes] = {}
+    return {"job_id": job.id, "queue_position": position, "message": "ساخت صدا شروع شد."}
 
 
 @router.get("/preview/{voice}")
-async def preview_tts_voice(voice: str, current_user: User = Depends(get_current_user)):
+async def preview_tts_voice(
+    voice: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     voice_info = next((item for item in VOICE_OPTIONS if item["value"] == voice), None)
     if voice_info is None:
         raise HTTPException(status_code=404, detail="این گوینده پیدا نشد.")
@@ -111,12 +113,27 @@ async def preview_tts_voice(voice: str, current_user: User = Depends(get_current
         raise HTTPException(status_code=503, detail="کلید Gemini TTS هنوز روی سرور تنظیم نشده است.")
     preferences = load_tts_settings(current_user)
     preferences.update(voice=voice, style="طبیعی، واضح و دوستانه", auto_expression=False, use_case="general", speed=1)
-    cache_key = (preferences["model"], voice)
-    audio = _preview_cache.get(cache_key)
-    if audio is None:
-        audio = await tts_queue.provider.synthesize("سلام! این یک نمونه کوتاه از صدای من در کمد است.", preferences)
-        _preview_cache[cache_key] = audio
-    return Response(content=audio, media_type="audio/wav", headers={"Cache-Control": "private, max-age=2592000"})
+    cached = (await db.execute(select(TTSVoicePreview).where(
+        TTSVoicePreview.model == preferences["model"], TTSVoicePreview.voice == voice,
+    ))).scalar_one_or_none()
+    if cached is None:
+        audio = await tts_queue.provider.synthesize(
+            "سلام رفیق! من یکی از صداهای کمدم. این نمونه رو گوش کن و اگر خوشت اومد منو انتخاب کن.",
+            preferences,
+        )
+        cached = TTSVoicePreview(model=preferences["model"], voice=voice, audio=audio)
+        db.add(cached)
+        await db.commit()
+    return Response(content=cached.audio, media_type="audio/wav", headers={"Cache-Control": "private, max-age=2592000"})
+
+
+@router.get("/jobs/{job_id}/audio")
+async def get_tts_job_audio(job_id: str, current_user: User = Depends(get_current_user)):
+    status = tts_queue.status(job_id, current_user.id)
+    audio = tts_queue.audio_outputs.get(job_id)
+    if status is None or audio is None:
+        raise HTTPException(status_code=404, detail="خروجی موقت پیدا نشد یا زمان نگهداری آن تمام شده است.")
+    return Response(content=audio, media_type="audio/wav", headers={"Cache-Control": "private, no-store"})
 
 
 @router.get("/jobs")

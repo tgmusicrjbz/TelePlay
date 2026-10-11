@@ -78,6 +78,7 @@ async def configure_main_client(c) -> None:
             BotCommand("myfiles", "دیدن فایل‌های ذخیره‌شده"),
             BotCommand("folders", "مرور کشوهای کمد"),
             BotCommand("playlists", "ساخت و پخش پلی‌لیست‌ها"),
+            BotCommand("tts", "ساخت صدا از متن"),
             BotCommand("search", "جست‌وجو در فایل‌ها و کشوها"),
             BotCommand("newfolder", "ساخت کشوی جدید"),
             BotCommand("web", "راهنمای ورود به نسخهٔ وب"),

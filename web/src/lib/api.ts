@@ -973,7 +973,7 @@ export const useTTSJobs = () => useQuery<TTSJobStatus[]>({
 export const useCreateTTSJob = () => {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (payload: {text:string;title:string;folder_id?:number|null;voice?:string;style?:string;speed?:number;auto_expression?:boolean;gender?:TTSSettings['gender'];pitch?:TTSSettings['pitch'];use_case?:TTSSettings['use_case']}) => (await api.post<{job_id:string;queue_position:number;message:string}>('/tts/jobs', payload)).data,
+        mutationFn: async (payload: {text:string;title:string;folder_id?:number|null;voice?:string;style?:string;speed?:number;auto_expression?:boolean;gender?:TTSSettings['gender'];pitch?:TTSSettings['pitch'];use_case?:TTSSettings['use_case'];output_mode?:'save'|'preview'|'telegram'}) => (await api.post<{job_id:string;queue_position:number;message:string}>('/tts/jobs', payload)).data,
         onSuccess: () => queryClient.invalidateQueries({queryKey:['tts-jobs']}),
     });
 };
