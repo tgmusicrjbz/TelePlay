@@ -33,22 +33,45 @@ settings = get_settings()
 
 DEFAULT_TTS_SETTINGS = {
     "voice": "Kore",
+    "gender": "female",
+    "pitch": "medium",
+    "use_case": "general",
     "style": "طبیعی، گرم و واضح",
     "speed": 1.0,
     "model": settings.gemini_tts_model,
     "auto_expression": True,
+    "folder_id": None,
 }
 VOICE_OPTIONS = [
-    {"value": "Kore", "label": "Kore · زن، گرم"},
-    {"value": "Aoede", "label": "Aoede · زن، روشن"},
-    {"value": "Leda", "label": "Leda · زن، جوان"},
-    {"value": "Sulafat", "label": "Sulafat · زن، گرم"},
-    {"value": "Puck", "label": "Puck · مرد، پرانرژی"},
-    {"value": "Charon", "label": "Charon · مرد، رسمی"},
-    {"value": "Fenrir", "label": "Fenrir · مرد، پرقدرت"},
-    {"value": "Orus", "label": "Orus · مرد، محکم"},
+    {"value": "Kore", "label": "🌷 Kore · گرم و متعادل", "description": "صدایی گرم برای روایت، آموزش و متن‌های روزمره", "gender": "female", "pitch": "medium"},
+    {"value": "Aoede", "label": "✨ Aoede · روشن و لطیف", "description": "مناسب متن‌های دوستانه، معرفی و محتوای سبک", "gender": "female", "pitch": "high"},
+    {"value": "Leda", "label": "🌱 Leda · جوان و روان", "description": "برای گفتگو، داستان کوتاه و محتوای شبکه‌های اجتماعی", "gender": "female", "pitch": "high"},
+    {"value": "Sulafat", "label": "🌙 Sulafat · آرام و عمیق", "description": "برای کتاب صوتی، آرامش و روایت‌های احساسی", "gender": "female", "pitch": "low"},
+    {"value": "Puck", "label": "⚡ Puck · پرانرژی", "description": "برای تبلیغ، سرگرمی و متن‌های هیجان‌انگیز", "gender": "male", "pitch": "high"},
+    {"value": "Charon", "label": "🎙️ Charon · رسمی و شمرده", "description": "برای خبر، مستند، گزارش و محتوای رسمی", "gender": "male", "pitch": "low"},
+    {"value": "Fenrir", "label": "🔥 Fenrir · قدرتمند", "description": "برای روایت حماسی، تریلر و اجرای پرقدرت", "gender": "male", "pitch": "low"},
+    {"value": "Orus", "label": "🧭 Orus · محکم و واضح", "description": "برای آموزش، پادکست و توضیح‌های فنی", "gender": "male", "pitch": "medium"},
 ]
 TERMINAL_STATES = {"done", "error", "cancelled"}
+USE_CASE_STYLES = {
+    "general": "طبیعی و روان",
+    "audiobook": "روایت پیوسته و مناسب کتاب صوتی",
+    "podcast": "صمیمی و مناسب پادکست",
+    "story": "داستانی و تصویرساز",
+    "education": "آموزشی، روشن و شمرده",
+    "news": "رسمی، دقیق و مناسب خبر",
+    "advertising": "پرانرژی و مناسب معرفی محصول",
+    "accessibility": "بسیار واضح، آرام و دسترس‌پذیر",
+}
+SCOPED_STYLE_TAGS = {
+    "whisper": "با صدای نجوا و بسیار آرام",
+    "soft": "نرم و آرام",
+    "excited": "هیجان‌زده و پرانرژی",
+    "sad": "غمگین و احساسی",
+    "angry": "عصبانی اما واضح و کنترل‌شده",
+    "formal": "رسمی و شمرده",
+    "story": "داستانی و تصویرساز",
+}
 
 
 def normalize_tts_settings(value: dict | None) -> dict:
@@ -61,7 +84,44 @@ def normalize_tts_settings(value: dict | None) -> dict:
         raw["model"] = "gemini-3.8-flash-tts"
     raw["speed"] = min(2.0, max(0.5, float(raw.get("speed") or 1)))
     raw["auto_expression"] = bool(raw.get("auto_expression", True))
+    raw["gender"] = raw.get("gender") if raw.get("gender") in {"all", "female", "male"} else DEFAULT_TTS_SETTINGS["gender"]
+    raw["pitch"] = raw.get("pitch") if raw.get("pitch") in {"all", "low", "medium", "high"} else DEFAULT_TTS_SETTINGS["pitch"]
+    raw["use_case"] = raw.get("use_case") if raw.get("use_case") in USE_CASE_STYLES else DEFAULT_TTS_SETTINGS["use_case"]
+    try:
+        raw["folder_id"] = int(raw["folder_id"]) if raw.get("folder_id") is not None else None
+    except (TypeError, ValueError):
+        raw["folder_id"] = None
     return raw
+
+
+def build_interaction_content(text: str, base_style: str) -> list[dict]:
+    """Turn paired style tags into scoped Gemini speech metadata.
+
+    Point cues such as ``<laugh>`` stay inside the text unchanged. Paired
+    tags such as ``<whisper>...</whisper>`` only affect their enclosed text.
+    """
+    tag_pattern = re.compile(
+        r"<(whisper|soft|excited|sad|angry|formal|story)>(.*?)</\1>",
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    content: list[dict] = []
+    cursor = 0
+
+    def append_part(value: str, scoped_style: str | None = None) -> None:
+        if not value:
+            return
+        part: dict = {"type": "text", "text": value}
+        styles = [item for item in (base_style, scoped_style) if item]
+        if styles:
+            part["annotations"] = [{"type": "speech_metadata", "style": "؛ ".join(styles)}]
+        content.append(part)
+
+    for match in tag_pattern.finditer(text):
+        append_part(text[cursor:match.start()])
+        append_part(match.group(2), SCOPED_STYLE_TAGS[match.group(1).lower()])
+        cursor = match.end()
+    append_part(text[cursor:])
+    return content or [{"type": "text", "text": text}]
 
 
 def load_tts_settings(user: User) -> dict:
@@ -237,17 +297,17 @@ class GeminiTTSProvider:
 
     async def _request(self, key: str, text: str, preferences: dict) -> bytes:
         style = preferences.get("style", "").strip()
+        use_case_style = USE_CASE_STYLES.get(preferences.get("use_case", "general"), "")
+        if use_case_style:
+            style = f"{style}؛ {use_case_style}".strip("؛ ")
         if preferences.get("auto_expression"):
             style = f"{style}؛ احساس، مکث و لحن را متناسب با معنای متن و بدون اغراق انتخاب کن".strip("؛ ")
         model = preferences["model"]
         if model.startswith("gemini-3.8-"):
             endpoint = f"https://generativelanguage.googleapis.com/v1beta/interactions?{urlencode({'key': key})}"
-            text_part: dict = {"type": "text", "text": text}
-            if style:
-                text_part["annotations"] = [{"type": "speech_metadata", "style": style}]
             payload = {
                 "model": model,
-                "input": [{"type": "user_input", "content": [text_part]}],
+                "input": [{"type": "user_input", "content": build_interaction_content(text, style)}],
                 "response_format": {"type": "audio"},
                 "generation_config": {"speech_config": [{"voice": preferences["voice"]}]},
             }
@@ -440,7 +500,10 @@ class TTSQueue:
         self.statuses[job.id].update(state="merging", message="یکپارچه‌سازی صدا", progress=85)
         wav_data = await asyncio.to_thread(merge_wav, parts)
         stored = await self._store(job, wav_data)
-        self.statuses[job.id].update(state="done", message="صدا آماده شد", progress=100, file_id=stored.id, finished_at=datetime.utcnow().isoformat())
+        self.statuses[job.id].update(
+            state="done", message="صدا آماده شد", progress=100, file_id=stored.id,
+            stream_url=f"/api/stream/{stored.id}?workspace={stored.user_id}", finished_at=datetime.utcnow().isoformat(),
+        )
 
     async def _store(self, job: TTSJob, wav_data: bytes) -> File:
         with tempfile.TemporaryDirectory(prefix="komod-tts-") as temporary_dir:
@@ -489,7 +552,7 @@ class TTSQueue:
                     user_id=user.id, folder_id=folder_id, file_id=media.file_id,
                     file_unique_id=media.file_unique_id, channel_message_id=message.id,
                     storage_channel_id=target_channel, file_name=output_path.name,
-                    description="ساخته‌شده از متن با Gemini TTS", file_size=media.file_size or os.path.getsize(output_path),
+                    description="🤖 تولیدشده با هوش مصنوعی", file_size=media.file_size or os.path.getsize(output_path),
                     mime_type=getattr(media, "mime_type", None) or ("audio/ogg" if is_voice else "audio/wav"),
                     file_type="audio", duration=getattr(media, "duration", None),
                     thumbnail_file_id=(select_best_thumbnail(getattr(media, "thumbs", None)).file_id if select_best_thumbnail(getattr(media, "thumbs", None)) else None),

@@ -1,7 +1,7 @@
 """Playlist API shared by the web app and Telegram bot."""
 import random
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -15,7 +15,12 @@ from ..schemas import (
 )
 from ..services import add_urls_to_file
 
-router = APIRouter(prefix="/playlists", tags=["Playlists"])
+def _reject_shared_workspace(request: Request) -> None:
+    if request.headers.get("X-Workspace-User") or request.query_params.get("workspace"):
+        raise HTTPException(status_code=403, detail="پلی‌لیست‌ها بخشی از فضای اشتراکی نیستند.")
+
+
+router = APIRouter(prefix="/playlists", tags=["Playlists"], dependencies=[Depends(_reject_shared_workspace)])
 
 
 def _file_response(file: File) -> FileResponse:

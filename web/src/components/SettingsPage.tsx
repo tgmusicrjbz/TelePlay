@@ -40,7 +40,11 @@ export default function SettingsPage() {
     const updateAccountPreferences = useUpdateAccountPreferences();
     const setVaultPassword = useSetVaultPassword();
     const unlockVault = useUnlockVault();
-    const [view, setView] = useState<SettingsView>('home');
+    const [view, setView] = useState<SettingsView>(() => {
+        const target = localStorage.getItem('komod-settings-target') as SettingsView | null;
+        localStorage.removeItem('komod-settings-target');
+        return target === 'tts' ? 'tts' : 'home';
+    });
     const [theme, setTheme] = useState<ActiveTheme>(getStoredTheme);
     const [appearanceMode, setAppearanceMode] = useState<AppearanceMode>(getStoredAppearanceMode);
     const [forceOffline, setForceOffline] = useState(() => localStorage.getItem('komod-force-offline') === '1');
@@ -95,6 +99,11 @@ export default function SettingsPage() {
     useEffect(() => { if (user) syncCurrentAccount(user); }, [user]);
     useEffect(() => { if (credentials?.username) setCredentialUsername(credentials.username); }, [credentials?.username]);
     useEffect(() => { if (confirmation === 'others') void logoutOtherDevices(); }, [confirmation]);
+    useEffect(() => {
+        const openTTS = () => { localStorage.removeItem('komod-settings-target'); setView('tts'); };
+        window.addEventListener('komod-open-tts', openTTS);
+        return () => window.removeEventListener('komod-open-tts', openTTS);
+    }, []);
     useEffect(() => {
         const frame = window.requestAnimationFrame(() => {
             document.querySelector<HTMLElement>('[data-main-scroll="true"]')?.scrollTo({ top: 0, behavior: 'auto' });

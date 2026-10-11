@@ -2,6 +2,20 @@
 @tailwind components;
 @tailwind utilities;
 
+.markdown-reader-surface { background: rgb(2 6 23 / .58); }
+.markdown-reader-surface--warm { background: #19160f; }
+.markdown-article { border-color: rgb(51 65 85 / .45); background: #111620; color: #f1f5f9; }
+.markdown-article--warm { border-color: rgb(254 243 199 / .1); background: #211d14; color: rgb(255 251 235 / .95); }
+.markdown-editor-toolbar { border-color: rgb(255 255 255 / .08); background: #121722; }
+.markdown-editor { border-color: rgb(255 255 255 / .1); background: #0f131c; color: #f1f5f9; }
+
+:root.light .markdown-reader-surface { background: #eef2f7; }
+:root.light .markdown-reader-surface--warm { background: #f3ecdc; }
+:root.light .markdown-article { border-color: rgb(148 163 184 / .35); background: #ffffff; color: #172033; }
+:root.light .markdown-article--warm { border-color: rgb(180 130 60 / .18); background: #fffaf0; color: #3d3324; }
+:root.light .markdown-editor-toolbar { border-color: rgb(148 163 184 / .3); background: #f8fafc; }
+:root.light .markdown-editor { border-color: rgb(148 163 184 / .35); background: #ffffff; color: #172033; }
+
 :root {
   color-scheme: dark;
   --app-white: 255 255 255;

@@ -17,7 +17,7 @@ os.environ.setdefault("TELEGRAM_STORAGE_CHANNEL_ID", "-1001234567890")
 os.environ.setdefault("JWT_SECRET", "test-secret")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.tts import GeminiRequestError, GeminiTTSProvider, TTSQueue, extract_interaction_audio, merge_wav, normalize_tts_settings, split_long_text
+from app.tts import GeminiRequestError, GeminiTTSProvider, TTSQueue, build_interaction_content, extract_interaction_audio, merge_wav, normalize_tts_settings, split_long_text
 
 
 def wav_with_frames(frames: bytes, rate: int = 24000) -> bytes:
@@ -49,10 +49,23 @@ class TTSHelpersTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result.readframes(result.getnframes()), first + second)
 
     def test_preferences_are_bounded_and_unknown_voice_is_replaced(self):
-        preferences = normalize_tts_settings({"voice": "unknown", "speed": 9, "style": " آرام "})
+        preferences = normalize_tts_settings({"voice": "unknown", "speed": 9, "style": " آرام ", "folder_id": "42", "use_case": "podcast"})
         self.assertEqual(preferences["voice"], "Kore")
         self.assertEqual(preferences["speed"], 2)
         self.assertEqual(preferences["style"], "آرام")
+        self.assertEqual(preferences["folder_id"], 42)
+        self.assertEqual(preferences["use_case"], "podcast")
+
+    def test_scoped_style_tags_only_annotate_their_own_text(self):
+        content = build_interaction_content("شروع <whisper>این بخش آرام است.</whisper> پایان", "روان")
+        self.assertEqual([part["text"] for part in content], ["شروع ", "این بخش آرام است.", " پایان"])
+        self.assertEqual(content[0]["annotations"][0]["style"], "روان")
+        self.assertIn("نجوا", content[1]["annotations"][0]["style"])
+        self.assertEqual(content[2]["annotations"][0]["style"], "روان")
+
+    def test_point_cues_are_kept_verbatim(self):
+        content = build_interaction_content("سلام <laugh> دنیا", "طبیعی")
+        self.assertEqual(content[0]["text"], "سلام <laugh> دنیا")
 
     async def test_provider_rotates_to_next_key_after_rate_limit(self):
         provider = GeminiTTSProvider(["first", "second"])

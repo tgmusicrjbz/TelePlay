@@ -43,9 +43,9 @@ export interface TagDefinition { name: string; color: string; file_count?: numbe
 export interface TagSettings { tags: TagDefinition[]; show_file_tags: boolean; display_limit: number; }
 export interface VaultStatus { configured: boolean; }
 export interface StorageChannel { configured: boolean; channel_id?: number | null; title?: string | null; }
-export interface TTSVoice { value: string; label: string; }
-export interface TTSSettings { voice: string; style: string; speed: number; model: string; auto_expression: boolean; available: boolean; voices: TTSVoice[]; }
-export interface TTSJobStatus { id: string; state: 'queued'|'paused'|'synthesizing'|'merging'|'uploading'|'done'|'error'|'cancelled'; message: string; progress: number; chunks_total: number; chunks_done: number; title: string; file_id?: number; created_at: string; finished_at?: string; }
+export interface TTSVoice { value: string; label: string; description: string; gender: 'female'|'male'; pitch: 'low'|'medium'|'high'; }
+export interface TTSSettings { voice: string; style: string; speed: number; model: string; auto_expression: boolean; gender: 'all'|'female'|'male'; pitch: 'all'|'low'|'medium'|'high'; use_case: 'general'|'audiobook'|'podcast'|'story'|'education'|'news'|'advertising'|'accessibility'; folder_id: number|null; available: boolean; voices: TTSVoice[]; }
+export interface TTSJobStatus { id: string; state: 'queued'|'paused'|'synthesizing'|'merging'|'uploading'|'done'|'error'|'cancelled'; message: string; progress: number; chunks_total: number; chunks_done: number; title: string; file_id?: number; stream_url?: string; created_at: string; finished_at?: string; }
 
 export interface Folder {
     id: number;
@@ -958,7 +958,7 @@ export const useTTSSettings = () => useQuery<TTSSettings>({
 export const useUpdateTTSSettings = () => {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (payload: Pick<TTSSettings, 'voice'|'style'|'speed'|'model'|'auto_expression'>) => (await api.put<TTSSettings>('/tts/settings', payload)).data,
+        mutationFn: async (payload: Pick<TTSSettings, 'voice'|'style'|'speed'|'model'|'auto_expression'|'gender'|'pitch'|'use_case'|'folder_id'>) => (await api.put<TTSSettings>('/tts/settings', payload)).data,
         onSuccess: data => queryClient.setQueryData(['tts-settings'], data),
     });
 };
@@ -973,7 +973,7 @@ export const useTTSJobs = () => useQuery<TTSJobStatus[]>({
 export const useCreateTTSJob = () => {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (payload: {text:string;title:string;folder_id?:number|null;voice?:string;style?:string;speed?:number;auto_expression?:boolean}) => (await api.post<{job_id:string;queue_position:number;message:string}>('/tts/jobs', payload)).data,
+        mutationFn: async (payload: {text:string;title:string;folder_id?:number|null;voice?:string;style?:string;speed?:number;auto_expression?:boolean;gender?:TTSSettings['gender'];pitch?:TTSSettings['pitch'];use_case?:TTSSettings['use_case']}) => (await api.post<{job_id:string;queue_position:number;message:string}>('/tts/jobs', payload)).data,
         onSuccess: () => queryClient.invalidateQueries({queryKey:['tts-jobs']}),
     });
 };

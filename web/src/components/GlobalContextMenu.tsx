@@ -181,6 +181,7 @@ export default function GlobalContextMenu() {
                     <div className="grid grid-cols-2 gap-2">
                         {playable&&<ActionTile icon={<Play/>} label="پخش" onClick={()=>handleAction(()=>handlePlay(file))}/>}
                         {previewable&&<ActionTile icon={<Eye/>} label={previewLabel} onClick={()=>handleAction(()=>setContentPreviewFile(file))}/>}
+                        {!readOnlyWorkspace&&canPreviewText(file)&&<ActionTile icon={<AudioLines/>} label="تبدیل به صوت" onClick={()=>void handleTextToSpeech(file)}/>}
                         <ActionTile icon={<DownloadCloud/>} label="ذخیره آفلاین" onClick={()=>handleOfflineSave(file)}/>
                         {!readOnlyWorkspace&&<><ActionTile icon={<FolderInput/>} label="جابه‌جایی" onClick={()=>handleAction(()=>setMoveItems({files:[file],folders:[]}))}/><ActionTile icon={<Heart className={file.is_favorite?'fill-current text-pink-400':''}/>} label={file.is_favorite?'برداشتن نشان':'نشان کردن'} onClick={async()=>{setActiveContextMenu(null);await updateFile.mutateAsync({id:file.id,is_favorite:!file.is_favorite});addToast(file.is_favorite?'نشان برداشته شد.':'فایل نشان شد ⭐');}}/><ActionTile icon={<Pin className={file.is_pinned?'fill-current text-primary-300':''}/>} label={file.is_pinned?'برداشتن پین':'پین بالای کمد'} onClick={async()=>{setActiveContextMenu(null);await updateFile.mutateAsync({id:file.id,is_pinned:!file.is_pinned});addToast(file.is_pinned?'پین برداشته شد.':'فایل پین شد 📌');}}/><ActionTile icon={<Edit/>} label="تغییر نام" onClick={()=>handleAction(()=>setRenameFile(file))}/></>}
                     </div>
@@ -189,7 +190,6 @@ export default function GlobalContextMenu() {
                             <div className="grid grid-cols-2 gap-2">
                                 <ActionTile icon={<Download/>} label="دانلود" onClick={()=>{void handleDownload(file);setActiveContextMenu(null);}}/>
                                 <ActionTile icon={<Info/>} label="جزئیات فایل" onClick={()=>handleAction(()=>setDetailsFile(file))}/>
-                                {canPreviewText(file)&&<ActionTile icon={<AudioLines/>} label="تبدیل به صوت" onClick={()=>void handleTextToSpeech(file)}/>}
                                 {!readOnlyWorkspace&&<>
                                     {playable&&<ActionTile icon={<ListPlus/>} label="افزودن به پلی‌لیست" onClick={()=>handleAction(()=>setPlaylistFile(file))}/>}
                                     <ActionTile icon={<AlignLeft/>} label={file.description?'ویرایش توضیحات':'افزودن توضیحات'} onClick={()=>handleAction(()=>setDescriptionItem({type:'file',item:file}))}/>
