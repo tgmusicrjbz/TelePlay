@@ -85,6 +85,18 @@ class Settings(BaseSettings):
     
     # Web
     web_base_url: str = "http://localhost:3000"
+
+    # Gemini text-to-speech. Keep these keys on the server; they must never be
+    # returned by an API endpoint or embedded in the web bundle.
+    gemini_api_keys_str: str = Field("", alias="GEMINI_API_KEYS")
+    gemini_api_key: str = Field("", alias="GEMINI_API_KEY")
+    gemini_tts_model: str = Field("gemini-2.5-flash-preview-tts", alias="GEMINI_TTS_MODEL")
+
+    @property
+    def gemini_api_keys(self) -> list[str]:
+        raw = self.gemini_api_keys_str or self.gemini_api_key
+        values = raw.replace("\r", "\n").replace(",", "\n").split("\n")
+        return list(dict.fromkeys(value.strip() for value in values if value.strip()))
     
     class Config:
         env_file = ".env"

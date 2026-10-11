@@ -28,6 +28,7 @@ from .config import get_settings
 from .auth import create_access_token
 from .services import escape_like, select_best_thumbnail
 from .downloader import ImportJob, link_importer
+from .tts import TTSJob, load_tts_settings, tts_queue
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -54,6 +55,38 @@ TEHRAN_TZ = timezone(timedelta(hours=3, minutes=30))
 FILE_ICONS = {"video": "🎬", "audio": "🎵", "document": "📄", "image": "🖼", "text": "📝"}
 TYPE_LABELS = {"all": "همه", "video": "فیلم", "audio": "آهنگ", "image": "عکس", "text": "متن", "document": "سند", "folder": "کشو"}
 SORT_LABELS = {"name": "نام", "type": "نوع", "size": "حجم", "duration": "مدت", "created": "تاریخ آپلود", "updated": "تاریخ ویرایش"}
+
+
+def extract_tags_from_caption(caption: str | None) -> list[str]:
+    """
+    Extracts tags from a media caption or description.
+    Supports:
+    - Hashtags: #tag, #آموزش, #film_2024
+    - Explicit prefix lines: 'تگ‌ها: ...', 'تگ:', 'Tags:', 'برچسب:'
+    """
+    if not caption:
+        return []
+    cleaned: list[str] = []
+    seen: set[str] = set()
+
+    hashtag_pattern = r"""#([^\s#.,;:!?'"()\[\]{}<>/\\+=*&^%$@~`|]+)"""
+    for tag_match in re.findall(hashtag_pattern, caption):
+        tag = tag_match.strip()[:40]
+        key = tag.casefold()
+        if tag and key not in seen:
+            cleaned.append(tag)
+            seen.add(key)
+
+    prefix_pattern = r"(?:^|\n)\s*(?:تگ[‌\s]*ها?|برچسب[‌\s]*ها?|tags?)\s*[:：]\s*(.+?)(?=\n|$)"
+    for line_match in re.findall(prefix_pattern, caption, flags=re.IGNORECASE):
+        for part in re.split(r"[,،;؛\s]+", line_match):
+            tag = part.strip().lstrip("#")[:40]
+            key = tag.casefold()
+            if tag and key not in seen:
+                cleaned.append(tag)
+                seen.add(key)
+
+    return cleaned[:20]
 
 
 def _sort_value(kind: str, item, field: str):
@@ -991,6 +1024,33 @@ async def help_command(client, message: Message):
     await message.reply(HELP_TEXT, reply_markup=help_keyboard(message.from_user.id))
 
 
+@tg_client.on_message(filters.command("tts") & filters.private)
+async def tts_command(client, message: Message):
+    """Create a voice from command text or a replied-to text message."""
+    if not tts_queue.available:
+        await message.reply("تبدیل متن به صدا هنوز روی سرور فعال نشده.")
+        return
+    direct_text = message.text.split(maxsplit=1)[1].strip() if message.text and len(message.text.split(maxsplit=1)) > 1 else ""
+    replied = message.reply_to_message
+    source_text = direct_text or ((replied.text or replied.caption or "").strip() if replied else "")
+    if not source_text:
+        await message.reply("متن را بعد از `/tts` بنویس یا روی یک پیام متنی ریپلای کن و `/tts` بفرست.")
+        return
+    user = await get_or_create_user(
+        message.from_user.id, message.from_user.username,
+        message.from_user.first_name, message.from_user.last_name,
+    )
+    folder_id = await get_active_drawer_id(message.from_user.id)
+    title_line = next((line.strip() for line in source_text.splitlines() if line.strip()), "صدای ساخته‌شده")
+    job = TTSJob(
+        user_id=user.id, telegram_id=user.telegram_id, text=source_text,
+        title=title_line[:80], folder_id=folder_id,
+        preferences=load_tts_settings(user),
+    )
+    position = await tts_queue.enqueue(job)
+    await message.reply(f"🎙️ متن رفت توی صف ساخت صدا · جایگاه {to_persian_digits(str(position))}\nوقتی آماده بشه همین‌جا می‌فرستمش.")
+
+
 @tg_client.on_message(filters.command("myfiles") & filters.private)
 async def myfiles_command(client, message: Message):
     """List user's recent files."""
@@ -1256,6 +1316,7 @@ async def _handle_file_impl(client, message: Message, status_msg: Message):
             "height": getattr(media, "height", None),
             "thumbnail_file_id": media.file_id if getattr(message, "photo", None) else (select_best_thumbnail(getattr(media, "thumbs", None)).file_id if select_best_thumbnail(getattr(media, "thumbs", None)) else None),
             "description": message.caption.strip()[:1024] if message.caption else None,
+            "tags_json": json.dumps(extract_tags_from_caption(message.caption.strip()[:1024]) if message.caption else [], ensure_ascii=False),
         }
         
         # Save to database
@@ -2301,6 +2362,15 @@ async def handle_callback(client, callback: CallbackQuery):
                 if not file:
                     return
                 file.description = description or None
+                if description:
+                    new_tags = extract_tags_from_caption(description)
+                    if new_tags:
+                        try:
+                            existing_tags = json.loads(file.tags_json or "[]")
+                        except Exception:
+                            existing_tags = []
+                        combined = existing_tags + [t for t in new_tags if t.casefold() not in {x.casefold() for x in existing_tags}]
+                        file.tags_json = json.dumps(combined[:20], ensure_ascii=False)
                 await db.commit()
                 await db.refresh(file)
             await callback.message.edit("✅ توضیحات فایل به‌روز شد.\n\n" + file_detail_text(file), reply_markup=file_detail_keyboard_for_user(file, callback.from_user.id))

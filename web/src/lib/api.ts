@@ -43,6 +43,9 @@ export interface TagDefinition { name: string; color: string; file_count?: numbe
 export interface TagSettings { tags: TagDefinition[]; show_file_tags: boolean; display_limit: number; }
 export interface VaultStatus { configured: boolean; }
 export interface StorageChannel { configured: boolean; channel_id?: number | null; title?: string | null; }
+export interface TTSVoice { value: string; label: string; }
+export interface TTSSettings { voice: string; style: string; speed: number; model: string; auto_expression: boolean; available: boolean; voices: TTSVoice[]; }
+export interface TTSJobStatus { id: string; state: 'queued'|'paused'|'synthesizing'|'merging'|'uploading'|'done'|'error'|'cancelled'; message: string; progress: number; chunks_total: number; chunks_done: number; title: string; file_id?: number; created_at: string; finished_at?: string; }
 
 export interface Folder {
     id: number;
@@ -940,4 +943,35 @@ export const useAddAdminUser = () => {
 export const useRemoveAdminUser = () => {
     const queryClient = useQueryClient();
     return useMutation({ mutationFn: async (id:number) => api.delete(`/admin/users/${id}`), onSuccess: () => { queryClient.invalidateQueries({queryKey:['adminUsers']}); queryClient.invalidateQueries({queryKey:['adminStats']}); } });
+};
+
+export const useTTSSettings = () => useQuery<TTSSettings>({
+    queryKey: ['tts-settings'],
+    queryFn: async () => (await api.get<TTSSettings>('/tts/settings')).data,
+});
+export const useUpdateTTSSettings = () => {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async (payload: Pick<TTSSettings, 'voice'|'style'|'speed'|'model'|'auto_expression'>) => (await api.put<TTSSettings>('/tts/settings', payload)).data,
+        onSuccess: data => queryClient.setQueryData(['tts-settings'], data),
+    });
+};
+export const useTTSJobs = () => useQuery<TTSJobStatus[]>({
+    queryKey: ['tts-jobs'],
+    queryFn: async () => (await api.get<TTSJobStatus[]>('/tts/jobs')).data,
+    refetchInterval: query => (query.state.data || []).some(job => !['done','error','cancelled'].includes(job.state)) ? 1200 : false,
+});
+export const useCreateTTSJob = () => {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async (payload: {text:string;title:string;folder_id?:number|null;voice?:string;style?:string;speed?:number;auto_expression?:boolean}) => (await api.post<{job_id:string;queue_position:number;message:string}>('/tts/jobs', payload)).data,
+        onSuccess: () => queryClient.invalidateQueries({queryKey:['tts-jobs']}),
+    });
+};
+export const useControlTTSJob = () => {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async ({id,action}:{id:string;action:'pause'|'cancel'}) => (await api.post<TTSJobStatus>(`/tts/jobs/${id}/${action}`)).data,
+        onSuccess: () => queryClient.invalidateQueries({queryKey:['tts-jobs']}),
+    });
 };

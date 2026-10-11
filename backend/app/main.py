@@ -22,7 +22,8 @@ from .config import get_settings
 from .database import init_db, engine
 from .telegram import start_telegram_client, stop_telegram_client
 from .downloader import link_importer
-from .routers import files_router, folders_router, streaming_router, auth_router, tv_router, playlists_router, accounts_router
+from .tts import tts_queue
+from .routers import files_router, folders_router, streaming_router, auth_router, tv_router, playlists_router, accounts_router, tts_router
 
 settings = get_settings()
 
@@ -61,6 +62,27 @@ async def lifespan(app: FastAPI):
             )
             await asyncio.sleep(delay)
     logger.info("Database initialized")
+    try:
+        from .bot import extract_tags_from_caption
+        from .models import File
+        from .database import async_session
+        from sqlalchemy import select, or_
+        import json
+        async with async_session() as db:
+            files_to_sync = (await db.execute(
+                select(File).where(File.description.isnot(None), or_(File.tags_json.is_(None), File.tags_json == "[]", File.tags_json == ""))
+            )).scalars().all()
+            changed = False
+            for f in files_to_sync:
+                tags = extract_tags_from_caption(f.description)
+                if tags:
+                    f.tags_json = json.dumps(tags, ensure_ascii=False)
+                    changed = True
+            if changed:
+                await db.commit()
+                logger.info("Backfilled caption tags for existing files.")
+    except Exception as e:
+        logger.warning(f"Could not backfill caption tags: {e}")
     await start_telegram_client()
     logger.info("Telegram client started")
     if link_importer.available:
@@ -68,11 +90,14 @@ async def lifespan(app: FastAPI):
             await link_importer.start()
         except Exception:
             logger.exception("Background link importer could not start; the rest of the app remains available")
+    if tts_queue.available:
+        await tts_queue.start()
     
     yield
     
     logger.info("Shutting down...")
     await link_importer.stop()
+    await tts_queue.stop()
     await stop_telegram_client()
     logger.info("Telegram client stopped")
 
@@ -140,6 +165,7 @@ app.include_router(streaming_router, prefix="/api")
 app.include_router(tv_router, prefix="/api")
 app.include_router(playlists_router, prefix="/api")
 app.include_router(accounts_router, prefix="/api")
+app.include_router(tts_router, prefix="/api")
 
 
 

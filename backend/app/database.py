@@ -100,6 +100,8 @@ async def init_db():
             await conn.execute(text(f"ALTER TABLE users ADD COLUMN show_file_tags {tag_bool_type} NOT NULL DEFAULT {tag_bool_default}"))
         if "file_tag_limit" not in user_columns:
             await conn.execute(text("ALTER TABLE users ADD COLUMN file_tag_limit INTEGER NOT NULL DEFAULT 2"))
+        if "tts_settings_json" not in user_columns:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN tts_settings_json TEXT NOT NULL DEFAULT '{}'"))
         if "login_username" not in user_columns:
             await conn.execute(text("ALTER TABLE users ADD COLUMN login_username VARCHAR(64)"))
         await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_login_username ON users (login_username)"))

@@ -8,6 +8,7 @@ from .auth import router as auth_router
 from .tv import router as tv_router
 from .playlists import router as playlists_router
 from .accounts import router as accounts_router
+from .tts import router as tts_router
 
-__all__ = ["files_router", "folders_router", "streaming_router", "auth_router", "tv_router", "playlists_router", "accounts_router"]
+__all__ = ["files_router", "folders_router", "streaming_router", "auth_router", "tv_router", "playlists_router", "accounts_router", "tts_router"]
 
