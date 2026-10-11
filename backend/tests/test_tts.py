@@ -17,7 +17,7 @@ os.environ.setdefault("TELEGRAM_STORAGE_CHANNEL_ID", "-1001234567890")
 os.environ.setdefault("JWT_SECRET", "test-secret")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.tts import GeminiRequestError, GeminiTTSProvider, TTSQueue, merge_wav, normalize_tts_settings, split_long_text
+from app.tts import GeminiRequestError, GeminiTTSProvider, TTSQueue, extract_interaction_audio, merge_wav, normalize_tts_settings, split_long_text
 
 
 def wav_with_frames(frames: bytes, rate: int = 24000) -> bytes:
@@ -76,7 +76,13 @@ class TTSHelpersTests(unittest.IsolatedAsyncioTestCase):
 
         def fake_request(endpoint, payload):
             captured.update(endpoint=endpoint, payload=payload)
-            return {"interaction": {"output_audio": {"data": base64.b64encode(expected).decode("ascii")}}}
+            return {
+                "status": "completed",
+                "steps": [{
+                    "type": "model_output",
+                    "content": [{"type": "audio", "data": base64.b64encode(expected).decode("ascii"), "mime_type": "audio/wav"}],
+                }],
+            }
 
         provider._request_sync = fake_request
         preferences = normalize_tts_settings({"model": "gemini-3.8-flash-tts", "style": "آرام"})
@@ -86,6 +92,14 @@ class TTSHelpersTests(unittest.IsolatedAsyncioTestCase):
         text_part = captured["payload"]["input"][0]["content"][0]
         self.assertEqual(text_part["text"], "متن اصلی")
         self.assertEqual(text_part["annotations"][0]["type"], "speech_metadata")
+
+    def test_interaction_audio_supports_sdk_convenience_shape(self):
+        expected = wav_with_frames(b"\x04\x00" * 4)
+        raw, mime_type = extract_interaction_audio({
+            "interaction": {"outputAudio": {"type": "audio", "data": base64.b64encode(expected).decode("ascii"), "mimeType": "audio/wav"}}
+        })
+        self.assertEqual(raw, expected)
+        self.assertEqual(mime_type, "audio/wav")
 
     def test_finished_history_can_be_dismissed_or_cleared(self):
         queue = TTSQueue(GeminiTTSProvider([]))

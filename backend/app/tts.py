@@ -122,6 +122,60 @@ def _pcm_to_wav(data: bytes, sample_rate: int = 24000) -> bytes:
     return target.getvalue()
 
 
+def extract_interaction_audio(result: dict) -> tuple[bytes, str]:
+    """Extract audio from raw Interactions REST responses.
+
+    ``output_audio`` is an SDK convenience property. The REST endpoint usually
+    returns the same block nested in ``steps[].content[]`` instead.
+    """
+    interaction = result.get("interaction", result) if isinstance(result, dict) else {}
+    direct = interaction.get("output_audio") or interaction.get("outputAudio")
+    candidates: list[dict] = [direct] if isinstance(direct, dict) else []
+
+    outputs = interaction.get("outputs")
+    if isinstance(outputs, list):
+        candidates.extend(item for item in reversed(outputs) if isinstance(item, dict))
+
+    steps = interaction.get("steps")
+    if isinstance(steps, list):
+        for step in reversed(steps):
+            if not isinstance(step, dict):
+                continue
+            content = step.get("content") or step.get("outputs")
+            if isinstance(content, dict):
+                content = [content]
+            if isinstance(content, list):
+                candidates.extend(item for item in reversed(content) if isinstance(item, dict))
+
+    for item in candidates:
+        content_type = str(item.get("type") or "").lower()
+        if content_type and content_type not in {"audio", "audio_content"}:
+            continue
+        data = item.get("data")
+        if not isinstance(data, str) or not data:
+            inline = item.get("inline_data") or item.get("inlineData")
+            if isinstance(inline, dict):
+                data = inline.get("data")
+                item = {**item, **inline}
+        if isinstance(data, str) and data:
+            try:
+                return base64.b64decode(data, validate=True), str(item.get("mime_type") or item.get("mimeType") or "audio/wav")
+            except (ValueError, TypeError) as error:
+                raise RuntimeError("داده صوتی Gemini قابل خواندن نبود.") from error
+
+    status = interaction.get("status")
+    errors = interaction.get("errors")
+    logger.warning(
+        "Gemini interaction contained no audio (status=%s, keys=%s, errors=%s)",
+        status,
+        sorted(interaction.keys()) if isinstance(interaction, dict) else [],
+        errors,
+    )
+    if errors:
+        raise RuntimeError("Gemini ساخت صدا را کامل نکرد؛ جزئیات خطا در گزارش سرور ثبت شد.")
+    raise RuntimeError("پاسخ Gemini کامل بود، اما داده صوتی در آن پیدا نشد.")
+
+
 def merge_wav(parts: list[bytes]) -> bytes:
     if not parts:
         raise ValueError("No audio chunks were generated")
@@ -198,13 +252,9 @@ class GeminiTTSProvider:
                 "generation_config": {"speech_config": [{"voice": preferences["voice"]}]},
             }
             result = await asyncio.to_thread(self._request_sync, endpoint, payload)
-            try:
-                interaction = result.get("interaction", result)
-                output = interaction.get("output_audio") or interaction.get("outputAudio")
-                raw = base64.b64decode(output["data"])
-                return _pcm_to_wav(raw)
-            except (AttributeError, KeyError, TypeError, ValueError) as error:
-                raise RuntimeError("پاسخ صوتی معتبری از Gemini دریافت نشد.") from error
+            raw, mime_type = extract_interaction_audio(result)
+            rate_match = re.search(r"rate=(\d+)", mime_type)
+            return _pcm_to_wav(raw, int(rate_match.group(1)) if rate_match else 24000)
 
         prompt = f"این متن را با این شیوه بخوان: {style}\n\n{text}" if style else text
         endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?{urlencode({'key': key})}"
