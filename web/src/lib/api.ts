@@ -3,7 +3,7 @@
  */
 import axios from 'axios';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { cachedCurrentUser } from './accounts';
+import { cachedCurrentUser, clearCurrentAccountSession, updateCurrentAccountTokens } from './accounts';
 
 const normalizeServerOrigin = (value?: string | null) => {
     const trimmed = String(value || '').trim().replace(/\/+$/, '');
@@ -266,6 +266,7 @@ api.interceptors.response.use(
         if (error.response?.status === 401 && !originalRequest._retry) {
             if (originalRequest.url.includes('/auth/refresh')) {
                 // Refresh token itself failed/expired - clear everything
+                clearCurrentAccountSession();
                 localStorage.removeItem('access_token');
                 localStorage.removeItem('refresh_token');
                 localStorage.removeItem('user');
@@ -305,6 +306,7 @@ api.interceptors.response.use(
 
                 localStorage.setItem('access_token', access_token);
                 localStorage.setItem('refresh_token', refresh_token);
+                updateCurrentAccountTokens(access_token, refresh_token);
 
                 api.defaults.headers.common['Authorization'] = 'Bearer ' + access_token;
                 originalRequest.headers['Authorization'] = 'Bearer ' + access_token;
@@ -322,6 +324,7 @@ api.interceptors.response.use(
                 localStorage.removeItem('access_token');
                 localStorage.removeItem('refresh_token');
                 localStorage.removeItem('user');
+                clearCurrentAccountSession();
                 
                 // فقط اگر در صفحه لاگین یا کال‌بک نیستیم ریدایرکت کن
                 if (!window.location.pathname.startsWith('/login') && !window.location.pathname.startsWith('/auth')) {
@@ -354,7 +357,10 @@ export const useCurrentUser = () => {
         enabled: !!localStorage.getItem('access_token'),
         initialData: cachedUser,
         initialDataUpdatedAt: cachedUser ? 0 : undefined,
-        retry: false,
+        retry: (failureCount, error: any) => {
+            const status = error?.response?.status;
+            return failureCount < 2 && (!status || status === 429 || status >= 500);
+        },
     });
 };
 
@@ -959,7 +965,10 @@ export const useUpdateTTSSettings = () => {
 export const useTTSJobs = () => useQuery<TTSJobStatus[]>({
     queryKey: ['tts-jobs'],
     queryFn: async () => (await api.get<TTSJobStatus[]>('/tts/jobs')).data,
-    refetchInterval: query => (query.state.data || []).some(job => !['done','error','cancelled'].includes(job.state)) ? 1200 : false,
+    refetchInterval: query => {
+        const jobs = query.state.data || [];
+        return jobs.some(job => !['done','error','cancelled'].includes(job.state)) ? 1200 : (jobs.length ? 30_000 : false);
+    },
 });
 export const useCreateTTSJob = () => {
     const queryClient = useQueryClient();
@@ -972,6 +981,20 @@ export const useControlTTSJob = () => {
     const queryClient = useQueryClient();
     return useMutation({
         mutationFn: async ({id,action}:{id:string;action:'pause'|'cancel'}) => (await api.post<TTSJobStatus>(`/tts/jobs/${id}/${action}`)).data,
+        onSuccess: () => queryClient.invalidateQueries({queryKey:['tts-jobs']}),
+    });
+};
+export const useDismissTTSJob = () => {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async (id:string) => api.delete(`/tts/jobs/${id}`),
+        onSuccess: () => queryClient.invalidateQueries({queryKey:['tts-jobs']}),
+    });
+};
+export const useClearFinishedTTSJobs = () => {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async () => (await api.delete<{removed:number}>('/tts/jobs')).data,
         onSuccess: () => queryClient.invalidateQueries({queryKey:['tts-jobs']}),
     });
 };

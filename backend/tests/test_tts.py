@@ -1,5 +1,6 @@
 """Unit tests for the Gemini TTS queue's deterministic building blocks."""
 import io
+import base64
 import os
 import sys
 import tempfile
@@ -16,7 +17,7 @@ os.environ.setdefault("TELEGRAM_STORAGE_CHANNEL_ID", "-1001234567890")
 os.environ.setdefault("JWT_SECRET", "test-secret")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.tts import GeminiRequestError, GeminiTTSProvider, merge_wav, normalize_tts_settings, split_long_text
+from app.tts import GeminiRequestError, GeminiTTSProvider, TTSQueue, merge_wav, normalize_tts_settings, split_long_text
 
 
 def wav_with_frames(frames: bytes, rate: int = 24000) -> bytes:
@@ -67,6 +68,38 @@ class TTSHelpersTests(unittest.IsolatedAsyncioTestCase):
         result = await provider.synthesize("سلام", normalize_tts_settings({}))
         self.assertTrue(result.startswith(b"RIFF"))
         self.assertEqual(calls, ["first", "second"])
+
+    async def test_gemini_38_uses_interactions_and_keeps_transcript_verbatim(self):
+        provider = GeminiTTSProvider(["key"])
+        expected = wav_with_frames(b"\x03\x00" * 8)
+        captured = {}
+
+        def fake_request(endpoint, payload):
+            captured.update(endpoint=endpoint, payload=payload)
+            return {"interaction": {"output_audio": {"data": base64.b64encode(expected).decode("ascii")}}}
+
+        provider._request_sync = fake_request
+        preferences = normalize_tts_settings({"model": "gemini-3.8-flash-tts", "style": "آرام"})
+        result = await provider._request("key", "متن اصلی", preferences)
+        self.assertEqual(result, expected)
+        self.assertIn("/v1beta/interactions", captured["endpoint"])
+        text_part = captured["payload"]["input"][0]["content"][0]
+        self.assertEqual(text_part["text"], "متن اصلی")
+        self.assertEqual(text_part["annotations"][0]["type"], "speech_metadata")
+
+    def test_finished_history_can_be_dismissed_or_cleared(self):
+        queue = TTSQueue(GeminiTTSProvider([]))
+        queue.statuses = {
+            "done": {"id": "done", "user_id": 1, "state": "done", "created_at": "2026-01-01T00:00:00", "finished_at": "2026-01-01T00:00:00"},
+            "active": {"id": "active", "user_id": 1, "state": "queued", "created_at": "2026-01-01T00:00:00"},
+            "other": {"id": "other", "user_id": 2, "state": "done", "created_at": "2026-01-01T00:00:00", "finished_at": "2026-01-01T00:00:00"},
+        }
+        queue.controls = {key: {"paused": False, "cancelled": False} for key in queue.statuses}
+        self.assertFalse(queue.dismiss("active", 1))
+        self.assertTrue(queue.dismiss("done", 1))
+        self.assertEqual(queue.clear_finished(1), 0)
+        self.assertIn("active", queue.statuses)
+        self.assertIn("other", queue.statuses)
 
 
 if __name__ == "__main__":

@@ -88,12 +88,23 @@ async def list_tts_jobs(current_user: User = Depends(get_current_user)):
     return tts_queue.list_statuses(current_user.id)
 
 
+@router.delete("/jobs")
+async def clear_finished_tts_jobs(current_user: User = Depends(get_current_user)):
+    return {"removed": tts_queue.clear_finished(current_user.id)}
+
+
 @router.get("/jobs/{job_id}")
 async def get_tts_job(job_id: str, current_user: User = Depends(get_current_user)):
     status = tts_queue.status(job_id, current_user.id)
     if status is None:
         raise HTTPException(status_code=404, detail="این کار پیدا نشد.")
     return status
+
+
+@router.delete("/jobs/{job_id}", status_code=204)
+async def dismiss_tts_job(job_id: str, current_user: User = Depends(get_current_user)):
+    if not tts_queue.dismiss(job_id, current_user.id):
+        raise HTTPException(status_code=409, detail="فقط کارهای پایان‌یافته را می‌توان از تاریخچه پاک کرد.")
 
 
 @router.post("/jobs/{job_id}/{action}")

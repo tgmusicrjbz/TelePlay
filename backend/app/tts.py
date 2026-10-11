@@ -57,6 +57,8 @@ def normalize_tts_settings(value: dict | None) -> dict:
     raw["voice"] = raw["voice"] if raw["voice"] in voices else DEFAULT_TTS_SETTINGS["voice"]
     raw["style"] = str(raw.get("style") or DEFAULT_TTS_SETTINGS["style"]).strip()[:500]
     raw["model"] = str(raw.get("model") or settings.gemini_tts_model).strip()[:120]
+    if raw["model"] == "gemini-2.5-flash-preview-tts":
+        raw["model"] = "gemini-3.8-flash-tts"
     raw["speed"] = min(2.0, max(0.5, float(raw.get("speed") or 1)))
     raw["auto_expression"] = bool(raw.get("auto_expression", True))
     return raw
@@ -180,13 +182,32 @@ class GeminiTTSProvider:
         raise RuntimeError("هیچ‌کدام از کلیدهای Gemini در حال حاضر پاسخ ندادند.") from last_error
 
     async def _request(self, key: str, text: str, preferences: dict) -> bytes:
-        prompt = text
         style = preferences.get("style", "").strip()
-        if style:
-            prompt = f"این متن را با این شیوه بخوان: {style}\n\n{text}"
         if preferences.get("auto_expression"):
-            prompt = "احساس، مکث و لحن را متناسب با معنای متن و بدون اغراق انتخاب کن.\n" + prompt
-        endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{preferences['model']}:generateContent?{urlencode({'key': key})}"
+            style = f"{style}؛ احساس، مکث و لحن را متناسب با معنای متن و بدون اغراق انتخاب کن".strip("؛ ")
+        model = preferences["model"]
+        if model.startswith("gemini-3.8-"):
+            endpoint = f"https://generativelanguage.googleapis.com/v1beta/interactions?{urlencode({'key': key})}"
+            text_part: dict = {"type": "text", "text": text}
+            if style:
+                text_part["annotations"] = [{"type": "speech_metadata", "style": style}]
+            payload = {
+                "model": model,
+                "input": [{"type": "user_input", "content": [text_part]}],
+                "response_format": {"type": "audio"},
+                "generation_config": {"speech_config": [{"voice": preferences["voice"]}]},
+            }
+            result = await asyncio.to_thread(self._request_sync, endpoint, payload)
+            try:
+                interaction = result.get("interaction", result)
+                output = interaction.get("output_audio") or interaction.get("outputAudio")
+                raw = base64.b64decode(output["data"])
+                return _pcm_to_wav(raw)
+            except (AttributeError, KeyError, TypeError, ValueError) as error:
+                raise RuntimeError("پاسخ صوتی معتبری از Gemini دریافت نشد.") from error
+
+        prompt = f"این متن را با این شیوه بخوان: {style}\n\n{text}" if style else text
+        endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?{urlencode({'key': key})}"
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {
@@ -284,7 +305,37 @@ class TTSQueue:
         return dict(item) if item and item["user_id"] == user_id else None
 
     def list_statuses(self, user_id: int) -> list[dict]:
+        self._prune_finished()
         return sorted((dict(item) for item in self.statuses.values() if item["user_id"] == user_id), key=lambda item: item["created_at"], reverse=True)[:100]
+
+    def _prune_finished(self, max_age: timedelta = timedelta(minutes=5)) -> None:
+        cutoff = datetime.utcnow() - max_age
+        for job_id, item in list(self.statuses.items()):
+            finished_at = item.get("finished_at")
+            if item.get("state") not in TERMINAL_STATES or not finished_at:
+                continue
+            try:
+                expired = datetime.fromisoformat(finished_at) < cutoff
+            except (TypeError, ValueError):
+                expired = True
+            if expired:
+                self.statuses.pop(job_id, None)
+                self.controls.pop(job_id, None)
+
+    def dismiss(self, job_id: str, user_id: int) -> bool:
+        item = self.statuses.get(job_id)
+        if not item or item["user_id"] != user_id or item["state"] not in TERMINAL_STATES:
+            return False
+        self.statuses.pop(job_id, None)
+        self.controls.pop(job_id, None)
+        return True
+
+    def clear_finished(self, user_id: int) -> int:
+        job_ids = [job_id for job_id, item in self.statuses.items() if item["user_id"] == user_id and item["state"] in TERMINAL_STATES]
+        for job_id in job_ids:
+            self.statuses.pop(job_id, None)
+            self.controls.pop(job_id, None)
+        return len(job_ids)
 
     def toggle_pause(self, job_id: str, user_id: int) -> dict | None:
         item = self.statuses.get(job_id)

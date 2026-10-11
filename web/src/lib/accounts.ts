@@ -35,6 +35,27 @@ export function syncCurrentAccount(user: User): void {
     localStorage.setItem('komod-current-account', String(user.telegram_id));
 }
 
+export function updateCurrentAccountTokens(accessToken: string, refreshToken?: string): void {
+    const currentId = Number(localStorage.getItem('komod-current-account'));
+    const accounts = savedAccounts();
+    const index = accounts.findIndex(item => item.telegramId === currentId);
+    if (index < 0) return;
+    accounts[index] = {
+        ...accounts[index],
+        accessToken,
+        refreshToken: refreshToken || accounts[index].refreshToken,
+        savedAt: new Date().toISOString(),
+    };
+    localStorage.setItem(KEY, JSON.stringify(accounts));
+}
+
+export function clearCurrentAccountSession(): void {
+    const currentId = Number(localStorage.getItem('komod-current-account'));
+    localStorage.setItem(KEY, JSON.stringify(savedAccounts().map(item =>
+        item.telegramId === currentId ? { ...item, accessToken: '', refreshToken: undefined } : item
+    )));
+}
+
 export function activateAccount(account: SavedAccount): void {
     localStorage.setItem('access_token', account.accessToken);
     if (account.refreshToken) localStorage.setItem('refresh_token', account.refreshToken); else localStorage.removeItem('refresh_token');

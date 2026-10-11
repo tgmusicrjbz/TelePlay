@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AudioLines, Check, Pause, Play, Sparkles, Square, Wand2 } from 'lucide-react';
-import { Folder, useControlTTSJob, useCreateTTSJob, useFolderTree, useTTSJobs, useTTSSettings, useUpdateTTSSettings } from '../lib/api';
+import { AudioLines, Check, Pause, Play, Sparkles, Square, Trash2, Wand2, X } from 'lucide-react';
+import { Folder, useClearFinishedTTSJobs, useControlTTSJob, useCreateTTSJob, useDismissTTSJob, useFolderTree, useTTSJobs, useTTSSettings, useUpdateTTSSettings } from '../lib/api';
 import CustomSelect from './CustomSelect';
 
 const STATES:Record<string,string>={queued:'در صف',paused:'متوقف',synthesizing:'در حال ساخت',merging:'در حال یکپارچه‌سازی',uploading:'در حال ذخیره',done:'آماده',error:'خطا',cancelled:'لغوشده'};
@@ -12,6 +12,8 @@ export default function TTSSettingsPanel(){
     const update=useUpdateTTSSettings();
     const create=useCreateTTSJob();
     const control=useControlTTSJob();
+    const dismiss=useDismissTTSJob();
+    const clearFinished=useClearFinishedTTSJobs();
     const [voice,setVoice]=useState('Kore');
     const [style,setStyle]=useState('طبیعی، گرم و واضح');
     const [speed,setSpeed]=useState(1);
@@ -47,6 +49,6 @@ export default function TTSSettingsPanel(){
             <button onClick={()=>void save()} disabled={update.isPending} className="btn-secondary mt-4 flex min-h-11 w-full items-center justify-center gap-2 disabled:opacity-50"><Check className="h-4 w-4"/> ذخیره به‌عنوان تنظیمات پیش‌فرض</button>
         </section>
         {message&&<p className={`rounded-xl px-3 py-2 text-sm ${message.kind==='ok'?'bg-emerald-500/10 text-emerald-300':'bg-red-500/10 text-red-300'}`}>{message.text}</p>}
-        {jobs.length>0&&<section className="rounded-2xl border border-white/[.07] bg-dark-900/70 p-5"><h2 className="font-bold">صف ساخت صدا</h2><div className="mt-4 space-y-2">{jobs.map(job=><article key={job.id} className="rounded-xl bg-dark-800/60 p-3"><div className="flex items-center gap-3"><div className="min-w-0 flex-1"><strong className="block truncate text-sm">{job.title}</strong><span className="mt-1 block text-xs text-dark-400">{STATES[job.state]||job.state} · {job.message}</span></div>{!['done','error','cancelled'].includes(job.state)&&<><button title={job.state==='paused'?'ادامه':'توقف'} className="btn-icon" onClick={()=>void control.mutateAsync({id:job.id,action:'pause'})}>{job.state==='paused'?<Play className="h-4 w-4"/>:<Pause className="h-4 w-4"/>}</button><button title="لغو" className="btn-icon text-red-300" onClick={()=>void control.mutateAsync({id:job.id,action:'cancel'})}><Square className="h-4 w-4"/></button></>}</div><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-dark-950"><div className={`h-full rounded-full ${job.state==='error'?'bg-red-500':job.state==='cancelled'?'bg-dark-500':'bg-primary-500'}`} style={{width:`${job.progress||0}%`}}/></div></article>)}</div></section>}
+        {jobs.length>0&&<section className="rounded-2xl border border-white/[.07] bg-dark-900/70 p-5"><div className="flex items-center justify-between gap-3"><h2 className="font-bold">صف ساخت صدا</h2>{jobs.some(job=>['done','error','cancelled'].includes(job.state))&&<button onClick={()=>void clearFinished.mutateAsync()} className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs text-dark-400 hover:bg-white/[.05] hover:text-white"><Trash2 className="h-3.5 w-3.5"/>پاک‌کردن تاریخچه</button>}</div><div className="mt-4 space-y-2">{jobs.map(job=>{const finished=['done','error','cancelled'].includes(job.state);return <article key={job.id} className="rounded-xl bg-dark-800/60 p-3"><div className="flex items-center gap-3"><div className="min-w-0 flex-1"><strong className="block truncate text-sm">{job.title}</strong><span className="mt-1 block text-xs text-dark-400">{STATES[job.state]||job.state} · {job.message}</span></div>{finished?<button title="حذف از تاریخچه" className="btn-icon text-dark-400" onClick={()=>void dismiss.mutateAsync(job.id)}><X className="h-4 w-4"/></button>:<><button title={job.state==='paused'?'ادامه':'توقف'} className="btn-icon" onClick={()=>void control.mutateAsync({id:job.id,action:'pause'})}>{job.state==='paused'?<Play className="h-4 w-4"/>:<Pause className="h-4 w-4"/>}</button><button title="لغو" className="btn-icon text-red-300" onClick={()=>void control.mutateAsync({id:job.id,action:'cancel'})}><Square className="h-4 w-4"/></button></>}</div><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-dark-950"><div className={`h-full rounded-full ${job.state==='error'?'bg-red-500':job.state==='cancelled'?'bg-dark-500':'bg-primary-500'}`} style={{width:`${job.progress||0}%`}}/></div></article>})}</div></section>}
     </div>;
 }

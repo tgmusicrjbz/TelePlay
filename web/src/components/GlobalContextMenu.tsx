@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../lib/store';
 import { TelegramFile, Folder, api, canPreviewText, useUpdateFile, useUpdateFolder } from '../lib/api';
-import { Play, Download, DownloadCloud, Link, Edit, FolderInput, Trash2, Globe, ShieldOff, HardDriveDownload, Eye, EyeOff, AlignLeft, ListPlus, Heart, Info, Pin, Tags, ChevronDown, ChevronUp, X } from 'lucide-react';
+import { Play, Download, DownloadCloud, Link, Edit, FolderInput, Trash2, Globe, ShieldOff, HardDriveDownload, Eye, EyeOff, AlignLeft, ListPlus, Heart, Info, Pin, Tags, ChevronDown, ChevronUp, X, AudioLines } from 'lucide-react';
 import { saveFileOffline } from '../lib/offline';
 
 export default function GlobalContextMenu() {
@@ -149,6 +149,19 @@ export default function GlobalContextMenu() {
         );
     };
 
+    const handleTextToSpeech = async (file: TelegramFile) => {
+        setActiveContextMenu(null);
+        addToast('متن در حال آماده‌سازی است…', 'info');
+        try {
+            const { data } = await api.get<{content:string}>(`/files/${file.id}/text`);
+            const title = file.file_name.replace(/\.(txt|md|markdown|json|csv|log|xml|ya?ml)$/i, '').trim() || 'صدای ساخته‌شده';
+            await api.post('/tts/jobs', { text: data.content, title });
+            addToast('متن به صف ساخت صدا اضافه شد.');
+        } catch (error: any) {
+            addToast(error?.response?.data?.detail || 'تبدیل متن به صدا شروع نشد.', 'error');
+        }
+    };
+
     const file = activeContextMenu.type === 'file' ? activeContextMenu.item as TelegramFile : null;
     const folder = activeContextMenu.type === 'folder' ? activeContextMenu.item as Folder : null;
     const previewable = Boolean(file && (file.file_type === 'image' || canPreviewText(file)));
@@ -176,6 +189,7 @@ export default function GlobalContextMenu() {
                             <div className="grid grid-cols-2 gap-2">
                                 <ActionTile icon={<Download/>} label="دانلود" onClick={()=>{void handleDownload(file);setActiveContextMenu(null);}}/>
                                 <ActionTile icon={<Info/>} label="جزئیات فایل" onClick={()=>handleAction(()=>setDetailsFile(file))}/>
+                                {canPreviewText(file)&&<ActionTile icon={<AudioLines/>} label="تبدیل به صوت" onClick={()=>void handleTextToSpeech(file)}/>}
                                 {!readOnlyWorkspace&&<>
                                     {playable&&<ActionTile icon={<ListPlus/>} label="افزودن به پلی‌لیست" onClick={()=>handleAction(()=>setPlaylistFile(file))}/>}
                                     <ActionTile icon={<AlignLeft/>} label={file.description?'ویرایش توضیحات':'افزودن توضیحات'} onClick={()=>handleAction(()=>setDescriptionItem({type:'file',item:file}))}/>

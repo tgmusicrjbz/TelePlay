@@ -90,7 +90,7 @@ class Settings(BaseSettings):
     # returned by an API endpoint or embedded in the web bundle.
     gemini_api_keys_str: str = Field("", alias="GEMINI_API_KEYS")
     gemini_api_key: str = Field("", alias="GEMINI_API_KEY")
-    gemini_tts_model: str = Field("gemini-2.5-flash-preview-tts", alias="GEMINI_TTS_MODEL")
+    gemini_tts_model: str = Field("gemini-3.8-flash-tts", alias="GEMINI_TTS_MODEL")
 
     @property
     def gemini_api_keys(self) -> list[str]:

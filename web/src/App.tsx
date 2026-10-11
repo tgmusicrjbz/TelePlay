@@ -414,7 +414,10 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     }
 
     const authStatus = (error as { response?: { status?: number } } | null)?.response?.status;
-    if (error && !authStatus) return <>{children}</>;
+    // Connectivity, rate-limit and server errors must not masquerade as an
+    // expired login. The cached account remains usable and the API client can
+    // recover when the server becomes reachable again.
+    if (error && authStatus !== 401 && authStatus !== 403) return <>{children}</>;
 
     if (error) {
         return (
