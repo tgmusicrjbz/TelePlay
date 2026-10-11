@@ -1,5 +1,6 @@
 import { api, Playlist, TelegramFile } from './api';
 import { cachedCurrentUser } from './accounts';
+import { publishLocalTransfer } from './transfers';
 
 const DB_NAME = 'komod-offline';
 const DB_VERSION = 4;
@@ -27,6 +28,8 @@ const playlistControls = new Map<string, { paused: boolean; cancelled: boolean }
 let activeOfflineJobs = 0;
 
 function emitProgress(progress: OfflineJobProgress) {
+    const percent=progress.size>0?Math.min(100,progress.loaded/progress.size*100):progress.total?Math.min(100,progress.done/progress.total*100):0;
+    publishLocalTransfer({id:progress.id,kind:'offline',title:progress.title,state:progress.state,percent,detail:progress.currentName});
     window.dispatchEvent(new CustomEvent<OfflineJobProgress>(OFFLINE_PROGRESS_EVENT, { detail: progress }));
 }
 
@@ -169,6 +172,16 @@ export function cancelOfflineJob(jobId: string): void {
 export function toggleOfflineJobPause(jobId: string): void {
     const control = playlistControls.get(jobId);
     if (control) control.paused = !control.paused;
+}
+
+export function moveQueuedOfflineJob(jobId:string,direction:-1|1):void {
+    if(!jobId.startsWith('file-'))return;
+    const fileId=Number(jobId.slice(5));
+    const index=offlineQueue.findIndex(job=>job.file.id===fileId);
+    const target=index+direction;
+    if(index<0||target<0||target>=offlineQueue.length)return;
+    [offlineQueue[index],offlineQueue[target]]=[offlineQueue[target],offlineQueue[index]];
+    offlineQueue.forEach(job=>emitProgress({id:`file-${job.file.id}`,kind:'file',title:job.file.file_name,state:'queued',done:0,total:1,failed:0,currentName:'در صف ذخیره‌سازی',loaded:0,size:job.file.file_size}));
 }
 
 function pumpOfflineQueue() {

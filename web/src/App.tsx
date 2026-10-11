@@ -1,6 +1,6 @@
 import { Routes, Route, Navigate, useSearchParams, useNavigate } from 'react-router-dom';
-import { useEffect, useState } from 'react';
-import { api, AuthResponse, getKomodDeviceId, resolveServerUrl, useCurrentUser, useLoginWithCode, usePasswordLogin, useBotInfo, useGenerateLoginCode, useVerifyLoginCode } from './lib/api';
+import { useEffect, useRef, useState } from 'react';
+import { api, AuthResponse, getKomodDeviceId, resolveServerUrl, useCurrentUser, useLoginWithCode, usePasswordLogin, useBotInfo, useGenerateLoginCode } from './lib/api';
 import FileBrowser from './components/FileBrowser';
 import GlobalContextMenu from './components/GlobalContextMenu';
 import PwaManager from './components/PwaManager';
@@ -157,7 +157,6 @@ function OfflineTextSync() {
 function LoginPage() {
     const { mutate: loginByCode, isPending: isVerifying } = useLoginWithCode();
     const { mutate: generateCode, isPending: isGenerating } = useGenerateLoginCode();
-    const { mutate: verifyCode } = useVerifyLoginCode();
     const passwordLogin = usePasswordLogin();
     
     const [code, setCode] = useState('');
@@ -166,6 +165,7 @@ function LoginPage() {
     const [loginMode, setLoginMode] = useState<'password'|'telegram'>('password');
     const [loginUsername, setLoginUsername] = useState('');
     const [loginPassword, setLoginPassword] = useState('');
+    const pollBusy = useRef(false);
 
     // Initial code generation
     useEffect(() => {
@@ -183,25 +183,45 @@ function LoginPage() {
 
     // Polling logic
     useEffect(() => {
-        let timer: any;
-        if (isPolling && code) {
-            timer = setInterval(() => {
-                verifyCode(code, {
-                    onSuccess: (data) => {
-                        saveAuthenticatedAccount(data);
-                        setIsPolling(false);
-                        window.location.href = '/';
-                    },
-                    onError: () => {
-                        // Silent failure for polling
-                    }
-                });
-            }, 3000);
-        }
-        return () => {
-            if (timer) clearInterval(timer);
+        if (!isPolling || !code) return;
+        let cancelled = false;
+        let timer = 0;
+        let networkFailures = 0;
+        const poll = async () => {
+            if (cancelled || pollBusy.current) return;
+            pollBusy.current = true;
+            try {
+                const { data } = await api.post<AuthResponse>('/auth/verify-code', { code });
+                if (cancelled) return;
+                cancelled = true;
+                saveAuthenticatedAccount(data);
+                setIsPolling(false);
+                window.location.replace('/');
+            } catch (pollError: any) {
+                if (cancelled) return;
+                const detail = String(pollError?.response?.data?.detail || '');
+                const status = Number(pollError?.response?.status || 0);
+                if (status === 400 && /expired|invalid/i.test(detail)) {
+                    cancelled = true;
+                    setError('کد قبلی منقضی شد؛ یک کد تازه می‌سازیم…');
+                    setIsPolling(false);
+                    setCode('');
+                    return;
+                }
+                if (!pollError?.response) {
+                    networkFailures += 1;
+                    if (networkFailures >= 3) setError('ارتباط با سرور ناپایدار است؛ بررسی ورود خودکار ادامه دارد.');
+                } else if (!/not yet verified/i.test(detail)) {
+                    setError(detail || 'بررسی کد ورود انجام نشد؛ دوباره تلاش می‌کنیم.');
+                }
+            } finally {
+                pollBusy.current = false;
+                if (!cancelled) timer = window.setTimeout(poll, 1800);
+            }
         };
-    }, [isPolling, code, verifyCode]);
+        void poll();
+        return () => { cancelled = true; window.clearTimeout(timer); pollBusy.current = false; };
+    }, [isPolling, code]);
 
     const handleManualLogin = (e: React.FormEvent) => {
         e.preventDefault();

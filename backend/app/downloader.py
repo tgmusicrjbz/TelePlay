@@ -10,7 +10,7 @@ import re
 import tempfile
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
@@ -163,6 +163,25 @@ class LinkImportService:
         return status if status and status["user_id"] == user_id else None
 
     def list_statuses(self, user_id: int) -> list[dict]:
+        # Terminal jobs are useful briefly, but keeping them forever made old
+        # completed imports reappear whenever the user logged in again.
+        cutoff = datetime.utcnow() - timedelta(seconds=45)
+        expired = []
+        for job_id, item in self.statuses.items():
+            if item.get("state") not in {"done", "error", "cancelled"}:
+                continue
+            finished_at = item.get("finished_at")
+            if not finished_at:
+                expired.append(job_id)
+                continue
+            try:
+                if datetime.fromisoformat(finished_at) < cutoff:
+                    expired.append(job_id)
+            except (TypeError, ValueError):
+                expired.append(job_id)
+        for job_id in expired:
+            self.statuses.pop(job_id, None)
+            self.controls.pop(job_id, None)
         jobs = [dict(item) for item in self.statuses.values() if item["user_id"] == user_id]
         return sorted(jobs, key=lambda item: item.get("created_at", ""), reverse=True)[:100]
 
@@ -186,7 +205,7 @@ class LinkImportService:
             return status
         control["cancelled"] = True
         control["paused"] = False
-        status.update(state="cancelled", message="لغو شد")
+        status.update(state="cancelled", message="لغو شد", finished_at=datetime.utcnow().isoformat())
         return status
 
     def clear_finished(self, user_id: int) -> int:
@@ -237,17 +256,17 @@ class LinkImportService:
                 if job.notify:
                     count = str(len(saved)).translate(str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹"))
                     await self._notify(job, f"✅ {count} فایل به کمد اضافه شد.")
-                self.statuses[job.id].update(state="done", message="آماده شد", saved=len(saved))
+                self.statuses[job.id].update(state="done", message="آماده شد", saved=len(saved), finished_at=datetime.utcnow().isoformat())
             except asyncio.CancelledError:
                 raise
             except ImportCancelled:
-                self.statuses[job.id].update(state="cancelled", message="لغو شد")
+                self.statuses[job.id].update(state="cancelled", message="لغو شد", finished_at=datetime.utcnow().isoformat())
             except Exception as error:
                 logger.exception("Link import failed for %s", job.url)
                 friendly_error = _friendly_import_error(error)
                 if job.notify:
                     await self._notify(job, f"❌ {friendly_error}")
-                self.statuses[job.id].update(state="error", message=friendly_error)
+                self.statuses[job.id].update(state="error", message=friendly_error, finished_at=datetime.utcnow().isoformat())
             finally:
                 if self.active_job_id == job.id:
                     self.active_job_id = None

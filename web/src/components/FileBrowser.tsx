@@ -2,7 +2,7 @@
  * Main FileBrowser component - the core of the web interface
  */
 import { useEffect, useCallback, useMemo, useRef, useState } from 'react';
-import { FolderPlus, Folder as FolderIcon, Grid, LayoutGrid, List, Search, ChevronRight, Home, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, StickyNote, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ChevronDown, ChevronUp, Plus, CheckSquare, Square, ListChecks, ListPlus, Upload, Star, RefreshCw, Link2, DownloadCloud, Download, Eye, EyeOff, Minus, Pause, Play, Tags, Cloud, CloudOff } from 'lucide-react';
+import { FolderPlus, Folder as FolderIcon, Grid, LayoutGrid, List, Search, ChevronRight, Home, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, StickyNote, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ChevronUp, Plus, CheckSquare, Square, ListChecks, ListPlus, Upload, Star, RefreshCw, Link2, DownloadCloud, Download, Eye, EyeOff, Minus, Pause, Play, Tags, Cloud, CloudOff } from 'lucide-react';
 import { api, useFiles, useFolders, useFolderTree, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useActivityFeed, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile, useImportLink, useTagSettings, useUnlockVault, useWorkspaces } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { cacheAllTextNotes, queueOfflineText, saveFileOffline } from '../lib/offline';
@@ -21,6 +21,7 @@ import SettingsPage from './SettingsPage';
 import DownloadsPage from './DownloadsPage';
 import CustomSelect from './CustomSelect';
 import { applyTheme, getStoredTheme } from '../lib/theme';
+import { publishLocalTransfer } from '../lib/transfers';
 
 const sortLabels: Record<SortField, string> = {
     name: 'نام', type: 'نوع', size: 'حجم', duration: 'مدت',
@@ -107,8 +108,10 @@ export default function FileBrowser() {
     const [importJobs, setImportJobs] = useState<Array<{id:string; url:string; quality?:string; folder_id?:number|null; created_at?:string; state:'queued'|'downloading'|'paused'|'cancelled'|'done'|'error'; message:string; saved:number}>>([]);
     const [importPanelMode, setImportPanelMode] = useState<'open'|'collapsed'|'hidden'>('open');
     const [forceOffline, setForceOffline] = useState(() => localStorage.getItem('komod-force-offline') === '1');
-    const [showHidden, setShowHidden] = useState(() => sessionStorage.getItem('komod-show-hidden') === '1');
-    const [hiddenOnly, setHiddenOnly] = useState(() => sessionStorage.getItem('komod-hidden-only') === '1');
+    // Vault views are deliberately ephemeral. Persisting this state used to
+    // reopen the app inside an empty hidden-only view after refresh/login.
+    const [showHidden, setShowHidden] = useState(false);
+    const [hiddenOnly, setHiddenOnly] = useState(false);
     const [showVaultPrompt, setShowVaultPrompt] = useState(false);
     const [vaultPassword, setVaultPassword] = useState('');
     const unlockVault = useUnlockVault();
@@ -144,9 +147,20 @@ export default function FileBrowser() {
     },[forceOffline]);
 
     useEffect(() => {
+        sessionStorage.removeItem('komod-show-hidden');
+        sessionStorage.removeItem('komod-hidden-only');
+    }, []);
+
+    useEffect(() => {
+        if(!uploadProgress)return;
+        publishLocalTransfer({id:'device-upload',kind:'upload',title:uploadProgress.name,state:'downloading',percent:uploadProgress.percent,detail:`فایل ${uploadProgress.index} از ${uploadProgress.total}`});
+    },[uploadProgress]);
+    useEffect(()=>{const cancel=()=>uploadAbortRef.current?.abort();window.addEventListener('komod-cancel-upload',cancel);return()=>window.removeEventListener('komod-cancel-upload',cancel)},[]);
+
+    useEffect(() => {
         const applyHiddenVisibility = (event: Event) => {
             const explicit = (event as CustomEvent<{visible?:boolean}>).detail?.visible;
-            const next = typeof explicit === 'boolean' ? explicit : sessionStorage.getItem('komod-show-hidden') === '1';
+            const next = typeof explicit === 'boolean' ? explicit : false;
             setShowHidden(next); setPage(1); setAllFiles([]);
         };
         window.addEventListener('komod-hidden-visibility', applyHiddenVisibility);
@@ -322,9 +336,11 @@ export default function FileBrowser() {
                 await uploadFileMutation.mutateAsync({ file, folderId: incomingFolderId, signal: controller.signal, onProgress: percent => setUploadProgress({name:file.name,index:uploaded+1,total:selected.length,percent}) });
                 uploaded += 1;
             }
+            publishLocalTransfer({id:'device-upload',kind:'upload',title:selected[selected.length-1]?.name||'آپلود از دستگاه',state:'done',percent:100,detail:`${uploaded} فایل ذخیره شد`});
             addToast(`${uploaded.toLocaleString('fa-IR')} فایل با موفقیت به کمد اضافه شد 📥`);
             handleRefresh();
         } catch (error:any) {
+            publishLocalTransfer({id:'device-upload',kind:'upload',title:selected[Math.min(uploaded,selected.length-1)]?.name||'آپلود از دستگاه',state:controller.signal.aborted?'cancelled':'error',percent:selected.length?Math.round(uploaded/selected.length*100):0,detail:controller.signal.aborted?'آپلود لغو شد':'آپلود ناموفق بود'});
             if (controller.signal.aborted || error?.code === 'ERR_CANCELED') addToast(uploaded ? `${uploaded.toLocaleString('fa-IR')} فایل ذخیره شد و ادامهٔ آپلود لغو شد.` : 'آپلود لغو شد.', 'info');
             else addToast(uploaded ? `${uploaded.toLocaleString('fa-IR')} فایل ذخیره شد؛ ادامهٔ آپلود متوقف شد.` : 'آپلود فایل انجام نشد. کمی بعد دوباره تلاش کن.', 'error');
         } finally { uploadAbortRef.current = null; setUploadProgress(null); }
@@ -844,17 +860,6 @@ export default function FileBrowser() {
     const scopeSortFields:SortField[]=contentScope==='files'?['name','type','size','duration','created','updated']:contentScope==='folders'?['name','count','created','updated']:['name','created','updated'];
     const availableSortFields = scopeSortFields.filter(field => !sortCriteria.some(item => item.field === field));
     const updateSort = (index: number, next: SortCriterion) => setSortCriteria(sortCriteria.map((item, itemIndex) => itemIndex === index ? next : item));
-    const moveSort = (index: number, offset: number) => {
-        const target = index + offset;
-        if (target < 0 || target >= sortCriteria.length) return;
-        const next = [...sortCriteria];
-        [next[index], next[target]] = [next[target], next[index]];
-        setSortCriteria(next);
-    };
-    const removeSort = (index: number) => {
-        const next = sortCriteria.filter((_, itemIndex) => itemIndex !== index);
-        setSortCriteria(next.length ? next : [{ field: 'created', direction: 'desc' }]);
-    };
     const visibleFileIds = showFiles ? displayFiles?.map(file => file.id) || [] : [];
     const visibleFolderIds = showFolders ? visibleFolders?.map(folder => folder.id) || [] : [];
     const totalSelectableFiles = showFiles ? (filesList?.total ?? visibleFileIds.length) : 0;
@@ -925,6 +930,7 @@ export default function FileBrowser() {
         try {
             if(!sessionStorage.getItem('komod-vault-token')) await unlockVault.mutateAsync(vaultPassword);
             if (onlyHidden) {
+                setActiveSection('files');
                 setCurrentFolderId(null);
                 setBreadcrumbs([{id:null,name:'کمد من'}]);
                 setSearchQuery('');
@@ -936,8 +942,6 @@ export default function FileBrowser() {
                 clearSelection();
             }
             setShowHidden(true); setHiddenOnly(onlyHidden); setPage(1); setAllFiles([]);
-            sessionStorage.setItem('komod-show-hidden','1');
-            if(onlyHidden) sessionStorage.setItem('komod-hidden-only','1'); else sessionStorage.removeItem('komod-hidden-only');
             setShowVaultPrompt(false); setVaultPassword('');
             requestAnimationFrame(()=>containerRef.current?.scrollTo({top:0,behavior:'smooth'}));
             addToast(onlyHidden?'فقط موارد مخفی نمایش داده می‌شوند.':'موارد مخفی هم نمایش داده می‌شوند.');
@@ -968,6 +972,7 @@ export default function FileBrowser() {
 
     return (
         <div dir="rtl" className="flex h-screen bg-dark-950 text-white selection:bg-primary-500/30 overflow-hidden">
+            {hiddenOnly && <button type="button" onClick={closeVaultItems} className="fixed left-3 top-[calc(env(safe-area-inset-top)+.75rem)] z-[220] flex min-h-10 items-center gap-2 rounded-xl border border-amber-300/25 bg-dark-950/95 px-3 text-xs font-semibold text-amber-100 shadow-2xl backdrop-blur-xl" aria-label="خروج از نمایش موارد مخفی"><ChevronRight className="h-4 w-4"/>بازگشت به کمد</button>}
             <Sidebar />
             
             <main className="relative flex min-w-0 flex-1 flex-col bg-gradient-to-br from-dark-950 to-dark-900 md:mr-24">

@@ -477,11 +477,9 @@ async def generate_login_code(
     alphabet = string.ascii_uppercase + string.digits
     code = ''.join(secrets.choice(alphabet) for _ in range(6))
     
-    # Expiry in 5 minutes
-    expires_at = datetime.utcnow().replace(minute=(datetime.utcnow().minute + 5) % 60)
-    if expires_at < datetime.utcnow(): # Handle hour rollover roughly
-        from datetime import timedelta
-        expires_at = datetime.utcnow() + timedelta(minutes=5)
+    # Use real duration arithmetic. ``datetime.replace`` could retain the old
+    # hour near an hour boundary and immediately expire otherwise valid codes.
+    expires_at = datetime.utcnow() + timedelta(minutes=5)
         
     login_code = LoginCode(
         code=code,

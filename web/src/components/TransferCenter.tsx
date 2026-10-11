@@ -1,0 +1,32 @@
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ArrowDown, ArrowUp, Check, DownloadCloud, Link2, Pause, Play, RefreshCw, Trash2, Upload, X } from 'lucide-react';
+import { api } from '../lib/api';
+import { cancelOfflineJob, moveQueuedOfflineJob, toggleOfflineJobPause } from '../lib/offline';
+import { clearFinishedLocalTransfers, listLocalTransfers, LocalTransfer, TRANSFERS_CHANGED_EVENT } from '../lib/transfers';
+
+type LinkJob={id:string;url:string;state:'queued'|'downloading'|'paused'|'cancelled'|'done'|'error';message:string;saved:number;quality?:string};
+type Row={id:string;kind:'offline'|'upload'|'link';title:string;state:LinkJob['state'];detail:string;percent:number};
+
+export default function TransferCenter(){
+ const [local,setLocal]=useState<LocalTransfer[]>(listLocalTransfers),[links,setLinks]=useState<LinkJob[]>([]),[filter,setFilter]=useState<'all'|'offline'|'upload'|'link'>('all');
+ const loadLocal=useCallback(()=>setLocal(listLocalTransfers()),[]);
+ const loadLinks=useCallback(async()=>{try{setLinks((await api.get<LinkJob[]>('/files/import-link/status')).data)}catch{/* offline: keep last result */}},[]);
+ useEffect(()=>{loadLocal();void loadLinks();window.addEventListener(TRANSFERS_CHANGED_EVENT,loadLocal);const timer=window.setInterval(loadLinks,3000);return()=>{window.removeEventListener(TRANSFERS_CHANGED_EVENT,loadLocal);window.clearInterval(timer)}},[loadLocal,loadLinks]);
+ const rows=useMemo<Row[]>(()=>[
+   ...local.map(item=>({id:item.id,kind:item.kind,title:item.title,state:item.state,detail:item.detail||'',percent:item.percent})),
+   ...links.map(item=>({id:item.id,kind:'link' as const,title:item.url,state:item.state,detail:item.message,percent:item.state==='done'?100:item.state==='queued'?0:15})),
+ ].filter(item=>filter==='all'||item.kind===filter),[local,links,filter]);
+ const controlLink=async(id:string,action:'pause'|'cancel')=>{await api.post(`/files/import-link/status/${id}/${action}`);await loadLinks()};
+ const clearFinished=async()=>{clearFinishedLocalTransfers();try{await api.delete('/files/import-link/status')}catch{}await loadLinks()};
+ return <div className="space-y-4">
+  <div className="grid grid-cols-4 gap-1 rounded-2xl border border-white/[.07] bg-dark-950/40 p-1">{([['all','همه'],['offline','آفلاین'],['upload','آپلود'],['link','لینک']] as const).map(([value,label])=><button key={value} onClick={()=>setFilter(value)} className={`min-h-10 rounded-xl text-xs ${filter===value?'bg-primary-500/20 text-primary-200':'text-dark-400'}`}>{label}</button>)}</div>
+  <div className="flex items-center justify-between gap-2"><p className="text-xs text-dark-400">صف و پیشرفت انتقال‌های همین حساب و دستگاه</p><div className="flex"><button className="btn-icon" title="تازه‌سازی" onClick={()=>void loadLinks()}><RefreshCw className="h-4 w-4"/></button><button className="btn-icon text-red-300" title="پاک‌کردن موارد تمام‌شده" onClick={()=>void clearFinished()}><Trash2 className="h-4 w-4"/></button></div></div>
+  <div className="space-y-2">{rows.map(row=><TransferRow key={`${row.kind}-${row.id}`} row={row} onPause={()=>row.kind==='link'?void controlLink(row.id,'pause'):toggleOfflineJobPause(row.id)} onCancel={()=>row.kind==='link'?void controlLink(row.id,'cancel'):row.kind==='upload'?window.dispatchEvent(new Event('komod-cancel-upload')):cancelOfflineJob(row.id)} onMove={direction=>moveQueuedOfflineJob(row.id,direction)}/>)}{!rows.length&&<div className="rounded-2xl border border-dashed border-white/10 py-12 text-center text-sm text-dark-500">انتقال فعالی وجود ندارد.</div>}</div>
+ </div>
+}
+
+function TransferRow({row,onPause,onCancel,onMove}:{row:Row;onPause:()=>void;onCancel:()=>void;onMove:(direction:-1|1)=>void}){
+ const active=['queued','downloading','paused'].includes(row.state), Icon=row.kind==='link'?Link2:row.kind==='upload'?Upload:DownloadCloud;
+ return <article className="rounded-2xl border border-white/[.07] bg-dark-800/45 p-3"><div className="flex items-center gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-500/10 text-primary-300">{row.state==='done'?<Check className="h-4 w-4"/>:row.state==='error'||row.state==='cancelled'?<X className="h-4 w-4"/>:<Icon className="h-4 w-4"/>}</span><div className="min-w-0 flex-1"><strong dir="auto" className="block truncate text-sm">{row.title}</strong><p className="mt-1 truncate text-[11px] text-dark-400">{row.detail||stateLabel(row.state)}</p></div>{active&&<><span className="text-xs font-bold text-primary-200">{Math.round(row.percent).toLocaleString('fa-IR')}٪</span>{row.kind==='offline'&&row.state==='queued'&&<div className="flex"><button className="btn-icon h-8 w-8" onClick={()=>onMove(-1)}><ArrowUp className="h-3.5 w-3.5"/></button><button className="btn-icon h-8 w-8" onClick={()=>onMove(1)}><ArrowDown className="h-3.5 w-3.5"/></button></div>}{(row.kind==='link'||(row.kind==='offline'&&row.id.startsWith('playlist-')))&&<button className="btn-icon h-8 w-8" onClick={onPause}>{row.state==='paused'?<Play className="h-3.5 w-3.5"/>:<Pause className="h-3.5 w-3.5"/>}</button>}<button className="btn-icon h-8 w-8 text-red-300" onClick={onCancel}><X className="h-3.5 w-3.5"/></button></>}</div><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-dark-950"><div className="h-full rounded-full bg-primary-500 transition-[width]" style={{width:`${Math.max(2,row.percent)}%`}}/></div></article>
+}
+function stateLabel(state:Row['state']){return ({queued:'در صف',downloading:'در حال انتقال',paused:'متوقف شده',cancelled:'لغو شد',done:'تمام شد',error:'ناموفق'})[state]}
