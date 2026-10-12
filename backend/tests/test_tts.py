@@ -17,7 +17,7 @@ os.environ.setdefault("TELEGRAM_STORAGE_CHANNEL_ID", "-1001234567890")
 os.environ.setdefault("JWT_SECRET", "test-secret")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.tts import GeminiRequestError, GeminiTTSProvider, TTSQueue, build_interaction_content, extract_interaction_audio, merge_wav, normalize_tts_settings, split_long_text
+from app.tts import GeminiRequestError, GeminiTTSProvider, TTSJob, TTSQueue, build_interaction_content, extract_interaction_audio, merge_wav, normalize_tts_settings, split_long_text
 
 
 def wav_with_frames(frames: bytes, rate: int = 24000) -> bytes:
@@ -81,6 +81,35 @@ class TTSHelpersTests(unittest.IsolatedAsyncioTestCase):
         result = await provider.synthesize("سلام", normalize_tts_settings({}))
         self.assertTrue(result.startswith(b"RIFF"))
         self.assertEqual(calls, ["first", "second"])
+
+    async def test_bad_request_reports_the_request_problem_instead_of_all_keys_failed(self):
+        provider = GeminiTTSProvider(["first", "second"])
+
+        async def fake_request(_key, _text, _preferences):
+            raise GeminiRequestError(400, '{"error":{"message":"unsupported speech tag"}}')
+
+        provider._request = fake_request
+        with self.assertRaisesRegex(RuntimeError, "unsupported speech tag"):
+            await provider.synthesize("<unknown>سلام", normalize_tts_settings({}))
+
+    async def test_preview_output_stays_temporary_and_is_streamable(self):
+        class Provider:
+            api_keys = ["test"]
+
+            async def synthesize(self, _text, _preferences):
+                return wav_with_frames(b"\x01\x00" * 4)
+
+        queue = TTSQueue(Provider())
+        job = TTSJob(
+            user_id=1, telegram_id=2, text="سلام", title="نمونه", folder_id=None,
+            preferences=normalize_tts_settings({}), output_mode="preview", id="preview-job",
+        )
+        queue.statuses[job.id] = {"id": job.id, "user_id": 1, "state": "queued", "created_at": "2026-01-01T00:00:00"}
+        queue.controls[job.id] = {"paused": False, "cancelled": False}
+        await queue._process(job)
+        self.assertEqual(queue.statuses[job.id]["state"], "done")
+        self.assertEqual(queue.statuses[job.id]["stream_url"], "/api/tts/jobs/preview-job/audio")
+        self.assertTrue(queue.audio_outputs[job.id].startswith(b"RIFF"))
 
     async def test_gemini_38_uses_interactions_and_keeps_transcript_verbatim(self):
         provider = GeminiTTSProvider(["key"])
