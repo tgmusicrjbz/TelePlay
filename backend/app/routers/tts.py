@@ -15,6 +15,7 @@ from ..models import Folder, TTSVoicePreview, User
 from ..tts import TTSJob, VOICE_OPTIONS, load_tts_settings, normalize_tts_settings, tts_queue
 
 router = APIRouter(prefix="/tts", tags=["Text to speech"])
+VOICE_PREVIEW_VERSION = "v2"
 
 
 class TTSSettingsUpdate(BaseModel):
@@ -113,15 +114,16 @@ async def preview_tts_voice(
         raise HTTPException(status_code=503, detail="کلید Gemini TTS هنوز روی سرور تنظیم نشده است.")
     preferences = load_tts_settings(current_user)
     preferences.update(voice=voice, style="طبیعی، واضح و دوستانه", auto_expression=False, use_case="general", speed=1)
+    preview_model_key = f'{preferences["model"]}::{VOICE_PREVIEW_VERSION}'
     cached = (await db.execute(select(TTSVoicePreview).where(
-        TTSVoicePreview.model == preferences["model"], TTSVoicePreview.voice == voice,
+        TTSVoicePreview.model == preview_model_key, TTSVoicePreview.voice == voice,
     ))).scalar_one_or_none()
     if cached is None:
         audio = await tts_queue.provider.synthesize(
             "سلام. من یکی از صداهای کُمُدم. این نمونه رو گوش کن و اگه خوشت اومد من رو انتخاب کن.",
             preferences,
         )
-        cached = TTSVoicePreview(model=preferences["model"], voice=voice, audio=audio)
+        cached = TTSVoicePreview(model=preview_model_key, voice=voice, audio=audio)
         db.add(cached)
         await db.commit()
     return Response(content=cached.audio, media_type="audio/wav", headers={"Cache-Control": "private, max-age=2592000"})
