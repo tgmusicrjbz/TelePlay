@@ -35,8 +35,10 @@ from app.routers.files import (
     get_storage_stats,
     get_text_preview,
     list_files,
+    send_files_to_telegram,
     update_file,
     upload_file,
+    SendToTelegramRequest,
 )
 from app.routers.folders import delete_folder_contents, list_folders, update_folder
 from app.routers.streaming import stored_message_response
@@ -166,6 +168,23 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result.total, 1)
             self.assertEqual(result.files[0].id, direct.id)
             self.assertTrue(result.files[0].is_hidden)
+
+    async def test_selected_files_are_copied_to_signed_in_telegram_chat_in_requested_order(self):
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            request = self.auth_request()
+            request.state.signed_in_user = user
+            client = SimpleNamespace(copy_message=AsyncMock())
+            with patch("app.routers.files.telegram.tg_client", client):
+                result = await send_files_to_telegram(
+                    SendToTelegramRequest(ids=[self.nested_file_id, self.direct_file_id]),
+                    request, db, user,
+                )
+            self.assertEqual(result, {"sent": 2, "failed": []})
+            self.assertEqual(
+                [call.args[2] for call in client.copy_message.await_args_list],
+                [102, 101],
+            )
 
     async def test_shared_storage_stats_only_count_granted_scope(self):
         async with async_session() as db:

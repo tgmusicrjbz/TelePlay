@@ -118,7 +118,7 @@ async def preview_tts_voice(
     ))).scalar_one_or_none()
     if cached is None:
         audio = await tts_queue.provider.synthesize(
-            "سلام رفیق! من یکی از صداهای کمدم. این نمونه رو گوش کن و اگر خوشت اومد منو انتخاب کن.",
+            "سلام. من یکی از صداهای کُمُدم. این نمونه رو گوش کن و اگه خوشت اومد من رو انتخاب کن.",
             preferences,
         )
         cached = TTSVoicePreview(model=preferences["model"], voice=voice, audio=audio)

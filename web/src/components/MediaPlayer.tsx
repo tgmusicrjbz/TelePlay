@@ -2,7 +2,7 @@
  * MediaPlayer - full screen video/audio player
  */
 import { useRef, useEffect, useState, useCallback } from 'react';
-import { X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipBack, SkipForward, Download, AlertTriangle, Copy, PictureInPicture2, Gauge, ChevronDown, ChevronUp, Repeat2, Shuffle, Headphones, RotateCcw, RotateCw, Clock3, ListPlus, RectangleHorizontal, Smartphone, MonitorSmartphone, Film, LockKeyhole, UnlockKeyhole } from 'lucide-react';
+import { X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipBack, SkipForward, Download, AlertTriangle, Copy, PictureInPicture2, Gauge, ChevronDown, ChevronUp, Repeat2, Shuffle, Headphones, RotateCcw, RotateCw, Clock3, ListPlus, ListMusic, ArrowUp, ArrowDown, Trash2, RectangleHorizontal, Smartphone, MonitorSmartphone, Film, LockKeyhole, UnlockKeyhole } from 'lucide-react';
 import { TelegramFile, useUpdateProgress, useFile, api } from '../lib/api';
 import { useAppStore } from '../lib/store';
 
@@ -22,7 +22,7 @@ interface MediaPlayerContentProps {
 }
 
 function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaPlayerContentProps) {
-    const { playQueue, queueIndex, repeatMode, playNext, playPrevious, shuffleQueue, setRepeatMode, setPlaylistFile, addToast } = useAppStore();
+    const { playQueue, queueIndex, repeatMode, playNext, playPrevious, shuffleQueue, removeQueueItem, moveQueueItem, setRepeatMode, setPlaylistFile, addToast } = useAppStore();
     const videoRef = useRef<HTMLVideoElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const [isPlaying, setIsPlaying] = useState(false);
@@ -53,6 +53,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     const [controlsLocked, setControlsLocked] = useState(false);
     const [skipFeedback, setSkipFeedback] = useState<'backward' | 'forward' | null>(null);
     const [thumbnailFailed, setThumbnailFailed] = useState(false);
+    const [showQueue, setShowQueue] = useState(false);
     const formatPlayerTime = (seconds: number) => {
         const safe = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
         const hours = Math.floor(safe / 3600);
@@ -798,6 +799,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                     {/* Secondary tools stay away from the transport controls. */}
                     <div data-player-controls data-player-tools className="absolute left-1/2 top-28 z-40 flex w-max max-w-[calc(100%-0.75rem)] -translate-x-1/2 flex-nowrap items-center justify-center gap-0.5 rounded-2xl border border-white/10 bg-black/45 p-1 shadow-xl backdrop-blur-md sm:top-28 sm:gap-1 sm:p-1.5">
                         {!isVideo && <button onClick={() => setPlaylistFile(file)} className="rounded-lg p-2 text-white/80 hover:bg-white/10" title="افزودن به پلی‌لیست"><ListPlus className="h-5 w-5" /></button>}
+                        {hasQueue && <button onClick={() => setShowQueue(true)} className="rounded-lg p-2 text-white/80 hover:bg-white/10" title="صف پخش"><ListMusic className="h-5 w-5" /></button>}
                         {!isVideo && <button onClick={() => handleSkip(-10)} className="rounded-lg p-2 text-white/80 hover:bg-white/10" title="۱۰ ثانیه عقب"><RotateCcw className="h-5 w-5" /></button>}
                         <div className="relative">
                             <button onClick={() => setShowSpeedMenu(open => !open)} className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-sm font-medium transition-all ${playbackSpeed !== 1 ? 'border-primary-500/40 bg-primary-500/30 text-primary-300' : 'border-white/10 bg-white/10 text-white/80 hover:bg-white/20'}`} title="انتخاب سرعت پخش" aria-expanded={showSpeedMenu}><Gauge className="w-4 h-4" /><span>{playbackSpeed === 1 ? '1.0' : playbackSpeed}x</span></button>
@@ -955,6 +957,15 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                             </div>
                         </div>}
                     </div>
+                </div>
+            )}
+
+            {!isMinimized && showQueue && (
+                <div className="absolute inset-0 z-[100] flex items-end justify-center bg-black/55 backdrop-blur-sm sm:items-center sm:p-5" onPointerUp={event=>event.stopPropagation()} onClick={() => setShowQueue(false)}>
+                    <section dir="rtl" className="flex max-h-[78dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-[2rem] border border-white/10 bg-dark-900/98 shadow-2xl sm:rounded-3xl" onClick={event => event.stopPropagation()}>
+                        <header className="flex items-center gap-3 border-b border-white/[.07] px-4 py-3"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary-500/12 text-primary-200"><ListMusic className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h2 className="font-bold">صف پخش</h2><p className="mt-0.5 text-[11px] text-dark-400">{Math.max(0, playQueue.length-queueIndex-1).toLocaleString('fa-IR')} مورد در ادامه</p></div><button className="btn-icon" onClick={() => setShowQueue(false)} aria-label="بستن صف"><X className="h-5 w-5"/></button></header>
+                        <div className="min-h-0 overflow-y-auto p-3">{playQueue.map((item,index)=>{const current=index===queueIndex;const upcoming=index>queueIndex;return <article key={`${item.id}-${index}`} className={`mb-1.5 flex items-center gap-2 rounded-2xl p-2 ${current?'bg-primary-500/12 ring-1 ring-primary-400/20':index<queueIndex?'opacity-40':'bg-white/[.025]'}`}><button disabled={!upcoming} onClick={()=>{useAppStore.getState().playQueueItem(index);setShowQueue(false)}} className="min-w-0 flex-1 text-right disabled:cursor-default"><span dir="auto" className="block truncate text-sm font-medium">{item.file_name.replace(/\.[^.]+$/,'')}</span><span className="mt-0.5 block text-[10px] text-dark-500">{current?'در حال پخش':index<queueIndex?'پخش‌شده':`نوبت ${(index-queueIndex).toLocaleString('fa-IR')}`}</span></button>{upcoming&&<div className="flex shrink-0 items-center"><button disabled={index===queueIndex+1} onClick={()=>moveQueueItem(index,index-1)} className="btn-icon h-8 w-8 disabled:opacity-25" title="بالاتر"><ArrowUp className="h-3.5 w-3.5"/></button><button disabled={index===playQueue.length-1} onClick={()=>moveQueueItem(index,index+1)} className="btn-icon h-8 w-8 disabled:opacity-25" title="پایین‌تر"><ArrowDown className="h-3.5 w-3.5"/></button><button onClick={()=>removeQueueItem(index)} className="btn-icon h-8 w-8 text-red-300" title="حذف از صف"><Trash2 className="h-3.5 w-3.5"/></button></div>}</article>})}</div>
+                    </section>
                 </div>
             )}
         </div>

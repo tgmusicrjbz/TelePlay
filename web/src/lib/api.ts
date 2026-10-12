@@ -998,3 +998,6 @@ export const useClearFinishedTTSJobs = () => {
         onSuccess: () => queryClient.invalidateQueries({queryKey:['tts-jobs']}),
     });
 };
+
+export const sendFilesToTelegram = async (ids:number[]) =>
+    (await api.post<{sent:number;failed:number[]}>('/files/send-to-telegram', {ids})).data;

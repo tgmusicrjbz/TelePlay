@@ -53,6 +53,10 @@ class LinkImportRequest(BaseModel):
     quality: Optional[str] = Field(default="480", pattern="^(auto|audio|480|720|1080)$")
 
 
+class SendToTelegramRequest(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=50)
+
+
 FILE_SORT_FIELDS = {
     "name": func.lower(File.file_name),
     "type": File.file_type,
@@ -716,6 +720,46 @@ async def batch_delete_files(
     await db.commit()
     
     return {"message": f"Deleted {len(files)} files"}
+
+
+@router.post("/send-to-telegram")
+async def send_files_to_telegram(
+    payload: SendToTelegramRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Copy selected stored files to the signed-in user's Telegram chat."""
+    unique_ids = list(dict.fromkeys(payload.ids))
+    files = (await db.execute(select(File).where(
+        File.id.in_(unique_ids), File.user_id == current_user.id,
+    ))).scalars().all()
+    if not files:
+        raise HTTPException(status_code=404, detail="فایلی برای ارسال پیدا نشد.")
+    if any(item.is_hidden for item in files):
+        require_vault_access(request, current_user)
+    signed_in_user = getattr(request.state, "signed_in_user", current_user)
+    by_id = {item.id: item for item in files}
+    sent = 0
+    failed: list[int] = []
+    for file_id in unique_ids:
+        item = by_id.get(file_id)
+        if item is None:
+            failed.append(file_id)
+            continue
+        try:
+            await telegram.tg_client.copy_message(
+                signed_in_user.telegram_id,
+                item.storage_channel_id or settings.telegram_storage_channel_id,
+                item.channel_message_id,
+            )
+            sent += 1
+        except Exception:
+            logger.warning("Could not send file %s to Telegram user %s", item.id, signed_in_user.telegram_id, exc_info=True)
+            failed.append(item.id)
+    if sent == 0:
+        raise HTTPException(status_code=502, detail="ارسال فایل‌ها به تلگرام انجام نشد؛ اول یک‌بار ربات را باز کن.")
+    return {"sent": sent, "failed": failed}
 
 
 @router.post("/batch-update")

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../lib/store';
-import { TelegramFile, Folder, api, canPreviewText, useUpdateFile, useUpdateFolder } from '../lib/api';
-import { Play, Download, DownloadCloud, Link, Edit, FolderInput, Trash2, Globe, ShieldOff, HardDriveDownload, Eye, EyeOff, AlignLeft, ListPlus, Heart, Info, Pin, Tags, ChevronDown, ChevronUp, X, AudioLines } from 'lucide-react';
+import { TelegramFile, Folder, api, canPreviewText, sendFilesToTelegram, useUpdateFile, useUpdateFolder } from '../lib/api';
+import { Play, Download, DownloadCloud, Link, Edit, FolderInput, Trash2, Globe, ShieldOff, HardDriveDownload, Eye, EyeOff, AlignLeft, ListPlus, Heart, Info, Pin, Tags, ChevronDown, ChevronUp, X, AudioLines, Send } from 'lucide-react';
 import { saveFileOffline } from '../lib/offline';
 
 export default function GlobalContextMenu() {
@@ -161,6 +161,14 @@ export default function GlobalContextMenu() {
             addToast(error?.response?.data?.detail || 'تبدیل متن به صدا شروع نشد.', 'error');
         }
     };
+    const handleSendToTelegram = async (files:TelegramFile[]) => {
+        setActiveContextMenu(null);
+        addToast('در حال ارسال به تلگرام…', 'info');
+        try {
+            const result = await sendFilesToTelegram(files.map(item=>item.id));
+            addToast(result.failed.length ? `${result.sent.toLocaleString('fa-IR')} فایل فرستاده شد؛ بعضی موارد ناموفق بود.` : `${result.sent.toLocaleString('fa-IR')} فایل به تلگرام فرستاده شد.`);
+        } catch (error:any) { addToast(error?.response?.data?.detail||'ارسال به تلگرام انجام نشد.','error'); }
+    };
 
     const file = activeContextMenu.type === 'file' ? activeContextMenu.item as TelegramFile : null;
     const folder = activeContextMenu.type === 'folder' ? activeContextMenu.item as Folder : null;
@@ -177,12 +185,13 @@ export default function GlobalContextMenu() {
                 <button className="btn-icon h-9 w-9" aria-label="بستن منو" onClick={()=>setActiveContextMenu(null)}><X className="h-4 w-4"/></button>
             </header>
             <div className="min-h-0 overflow-y-auto p-3">
-                {isMultiSelect ? <div className="space-y-3"><p className="rounded-xl bg-primary-500/10 px-3 py-2 text-sm text-primary-200">{selectedFileIds.size.toLocaleString('fa-IR')} فایل انتخاب شده</p>{readOnlyWorkspace?<p className="text-sm text-amber-200">این کمد فقط قابل مشاهده است.</p>:<div className="grid grid-cols-2 gap-2"><ActionTile icon={<FolderInput/>} label="جابه‌جایی" onClick={()=>handleAction(()=>setMoveFiles(selectedFiles))}/><ActionTile danger icon={<Trash2/>} label="حذف" onClick={()=>handleAction(()=>setDeleteConfirm({type:'file',items:Array.from(selectedFileIds).map(id=>({id} as any))}))}/></div>}</div> : file ? <>
+                {isMultiSelect ? <div className="space-y-3"><p className="rounded-xl bg-primary-500/10 px-3 py-2 text-sm text-primary-200">{selectedFileIds.size.toLocaleString('fa-IR')} فایل انتخاب شده</p><div className="grid grid-cols-2 gap-2"><ActionTile icon={<Send/>} label="ارسال به تلگرام" onClick={()=>void handleSendToTelegram(selectedFiles)}/>{!readOnlyWorkspace&&<><ActionTile icon={<FolderInput/>} label="جابه‌جایی" onClick={()=>handleAction(()=>setMoveFiles(selectedFiles))}/><ActionTile danger icon={<Trash2/>} label="حذف" onClick={()=>handleAction(()=>setDeleteConfirm({type:'file',items:Array.from(selectedFileIds).map(id=>({id} as any))}))}/></>}</div></div> : file ? <>
                     <div className="grid grid-cols-2 gap-2">
                         {playable&&<ActionTile icon={<Play/>} label="پخش" onClick={()=>handleAction(()=>handlePlay(file))}/>}
                         {previewable&&<ActionTile icon={<Eye/>} label={previewLabel} onClick={()=>handleAction(()=>setContentPreviewFile(file))}/>}
                         {!readOnlyWorkspace&&canPreviewText(file)&&<ActionTile icon={<AudioLines/>} label="تبدیل به صوت" onClick={()=>void handleTextToSpeech(file)}/>}
                         <ActionTile icon={<DownloadCloud/>} label="ذخیره آفلاین" onClick={()=>handleOfflineSave(file)}/>
+                        <ActionTile icon={<Send/>} label="ارسال به تلگرام" onClick={()=>void handleSendToTelegram([file])}/>
                         {!readOnlyWorkspace&&<><ActionTile icon={<FolderInput/>} label="جابه‌جایی" onClick={()=>handleAction(()=>setMoveItems({files:[file],folders:[]}))}/><ActionTile icon={<Heart className={file.is_favorite?'fill-current text-pink-400':''}/>} label={file.is_favorite?'برداشتن نشان':'نشان کردن'} onClick={async()=>{setActiveContextMenu(null);await updateFile.mutateAsync({id:file.id,is_favorite:!file.is_favorite});addToast(file.is_favorite?'نشان برداشته شد.':'فایل نشان شد ⭐');}}/><ActionTile icon={<Pin className={file.is_pinned?'fill-current text-primary-300':''}/>} label={file.is_pinned?'برداشتن پین':'پین بالای کمد'} onClick={async()=>{setActiveContextMenu(null);await updateFile.mutateAsync({id:file.id,is_pinned:!file.is_pinned});addToast(file.is_pinned?'پین برداشته شد.':'فایل پین شد 📌');}}/><ActionTile icon={<Edit/>} label="تغییر نام" onClick={()=>handleAction(()=>setRenameFile(file))}/></>}
                     </div>
                     <button className="mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-white/[.07] bg-white/[.035] text-sm text-dark-300 transition hover:bg-white/[.07]" onClick={()=>setShowMore(value=>!value)}>{showMore?<ChevronUp className="h-4 w-4"/>:<ChevronDown className="h-4 w-4"/>}{showMore?'بستن گزینه‌های بیشتر':'گزینه‌های بیشتر'}</button>

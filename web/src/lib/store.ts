@@ -69,6 +69,8 @@ interface AppState {
     playNext: () => boolean;
     playPrevious: () => boolean;
     shuffleQueue: () => void;
+    removeQueueItem: (index: number) => void;
+    moveQueueItem: (from: number, to: number) => void;
     setRepeatMode: (mode: 'off' | 'all' | 'one') => void;
     clearQueue: () => void;
 
@@ -248,6 +250,19 @@ export const useAppStore = create<AppState>((set) => ({
             [rest[index], rest[randomIndex]] = [rest[randomIndex], rest[index]];
         }
         return { playQueue: [current, ...rest], queueIndex: 0 };
+    }),
+    removeQueueItem: (index) => set((state) => {
+        if (index < 0 || index >= state.playQueue.length || index === state.queueIndex) return state;
+        const next = state.playQueue.filter((_, itemIndex) => itemIndex !== index);
+        return { playQueue: next, queueIndex: index < state.queueIndex ? state.queueIndex - 1 : state.queueIndex };
+    }),
+    moveQueueItem: (from, to) => set((state) => {
+        if (from < 0 || to < 0 || from >= state.playQueue.length || to >= state.playQueue.length || from === to || from === state.queueIndex || to <= state.queueIndex) return state;
+        const current = state.playQueue[state.queueIndex];
+        const next = [...state.playQueue];
+        const [moved] = next.splice(from, 1);
+        next.splice(to, 0, moved);
+        return { playQueue: next, queueIndex: next.indexOf(current) };
     }),
     setRepeatMode: (repeatMode) => set({ repeatMode }),
     clearQueue: () => set({ playQueue: [], queueIndex: -1 }),

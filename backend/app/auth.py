@@ -171,6 +171,10 @@ async def get_current_user(
         )
     if not user.is_active:
         raise HTTPException(status_code=403, detail="User account is inactive")
+    if request:
+        # Keep the signed-in identity available when get_current_user switches
+        # to the owner of a shared workspace.
+        request.state.signed_in_user = user
     
     # Check token version for global logout
     if token_version is not None and token_version < user.auth_version:
