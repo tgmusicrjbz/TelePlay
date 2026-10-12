@@ -165,6 +165,7 @@ export default function GlobalContextMenu() {
         localStorage.setItem('komod-stt-source-file',String(file.id));
         localStorage.setItem('komod-stt-source-title',`رونویسی ${file.file_name.replace(/\.[^.]+$/,'')}`);
         localStorage.setItem('komod-settings-target','tts');
+        localStorage.setItem('komod-speech-mode','stt');
         setActiveContextMenu(null);
         setActiveSection('settings');
         window.history.pushState({},'', '/');
