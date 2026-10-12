@@ -2,9 +2,12 @@
  * MediaPlayer - full screen video/audio player
  */
 import { useRef, useEffect, useState, useCallback } from 'react';
-import { X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipBack, SkipForward, Download, AlertTriangle, Copy, PictureInPicture2, Gauge, ChevronDown, ChevronUp, Repeat2, Shuffle, Headphones, RotateCcw, RotateCw, Clock3, ListPlus, ListMusic, ArrowUp, ArrowDown, Trash2, RectangleHorizontal, Smartphone, MonitorSmartphone, Film, LockKeyhole, UnlockKeyhole } from 'lucide-react';
+import { X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipBack, SkipForward, Download, AlertTriangle, Copy, PictureInPicture2, Gauge, ChevronDown, ChevronUp, Repeat2, Shuffle, Headphones, RotateCcw, RotateCw, Clock3, ListPlus, ListMusic, GripVertical, Trash2, RectangleHorizontal, Smartphone, MonitorSmartphone, Film, LockKeyhole, UnlockKeyhole } from 'lucide-react';
 import { TelegramFile, useUpdateProgress, useFile, api } from '../lib/api';
 import { useAppStore } from '../lib/store';
+import { DndContext, DragEndEvent, PointerSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 export default function MediaPlayer() {
     const { previewFile: file, setPreviewFile, isPlayerMinimized, setPlayerMinimized, clearQueue } = useAppStore();
@@ -54,6 +57,10 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     const [skipFeedback, setSkipFeedback] = useState<'backward' | 'forward' | null>(null);
     const [thumbnailFailed, setThumbnailFailed] = useState(false);
     const [showQueue, setShowQueue] = useState(false);
+    const queueSensors = useSensors(
+        useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+        useSensor(TouchSensor, { activationConstraint: { delay: 140, tolerance: 7 } }),
+    );
     const formatPlayerTime = (seconds: number) => {
         const safe = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
         const hours = Math.floor(safe / 3600);
@@ -964,12 +971,26 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                 <div className="absolute inset-0 z-[100] flex items-end justify-center bg-black/55 backdrop-blur-sm sm:items-center sm:p-5" onPointerUp={event=>event.stopPropagation()} onClick={() => setShowQueue(false)}>
                     <section dir="rtl" className="flex max-h-[78dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-[2rem] border border-white/10 bg-dark-900/98 shadow-2xl sm:rounded-3xl" onClick={event => event.stopPropagation()}>
                         <header className="flex items-center gap-3 border-b border-white/[.07] px-4 py-3"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary-500/12 text-primary-200"><ListMusic className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h2 className="font-bold">صف پخش</h2><p className="mt-0.5 text-[11px] text-dark-400">{Math.max(0, playQueue.length-queueIndex-1).toLocaleString('fa-IR')} مورد در ادامه</p></div><button className="btn-icon" onClick={() => setShowQueue(false)} aria-label="بستن صف"><X className="h-5 w-5"/></button></header>
-                        <div className="min-h-0 overflow-y-auto p-3">{playQueue.map((item,index)=>{const current=index===queueIndex;const upcoming=index>queueIndex;return <article key={`${item.id}-${index}`} className={`mb-1.5 flex items-center gap-2 rounded-2xl p-2 ${current?'bg-primary-500/12 ring-1 ring-primary-400/20':index<queueIndex?'opacity-40':'bg-white/[.025]'}`}><button disabled={!upcoming} onClick={()=>{useAppStore.getState().playQueueItem(index);setShowQueue(false)}} className="min-w-0 flex-1 text-right disabled:cursor-default"><span dir="auto" className="block truncate text-sm font-medium">{item.file_name.replace(/\.[^.]+$/,'')}</span><span className="mt-0.5 block text-[10px] text-dark-500">{current?'در حال پخش':index<queueIndex?'پخش‌شده':`نوبت ${(index-queueIndex).toLocaleString('fa-IR')}`}</span></button>{upcoming&&<div className="flex shrink-0 items-center"><button disabled={index===queueIndex+1} onClick={()=>moveQueueItem(index,index-1)} className="btn-icon h-8 w-8 disabled:opacity-25" title="بالاتر"><ArrowUp className="h-3.5 w-3.5"/></button><button disabled={index===playQueue.length-1} onClick={()=>moveQueueItem(index,index+1)} className="btn-icon h-8 w-8 disabled:opacity-25" title="پایین‌تر"><ArrowDown className="h-3.5 w-3.5"/></button><button onClick={()=>removeQueueItem(index)} className="btn-icon h-8 w-8 text-red-300" title="حذف از صف"><Trash2 className="h-3.5 w-3.5"/></button></div>}</article>})}</div>
+                        <DndContext sensors={queueSensors} onDragEnd={({active,over}:DragEndEvent)=>{if(!over||active.id===over.id)return;const from=Number(String(active.id).replace('queue-',''));const to=Number(String(over.id).replace('queue-',''));moveQueueItem(from,to)}}>
+                            <SortableContext items={playQueue.map((_,index)=>`queue-${index}`)} strategy={verticalListSortingStrategy}>
+                                <div className="min-h-0 overflow-y-auto p-3">{playQueue.map((item,index)=><SortableQueueRow key={`queue-${index}`} item={item} index={index} currentIndex={queueIndex} onPlay={()=>{useAppStore.getState().playQueueItem(index);setShowQueue(false)}} onRemove={()=>removeQueueItem(index)}/>)}</div>
+                            </SortableContext>
+                        </DndContext>
                     </section>
                 </div>
             )}
         </div>
     );
+}
+
+function SortableQueueRow({item,index,currentIndex,onPlay,onRemove}:{item:TelegramFile;index:number;currentIndex:number;onPlay:()=>void;onRemove:()=>void}) {
+    const sortable=useSortable({id:`queue-${index}`});
+    const current=index===currentIndex;
+    return <article ref={sortable.setNodeRef} style={{transform:CSS.Transform.toString(sortable.transform),transition:sortable.transition}} className={`mb-1.5 flex items-center gap-2 rounded-2xl p-2 ${current?'bg-primary-500/12 ring-1 ring-primary-400/20':'bg-white/[.025]'} ${sortable.isDragging?'z-20 opacity-70 shadow-2xl':''}`}>
+        <button {...sortable.attributes} {...sortable.listeners} className="flex h-9 w-8 shrink-0 touch-none items-center justify-center rounded-xl text-dark-400 hover:bg-white/[.06] hover:text-white" aria-label="جابه‌جایی در صف"><GripVertical className="h-4 w-4"/></button>
+        <button onClick={onPlay} className="min-w-0 flex-1 text-right"><span dir="auto" className="block truncate text-sm font-medium">{item.file_name.replace(/\.[^.]+$/,'')}</span><span className="mt-0.5 block text-[10px] text-dark-500">{current?'در حال پخش':index<currentIndex?'پخش‌شده':`نوبت ${(index-currentIndex).toLocaleString('fa-IR')}`}</span></button>
+        {!current&&<button onClick={onRemove} className="btn-icon h-8 w-8 shrink-0 text-red-300" title="حذف موقت از صف"><Trash2 className="h-3.5 w-3.5"/></button>}
+    </article>;
 }
 
 // Helper button component for cleaner code

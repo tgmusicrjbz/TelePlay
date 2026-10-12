@@ -5,7 +5,7 @@ import { Play, Download, DownloadCloud, Link, Edit, FolderInput, Trash2, Globe, 
 import { saveFileOffline } from '../lib/offline';
 
 export default function GlobalContextMenu() {
-    const { activeContextMenu, setActiveContextMenu, setPreviewFile, setContentPreviewFile, setDetailsFile, setMoveItems, setMoveFiles, setDeleteConfirm, setRenameFile, setRenameFolder, setDescriptionItem, selectedFileIds, selectedFiles, setPlaylistFile, addToast } = useAppStore();
+    const { activeContextMenu, setActiveContextMenu, setPreviewFile, setContentPreviewFile, setDetailsFile, setMoveItems, setMoveFiles, setDeleteConfirm, setRenameFile, setRenameFolder, setDescriptionItem, selectedFileIds, selectedFiles, setPlaylistFile, setActiveSection, addToast } = useAppStore();
     const updateFile = useUpdateFile();
     const updateFolder = useUpdateFolder();
     const menuRef = useRef<HTMLDivElement>(null);
@@ -161,6 +161,14 @@ export default function GlobalContextMenu() {
             addToast(error?.response?.data?.detail || 'تبدیل متن به صدا شروع نشد.', 'error');
         }
     };
+    const handleSpeechToText = (file:TelegramFile) => {
+        localStorage.setItem('komod-stt-source-file',String(file.id));
+        localStorage.setItem('komod-stt-source-title',`رونویسی ${file.file_name.replace(/\.[^.]+$/,'')}`);
+        localStorage.setItem('komod-settings-target','tts');
+        setActiveContextMenu(null);
+        setActiveSection('settings');
+        window.history.pushState({},'', '/');
+    };
     const handleSendToTelegram = async (files:TelegramFile[]) => {
         setActiveContextMenu(null);
         addToast('در حال ارسال به تلگرام…', 'info');
@@ -190,6 +198,7 @@ export default function GlobalContextMenu() {
                         {playable&&<ActionTile icon={<Play/>} label="پخش" onClick={()=>handleAction(()=>handlePlay(file))}/>}
                         {previewable&&<ActionTile icon={<Eye/>} label={previewLabel} onClick={()=>handleAction(()=>setContentPreviewFile(file))}/>}
                         {!readOnlyWorkspace&&canPreviewText(file)&&<ActionTile icon={<AudioLines/>} label="تبدیل به صوت" onClick={()=>void handleTextToSpeech(file)}/>}
+                        {!readOnlyWorkspace&&playable&&<ActionTile icon={<AudioLines/>} label="تبدیل صدا به متن" onClick={()=>handleSpeechToText(file)}/>}
                         <ActionTile icon={<DownloadCloud/>} label="ذخیره آفلاین" onClick={()=>handleOfflineSave(file)}/>
                         <ActionTile icon={<Send/>} label="ارسال به تلگرام" onClick={()=>void handleSendToTelegram([file])}/>
                         {!readOnlyWorkspace&&<><ActionTile icon={<FolderInput/>} label="جابه‌جایی" onClick={()=>handleAction(()=>setMoveItems({files:[file],folders:[]}))}/><ActionTile icon={<Heart className={file.is_favorite?'fill-current text-pink-400':''}/>} label={file.is_favorite?'برداشتن نشان':'نشان کردن'} onClick={async()=>{setActiveContextMenu(null);await updateFile.mutateAsync({id:file.id,is_favorite:!file.is_favorite});addToast(file.is_favorite?'نشان برداشته شد.':'فایل نشان شد ⭐');}}/><ActionTile icon={<Pin className={file.is_pinned?'fill-current text-primary-300':''}/>} label={file.is_pinned?'برداشتن پین':'پین بالای کمد'} onClick={async()=>{setActiveContextMenu(null);await updateFile.mutateAsync({id:file.id,is_pinned:!file.is_pinned});addToast(file.is_pinned?'پین برداشته شد.':'فایل پین شد 📌');}}/><ActionTile icon={<Edit/>} label="تغییر نام" onClick={()=>handleAction(()=>setRenameFile(file))}/></>}

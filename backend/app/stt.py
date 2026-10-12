@@ -1,0 +1,294 @@
+"""Background speech-to-text jobs backed by the configured Gemini keys."""
+from __future__ import annotations
+
+import asyncio
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+import json
+import logging
+import mimetypes
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+import time
+import uuid
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote, urlencode
+from urllib.request import Request, urlopen
+
+from sqlalchemy import select
+
+from . import telegram
+from .config import get_settings
+from .database import async_session
+from .models import File, Folder, User
+from .services import sanitize_filename
+from .tts import GeminiRequestError
+
+logger = logging.getLogger(__name__)
+settings = get_settings()
+TERMINAL_STATES = {"done", "error", "cancelled"}
+
+
+class GeminiSTTProvider:
+    def __init__(self, api_keys: list[str]) -> None:
+        self.api_keys = api_keys
+        self.cursor = 0
+        self.cooldowns: dict[str, datetime] = {}
+
+    def _ordered_keys(self) -> list[str]:
+        if not self.api_keys:
+            return []
+        now = datetime.utcnow()
+        ordered = self.api_keys[self.cursor:] + self.api_keys[:self.cursor]
+        ready = [key for key in ordered if self.cooldowns.get(key, datetime.min) <= now]
+        return ready or ordered
+
+    async def transcribe(self, path: Path, mime_type: str, prompt: str) -> str:
+        last_error: Exception | None = None
+        for key in self._ordered_keys():
+            try:
+                result = await asyncio.to_thread(self._request, key, path, mime_type, prompt)
+                self.cursor = (self.api_keys.index(key) + 1) % len(self.api_keys)
+                return result
+            except GeminiRequestError as error:
+                last_error = error
+                if error.status == 400:
+                    raise RuntimeError(f"فایل صوتی یا تنظیمات پذیرفته نشد: {error.user_detail()}") from error
+                if error.status in {429, 500, 502, 503, 504}:
+                    self.cooldowns[key] = datetime.utcnow() + timedelta(seconds=60 if error.status == 429 else 15)
+                    continue
+                if error.status in {401, 403}:
+                    self.cooldowns[key] = datetime.utcnow() + timedelta(minutes=10)
+                    continue
+                raise
+            except (TimeoutError, URLError) as error:
+                last_error = error
+                self.cooldowns[key] = datetime.utcnow() + timedelta(seconds=15)
+        raise RuntimeError("هیچ‌کدام از کلیدهای Gemini برای تبدیل صدا پاسخ ندادند.") from last_error
+
+    @staticmethod
+    def _json_request(request: Request, timeout: int = 180) -> tuple[dict, object]:
+        try:
+            with urlopen(request, timeout=timeout) as response:
+                return json.loads(response.read().decode("utf-8")), response.headers
+        except HTTPError as error:
+            try:
+                detail = error.read().decode("utf-8")[:1500]
+            except Exception:
+                detail = str(error)
+            raise GeminiRequestError(error.code, detail) from error
+
+    def _request(self, key: str, path: Path, mime_type: str, custom_prompt: str) -> str:
+        size = path.stat().st_size
+        start = Request(
+            f"https://generativelanguage.googleapis.com/upload/v1beta/files?{urlencode({'key': key})}",
+            data=json.dumps({"file": {"display_name": path.name}}).encode(),
+            headers={
+                "Content-Type": "application/json",
+                "X-Goog-Upload-Protocol": "resumable",
+                "X-Goog-Upload-Command": "start",
+                "X-Goog-Upload-Header-Content-Length": str(size),
+                "X-Goog-Upload-Header-Content-Type": mime_type,
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(start, timeout=60) as response:
+                upload_url = response.headers.get("X-Goog-Upload-URL")
+            if not upload_url:
+                raise RuntimeError("آدرس آپلود Gemini دریافت نشد.")
+            upload = Request(
+                upload_url, data=path.read_bytes(),
+                headers={"Content-Type": mime_type, "X-Goog-Upload-Command": "upload, finalize", "X-Goog-Upload-Offset": "0"},
+                method="POST",
+            )
+            uploaded, _ = self._json_request(upload, 300)
+            remote = uploaded.get("file", uploaded)
+            file_uri = remote.get("uri")
+            file_name = remote.get("name")
+            if not file_uri:
+                raise RuntimeError("فایل صوتی در Gemini آماده نشد.")
+            state = str(remote.get("state", "ACTIVE")).upper()
+            for _ in range(60):
+                if state == "ACTIVE":
+                    break
+                if state == "FAILED":
+                    raise RuntimeError("Gemini نتوانست فایل صوتی را پردازش کند.")
+                if not file_name:
+                    raise RuntimeError("وضعیت پردازش فایل Gemini قابل پیگیری نیست.")
+                time.sleep(1)
+                remote, _ = self._json_request(Request(
+                    f"https://generativelanguage.googleapis.com/v1beta/{quote(file_name, safe='/')}?{urlencode({'key': key})}",
+                    method="GET",
+                ), 60)
+                state = str(remote.get("state", "ACTIVE")).upper()
+            else:
+                raise RuntimeError("آماده‌شدن فایل برای تبدیل بیش از حد طول کشید.")
+            instruction = (
+                "محتوای این فایل صوتی یا ویدیویی را بدون خلاصه‌سازی و بدون تغییر معنا، دقیق رونویسی کن. "
+                "اصطلاحات تخصصی و کلمات انگلیسی را به همان زبان نگه دار. خروجی فقط Markdown خوانا باشد؛ "
+                "برای پاراگراف‌ها و گوینده‌های متفاوت ساختار مناسب بساز و هیچ توضیح اضافه‌ای درباره فرایند ننویس."
+            )
+            if custom_prompt.strip():
+                instruction += f"\n\nدستور تکمیلی کاربر:\n{custom_prompt.strip()}"
+            payload = {
+                "contents": [{"role": "user", "parts": [
+                    {"text": instruction},
+                    {"fileData": {"mimeType": mime_type, "fileUri": file_uri}},
+                ]}],
+                "generationConfig": {"temperature": 0.1},
+            }
+            endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{settings.gemini_stt_model}:generateContent?{urlencode({'key': key})}"
+            result, _ = self._json_request(Request(endpoint, data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"}, method="POST"), 600)
+            parts = result.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+            text = "\n".join(str(part.get("text", "")) for part in parts if part.get("text")).strip()
+            if not text:
+                raise RuntimeError("Gemini متن معتبری از فایل برنگرداند.")
+            return text
+        finally:
+            if 'file_name' in locals() and file_name:
+                try:
+                    urlopen(Request(f"https://generativelanguage.googleapis.com/v1beta/{quote(file_name, safe='/')}?{urlencode({'key': key})}", method="DELETE"), timeout=30).close()
+                except Exception:
+                    pass
+
+
+@dataclass
+class STTJob:
+    user_id: int
+    source_file_id: int
+    title: str
+    folder_id: int | None
+    prompt: str = ""
+    output_mode: str = "save"
+    id: str = ""
+
+
+class STTQueue:
+    def __init__(self, provider: GeminiSTTProvider | None = None) -> None:
+        self.provider = provider or GeminiSTTProvider(settings.gemini_api_keys)
+        self.queue: asyncio.Queue[STTJob] = asyncio.Queue()
+        self.statuses: dict[str, dict] = {}
+        self.controls: dict[str, bool] = {}
+        self.task: asyncio.Task | None = None
+
+    @property
+    def available(self) -> bool:
+        return bool(self.provider.api_keys)
+
+    async def start(self) -> None:
+        if self.available and (self.task is None or self.task.done()):
+            self.task = asyncio.create_task(self._run(), name="gemini-stt-worker")
+
+    async def stop(self) -> None:
+        if self.task:
+            self.task.cancel()
+            await asyncio.gather(self.task, return_exceptions=True)
+            self.task = None
+
+    async def enqueue(self, job: STTJob) -> int:
+        await self.start()
+        job.id = job.id or uuid.uuid4().hex
+        self.statuses[job.id] = {"id": job.id, "user_id": job.user_id, "source_file_id": job.source_file_id, "title": job.title, "state": "queued", "message": "منتظر نوبت", "progress": 0, "created_at": datetime.utcnow().isoformat()}
+        self.controls[job.id] = False
+        await self.queue.put(job)
+        return self.queue.qsize()
+
+    def status(self, job_id: str, user_id: int) -> dict | None:
+        item = self.statuses.get(job_id)
+        return dict(item) if item and item["user_id"] == user_id else None
+
+    def list_statuses(self, user_id: int) -> list[dict]:
+        return sorted((dict(item) for item in self.statuses.values() if item["user_id"] == user_id), key=lambda item: item["created_at"], reverse=True)[:50]
+
+    def cancel(self, job_id: str, user_id: int) -> dict | None:
+        item = self.statuses.get(job_id)
+        if not item or item["user_id"] != user_id:
+            return None
+        if item["state"] not in TERMINAL_STATES:
+            self.controls[job_id] = True
+            item.update(state="cancelled", message="لغو شد", finished_at=datetime.utcnow().isoformat())
+        return dict(item)
+
+    def dismiss(self, job_id: str, user_id: int) -> bool:
+        item = self.statuses.get(job_id)
+        if not item or item["user_id"] != user_id or item["state"] not in TERMINAL_STATES:
+            return False
+        self.statuses.pop(job_id, None); self.controls.pop(job_id, None)
+        return True
+
+    async def _run(self) -> None:
+        while True:
+            job = await self.queue.get()
+            try:
+                if not self.controls.get(job.id):
+                    await self._process(job)
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                logger.exception("STT job %s failed", job.id)
+                self.statuses[job.id].update(state="error", message=str(error) or "تبدیل صدا به متن انجام نشد.", finished_at=datetime.utcnow().isoformat())
+            finally:
+                self.queue.task_done()
+
+    async def _process(self, job: STTJob) -> None:
+        async with async_session() as db:
+            source = (await db.execute(select(File).where(File.id == job.source_file_id, File.user_id == job.user_id))).scalar_one_or_none()
+            user = await db.get(User, job.user_id)
+            if source is None or user is None:
+                raise RuntimeError("فایل صوتی پیدا نشد.")
+            channel_id = source.storage_channel_id or user.storage_channel_id or settings.telegram_storage_channel_id
+            message = await telegram.tg_client.get_messages(channel_id, source.channel_message_id)
+            if not message:
+                raise RuntimeError("نسخه اصلی فایل در دسترس نیست.")
+            with tempfile.TemporaryDirectory(prefix="komod-stt-") as directory:
+                suffix = Path(source.file_name).suffix or mimetypes.guess_extension(source.mime_type or "") or ".bin"
+                input_path = Path(directory) / f"source{suffix}"
+                self.statuses[job.id].update(state="downloading", message="دریافت فایل", progress=10)
+                downloaded = await telegram.tg_client.download_media(message, file_name=str(input_path))
+                if not downloaded:
+                    raise RuntimeError("دریافت فایل از فضای ذخیره‌سازی انجام نشد.")
+                media_path = Path(downloaded)
+                mime_type = source.mime_type or mimetypes.guess_type(media_path.name)[0] or "audio/ogg"
+                if shutil.which("ffmpeg") and (source.file_type == "video" or media_path.stat().st_size > 18 * 1024 * 1024):
+                    compressed = Path(directory) / "speech.mp3"
+                    command = ["ffmpeg", "-y", "-loglevel", "error", "-i", str(media_path), "-vn", "-ac", "1", "-ar", "16000", "-b:a", "48k", str(compressed)]
+                    await asyncio.to_thread(subprocess.run, command, check=True, capture_output=True)
+                    media_path, mime_type = compressed, "audio/mpeg"
+                if self.controls.get(job.id):
+                    return
+                self.statuses[job.id].update(state="transcribing", message="در حال تبدیل", progress=45)
+                markdown = await self.provider.transcribe(media_path, mime_type, job.prompt)
+            if self.controls.get(job.id):
+                return
+            if job.output_mode == "temporary":
+                self.statuses[job.id].update(state="done", message="متن آماده است", progress=100, content=markdown, finished_at=datetime.utcnow().isoformat())
+                return
+            self.statuses[job.id].update(state="saving", message="ذخیره Markdown", progress=85)
+            stored = await self._store(db, user, job, markdown)
+            self.statuses[job.id].update(state="done", message="متن ذخیره شد", progress=100, content=markdown, file_id=stored.id, finished_at=datetime.utcnow().isoformat())
+
+    async def _store(self, db, user: User, job: STTJob, markdown: str) -> File:
+        folder_id = job.folder_id
+        if folder_id is None:
+            default = (await db.execute(select(Folder).where(Folder.user_id == user.id, Folder.is_default.is_(True)))).scalar_one_or_none()
+            if default is None:
+                default = Folder(user_id=user.id, name="فایل‌های من", is_default=True); db.add(default); await db.flush()
+            folder_id = default.id
+        elif (await db.execute(select(Folder.id).where(Folder.id == folder_id, Folder.user_id == user.id))).scalar_one_or_none() is None:
+            raise RuntimeError("کشوی مقصد پیدا نشد.")
+        title = sanitize_filename(job.title or "رونویسی صدا")
+        with tempfile.TemporaryDirectory(prefix="komod-stt-output-") as directory:
+            path = Path(directory) / f"{title}.md"; path.write_text(markdown, encoding="utf-8")
+            target = user.storage_channel_id or settings.telegram_storage_channel_id
+            message = await telegram.tg_client.send_document(target, str(path), caption=job.title[:1024])
+            media = message.document
+            record = File(user_id=user.id, folder_id=folder_id, file_id=media.file_id, file_unique_id=media.file_unique_id, channel_message_id=message.id, storage_channel_id=target, file_name=path.name, description="🎙️ رونویسی‌شده با هوش مصنوعی", file_size=media.file_size or os.path.getsize(path), mime_type="text/markdown", file_type="text")
+            db.add(record); await db.commit(); await db.refresh(record)
+            return record
+
+
+stt_queue = STTQueue()

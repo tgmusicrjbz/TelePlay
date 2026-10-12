@@ -36,8 +36,8 @@ export interface User {
 
 export interface AuthSession { id: string; device_name: string; user_agent?: string | null; ip_address?: string | null; created_at: string; last_seen_at: string; current: boolean; }
 export interface Workspace { user_id: number; telegram_id: number; name: string; username?: string | null; permission: 'owner' | 'read' | 'write'; folder_ids: number[]; file_ids: number[]; }
-export interface AdminUser extends User { total_size: number; file_count: number; session_count: number; }
-export interface AdminStats { active_users: number; total_users: number; total_files: number; total_size: number; }
+export interface AdminUser extends User { total_size: number; file_count: number; session_count: number; tts_daily_limit:number; tts_max_chars:number; tts_used_today:number; tts_total_jobs:number; tts_total_chars:number; }
+export interface AdminStats { active_users: number; total_users: number; total_files: number; total_size: number; tts_jobs_today:number; tts_total_jobs:number; tts_total_chars:number; }
 export interface AccountPreferences { delete_storage_files: boolean; }
 export interface TagDefinition { name: string; color: string; file_count?: number; }
 export interface TagSettings { tags: TagDefinition[]; show_file_tags: boolean; display_limit: number; }
@@ -46,6 +46,7 @@ export interface StorageChannel { configured: boolean; channel_id?: number | nul
 export interface TTSVoice { value: string; label: string; description: string; gender: 'female'|'male'; pitch: 'low'|'medium'|'high'; }
 export interface TTSSettings { voice: string; style: string; speed: number; model: string; auto_expression: boolean; gender: 'all'|'female'|'male'; pitch: 'all'|'low'|'medium'|'high'; use_case: 'general'|'audiobook'|'podcast'|'story'|'education'|'news'|'advertising'|'accessibility'; folder_id: number|null; available: boolean; voices: TTSVoice[]; }
 export interface TTSJobStatus { id: string; state: 'queued'|'paused'|'synthesizing'|'merging'|'uploading'|'done'|'error'|'cancelled'; message: string; progress: number; chunks_total: number; chunks_done: number; title: string; file_id?: number; stream_url?: string; created_at: string; finished_at?: string; }
+export interface STTJobStatus { id:string; source_file_id:number; title:string; state:'queued'|'downloading'|'transcribing'|'saving'|'done'|'error'|'cancelled'; message:string; progress:number; content?:string; file_id?:number; created_at:string; finished_at?:string; }
 
 export interface Folder {
     id: number;
@@ -940,7 +941,7 @@ export const useSetStorageChannel = () => { const queryClient=useQueryClient(); 
 export const useResetStorageChannel = () => { const queryClient=useQueryClient(); return useMutation({ mutationFn: async()=>api.delete('/accounts/storage-channel'), onSuccess:()=>queryClient.invalidateQueries({queryKey:['storageChannel']}) }); };
 export const useUpdateAdminUser = () => {
     const queryClient = useQueryClient();
-    return useMutation({ mutationFn: async ({ id, ...payload }: { id: number; display_name?: string; is_active?: boolean }) => (await api.patch<AdminUser>(`/admin/users/${id}`, payload)).data, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['adminUsers'] }) });
+    return useMutation({ mutationFn: async ({ id, ...payload }: { id: number; display_name?: string; is_active?: boolean; tts_daily_limit?:number; tts_max_chars?:number }) => (await api.patch<AdminUser>(`/admin/users/${id}`, payload)).data, onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['adminUsers'] }); queryClient.invalidateQueries({queryKey:['adminStats']}); } });
 };
 export const useAddAdminUser = () => {
     const queryClient = useQueryClient();
@@ -998,6 +999,22 @@ export const useClearFinishedTTSJobs = () => {
         onSuccess: () => queryClient.invalidateQueries({queryKey:['tts-jobs']}),
     });
 };
+
+export const useSTTJobs = () => useQuery<STTJobStatus[]>({
+    queryKey:['stt-jobs'], queryFn:async()=>(await api.get<STTJobStatus[]>('/stt/jobs')).data,
+    refetchInterval:query=>(query.state.data||[]).some(job=>!['done','error','cancelled'].includes(job.state))?1500:false,
+});
+export const useCreateSTTJob = () => { const queryClient=useQueryClient(); return useMutation({
+    mutationFn:async(payload:{file_id:number;title:string;prompt?:string;folder_id?:number|null;output_mode:'temporary'|'save'})=>(await api.post('/stt/jobs',payload)).data,
+    onSuccess:()=>queryClient.invalidateQueries({queryKey:['stt-jobs']}),
+}); };
+export const useCancelSTTJob = () => { const queryClient=useQueryClient(); return useMutation({
+    mutationFn:async(id:string)=>(await api.post<STTJobStatus>(`/stt/jobs/${id}/cancel`)).data,
+    onSuccess:()=>queryClient.invalidateQueries({queryKey:['stt-jobs']}),
+}); };
+export const useDismissSTTJob = () => { const queryClient=useQueryClient(); return useMutation({
+    mutationFn:async(id:string)=>api.delete(`/stt/jobs/${id}`), onSuccess:()=>queryClient.invalidateQueries({queryKey:['stt-jobs']}),
+}); };
 
 export const sendFilesToTelegram = async (ids:number[]) =>
     (await api.post<{sent:number;failed:number[]}>('/files/send-to-telegram', {ids})).data;

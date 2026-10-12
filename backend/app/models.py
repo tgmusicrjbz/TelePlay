@@ -1,9 +1,9 @@
 """
 Database models for TelePlay streaming app.
 """
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional, List
-from sqlalchemy import BigInteger, String, Integer, Boolean, ForeignKey, DateTime, Text, Index, UniqueConstraint, LargeBinary
+from sqlalchemy import BigInteger, String, Integer, Boolean, ForeignKey, Date, DateTime, Text, Index, UniqueConstraint, LargeBinary
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .database import Base
 
@@ -100,6 +100,24 @@ class TTSVoicePreview(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (UniqueConstraint("model", "voice", name="uq_tts_preview_model_voice"),)
+
+
+class TTSUsage(Base):
+    """Per-user TTS limits and durable usage counters."""
+    __tablename__ = "tts_usage"
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    daily_limit: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    max_chars: Mapped[int] = mapped_column(Integer, default=200_000, nullable=False)
+    used_today: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    usage_date: Mapped[Optional[date]] = mapped_column(Date)
+    total_jobs: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_chars: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
 
 class Folder(Base):

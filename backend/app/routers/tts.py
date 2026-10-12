@@ -6,16 +6,16 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import get_current_user
 from ..database import get_db
 from ..models import Folder, TTSVoicePreview, User
-from ..tts import TTSJob, VOICE_OPTIONS, load_tts_settings, normalize_tts_settings, tts_queue
+from ..tts import TTSJob, VOICE_OPTIONS, consume_tts_quota, load_tts_settings, normalize_tts_settings, tts_queue
 
 router = APIRouter(prefix="/tts", tags=["Text to speech"])
-VOICE_PREVIEW_VERSION = "v2"
+VOICE_PREVIEW_VERSION = "v3"
 
 
 class TTSSettingsUpdate(BaseModel):
@@ -92,6 +92,10 @@ async def create_tts_job(
         folder = (await db.execute(select(Folder).where(Folder.id == target_folder_id, Folder.user_id == current_user.id))).scalar_one_or_none()
         if folder is None:
             target_folder_id = None
+    try:
+        await consume_tts_quota(db, current_user.id, len(payload.text.strip()))
+    except ValueError as error:
+        raise HTTPException(status_code=429, detail=str(error)) from error
     job = TTSJob(
         user_id=current_user.id, telegram_id=current_user.telegram_id,
         text=payload.text.strip(), title=payload.title.strip(), folder_id=target_folder_id,
@@ -115,6 +119,10 @@ async def preview_tts_voice(
     preferences = load_tts_settings(current_user)
     preferences.update(voice=voice, style="طبیعی، واضح و دوستانه", auto_expression=False, use_case="general", speed=1)
     preview_model_key = f'{preferences["model"]}::{VOICE_PREVIEW_VERSION}'
+    # Remove samples generated with older prompts/models instead of merely
+    # ignoring them. The v3 key also forces every browser to fetch fresh audio.
+    await db.execute(delete(TTSVoicePreview).where(TTSVoicePreview.model != preview_model_key))
+    await db.commit()
     cached = (await db.execute(select(TTSVoicePreview).where(
         TTSVoicePreview.model == preview_model_key, TTSVoicePreview.voice == voice,
     ))).scalar_one_or_none()

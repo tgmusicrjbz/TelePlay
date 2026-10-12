@@ -80,7 +80,7 @@ interface AppState {
 
     // Filter
     fileTypeFilter: string[];
-    setFileTypeFilter: (type: string | null) => void;
+    setFileTypeFilter: (type: string | null | string[]) => void;
 
     // Context menu - only one can be open at a time, with position for fixed positioning
     activeContextMenu: { type: 'file'; item: TelegramFile; x: number; y: number } | { type: 'folder'; item: Folder; x: number; y: number } | null;
@@ -257,12 +257,15 @@ export const useAppStore = create<AppState>((set) => ({
         return { playQueue: next, queueIndex: index < state.queueIndex ? state.queueIndex - 1 : state.queueIndex };
     }),
     moveQueueItem: (from, to) => set((state) => {
-        if (from < 0 || to < 0 || from >= state.playQueue.length || to >= state.playQueue.length || from === to || from === state.queueIndex || to <= state.queueIndex) return state;
-        const current = state.playQueue[state.queueIndex];
+        if (from < 0 || to < 0 || from >= state.playQueue.length || to >= state.playQueue.length || from === to) return state;
         const next = [...state.playQueue];
         const [moved] = next.splice(from, 1);
         next.splice(to, 0, moved);
-        return { playQueue: next, queueIndex: next.indexOf(current) };
+        let queueIndex = state.queueIndex;
+        if (from === queueIndex) queueIndex = to;
+        else if (from < queueIndex && to >= queueIndex) queueIndex -= 1;
+        else if (from > queueIndex && to <= queueIndex) queueIndex += 1;
+        return { playQueue: next, queueIndex };
     }),
     setRepeatMode: (repeatMode) => set({ repeatMode }),
     clearQueue: () => set({ playQueue: [], queueIndex: -1 }),
@@ -275,6 +278,7 @@ export const useAppStore = create<AppState>((set) => ({
     fileTypeFilter: [],
     setFileTypeFilter: (type) => set((state) => {
         if (type === null) return { fileTypeFilter: [] };
+        if (Array.isArray(type)) return { fileTypeFilter: type.filter(Boolean) };
         return {
             fileTypeFilter: state.fileTypeFilter.includes(type)
                 ? state.fileTypeFilter.filter((item) => item !== type)

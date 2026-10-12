@@ -334,6 +334,8 @@ class WorkspaceResponse(BaseModel):
 class AdminUserUpdate(BaseModel):
     display_name: Optional[str] = Field(default=None, max_length=255)
     is_active: Optional[bool] = None
+    tts_daily_limit: Optional[int] = Field(default=None, ge=0, le=10000)
+    tts_max_chars: Optional[int] = Field(default=None, ge=100, le=200_000)
 
 
 class AdminUserCreate(BaseModel):
@@ -345,6 +347,11 @@ class AdminUserResponse(UserResponse):
     total_size: int = 0
     file_count: int = 0
     session_count: int = 0
+    tts_daily_limit: int = 0
+    tts_max_chars: int = 200_000
+    tts_used_today: int = 0
+    tts_total_jobs: int = 0
+    tts_total_chars: int = 0
 
 
 class AdminStatsResponse(BaseModel):
@@ -352,6 +359,9 @@ class AdminStatsResponse(BaseModel):
     total_users: int = 0
     total_files: int = 0
     total_size: int = 0
+    tts_jobs_today: int = 0
+    tts_total_jobs: int = 0
+    tts_total_chars: int = 0
 
 
 class StorageChannelUpdate(BaseModel):

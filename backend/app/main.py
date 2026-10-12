@@ -23,7 +23,8 @@ from .database import init_db, engine
 from .telegram import start_telegram_client, stop_telegram_client
 from .downloader import link_importer
 from .tts import tts_queue
-from .routers import files_router, folders_router, streaming_router, auth_router, tv_router, playlists_router, accounts_router, tts_router
+from .stt import stt_queue
+from .routers import files_router, folders_router, streaming_router, auth_router, tv_router, playlists_router, accounts_router, tts_router, stt_router
 
 settings = get_settings()
 
@@ -92,12 +93,15 @@ async def lifespan(app: FastAPI):
             logger.exception("Background link importer could not start; the rest of the app remains available")
     if tts_queue.available:
         await tts_queue.start()
+    if stt_queue.available:
+        await stt_queue.start()
     
     yield
     
     logger.info("Shutting down...")
     await link_importer.stop()
     await tts_queue.stop()
+    await stt_queue.stop()
     await stop_telegram_client()
     logger.info("Telegram client stopped")
 
@@ -166,6 +170,7 @@ app.include_router(tv_router, prefix="/api")
 app.include_router(playlists_router, prefix="/api")
 app.include_router(accounts_router, prefix="/api")
 app.include_router(tts_router, prefix="/api")
+app.include_router(stt_router, prefix="/api")
 
 
 

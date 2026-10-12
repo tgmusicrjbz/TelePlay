@@ -28,7 +28,7 @@ from .config import get_settings
 from .auth import create_access_token
 from .services import escape_like, select_best_thumbnail
 from .downloader import ImportJob, link_importer
-from .tts import TTSJob, load_tts_settings, tts_queue
+from .tts import TTSJob, VOICE_OPTIONS, consume_tts_quota, load_tts_settings, tts_queue
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -1034,14 +1034,8 @@ async def tts_command(client, message: Message):
     replied = message.reply_to_message
     source_text = direct_text or ((replied.text or replied.caption or "").strip() if replied else "")
     if not source_text:
-        await message.reply(
-            "🎙️ متن را بعد از `/tts` بنویس یا روی یک پیام متنی ریپلای کن.\nلحن پیش‌فرض را هم می‌توانی همین‌جا انتخاب کنی:",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🙂 طبیعی", callback_data="tts_style:natural"), InlineKeyboardButton("🌙 آرام", callback_data="tts_style:calm")],
-                [InlineKeyboardButton("⚡ پرانرژی", callback_data="tts_style:energetic"), InlineKeyboardButton("📰 رسمی", callback_data="tts_style:formal")],
-                [InlineKeyboardButton("📖 داستانی", callback_data="tts_style:story"), InlineKeyboardButton("🎧 پادکست", callback_data="tts_style:podcast")],
-            ]),
-        )
+        user = await get_or_create_user(message.from_user.id, message.from_user.username, message.from_user.first_name, message.from_user.last_name)
+        await message.reply(**tts_bot_settings_view(load_tts_settings(user)))
         return
     user = await get_or_create_user(
         message.from_user.id, message.from_user.username,
@@ -1049,13 +1043,41 @@ async def tts_command(client, message: Message):
     )
     folder_id = await get_active_drawer_id(message.from_user.id)
     title_line = next((line.strip() for line in source_text.splitlines() if line.strip()), "صدای ساخته‌شده")
+    preferences = load_tts_settings(user)
+    async with async_session() as db:
+        try:
+            await consume_tts_quota(db, user.id, len(source_text))
+        except ValueError as error:
+            await message.reply(f"⛔ {error}")
+            return
     job = TTSJob(
         user_id=user.id, telegram_id=user.telegram_id, text=source_text,
         title=title_line[:80], folder_id=folder_id,
-        preferences=load_tts_settings(user),
+        preferences=preferences, output_mode=preferences.get("bot_output_mode", "save"),
     )
     position = await tts_queue.enqueue(job)
     await message.reply(f"🎙️ متن رفت توی صف ساخت صدا · جایگاه {to_persian_digits(str(position))}\nوقتی آماده بشه همین‌جا می‌فرستمش.")
+
+
+def tts_bot_settings_view(preferences: dict) -> dict:
+    voice = next((item for item in VOICE_OPTIONS if item["value"] == preferences.get("voice")), VOICE_OPTIONS[0])
+    output = "ذخیره در کمد" if preferences.get("bot_output_mode", "save") == "save" else "فقط ارسال در تلگرام"
+    gender = {"all": "همه", "female": "زن", "male": "مرد"}.get(preferences.get("gender"), "همه")
+    pitch = {"all": "همه", "low": "بم", "medium": "متعادل", "high": "زیر"}.get(preferences.get("pitch"), "همه")
+    use_case = {
+        "general": "عمومی", "audiobook": "کتاب صوتی", "podcast": "پادکست", "story": "داستان",
+        "education": "آموزشی", "news": "خبری", "advertising": "تبلیغاتی", "accessibility": "دسترس‌پذیری",
+    }.get(preferences.get("use_case"), "عمومی")
+    rows = [
+        [InlineKeyboardButton("🙂 طبیعی", callback_data="tts_style:natural"), InlineKeyboardButton("🌙 آرام", callback_data="tts_style:calm")],
+        [InlineKeyboardButton("⚡ پرانرژی", callback_data="tts_style:energetic"), InlineKeyboardButton("📰 رسمی", callback_data="tts_style:formal")],
+        [InlineKeyboardButton("📖 داستانی", callback_data="tts_style:story"), InlineKeyboardButton("🎧 پادکست", callback_data="tts_style:podcast")],
+        [InlineKeyboardButton("🎤 انتخاب گوینده", callback_data="tts_menu:voices"), InlineKeyboardButton(f"⏱ سرعت {preferences.get('speed', 1):g}×", callback_data="tts_menu:speed")],
+        [InlineKeyboardButton(f"👤 {gender}", callback_data="tts_menu:gender"), InlineKeyboardButton(f"🎚 {pitch}", callback_data="tts_menu:pitch")],
+        [InlineKeyboardButton(f"🎯 {use_case}", callback_data="tts_menu:usecase"), InlineKeyboardButton(f"✨ بیان {'روشن' if preferences.get('auto_expression', True) else 'خاموش'}", callback_data="tts_auto:toggle")],
+        [InlineKeyboardButton(f"📤 {output}", callback_data="tts_menu:output")],
+    ]
+    return {"text": f"🎙️ تنظیمات ساخت صدا\nگوینده: {voice['label']}\n\nبرای ساخت، `/tts متن` را بفرست یا روی یک پیام ریپلای کن.", "reply_markup": InlineKeyboardMarkup(rows)}
 
 
 @tg_client.on_message(filters.command("myfiles") & filters.private)
@@ -1473,6 +1495,94 @@ async def handle_callback(client, callback: CallbackQuery):
             queue.put_nowait(action)
         await callback.answer("عملیات لغو شد." if action == "cancel" else "توضیحات پاک می‌شه.")
 
+    elif data == "tts_menu:voices":
+        rows = []
+        for index in range(0, len(VOICE_OPTIONS), 2):
+            rows.append([InlineKeyboardButton(item["label"].split(" · ")[0], callback_data=f"tts_voice:{item['value']}") for item in VOICE_OPTIONS[index:index + 2]])
+        rows.append([InlineKeyboardButton("↩️ تنظیمات صدا", callback_data="tts_menu:home")])
+        await callback.message.edit_text("🎤 گوینده را انتخاب کن:", reply_markup=InlineKeyboardMarkup(rows))
+        await callback.answer()
+
+    elif data == "tts_menu:speed":
+        await callback.message.edit_text("⏱ سرعت خواندن را انتخاب کن:", reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("۰٫۸×", callback_data="tts_speed:0.8"), InlineKeyboardButton("۱×", callback_data="tts_speed:1"), InlineKeyboardButton("۱٫۲×", callback_data="tts_speed:1.2")],
+            [InlineKeyboardButton("۱٫۵×", callback_data="tts_speed:1.5"), InlineKeyboardButton("۲×", callback_data="tts_speed:2")],
+            [InlineKeyboardButton("↩️ تنظیمات صدا", callback_data="tts_menu:home")],
+        ]))
+        await callback.answer()
+
+    elif data == "tts_menu:output":
+        await callback.message.edit_text("📤 خروجی ربات کجا برود؟", reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🗄️ ذخیره در کمد", callback_data="tts_output:save")],
+            [InlineKeyboardButton("📨 فقط تلگرام", callback_data="tts_output:telegram")],
+            [InlineKeyboardButton("↩️ تنظیمات صدا", callback_data="tts_menu:home")],
+        ]))
+        await callback.answer()
+
+    elif data == "tts_menu:gender":
+        await callback.message.edit_text("👤 جنس صدا را انتخاب کن:", reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("همه", callback_data="tts_gender:all"), InlineKeyboardButton("زن", callback_data="tts_gender:female"), InlineKeyboardButton("مرد", callback_data="tts_gender:male")],
+            [InlineKeyboardButton("↩️ تنظیمات صدا", callback_data="tts_menu:home")],
+        ]))
+        await callback.answer()
+
+    elif data == "tts_menu:pitch":
+        await callback.message.edit_text("🎚 زیر و بمی صدا را انتخاب کن:", reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("همه", callback_data="tts_pitch:all"), InlineKeyboardButton("بم", callback_data="tts_pitch:low")],
+            [InlineKeyboardButton("متعادل", callback_data="tts_pitch:medium"), InlineKeyboardButton("زیر", callback_data="tts_pitch:high")],
+            [InlineKeyboardButton("↩️ تنظیمات صدا", callback_data="tts_menu:home")],
+        ]))
+        await callback.answer()
+
+    elif data == "tts_menu:usecase":
+        options = [
+            ("عمومی", "general"), ("کتاب صوتی", "audiobook"), ("پادکست", "podcast"), ("داستان", "story"),
+            ("آموزشی", "education"), ("خبری", "news"), ("تبلیغاتی", "advertising"), ("دسترس‌پذیری", "accessibility"),
+        ]
+        rows = [[InlineKeyboardButton(label, callback_data=f"tts_usecase:{value}") for label, value in options[index:index + 2]] for index in range(0, len(options), 2)]
+        rows.append([InlineKeyboardButton("↩️ تنظیمات صدا", callback_data="tts_menu:home")])
+        await callback.message.edit_text("🎯 کاربرد صدا را انتخاب کن:", reply_markup=InlineKeyboardMarkup(rows))
+        await callback.answer()
+
+    elif data == "tts_menu:home":
+        async with async_session() as db:
+            user = (await db.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one_or_none()
+        if user is None:
+            await callback.answer("اول /start رو بفرست.", show_alert=True)
+        else:
+            await callback.message.edit_text(**tts_bot_settings_view(load_tts_settings(user)))
+            await callback.answer()
+
+    elif data.startswith(("tts_voice:", "tts_speed:", "tts_output:", "tts_gender:", "tts_pitch:", "tts_usecase:", "tts_auto:")):
+        kind, selected = data.split(":", 1)
+        async with async_session() as db:
+            user = (await db.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one_or_none()
+            if user is None:
+                await callback.answer("اول /start رو بفرست.", show_alert=True)
+                return
+            preferences = load_tts_settings(user)
+            if kind == "tts_voice" and selected in {item["value"] for item in VOICE_OPTIONS}:
+                preferences["voice"] = selected
+            elif kind == "tts_speed" and selected in {"0.8", "1", "1.2", "1.5", "2"}:
+                preferences["speed"] = float(selected)
+            elif kind == "tts_output" and selected in {"save", "telegram"}:
+                preferences["bot_output_mode"] = selected
+            elif kind == "tts_gender" and selected in {"all", "female", "male"}:
+                preferences["gender"] = selected
+            elif kind == "tts_pitch" and selected in {"all", "low", "medium", "high"}:
+                preferences["pitch"] = selected
+            elif kind == "tts_usecase" and selected in {"general", "audiobook", "podcast", "story", "education", "news", "advertising", "accessibility"}:
+                preferences["use_case"] = selected
+            elif kind == "tts_auto" and selected == "toggle":
+                preferences["auto_expression"] = not preferences.get("auto_expression", True)
+            else:
+                await callback.answer("این گزینه معتبر نیست.", show_alert=True)
+                return
+            user.tts_settings_json = json.dumps(preferences, ensure_ascii=False)
+            await db.commit()
+        await callback.message.edit_text(**tts_bot_settings_view(preferences))
+        await callback.answer("ذخیره شد.")
+
     elif data.startswith("tts_style:"):
         selected = data.split(":", 1)[1]
         presets = {
@@ -1496,8 +1606,8 @@ async def handle_callback(client, callback: CallbackQuery):
             preferences.update(style=preset[0], use_case=preset[1])
             user.tts_settings_json = json.dumps(preferences, ensure_ascii=False)
             await db.commit()
+        await callback.message.edit_text(**tts_bot_settings_view(preferences))
         await callback.answer(f"لحن {preset[2]} انتخاب شد.")
-        await callback.message.reply(f"✅ لحن پیش‌فرض روی «{preset[2]}» تنظیم شد. حالا `/tts متن` رو بفرست.")
 
     elif data == "noop":
         await callback.answer()

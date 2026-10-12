@@ -37,6 +37,7 @@ function PlaylistIndex() {
     const [creating, setCreating] = useState(false);
     const [editing, setEditing] = useState<PlaylistSummary | null>(null);
     const [menuPlaylist, setMenuPlaylist] = useState<PlaylistSummary | null>(null);
+    const [offlinePlaylist,setOfflinePlaylist]=useState<Playlist|null>(null);
     const create = useCreatePlaylist();
     const update = useUpdatePlaylist();
     const removePlaylist = useDeletePlaylist();
@@ -67,7 +68,7 @@ function PlaylistIndex() {
     };
     const downloadFromMenu = async (playlist: PlaylistSummary) => {
         setMenuPlaylist(null);
-        try { const { data } = await api.get<Playlist>(`/playlists/${playlist.id}`); void savePlaylistOffline(data); addToast('دانلود پلی‌لیست شروع شد 📥'); }
+        try { const { data } = await api.get<Playlist>(`/playlists/${playlist.id}`); setOfflinePlaylist(data); }
         catch { addToast('شروع دانلود پلی‌لیست انجام نشد.', 'error'); }
     };
     return <div className="mx-auto w-full max-w-7xl p-4 pb-28 sm:p-6 md:pb-8 lg:p-8">
@@ -87,7 +88,15 @@ function PlaylistIndex() {
         {creating && <PlaylistEditor title="پلی‌لیست تازه" onClose={() => setCreating(false)} onSave={async (name, description) => { const p = await create.mutateAsync({ name, description }); setCreating(false); addToast('پلی‌لیست ساخته شد 🎶'); openPath(`/playlist/${p.id}`); }} />}
         {editing && <PlaylistEditor title="ویرایش پلی‌لیست" initialName={editing.name} initialDescription={editing.description || ''} onClose={() => setEditing(null)} onSave={async (name, description) => { await update.mutateAsync({ id: editing.id, name, description }); setEditing(null); }} />}
         {menuPlaylist && <div className="fixed inset-0 z-[160] flex items-end bg-black/65 backdrop-blur-sm" onClick={() => setMenuPlaylist(null)}><div className="w-full rounded-t-3xl border-t border-white/10 bg-dark-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]" onClick={event => event.stopPropagation()}><div className="mx-auto mb-4 h-1 w-12 rounded-full bg-white/20"/><h2 dir="auto" className="mb-3 truncate px-2 font-bold">{menuPlaylist.name}</h2>{!readOnlyWorkspace && <><button className="context-menu-item min-h-14 w-full" onClick={() => { setEditing(menuPlaylist); setMenuPlaylist(null); }}><Pencil className="h-5 w-5"/> ویرایش</button><button className="context-menu-item min-h-14 w-full" onClick={() => openPath(`/playlist/${menuPlaylist.id}?manage=1`)}><Check className="h-5 w-5"/> مدیریت فایل‌ها</button></>}<button className="context-menu-item min-h-14 w-full" onClick={() => void downloadFromMenu(menuPlaylist)}><DownloadCloud className="h-5 w-5"/> دانلود و ذخیره آفلاین</button>{!readOnlyWorkspace && <button className="context-menu-item min-h-14 w-full text-red-300" onClick={() => void deleteFromMenu(menuPlaylist)}><Trash2 className="h-5 w-5"/> حذف پلی‌لیست</button>}</div></div>}
+        {offlinePlaylist&&<OfflinePlaylistPicker playlist={offlinePlaylist} onClose={()=>setOfflinePlaylist(null)} onStart={ids=>{void savePlaylistOffline(offlinePlaylist,undefined,ids);setOfflinePlaylist(null);addToast('فایل‌های انتخاب‌شده به صف ذخیره آفلاین رفتند 📥')}}/>}
     </div>;
+}
+
+function OfflinePlaylistPicker({playlist,onClose,onStart}:{playlist:Playlist;onClose:()=>void;onStart:(ids:number[])=>void}){
+    const playable=playlist.items.map(item=>item.file).filter(file=>file.file_type==='audio'||file.file_type==='video');
+    const [selected,setSelected]=useState<Set<number>>(()=>new Set(playable.map(file=>file.id)));
+    const all=selected.size===playable.length;
+    return <div className="fixed inset-0 z-[180] flex items-end bg-black/70 backdrop-blur-sm sm:items-center sm:justify-center sm:p-4" onClick={onClose}><section className="flex max-h-[86dvh] w-full max-w-lg flex-col rounded-t-3xl border border-white/10 bg-dark-900 p-4 sm:rounded-3xl" onClick={event=>event.stopPropagation()}><div className="flex items-center gap-3"><div className="min-w-0 flex-1"><h2 className="truncate font-bold">ذخیره آفلاین «{playlist.name}»</h2><p className="mt-1 text-xs text-dark-500">همه یا فقط ترک‌های دلخواهت را انتخاب کن.</p></div><button className="btn-icon" onClick={onClose}><X className="h-4 w-4"/></button></div><button className="mt-4 flex min-h-10 items-center justify-between rounded-xl bg-white/[.04] px-3 text-sm" onClick={()=>setSelected(all?new Set():new Set(playable.map(file=>file.id)))}><span>{all?'لغو انتخاب همه':'انتخاب همه'}</span><span>{selected.size.toLocaleString('fa-IR')} از {playable.length.toLocaleString('fa-IR')}</span></button><div className="mt-2 min-h-0 flex-1 overflow-y-auto">{playable.map(file=><button key={file.id} onClick={()=>setSelected(previous=>{const next=new Set(previous);next.has(file.id)?next.delete(file.id):next.add(file.id);return next})} className="flex min-h-14 w-full items-center gap-3 border-b border-white/[.05] px-2 text-right"><span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md border ${selected.has(file.id)?'border-primary-400 bg-primary-500 text-white':'border-white/20'}`}>{selected.has(file.id)&&<Check className="h-4 w-4"/>}</span><span className="min-w-0 flex-1 truncate text-sm">{file.file_name}</span><small className="text-dark-500">{file.file_type==='video'?'ویدیو':'صدا'}</small></button>)}</div><button disabled={!selected.size} onClick={()=>onStart([...selected])} className="btn-primary mt-4 min-h-11 disabled:opacity-40">ذخیره {selected.size.toLocaleString('fa-IR')} فایل</button></section></div>;
 }
 
 function PlaylistCard({ playlist, view, manual, onLongPress }: { playlist: PlaylistSummary; view: 'grid' | 'dense' | 'list'; manual: boolean; onLongPress: () => void }) {

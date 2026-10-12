@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import create_vault_token, get_current_user, require_vault_access
 from ..config import get_settings
 from ..database import get_db
-from ..models import AuthSession, File, Folder, User, WorkspaceGrant
+from ..models import AuthSession, File, Folder, TTSUsage, User, WorkspaceGrant
 from ..schemas import AccountPreferences, AdminStatsResponse, AdminUserCreate, AdminUserResponse, AdminUserUpdate, StorageChannelResponse, StorageChannelUpdate, TagDefinitionResponse, TagSettingsResponse, TagSettingsUpdate, VaultPasswordRequest, VaultStatus, VaultTokenResponse, WorkspaceGrantCreate, WorkspaceResponse
 from .. import telegram
 
@@ -276,9 +276,18 @@ async def admin_stats(_: User = Depends(require_admin), db: AsyncSession = Depen
     total_files, total_size = (await db.execute(select(
         func.count(File.id), func.coalesce(func.sum(File.file_size), 0)
     ))).one()
+    tts_total_jobs, tts_total_chars = (await db.execute(select(
+        func.coalesce(func.sum(TTSUsage.total_jobs), 0),
+        func.coalesce(func.sum(TTSUsage.total_chars), 0),
+    ))).one()
+    tts_jobs_today = (await db.execute(select(
+        func.coalesce(func.sum(TTSUsage.used_today), 0)
+    ).where(TTSUsage.usage_date == datetime.utcnow().date()))).scalar_one()
     return AdminStatsResponse(
         active_users=int(active_users or 0), total_users=int(total_users or 0),
         total_files=int(total_files or 0), total_size=int(total_size or 0),
+        tts_jobs_today=int(tts_jobs_today or 0), tts_total_jobs=int(tts_total_jobs or 0),
+        tts_total_chars=int(tts_total_chars or 0),
     )
 
 
@@ -299,16 +308,23 @@ async def admin_users(_: User = Depends(require_admin), db: AsyncSession = Depen
             func.coalesce(file_stats.c.total_size, 0),
             func.coalesce(file_stats.c.file_count, 0),
             func.coalesce(session_stats.c.session_count, 0),
+            TTSUsage,
         )
         .outerjoin(file_stats, file_stats.c.user_id == User.id)
         .outerjoin(session_stats, session_stats.c.user_id == User.id)
+        .outerjoin(TTSUsage, TTSUsage.user_id == User.id)
         .order_by(User.created_at.desc())
     )).all()
     return [
         AdminUserResponse.model_validate(user, from_attributes=True).model_copy(update={
             "total_size": int(size or 0), "file_count": int(files or 0), "session_count": int(sessions or 0),
+            "tts_daily_limit": usage.daily_limit if usage else 0,
+            "tts_max_chars": usage.max_chars if usage else 200_000,
+            "tts_used_today": usage.used_today if usage and usage.usage_date == datetime.utcnow().date() else 0,
+            "tts_total_jobs": usage.total_jobs if usage else 0,
+            "tts_total_chars": usage.total_chars if usage else 0,
         })
-        for user, size, files, sessions in rows
+        for user, size, files, sessions, usage in rows
     ]
 
 
@@ -363,8 +379,24 @@ async def update_admin_user(user_id: int, payload: AdminUserUpdate, admin: User 
             sessions = (await db.execute(select(AuthSession).where(AuthSession.user_id == user.id, AuthSession.revoked_at.is_(None)))).scalars().all()
             for session in sessions:
                 session.revoked_at = datetime.utcnow()
+    usage = await db.get(TTSUsage, user.id)
+    if payload.tts_daily_limit is not None or payload.tts_max_chars is not None:
+        if usage is None:
+            usage = TTSUsage(user_id=user.id, usage_date=datetime.utcnow().date())
+            db.add(usage)
+        if payload.tts_daily_limit is not None:
+            usage.daily_limit = payload.tts_daily_limit
+        if payload.tts_max_chars is not None:
+            usage.max_chars = payload.tts_max_chars
     await db.commit()
     size = (await db.execute(select(func.coalesce(func.sum(File.file_size), 0)).where(File.user_id == user.id))).scalar_one()
     files = (await db.execute(select(func.count(File.id)).where(File.user_id == user.id))).scalar_one()
     sessions = (await db.execute(select(func.count(AuthSession.id)).where(AuthSession.user_id == user.id, AuthSession.revoked_at.is_(None)))).scalar_one()
-    return AdminUserResponse.model_validate(user, from_attributes=True).model_copy(update={"total_size": int(size or 0), "file_count": int(files or 0), "session_count": int(sessions or 0)})
+    return AdminUserResponse.model_validate(user, from_attributes=True).model_copy(update={
+        "total_size": int(size or 0), "file_count": int(files or 0), "session_count": int(sessions or 0),
+        "tts_daily_limit": usage.daily_limit if usage else 0,
+        "tts_max_chars": usage.max_chars if usage else 200_000,
+        "tts_used_today": usage.used_today if usage and usage.usage_date == datetime.utcnow().date() else 0,
+        "tts_total_jobs": usage.total_jobs if usage else 0,
+        "tts_total_chars": usage.total_chars if usage else 0,
+    })

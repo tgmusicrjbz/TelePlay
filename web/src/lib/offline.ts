@@ -212,8 +212,9 @@ export function saveFileOffline(file: TelegramFile, onProgress?: (loaded: number
     return promise;
 }
 
-export async function savePlaylistOffline(playlist: Playlist, onProgress?: (progress: OfflineDownloadProgress) => void): Promise<OfflinePlaylist> {
-    const playable = playlist.items.map(item => item.file).filter(file => file.file_type === 'audio' || file.file_type === 'video');
+export async function savePlaylistOffline(playlist: Playlist, onProgress?: (progress: OfflineDownloadProgress) => void, selectedFileIds?: number[]): Promise<OfflinePlaylist> {
+    const selected = selectedFileIds ? new Set(selectedFileIds) : null;
+    const playable = playlist.items.map(item => item.file).filter(file => (file.file_type === 'audio' || file.file_type === 'video') && (!selected || selected.has(file.id)));
     if (!playable.length) throw new Error('این پلی‌لیست فایل صوتی یا ویدیویی قابل دانلود ندارد.');
     const jobId = `playlist-${playlist.id}`;
     const control = { paused: false, cancelled: false };
@@ -264,6 +265,23 @@ export async function savePlaylistOffline(playlist: Playlist, onProgress?: (prog
     emitProgress({ id: jobId, kind: 'playlist', title: playlist.name, state: 'done', done, total: playable.length, failed, currentName: '', loaded: [...loadedByFile.values()].reduce((sum, value) => sum + value, 0), size: totalSize });
     playlistControls.delete(jobId);
     return record;
+}
+
+export async function createOfflinePlaylist(name:string,fileIds:number[]=[],description=''):Promise<OfflinePlaylist>{
+    const clean=name.trim().slice(0,120);if(!clean)throw new Error('نام پلی‌لیست را وارد کن.');
+    const mediaIds=new Set((await listOfflineMedia()).map(item=>item.id));
+    const ids=fileIds.filter((id,index)=>mediaIds.has(id)&&fileIds.indexOf(id)===index);
+    const record:OfflinePlaylist={id:-Date.now(),name:clean,description:description.trim()||null,fileIds:ids,totalCount:ids.length,failedCount:0,savedAt:new Date().toISOString(),ownerUserId:activeUserId()};
+    await transaction<IDBValidKey>(PLAYLIST_STORE,'readwrite',store=>store.put(record));window.dispatchEvent(new Event(OFFLINE_CHANGED_EVENT));return record;
+}
+
+export async function updateOfflinePlaylist(id:number,changes:{name?:string;description?:string;fileIds?:number[]}):Promise<OfflinePlaylist>{
+    const current=await transaction<OfflinePlaylist|undefined>(PLAYLIST_STORE,'readonly',store=>store.get(id));
+    if(!current||current.ownerUserId!==activeUserId())throw new Error('پلی‌لیست آفلاین پیدا نشد.');
+    let fileIds=current.fileIds;
+    if(changes.fileIds){const mediaIds=new Set((await listOfflineMedia()).map(item=>item.id));fileIds=changes.fileIds.filter((value,index)=>mediaIds.has(value)&&changes.fileIds!.indexOf(value)===index)}
+    const next:OfflinePlaylist={...current,name:changes.name?.trim().slice(0,120)||current.name,description:changes.description===undefined?current.description:changes.description.trim()||null,fileIds,totalCount:fileIds.length,savedAt:new Date().toISOString()};
+    await transaction<IDBValidKey>(PLAYLIST_STORE,'readwrite',store=>store.put(next));window.dispatchEvent(new Event(OFFLINE_CHANGED_EVENT));return next;
 }
 
 export async function offlinePlaylistFiles(playlist: OfflinePlaylist): Promise<TelegramFile[]> {

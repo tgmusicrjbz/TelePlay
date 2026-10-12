@@ -25,7 +25,7 @@ from urllib.request import Request, urlopen
 from . import telegram
 from .config import get_settings
 from .database import async_session
-from .models import File, Folder, User
+from .models import File, Folder, TTSUsage, User
 from .services import sanitize_filename, select_best_thumbnail
 
 logger = logging.getLogger(__name__)
@@ -41,6 +41,7 @@ DEFAULT_TTS_SETTINGS = {
     "model": settings.gemini_tts_model,
     "auto_expression": True,
     "folder_id": None,
+    "bot_output_mode": "save",
 }
 VOICE_OPTIONS = [
     {"value": "Kore", "label": "🌷 Kore · گرم و متعادل", "description": "صدایی گرم برای روایت، آموزش و متن‌های روزمره", "gender": "female", "pitch": "medium"},
@@ -91,7 +92,30 @@ def normalize_tts_settings(value: dict | None) -> dict:
         raw["folder_id"] = int(raw["folder_id"]) if raw.get("folder_id") is not None else None
     except (TypeError, ValueError):
         raw["folder_id"] = None
+    raw["bot_output_mode"] = raw.get("bot_output_mode") if raw.get("bot_output_mode") in {"save", "telegram"} else "save"
     return raw
+
+
+async def consume_tts_quota(db, user_id: int, character_count: int) -> TTSUsage:
+    """Validate and atomically account for an accepted TTS request."""
+    today = datetime.utcnow().date()
+    usage = await db.get(TTSUsage, user_id)
+    if usage is None:
+        usage = TTSUsage(user_id=user_id, usage_date=today)
+        db.add(usage)
+        await db.flush()
+    if usage.usage_date != today:
+        usage.usage_date = today
+        usage.used_today = 0
+    if character_count > usage.max_chars:
+        raise ValueError(f"طول متن از سقف {to_persian_digits(usage.max_chars)} نویسه بیشتر است.")
+    if usage.daily_limit and usage.used_today >= usage.daily_limit:
+        raise ValueError("سهمیه روزانه ساخت صدا برای این حساب تمام شده است.")
+    usage.used_today += 1
+    usage.total_jobs += 1
+    usage.total_chars += character_count
+    await db.commit()
+    return usage
 
 
 def build_interaction_content(text: str, base_style: str) -> list[dict]:

@@ -17,7 +17,9 @@ os.environ.setdefault("TELEGRAM_STORAGE_CHANNEL_ID", "-1001234567890")
 os.environ.setdefault("JWT_SECRET", "test-secret")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.tts import GeminiRequestError, GeminiTTSProvider, TTSJob, TTSQueue, build_interaction_content, extract_interaction_audio, merge_wav, normalize_tts_settings, split_long_text
+from app.database import Base, async_session, engine
+from app.models import TTSUsage, User
+from app.tts import GeminiRequestError, GeminiTTSProvider, TTSJob, TTSQueue, build_interaction_content, consume_tts_quota, extract_interaction_audio, merge_wav, normalize_tts_settings, split_long_text
 
 
 def wav_with_frames(frames: bytes, rate: int = 24000) -> bytes:
@@ -156,6 +158,34 @@ class TTSHelpersTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(queue.clear_finished(1), 0)
         self.assertIn("active", queue.statuses)
         self.assertIn("other", queue.statuses)
+
+
+class TTSQuotaTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.drop_all)
+            await connection.run_sync(Base.metadata.create_all)
+        async with async_session() as db:
+            user = User(telegram_id=991100)
+            db.add(user)
+            await db.commit()
+            await db.refresh(user)
+            self.user_id = user.id
+
+    async def test_daily_limit_and_character_limit_are_enforced(self):
+        async with async_session() as db:
+            db.add(TTSUsage(user_id=self.user_id, daily_limit=1, max_chars=10))
+            await db.commit()
+            usage = await consume_tts_quota(db, self.user_id, 5)
+            self.assertEqual((usage.used_today, usage.total_jobs, usage.total_chars), (1, 1, 5))
+            with self.assertRaisesRegex(ValueError, "سهمیه روزانه"):
+                await consume_tts_quota(db, self.user_id, 5)
+        async with async_session() as db:
+            usage = await db.get(TTSUsage, self.user_id)
+            usage.daily_limit = 0
+            await db.commit()
+            with self.assertRaisesRegex(ValueError, "طول متن"):
+                await consume_tts_quota(db, self.user_id, 11)
 
 
 if __name__ == "__main__":
