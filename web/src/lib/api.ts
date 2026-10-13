@@ -897,6 +897,17 @@ export const useUpdateTagSettings = () => {
     });
 };
 
+export const useDeleteTag = () => {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async (name: string) => cacheTagSettings((await api.delete<TagSettings>(`/accounts/tags/${encodeURIComponent(name)}`)).data),
+        onSuccess: data => {
+            queryClient.setQueryData(['tag-settings'], data);
+            queryClient.invalidateQueries({ queryKey: ['files'] });
+        },
+    });
+};
+
 export const useSessions = () => useQuery({ queryKey: ['sessions'], queryFn: async () => (await api.get<AuthSession[]>('/auth/sessions')).data });
 export const useRevokeSession = () => {
     const queryClient = useQueryClient();

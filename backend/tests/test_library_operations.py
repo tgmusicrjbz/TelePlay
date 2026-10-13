@@ -26,9 +26,10 @@ from starlette.requests import Request
 from sqlalchemy import select
 
 from app.database import Base, async_session, engine
-from app.models import AuthSession, BotUserState, File, Folder, Playlist, PlaylistItem, User, WatchProgress
+from app.models import AuthSession, BotUserState, File, Folder, Playlist, PlaylistItem, TTSUsage, User, WatchProgress
 from app.routers.auth import _session_for_device, password_login, update_credentials
-from app.routers.accounts import get_tag_settings, update_tag_settings
+from app.routers.accounts import delete_tag_definition, get_tag_settings, update_tag_settings
+from app.stt import consume_stt_quota
 from app.routers.files import (
     batch_update_files,
     get_activity,
@@ -125,6 +126,27 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             discovered = next(item for item in refreshed.tags if item.name == "تگ مستقیم")
             self.assertEqual(discovered.file_count, 1)
             self.assertRegex(discovered.color, r"^#[0-9a-f]{6}$")
+
+    async def test_deleting_tag_removes_it_from_definitions_and_files(self):
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            direct = await db.get(File, self.direct_file_id)
+            direct.tags_json = json.dumps(["پروژه", "نگه‌دار"], ensure_ascii=False)
+            await update_tag_settings(TagSettingsUpdate(
+                tags=[TagDefinition(name="پروژه", color="#14b8a6"), TagDefinition(name="نگه‌دار", color="#2563eb")],
+                show_file_tags=True, display_limit=3,
+            ), user, db)
+            result = await delete_tag_definition("#پروژه", user, db)
+            await db.refresh(direct)
+            self.assertNotIn("پروژه", [tag.name for tag in result.tags])
+            self.assertEqual(json.loads(direct.tags_json), ["نگه‌دار"])
+
+    async def test_stt_duration_limit_rejects_long_input(self):
+        async with async_session() as db:
+            db.add(TTSUsage(user_id=self.user_id, stt_max_seconds=60))
+            await db.commit()
+            with self.assertRaisesRegex(ValueError, "مدت فایل"):
+                await consume_stt_quota(db, self.user_id, 61)
 
     async def test_search_supports_comma_and_semicolon_expressions(self):
         async with async_session() as db:

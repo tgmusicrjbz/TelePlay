@@ -106,6 +106,32 @@ async def update_tag_settings(payload: TagSettingsUpdate, current_user: User = D
     return await get_tag_settings(current_user, db)
 
 
+@router.delete("/accounts/tags/{tag_name}", response_model=TagSettingsResponse)
+async def delete_tag_definition(tag_name: str, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Delete a tag definition and remove that tag from every file owned by the user."""
+    normalized = " ".join(tag_name.strip().lstrip("#").split())[:40]
+    if not normalized:
+        raise HTTPException(status_code=400, detail="نام تگ معتبر نیست.")
+    key = normalized.casefold()
+    try:
+        stored = json.loads(current_user.tag_settings_json or "[]")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        stored = []
+    definitions = [item for item in clean_tag_definitions(stored if isinstance(stored, list) else []) if item["name"].casefold() != key]
+    current_user.tag_settings_json = json.dumps(definitions, ensure_ascii=False)
+    files = (await db.execute(select(File).where(File.user_id == current_user.id))).scalars().all()
+    for file in files:
+        try:
+            tags = json.loads(file.tags_json or "[]")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            tags = []
+        cleaned = [tag for tag in tags if str(tag).strip().lstrip("#").casefold() != key]
+        if cleaned != tags:
+            file.tags_json = json.dumps(cleaned, ensure_ascii=False)
+    await db.commit()
+    return await get_tag_settings(current_user, db)
+
+
 @router.get("/accounts/workspaces", response_model=list[WorkspaceResponse])
 async def list_workspaces(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     grants = (await db.execute(select(WorkspaceGrant, User).join(User, User.id == WorkspaceGrant.owner_user_id).where(

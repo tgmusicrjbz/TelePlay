@@ -104,8 +104,9 @@ export default function FileBrowser() {
     const [importFolder, setImportFolder] = useState<number | 'new' | null>(null);
     const [importFolderName, setImportFolderName] = useState('');
     const [importQuality, setImportQuality] = useState<'auto' | 'audio' | '480' | '720' | '1080'>('480');
-    const [uploadProgress, setUploadProgress] = useState<{name:string; index:number; total:number; percent:number}|null>(null);
+    const [uploadProgress, setUploadProgress] = useState<{name:string; index:number; total:number; percent:number; phase:'uploading'|'processing'}|null>(null);
     const [uploadPanelMode, setUploadPanelMode] = useState<'open'|'collapsed'|'hidden'>('open');
+    const [isFileDragOver, setIsFileDragOver] = useState(false);
     const [importJobs, setImportJobs] = useState<Array<{id:string; url:string; quality?:string; folder_id?:number|null; created_at?:string; state:'queued'|'downloading'|'paused'|'cancelled'|'done'|'error'; message:string; saved:number}>>([]);
     const [importPanelMode, setImportPanelMode] = useState<'open'|'collapsed'|'hidden'>('open');
     const [forceOffline, setForceOffline] = useState(() => localStorage.getItem('komod-force-offline') === '1');
@@ -154,7 +155,7 @@ export default function FileBrowser() {
 
     useEffect(() => {
         if(!uploadProgress)return;
-        publishLocalTransfer({id:'device-upload',kind:'upload',title:uploadProgress.name,state:'downloading',percent:uploadProgress.percent,detail:`فایل ${uploadProgress.index} از ${uploadProgress.total}`});
+        publishLocalTransfer({id:'device-upload',kind:'upload',title:uploadProgress.name,state:'downloading',percent:uploadProgress.percent,detail:uploadProgress.phase==='processing'?'در حال ذخیره نهایی':`فایل ${uploadProgress.index} از ${uploadProgress.total}`});
     },[uploadProgress]);
     useEffect(()=>{const cancel=()=>uploadAbortRef.current?.abort();window.addEventListener('komod-cancel-upload',cancel);return()=>window.removeEventListener('komod-cancel-upload',cancel)},[]);
 
@@ -330,18 +331,20 @@ export default function FileBrowser() {
         }
     }, [activeSection, clearSelection]);
 
-    const handleWebUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-        const selected = Array.from(event.target.files || []);
-        event.target.value = '';
+    const uploadSelectedFiles = async (selected: globalThis.File[]) => {
         if (!selected.length) return;
+        if (uploadAbortRef.current) {
+            addToast('یک صف آپلود در حال اجراست؛ کمی صبر کن یا آن را لغو کن.', 'info');
+            return;
+        }
         const controller = new AbortController();
         uploadAbortRef.current = controller;
         setUploadPanelMode('open');
         let uploaded = 0;
         try {
             for (const file of selected) {
-                setUploadProgress({name:file.name,index:uploaded+1,total:selected.length,percent:0});
-                await uploadFileMutation.mutateAsync({ file, folderId: incomingFolderId, signal: controller.signal, onProgress: percent => setUploadProgress({name:file.name,index:uploaded+1,total:selected.length,percent}) });
+                setUploadProgress({name:file.name,index:uploaded+1,total:selected.length,percent:0,phase:'uploading'});
+                await uploadFileMutation.mutateAsync({ file, folderId: incomingFolderId, signal: controller.signal, onProgress: percent => setUploadProgress({name:file.name,index:uploaded+1,total:selected.length,percent,phase:percent >= 100 ? 'processing' : 'uploading'}) });
                 uploaded += 1;
             }
             publishLocalTransfer({id:'device-upload',kind:'upload',title:selected[selected.length-1]?.name||'آپلود از دستگاه',state:'done',percent:100,detail:`${uploaded} فایل ذخیره شد`});
@@ -352,6 +355,19 @@ export default function FileBrowser() {
             if (controller.signal.aborted || error?.code === 'ERR_CANCELED') addToast(uploaded ? `${uploaded.toLocaleString('fa-IR')} فایل ذخیره شد و ادامهٔ آپلود لغو شد.` : 'آپلود لغو شد.', 'info');
             else addToast(uploaded ? `${uploaded.toLocaleString('fa-IR')} فایل ذخیره شد؛ ادامهٔ آپلود متوقف شد.` : 'آپلود فایل انجام نشد. کمی بعد دوباره تلاش کن.', 'error');
         } finally { uploadAbortRef.current = null; setUploadProgress(null); }
+    };
+
+    const handleWebUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const selected = Array.from(event.target.files || []);
+        event.target.value = '';
+        void uploadSelectedFiles(selected);
+    };
+
+    const handleExternalFileDrop = (event: React.DragEvent<HTMLDivElement>) => {
+        event.preventDefault();
+        setIsFileDragOver(false);
+        const selected = Array.from(event.dataTransfer.files || []);
+        if (selected.length) void uploadSelectedFiles(selected);
     };
 
     // handle refresh
@@ -1068,7 +1084,7 @@ export default function FileBrowser() {
                 <div 
                     ref={containerRef}
                     data-main-scroll="true"
-                    className="relative flex-1 overflow-auto overscroll-y-contain p-4 pb-28 outline-none sm:p-6 md:pb-6 lg:p-8"
+                    className={`relative flex-1 overflow-auto overscroll-y-contain p-4 pb-28 outline-none transition sm:p-6 md:pb-6 lg:p-8 ${isFileDragOver?'ring-2 ring-inset ring-primary-400/60 bg-primary-500/[.04]':''}`}
                     style={{ overscrollBehaviorY: 'contain' }}
                     onTouchStart={handlePullStart}
                     onTouchMove={handlePullMove}
@@ -1079,9 +1095,12 @@ export default function FileBrowser() {
                     onMouseUp={handleMouseUp}
                     onMouseLeave={handleMouseUp}
                     tabIndex={0}
-                    // Prevent default drag behaviors on container
-                    onDragOver={(e) => e.preventDefault()}
+                    onDragEnter={event=>{if(event.dataTransfer.types.includes('Files'))setIsFileDragOver(true)}}
+                    onDragOver={event=>{event.preventDefault();if(event.dataTransfer.types.includes('Files'))event.dataTransfer.dropEffect='copy'}}
+                    onDragLeave={event=>{if(event.currentTarget===event.target)setIsFileDragOver(false)}}
+                    onDrop={handleExternalFileDrop}
                 >
+                    {isFileDragOver&&<div className="pointer-events-none fixed inset-4 z-[220] flex items-center justify-center rounded-3xl border-2 border-dashed border-primary-400/60 bg-dark-950/80 backdrop-blur-sm"><div className="text-center"><Upload className="mx-auto h-10 w-10 text-primary-300"/><p className="mt-3 font-bold">فایل‌ها را اینجا رها کن</p><p className="mt-1 text-xs text-dark-400">چند فایل با هم هم پشتیبانی می‌شود</p></div></div>}
                     {pullEnabled && pullDistance > 0 && <div className="pointer-events-none fixed left-1/2 top-20 z-50 -translate-x-1/2 rounded-full border border-white/10 bg-dark-900/95 px-3 py-1.5 text-xs text-primary-200 shadow-xl backdrop-blur" style={{ transform: `translate(-50%, ${pullDistance / 3}px)` }}>{pullDistance >= 52 ? 'رها کن تا تازه بشه ✨' : 'برای تازه‌سازی پایین بکش'}</div>}
                     {!readOnlyWorkspace && (selectionMode || selectedItems.length > 0) && activeSection === 'files' && (
                         <div className="fixed inset-x-4 top-20 z-40 mx-auto flex min-h-14 w-auto max-w-7xl flex-nowrap items-center gap-1 overflow-x-auto rounded-2xl border border-primary-500/25 bg-dark-900/95 p-1.5 shadow-2xl backdrop-blur-xl sm:hidden">
@@ -1407,7 +1426,7 @@ export default function FileBrowser() {
             />
             {showVaultPrompt && <div className="fixed inset-0 z-[190] flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-4" onClick={()=>setShowVaultPrompt(false)}><div className="w-full max-w-sm rounded-t-3xl border border-white/10 bg-dark-900 p-5 sm:rounded-3xl" onClick={event=>event.stopPropagation()}><div className="flex items-center gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary-500/15 text-primary-200"><EyeOff className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h2 className="font-bold">گاوصندوق</h2><p className="text-xs text-dark-400">موارد مخفی را کنار بقیهٔ فایل‌ها ببین.</p></div><button className="btn-icon" onClick={()=>setShowVaultPrompt(false)}><X className="h-5 w-5"/></button></div>{!sessionStorage.getItem('komod-vault-token')&&<input autoFocus type="password" value={vaultPassword} onChange={event=>setVaultPassword(event.target.value)} className="input mt-4 w-full" placeholder="رمز گاوصندوق"/>}<div className="mt-4 grid gap-2"><button disabled={unlockVault.isPending||(!sessionStorage.getItem('komod-vault-token')&&!vaultPassword)} onClick={()=>void showVaultItems()} className="btn-primary min-h-11 disabled:opacity-40">نمایش موارد مخفی</button>{showHidden&&<button onClick={closeVaultItems} className="min-h-10 rounded-xl text-sm text-red-300 hover:bg-red-500/10">بستن گاوصندوق</button>}</div></div></div>}
             {showAddMenu && createPortal(<div className="fixed inset-0 z-[260] flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-5" onClick={() => setShowAddMenu(false)}><div className="max-h-[min(86vh,42rem)] w-full max-w-md overflow-y-auto rounded-t-3xl border border-white/10 bg-dark-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl sm:rounded-3xl" onClick={event => event.stopPropagation()}><div className="mx-auto mb-4 h-1 w-12 rounded-full bg-white/20 sm:hidden"/><div className="flex items-center justify-between"><div><h2 className="font-bold">افزودن به کمد</h2><p className="mt-1 text-xs text-dark-500">چه چیزی می‌خواهی اضافه کنی؟</p></div><button className="btn-icon" onClick={() => setShowAddMenu(false)}><X className="h-5 w-5"/></button></div><div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-1">{[{label:'آپلود فایل',icon:<Upload className="h-5 w-5"/>,action:()=>uploadInputRef.current?.click()},{label:'یادداشت متنی',icon:<StickyNote className="h-5 w-5"/>,action:()=>{setTextFolder(incomingFolderId);setShowTextComposer(true)}},{label:'ساخت کشو',icon:<FolderPlus className="h-5 w-5"/>,action:()=>setShowNewFolder(true)},{label:'ذخیره از لینک',icon:<Link2 className="h-5 w-5"/>,action:openImportLink},{label:'ساخت صدا از متن',icon:<AudioLines className="h-5 w-5"/>,action:()=>openSpeechTools('tts')},{label:'استخراج متن از صدا',icon:<FileAudio className="h-5 w-5"/>,action:()=>openSpeechTools('stt')}].map(item=><button key={item.label} className="flex min-h-16 items-center gap-3 rounded-2xl border border-white/[.07] bg-dark-800/60 px-3 text-right text-sm transition hover:border-primary-400/20 hover:bg-primary-500/[.07] sm:min-h-14" onClick={()=>{setShowAddMenu(false);item.action()}}><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-500/10 text-primary-300">{item.icon}</span><span>{item.label}</span></button>)}</div></div></div>, document.body)}
-            {uploadProgress&&uploadPanelMode!=='hidden'&&(uploadPanelMode==='collapsed'?<button onClick={()=>setUploadPanelMode('open')} className="fixed bottom-24 left-3 z-[175] flex h-12 items-center gap-2 rounded-full border border-primary-500/25 bg-dark-900/95 px-3 text-xs shadow-2xl backdrop-blur-xl" title="نمایش جزئیات آپلود"><Upload className="h-4 w-4 animate-pulse text-primary-300"/><span>{uploadProgress.index.toLocaleString('fa-IR')}/{uploadProgress.total.toLocaleString('fa-IR')}</span><span dir="ltr" className="font-bold text-primary-200">{uploadProgress.percent}%</span><ChevronUp className="h-3.5 w-3.5"/></button>:<div className="fixed bottom-24 left-4 right-4 z-[175] mx-auto max-w-md rounded-2xl border border-primary-500/25 bg-dark-900/95 p-3 shadow-2xl backdrop-blur-xl"><div className="flex items-center gap-3"><Upload className="h-5 w-5 text-primary-300"/><div className="min-w-0 flex-1"><div className="flex justify-between gap-2 text-xs"><span className="truncate">{uploadProgress.name}</span><span dir="ltr">{uploadProgress.index}/{uploadProgress.total} · {uploadProgress.percent}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-dark-700"><div className="h-full rounded-full bg-primary-500 transition-[width]" style={{width:`${uploadProgress.percent}%`}}/></div><p className="mt-1 text-[10px] text-dark-500">فایل {uploadProgress.index.toLocaleString('fa-IR')} از {uploadProgress.total.toLocaleString('fa-IR')}</p></div><button className="btn-icon h-8 w-8" onClick={()=>setUploadPanelMode('collapsed')} title="نمایش خیلی کوچک"><Minus className="h-4 w-4"/></button><button className="btn-icon h-8 w-8" onClick={()=>setUploadPanelMode('hidden')} title="بستن وضعیت"><Eye className="h-4 w-4"/></button><button onClick={() => uploadAbortRef.current?.abort()} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-red-500/10 text-red-300 hover:bg-red-500/20" title="لغو آپلود"><X className="h-4 w-4"/></button></div></div>)}
+            {uploadProgress&&uploadPanelMode!=='hidden'&&(uploadPanelMode==='collapsed'?<button onClick={()=>setUploadPanelMode('open')} className="fixed bottom-24 left-3 z-[175] flex h-12 items-center gap-2 rounded-full border border-primary-500/25 bg-dark-900/95 px-3 text-xs shadow-2xl backdrop-blur-xl" title="نمایش جزئیات آپلود"><Upload className="h-4 w-4 animate-pulse text-primary-300"/><span>{uploadProgress.index.toLocaleString('fa-IR')}/{uploadProgress.total.toLocaleString('fa-IR')}</span><span dir="ltr" className="font-bold text-primary-200">{uploadProgress.phase==="processing"?"…":uploadProgress.percent+"%"}</span><ChevronUp className="h-3.5 w-3.5"/></button>:<div className="fixed bottom-24 left-4 right-4 z-[175] mx-auto max-w-md rounded-2xl border border-primary-500/25 bg-dark-900/95 p-3 shadow-2xl backdrop-blur-xl"><div className="flex items-center gap-3"><Upload className="h-5 w-5 text-primary-300"/><div className="min-w-0 flex-1"><div className="flex justify-between gap-2 text-xs"><span className="truncate">{uploadProgress.name}</span><span dir="ltr">{uploadProgress.index}/{uploadProgress.total} · {uploadProgress.phase==="processing"?"…":uploadProgress.percent+"%"}</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-dark-700"><div className="h-full rounded-full bg-primary-500 transition-[width]" style={{width:`${uploadProgress.percent}%`}}/></div><p className="mt-1 text-[10px] text-dark-500">{uploadProgress.phase==="processing"?"ارسال تمام شد؛ در حال ذخیره نهایی…":"در حال ارسال فایل جاری"}</p></div><button className="btn-icon h-8 w-8" onClick={()=>setUploadPanelMode('collapsed')} title="نمایش خیلی کوچک"><Minus className="h-4 w-4"/></button><button className="btn-icon h-8 w-8" onClick={()=>setUploadPanelMode('hidden')} title="بستن وضعیت"><Eye className="h-4 w-4"/></button><button onClick={() => uploadAbortRef.current?.abort()} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-red-500/10 text-red-300 hover:bg-red-500/20" title="لغو آپلود"><X className="h-4 w-4"/></button></div></div>)}
             {importJobs.length>0&&importPanelMode!=='hidden'&&(importPanelMode==='collapsed'?
                 <button onClick={()=>setImportPanelMode('open')} className="fixed bottom-24 left-3 z-[174] flex h-12 items-center gap-2 rounded-full border border-white/10 bg-dark-900/95 px-3 text-xs shadow-2xl backdrop-blur-xl" title="نمایش صف لینک‌ها"><Link2 className="h-4 w-4 animate-pulse text-primary-300"/><span>{importJobs.filter(job=>!['done','error','cancelled'].includes(job.state)).length.toLocaleString('fa-IR')} فعال</span><ChevronUp className="h-3.5 w-3.5"/></button>:
                 <div className="fixed bottom-24 left-4 right-4 z-[174] mx-auto max-w-md overflow-hidden rounded-2xl border border-white/10 bg-dark-900/95 shadow-2xl backdrop-blur-xl">
