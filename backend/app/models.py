@@ -134,6 +134,9 @@ class Folder(Base):
     parent_id: Mapped[Optional[int]] = mapped_column(ForeignKey("folders.id", ondelete="CASCADE"))
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
+    color: Mapped[Optional[str]] = mapped_column(String(7))
+    icon: Mapped[Optional[str]] = mapped_column(String(16))
+    cover_file_id: Mapped[Optional[int]] = mapped_column(ForeignKey("files.id", ondelete="SET NULL"), nullable=True)
     is_favorite: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_pinned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -145,7 +148,8 @@ class Folder(Base):
     user: Mapped["User"] = relationship(back_populates="folders")
     parent: Mapped[Optional["Folder"]] = relationship(back_populates="children", remote_side=[id])
     children: Mapped[List["Folder"]] = relationship(back_populates="parent", cascade="all, delete-orphan")
-    files: Mapped[List["File"]] = relationship(back_populates="folder")
+    files: Mapped[List["File"]] = relationship(back_populates="folder", foreign_keys="File.folder_id")
+    cover_file: Mapped[Optional["File"]] = relationship(foreign_keys="Folder.cover_file_id", post_update=True)
     
     # Indexes
     __table_args__ = (
@@ -193,7 +197,7 @@ class File(Base):
     
     # Relationships
     user: Mapped["User"] = relationship(back_populates="files")
-    folder: Mapped[Optional["Folder"]] = relationship(back_populates="files")
+    folder: Mapped[Optional["Folder"]] = relationship(back_populates="files", foreign_keys=[folder_id])
     watch_progress: Mapped[List["WatchProgress"]] = relationship(back_populates="file", cascade="all, delete-orphan")
     playlist_items: Mapped[List["PlaylistItem"]] = relationship(back_populates="file", cascade="all, delete-orphan")
     

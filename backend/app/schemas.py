@@ -40,7 +40,9 @@ class FolderBase(BaseModel):
 
 
 class FolderCreate(FolderBase):
-    pass
+    color: Optional[str] = None
+    icon: Optional[str] = None
+    cover_file_id: Optional[int] = None
 
 
 class FolderUpdate(BaseModel):
@@ -50,6 +52,9 @@ class FolderUpdate(BaseModel):
     is_favorite: Optional[bool] = None
     is_pinned: Optional[bool] = None
     is_hidden: Optional[bool] = None
+    color: Optional[str] = None
+    icon: Optional[str] = None
+    cover_file_id: Optional[int] = None
 
 
 class FolderResponse(FolderBase):
@@ -62,6 +67,10 @@ class FolderResponse(FolderBase):
     is_pinned: bool = False
     is_default: bool = False
     is_hidden: bool = False
+    color: Optional[str] = None
+    icon: Optional[str] = None
+    cover_file_id: Optional[int] = None
+    cover_url: Optional[str] = None
     
     model_config = ConfigDict(from_attributes=True)
 

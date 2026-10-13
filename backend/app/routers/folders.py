@@ -3,6 +3,7 @@ Folder management API endpoints.
 """
 from typing import Optional, List
 import logging
+import re
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, update, delete, text, asc, desc
@@ -16,6 +17,35 @@ from ..telegram import delete_from_storage_channel
 
 router = APIRouter(prefix="/folders", tags=["Folders"])
 logger = logging.getLogger(__name__)
+
+
+def folder_appearance(folder: Folder) -> dict:
+    return {
+        "color": folder.color,
+        "icon": folder.icon,
+        "cover_file_id": folder.cover_file_id,
+        "cover_url": f"/api/stream/{folder.cover_file_id}?workspace={folder.user_id}" if folder.cover_file_id else None,
+    }
+
+
+def normalize_folder_color(value: str | None) -> str | None:
+    if value is None or value == "":
+        return None
+    value = value.strip().upper()
+    if not re.fullmatch(r"#[0-9A-F]{6}", value):
+        raise HTTPException(status_code=400, detail="رنگ کشو باید یک کد شش‌رقمی معتبر باشد")
+    return value
+
+
+async def validate_folder_cover(db: AsyncSession, user_id: int, file_id: int | None) -> int | None:
+    if file_id is None:
+        return None
+    cover = (await db.execute(select(File).where(
+        File.id == file_id, File.user_id == user_id, File.file_type == "image"
+    ))).scalar_one_or_none()
+    if cover is None:
+        raise HTTPException(status_code=400, detail="عکس کاور در کمد پیدا نشد")
+    return cover.id
 
 
 async def ensure_default_folder(db: AsyncSession, user_id: int) -> Folder:
@@ -166,6 +196,7 @@ async def list_folders(
         created_at=folder.created_at, updated_at=folder.updated_at,
         file_count=counts.get(folder.id, 0), is_favorite=folder.is_favorite,
         is_pinned=folder.is_pinned, is_default=folder.is_default, is_hidden=folder.is_hidden,
+        **folder_appearance(folder),
     ) for folder in folders]
 
 
@@ -195,6 +226,7 @@ async def get_folder_tree(
         "created_at": folder.created_at, "updated_at": folder.updated_at,
         "file_count": counts.get(folder.id, 0), "is_favorite": folder.is_favorite,
         "is_pinned": folder.is_pinned, "is_default": folder.is_default, "is_hidden": folder.is_hidden, "children": [],
+        **folder_appearance(folder),
     } for folder in folders}
     roots = []
     for folder_data in folder_map.values():
@@ -227,6 +259,7 @@ async def get_folder(
         file_count=await get_folder_file_count(db, folder.id),
         is_favorite=folder.is_favorite, is_pinned=folder.is_pinned,
         is_default=folder.is_default, is_hidden=folder.is_hidden,
+        **folder_appearance(folder),
     )
 
 
@@ -264,6 +297,9 @@ async def create_folder(
         name=folder_data.name,
         description=folder_data.description.strip()[:1024] if folder_data.description else None,
         parent_id=folder_data.parent_id,
+        color=normalize_folder_color(folder_data.color),
+        icon=(folder_data.icon or "").strip()[:16] or None,
+        cover_file_id=await validate_folder_cover(db, current_user.id, folder_data.cover_file_id),
     )
     db.add(folder)
     await db.commit()
@@ -281,6 +317,8 @@ async def create_folder(
         is_favorite=folder.is_favorite,
         is_pinned=folder.is_pinned,
         is_default=folder.is_default,
+        is_hidden=folder.is_hidden,
+        **folder_appearance(folder),
     )
 
 
@@ -315,6 +353,12 @@ async def update_folder(
         folder.is_favorite = update_data.is_favorite
     if update_data.is_pinned is not None:
         folder.is_pinned = update_data.is_pinned
+    if "color" in update_data.model_fields_set:
+        folder.color = normalize_folder_color(update_data.color)
+    if "icon" in update_data.model_fields_set:
+        folder.icon = (update_data.icon or "").strip()[:16] or None
+    if "cover_file_id" in update_data.model_fields_set:
+        folder.cover_file_id = await validate_folder_cover(db, current_user.id, update_data.cover_file_id)
     if update_data.is_hidden is not None:
         if update_data.is_hidden and not current_user.vault_password_hash:
             raise HTTPException(status_code=409, detail="ابتدا برای گاوصندوق رمز تعیین کن")
@@ -390,6 +434,7 @@ async def update_folder(
         is_favorite=folder.is_favorite,
         is_pinned=folder.is_pinned,
         is_default=folder.is_default, is_hidden=folder.is_hidden,
+        **folder_appearance(folder),
     )
 
 

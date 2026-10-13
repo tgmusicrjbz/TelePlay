@@ -169,6 +169,12 @@ async def init_db():
             await conn.execute(text(f"ALTER TABLE folders ADD COLUMN is_default {favorite_type} NOT NULL DEFAULT {favorite_default}"))
         if "is_hidden" not in folder_columns:
             await conn.execute(text(f"ALTER TABLE folders ADD COLUMN is_hidden {favorite_type} NOT NULL DEFAULT {favorite_default}"))
+        if "color" not in folder_columns:
+            await conn.execute(text("ALTER TABLE folders ADD COLUMN color VARCHAR(7)"))
+        if "icon" not in folder_columns:
+            await conn.execute(text("ALTER TABLE folders ADD COLUMN icon VARCHAR(16)"))
+        if "cover_file_id" not in folder_columns:
+            await conn.execute(text("ALTER TABLE folders ADD COLUMN cover_file_id INTEGER REFERENCES files(id) ON DELETE SET NULL"))
         bot_state_columns = await conn.run_sync(
             lambda sync_conn: {column["name"] for column in inspect(sync_conn).get_columns("bot_user_states")}
         )
