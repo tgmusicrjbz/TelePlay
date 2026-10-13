@@ -34,6 +34,16 @@ class STTQueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, "# متن\n\nخروجی دقیق")
         self.assertEqual(calls, ["first", "second"])
 
+    async def test_all_rate_limited_keys_report_the_real_reason(self):
+        provider = GeminiSTTProvider(["first", "second"])
+
+        def fake_request(_key, _path, _mime_type, _prompt):
+            raise GeminiRequestError(429, "limited")
+
+        provider._request = fake_request
+        with self.assertRaisesRegex(RuntimeError, "سهمیه یا محدودیت درخواست"):
+            await provider.transcribe(Path(__file__), "audio/mpeg", "")
+
     async def test_statuses_are_private_and_finished_jobs_can_be_dismissed(self):
         provider = GeminiSTTProvider([])
         queue = STTQueue(provider)

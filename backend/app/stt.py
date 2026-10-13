@@ -90,7 +90,19 @@ class GeminiSTTProvider:
             except (TimeoutError, URLError) as error:
                 last_error = error
                 self.cooldowns[key] = datetime.utcnow() + timedelta(seconds=15)
-        raise RuntimeError("هیچ‌کدام از کلیدهای Gemini برای تبدیل صدا پاسخ ندادند.") from last_error
+        if isinstance(last_error, GeminiRequestError):
+            if last_error.status == 429:
+                detail = "سهمیه یا محدودیت درخواست همه کلیدهای Gemini پر شده است. کمی بعد دوباره تلاش کن."
+            elif last_error.status in {401, 403}:
+                detail = "کلیدهای Gemini رد شدند؛ دسترسی API، محدودیت کلید و فعال‌بودن صورت‌حساب را بررسی کن."
+            elif last_error.status in {500, 502, 503, 504}:
+                detail = "سرویس Gemini موقتاً در دسترس نیست. کمی بعد دوباره تلاش کن."
+            else:
+                detail = last_error.user_detail()
+            raise RuntimeError(f"تبدیل صدا با {settings.gemini_stt_model} انجام نشد: {detail}") from last_error
+        if isinstance(last_error, (TimeoutError, URLError)):
+            raise RuntimeError("سرور کمد نتوانست به Gemini متصل شود؛ اتصال خروجی سرور را بررسی کن.") from last_error
+        raise RuntimeError("Gemini متن معتبری از فایل برنگرداند.") from last_error
 
     @staticmethod
     def _json_request(request: Request, timeout: int = 180) -> tuple[dict, object]:
