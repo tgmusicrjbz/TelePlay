@@ -103,7 +103,7 @@ class TTSVoicePreview(Base):
 
 
 class TTSUsage(Base):
-    """Per-user TTS limits and durable usage counters."""
+    """Per-user speech limits and durable TTS/STT usage counters."""
     __tablename__ = "tts_usage"
 
     user_id: Mapped[int] = mapped_column(
@@ -115,6 +115,11 @@ class TTSUsage(Base):
     usage_date: Mapped[Optional[date]] = mapped_column(Date)
     total_jobs: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     total_chars: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    stt_daily_limit: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    stt_max_seconds: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    stt_used_today: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    stt_total_jobs: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    stt_total_seconds: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )

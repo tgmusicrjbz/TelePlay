@@ -117,6 +117,13 @@ async def init_db():
             active_type = "BOOLEAN" if url.drivername.startswith("postgresql") else "INTEGER"
             active_default = "TRUE" if url.drivername.startswith("postgresql") else "1"
             await conn.execute(text(f"ALTER TABLE users ADD COLUMN is_active {active_type} NOT NULL DEFAULT {active_default}"))
+        usage_columns = await conn.run_sync(
+            lambda sync_conn: {column["name"] for column in inspect(sync_conn).get_columns("tts_usage")}
+        )
+        for column_name in ("stt_daily_limit", "stt_max_seconds", "stt_used_today", "stt_total_jobs", "stt_total_seconds"):
+            if column_name not in usage_columns:
+                column_type = "BIGINT" if column_name == "stt_total_seconds" else "INTEGER"
+                await conn.execute(text(f"ALTER TABLE tts_usage ADD COLUMN {column_name} {column_type} NOT NULL DEFAULT 0"))
         columns = await conn.run_sync(
             lambda sync_conn: {column["name"] for column in inspect(sync_conn).get_columns("files")}
         )

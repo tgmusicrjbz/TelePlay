@@ -276,18 +276,25 @@ async def admin_stats(_: User = Depends(require_admin), db: AsyncSession = Depen
     total_files, total_size = (await db.execute(select(
         func.count(File.id), func.coalesce(func.sum(File.file_size), 0)
     ))).one()
-    tts_total_jobs, tts_total_chars = (await db.execute(select(
+    tts_total_jobs, tts_total_chars, stt_total_jobs, stt_total_seconds = (await db.execute(select(
         func.coalesce(func.sum(TTSUsage.total_jobs), 0),
         func.coalesce(func.sum(TTSUsage.total_chars), 0),
+        func.coalesce(func.sum(TTSUsage.stt_total_jobs), 0),
+        func.coalesce(func.sum(TTSUsage.stt_total_seconds), 0),
     ))).one()
     tts_jobs_today = (await db.execute(select(
         func.coalesce(func.sum(TTSUsage.used_today), 0)
+    ).where(TTSUsage.usage_date == datetime.utcnow().date()))).scalar_one()
+    stt_jobs_today = (await db.execute(select(
+        func.coalesce(func.sum(TTSUsage.stt_used_today), 0)
     ).where(TTSUsage.usage_date == datetime.utcnow().date()))).scalar_one()
     return AdminStatsResponse(
         active_users=int(active_users or 0), total_users=int(total_users or 0),
         total_files=int(total_files or 0), total_size=int(total_size or 0),
         tts_jobs_today=int(tts_jobs_today or 0), tts_total_jobs=int(tts_total_jobs or 0),
         tts_total_chars=int(tts_total_chars or 0),
+        stt_jobs_today=int(stt_jobs_today or 0), stt_total_jobs=int(stt_total_jobs or 0),
+        stt_total_seconds=int(stt_total_seconds or 0),
     )
 
 
@@ -323,6 +330,11 @@ async def admin_users(_: User = Depends(require_admin), db: AsyncSession = Depen
             "tts_used_today": usage.used_today if usage and usage.usage_date == datetime.utcnow().date() else 0,
             "tts_total_jobs": usage.total_jobs if usage else 0,
             "tts_total_chars": usage.total_chars if usage else 0,
+            "stt_daily_limit": usage.stt_daily_limit if usage else 0,
+            "stt_max_seconds": usage.stt_max_seconds if usage else 0,
+            "stt_used_today": usage.stt_used_today if usage and usage.usage_date == datetime.utcnow().date() else 0,
+            "stt_total_jobs": usage.stt_total_jobs if usage else 0,
+            "stt_total_seconds": usage.stt_total_seconds if usage else 0,
         })
         for user, size, files, sessions, usage in rows
     ]
@@ -380,7 +392,7 @@ async def update_admin_user(user_id: int, payload: AdminUserUpdate, admin: User 
             for session in sessions:
                 session.revoked_at = datetime.utcnow()
     usage = await db.get(TTSUsage, user.id)
-    if payload.tts_daily_limit is not None or payload.tts_max_chars is not None:
+    if any(value is not None for value in (payload.tts_daily_limit, payload.tts_max_chars, payload.stt_daily_limit, payload.stt_max_seconds)):
         if usage is None:
             usage = TTSUsage(user_id=user.id, usage_date=datetime.utcnow().date())
             db.add(usage)
@@ -388,6 +400,10 @@ async def update_admin_user(user_id: int, payload: AdminUserUpdate, admin: User 
             usage.daily_limit = payload.tts_daily_limit
         if payload.tts_max_chars is not None:
             usage.max_chars = payload.tts_max_chars
+        if payload.stt_daily_limit is not None:
+            usage.stt_daily_limit = payload.stt_daily_limit
+        if payload.stt_max_seconds is not None:
+            usage.stt_max_seconds = payload.stt_max_seconds
     await db.commit()
     size = (await db.execute(select(func.coalesce(func.sum(File.file_size), 0)).where(File.user_id == user.id))).scalar_one()
     files = (await db.execute(select(func.count(File.id)).where(File.user_id == user.id))).scalar_one()
@@ -399,4 +415,9 @@ async def update_admin_user(user_id: int, payload: AdminUserUpdate, admin: User 
         "tts_used_today": usage.used_today if usage and usage.usage_date == datetime.utcnow().date() else 0,
         "tts_total_jobs": usage.total_jobs if usage else 0,
         "tts_total_chars": usage.total_chars if usage else 0,
+        "stt_daily_limit": usage.stt_daily_limit if usage else 0,
+        "stt_max_seconds": usage.stt_max_seconds if usage else 0,
+        "stt_used_today": usage.stt_used_today if usage and usage.usage_date == datetime.utcnow().date() else 0,
+        "stt_total_jobs": usage.stt_total_jobs if usage else 0,
+        "stt_total_seconds": usage.stt_total_seconds if usage else 0,
     })

@@ -36,8 +36,8 @@ export interface User {
 
 export interface AuthSession { id: string; device_name: string; user_agent?: string | null; ip_address?: string | null; created_at: string; last_seen_at: string; current: boolean; }
 export interface Workspace { user_id: number; telegram_id: number; name: string; username?: string | null; permission: 'owner' | 'read' | 'write'; folder_ids: number[]; file_ids: number[]; }
-export interface AdminUser extends User { total_size: number; file_count: number; session_count: number; tts_daily_limit:number; tts_max_chars:number; tts_used_today:number; tts_total_jobs:number; tts_total_chars:number; }
-export interface AdminStats { active_users: number; total_users: number; total_files: number; total_size: number; tts_jobs_today:number; tts_total_jobs:number; tts_total_chars:number; }
+export interface AdminUser extends User { total_size: number; file_count: number; session_count: number; tts_daily_limit:number; tts_max_chars:number; tts_used_today:number; tts_total_jobs:number; tts_total_chars:number; stt_daily_limit:number; stt_max_seconds:number; stt_used_today:number; stt_total_jobs:number; stt_total_seconds:number; }
+export interface AdminStats { active_users: number; total_users: number; total_files: number; total_size: number; tts_jobs_today:number; tts_total_jobs:number; tts_total_chars:number; stt_jobs_today:number; stt_total_jobs:number; stt_total_seconds:number; }
 export interface AccountPreferences { delete_storage_files: boolean; }
 export interface TagDefinition { name: string; color: string; file_count?: number; }
 export interface TagSettings { tags: TagDefinition[]; show_file_tags: boolean; display_limit: number; }
@@ -158,6 +158,8 @@ export interface LoginCodeResponse {
 
 export interface StorageStats {
     total_size: number;
+    total_files: number;
+    by_type: Array<{ type: TelegramFile['file_type']; count: number; size: number }>;
     limit: number;
 }
 
@@ -941,7 +943,7 @@ export const useSetStorageChannel = () => { const queryClient=useQueryClient(); 
 export const useResetStorageChannel = () => { const queryClient=useQueryClient(); return useMutation({ mutationFn: async()=>api.delete('/accounts/storage-channel'), onSuccess:()=>queryClient.invalidateQueries({queryKey:['storageChannel']}) }); };
 export const useUpdateAdminUser = () => {
     const queryClient = useQueryClient();
-    return useMutation({ mutationFn: async ({ id, ...payload }: { id: number; display_name?: string; is_active?: boolean; tts_daily_limit?:number; tts_max_chars?:number }) => (await api.patch<AdminUser>(`/admin/users/${id}`, payload)).data, onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['adminUsers'] }); queryClient.invalidateQueries({queryKey:['adminStats']}); } });
+    return useMutation({ mutationFn: async ({ id, ...payload }: { id: number; display_name?: string; is_active?: boolean; tts_daily_limit?:number; tts_max_chars?:number; stt_daily_limit?:number; stt_max_seconds?:number }) => (await api.patch<AdminUser>(`/admin/users/${id}`, payload)).data, onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['adminUsers'] }); queryClient.invalidateQueries({queryKey:['adminStats']}); } });
 };
 export const useAddAdminUser = () => {
     const queryClient = useQueryClient();

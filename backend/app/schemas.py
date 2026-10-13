@@ -336,6 +336,8 @@ class AdminUserUpdate(BaseModel):
     is_active: Optional[bool] = None
     tts_daily_limit: Optional[int] = Field(default=None, ge=0, le=10000)
     tts_max_chars: Optional[int] = Field(default=None, ge=100, le=200_000)
+    stt_daily_limit: Optional[int] = Field(default=None, ge=0, le=10000)
+    stt_max_seconds: Optional[int] = Field(default=None, ge=0, le=604_800)
 
 
 class AdminUserCreate(BaseModel):
@@ -352,6 +354,11 @@ class AdminUserResponse(UserResponse):
     tts_used_today: int = 0
     tts_total_jobs: int = 0
     tts_total_chars: int = 0
+    stt_daily_limit: int = 0
+    stt_max_seconds: int = 0
+    stt_used_today: int = 0
+    stt_total_jobs: int = 0
+    stt_total_seconds: int = 0
 
 
 class AdminStatsResponse(BaseModel):
@@ -362,6 +369,9 @@ class AdminStatsResponse(BaseModel):
     tts_jobs_today: int = 0
     tts_total_jobs: int = 0
     tts_total_chars: int = 0
+    stt_jobs_today: int = 0
+    stt_total_jobs: int = 0
+    stt_total_seconds: int = 0
 
 
 class StorageChannelUpdate(BaseModel):

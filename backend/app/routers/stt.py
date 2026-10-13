@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import get_current_user
 from ..database import get_db
 from ..models import File, Folder, User
-from ..stt import STTJob, stt_queue
+from ..stt import STTJob, consume_stt_quota, stt_queue
 
 router = APIRouter(prefix="/stt", tags=["Speech to text"])
 
@@ -31,6 +31,10 @@ async def create_stt_job(payload: STTCreate, current_user: User = Depends(get_cu
         raise HTTPException(status_code=404, detail="فایل صوتی یا ویدیویی پیدا نشد.")
     if payload.folder_id is not None and (await db.execute(select(Folder.id).where(Folder.id == payload.folder_id, Folder.user_id == current_user.id))).scalar_one_or_none() is None:
         raise HTTPException(status_code=404, detail="کشوی مقصد پیدا نشد.")
+    try:
+        await consume_stt_quota(db, current_user.id, int(source.duration or 0))
+    except ValueError as error:
+        raise HTTPException(status_code=429, detail=str(error)) from error
     job = STTJob(user_id=current_user.id, source_file_id=source.id, title=payload.title.strip(), folder_id=payload.folder_id, prompt=payload.prompt.strip(), output_mode=payload.output_mode)
     position = await stt_queue.enqueue(job)
     return {"job_id": job.id, "queue_position": position, "message": "تبدیل صدا به متن شروع شد."}

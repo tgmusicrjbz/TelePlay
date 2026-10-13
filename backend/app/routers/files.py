@@ -547,7 +547,7 @@ async def get_storage_stats(
     request: Request = None,
 ):
     """Get total storage usage."""
-    query = select(func.sum(File.file_size)).where(File.user_id == current_user.id)
+    conditions = [File.user_id == current_user.id]
     scope = workspace_scope(request)
     if scope and (scope["folder_ids"] or scope["file_ids"]):
         clauses = []
@@ -556,12 +556,24 @@ async def get_storage_stats(
         allowed_folders = getattr(request.state, "workspace_allowed_folder_ids", set())
         if allowed_folders:
             clauses.append(File.folder_id.in_(allowed_folders))
-        query = query.where(or_(*clauses))
-    result = await db.execute(query)
-    total_size = result.scalar() or 0
+        if clauses:
+            conditions.append(or_(*clauses))
+    result = await db.execute(select(func.sum(File.file_size), func.count(File.id)).where(*conditions))
+    total_size, total_files = result.one()
+    breakdown_result = await db.execute(
+        select(File.file_type, func.count(File.id), func.sum(File.file_size))
+        .where(*conditions)
+        .group_by(File.file_type)
+    )
+    by_type = [
+        {"type": file_type or "document", "count": count or 0, "size": size or 0}
+        for file_type, count, size in breakdown_result.all()
+    ]
     
     return {
-        "total_size": total_size,
+        "total_size": total_size or 0,
+        "total_files": total_files or 0,
+        "by_type": by_type,
         "limit": -1  # Unlimited
     }
 

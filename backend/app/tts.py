@@ -107,6 +107,7 @@ async def consume_tts_quota(db, user_id: int, character_count: int) -> TTSUsage:
     if usage.usage_date != today:
         usage.usage_date = today
         usage.used_today = 0
+        usage.stt_used_today = 0
     if character_count > usage.max_chars:
         raise ValueError(f"طول متن از سقف {to_persian_digits(usage.max_chars)} نویسه بیشتر است.")
     if usage.daily_limit and usage.used_today >= usage.daily_limit:

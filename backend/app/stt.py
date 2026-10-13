@@ -23,13 +23,36 @@ from sqlalchemy import select
 from . import telegram
 from .config import get_settings
 from .database import async_session
-from .models import File, Folder, User
+from .models import File, Folder, TTSUsage, User
 from .services import sanitize_filename
 from .tts import GeminiRequestError
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 TERMINAL_STATES = {"done", "error", "cancelled"}
+
+
+async def consume_stt_quota(db, user_id: int, duration: int) -> TTSUsage:
+    """Validate and account for an accepted transcription request."""
+    today = datetime.utcnow().date()
+    usage = await db.get(TTSUsage, user_id)
+    if usage is None:
+        usage = TTSUsage(user_id=user_id, usage_date=today)
+        db.add(usage)
+        await db.flush()
+    if usage.usage_date != today:
+        usage.usage_date = today
+        usage.used_today = 0
+        usage.stt_used_today = 0
+    if usage.stt_max_seconds and duration > usage.stt_max_seconds:
+        raise ValueError("مدت فایل از سقف مجاز تبدیل صوت به متن بیشتر است.")
+    if usage.stt_daily_limit and usage.stt_used_today >= usage.stt_daily_limit:
+        raise ValueError("سهمیه روزانه استخراج متن برای این حساب تمام شده است.")
+    usage.stt_used_today += 1
+    usage.stt_total_jobs += 1
+    usage.stt_total_seconds += max(0, duration)
+    await db.commit()
+    return usage
 
 
 class GeminiSTTProvider:
