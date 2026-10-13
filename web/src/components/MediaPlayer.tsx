@@ -460,16 +460,14 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
 
         if (event.pointerType !== 'touch') {
             if (isVideo) toggleVideoControls();
-            else { setShowControls(true); togglePlay(); }
+            else setShowControls(current => !current);
             return;
         }
 
-        // A tap on the music player toggles playback and must never hide its
-        // controls. The video-only single/double tap logic below used to run
-        // for audio on touch screens and immediately collapsed the overlay.
+        // A tap on the music artwork only toggles the controls. Playback is
+        // changed exclusively by the transport button or hardware controls.
         if (!isVideo) {
-            setShowControls(true);
-            togglePlay();
+            setShowControls(current => !current);
             return;
         }
 
@@ -627,7 +625,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
             data-media-kind={isVideo ? 'video' : 'audio'}
             data-controls-locked={controlsLocked ? 'true' : 'false'}
             style={!isMinimized && !isVideo ? ({ backgroundImage: authorizedThumbnailUrl ? `linear-gradient(135deg, rgba(8,10,20,.96), rgba(38,12,54,.84)), url(${authorizedThumbnailUrl})` : 'linear-gradient(135deg, #080a14, #260c36)', backgroundPosition: 'center', backgroundSize: 'cover' }) : undefined}
-            onMouseMove={!isMinimized && !isVideo ? revealControls : undefined}
+            onMouseMove={undefined}
             onPointerUp={!isMinimized ? handlePlayerPointerUp : undefined}
             onDoubleClick={!isMinimized && !controlsLocked ? toggleFullscreen : undefined}
         >
