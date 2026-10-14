@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.database import Base, async_session, engine
 from app.models import TTSUsage, User
-from app.tts import GeminiRequestError, GeminiTTSProvider, TTSJob, TTSQueue, build_interaction_content, consume_tts_quota, extract_interaction_audio, merge_wav, normalize_tts_settings, split_long_text
+from app.tts import DIRECTOR_NOTES_SYSTEM_INSTRUCTION, GeminiRequestError, GeminiTTSProvider, TTSJob, TTSQueue, build_interaction_content, consume_tts_quota, extract_interaction_audio, merge_wav, normalize_director_notes, normalize_tts_settings, split_long_text
 
 
 def wav_with_frames(frames: bytes, rate: int = 24000) -> bytes:
@@ -58,16 +58,21 @@ class TTSHelpersTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(preferences["folder_id"], 42)
         self.assertEqual(preferences["use_case"], "podcast")
 
-    def test_scoped_style_tags_only_annotate_their_own_text(self):
+    def test_legacy_scoped_tags_become_director_notes(self):
         content = build_interaction_content("شروع <whisper>این بخش آرام است.</whisper> پایان", "روان")
-        self.assertEqual([part["text"] for part in content], ["شروع ", "این بخش آرام است.", " پایان"])
+        self.assertEqual(content[0]["text"], "شروع [whispering]این بخش آرام است.[resumes normal speech] پایان")
         self.assertEqual(content[0]["annotations"][0]["style"], "روان")
-        self.assertIn("نجوا", content[1]["annotations"][0]["style"])
-        self.assertEqual(content[2]["annotations"][0]["style"], "روان")
+        self.assertNotIn("<", content[0]["text"])
 
     def test_point_cues_are_kept_verbatim(self):
         content = build_interaction_content("سلام <laugh> دنیا", "طبیعی")
-        self.assertEqual(content[0]["text"], "سلام <laugh> دنیا")
+        self.assertEqual(content[0]["text"], "سلام [chuckle] دنیا")
+
+    def test_all_legacy_tags_are_normalized_without_angle_brackets(self):
+        result = normalize_director_notes("<phew> <laughter> <story>قصه</story>")
+        self.assertEqual(result, "[relieved sigh] [laughs] [storytelling]قصه[resumes normal speech]")
+        self.assertNotIn("<", result)
+        self.assertNotIn(">", result)
 
     async def test_provider_rotates_to_next_key_after_rate_limit(self):
         provider = GeminiTTSProvider(["first", "second"])
@@ -136,6 +141,7 @@ class TTSHelpersTests(unittest.IsolatedAsyncioTestCase):
         text_part = captured["payload"]["input"][0]["content"][0]
         self.assertEqual(text_part["text"], "متن اصلی")
         self.assertEqual(text_part["annotations"][0]["type"], "speech_metadata")
+        self.assertEqual(captured["payload"]["system_instruction"], DIRECTOR_NOTES_SYSTEM_INSTRUCTION)
 
     def test_interaction_audio_supports_sdk_convenience_shape(self):
         expected = wav_with_frames(b"\x04\x00" * 4)

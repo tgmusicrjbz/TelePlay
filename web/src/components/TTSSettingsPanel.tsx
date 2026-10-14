@@ -8,27 +8,38 @@ const GENDERS=[{value:'all',label:'همه صداها'},{value:'female',label:'ص
 const PITCHES=[{value:'all',label:'همه زیر و بمی‌ها'},{value:'high',label:'زیر و روشن'},{value:'medium',label:'متعادل'},{value:'low',label:'بم و عمیق'}] as const;
 const USE_CASES=[{value:'general',label:'کاربرد عمومی'},{value:'audiobook',label:'کتاب صوتی'},{value:'podcast',label:'پادکست'},{value:'story',label:'داستان'},{value:'education',label:'آموزش'},{value:'news',label:'خبر و گزارش'},{value:'advertising',label:'معرفی و تبلیغ'},{value:'accessibility',label:'خوانش دسترس‌پذیر'}] as const;
 const CUES=[
-    {label:'مکث کوتاه',tag:'<short pause>'},{label:'مکث بلند',tag:'<long pause>'},{label:'آه',tag:'<sigh>'},
-    {label:'خنده',tag:'<laugh>'},{label:'قهقهه',tag:'<laughter>'},{label:'نفس',tag:'<breath>'},
-    {label:'سرفه',tag:'<cough>'},{label:'نفس راحت',tag:'<phew>'},{label:'تعجب',tag:'<gasp>'},
+    {label:'مکث کوتاه',tag:'[short pause]'},{label:'مکث بلند',tag:'[long pause]'},{label:'آه',tag:'[sigh]'},
+    {label:'خنده',tag:'[chuckle]'},{label:'قهقهه',tag:'[laughs]'},{label:'نفس',tag:'[breath]'},
+    {label:'سرفه',tag:'[cough]'},{label:'نفس راحت',tag:'[relieved sigh]'},{label:'تعجب',tag:'[gasp]'},
 ];
 const SCOPED_CUES=[
-    {label:'نجوا',tag:'whisper'},{label:'آرام',tag:'soft'},{label:'هیجان',tag:'excited'},{label:'غمگین',tag:'sad'},
-    {label:'عصبانی',tag:'angry'},{label:'رسمی',tag:'formal'},{label:'داستانی',tag:'story'},
+    {label:'نجوا',tag:'[whispering]'},{label:'آرام',tag:'[soft]'},{label:'هیجان',tag:'[excited]'},{label:'غمگین',tag:'[sad]'},
+    {label:'عصبانی',tag:'[angry]'},{label:'رسمی',tag:'[formal]'},{label:'داستانی',tag:'[storytelling]'},
 ];
 const TAG_LABELS:Record<string,string>={
-    '<short pause>':'مکث کوتاه','<long pause>':'مکث بلند','<sigh>':'آه','<laugh>':'خنده','<laughter>':'قهقهه',
-    '<breath>':'نفس','<cough>':'سرفه','<phew>':'نفس راحت','<gasp>':'تعجب',
-    '<whisper>':'شروع نجوا','</whisper>':'پایان نجوا','<soft>':'شروع آرام','</soft>':'پایان آرام',
-    '<excited>':'شروع هیجان','</excited>':'پایان هیجان','<sad>':'شروع غم','</sad>':'پایان غم',
-    '<angry>':'شروع خشم','</angry>':'پایان خشم','<formal>':'شروع رسمی','</formal>':'پایان رسمی',
-    '<story>':'شروع داستانی','</story>':'پایان داستانی',
+    '[short pause]':'مکث کوتاه','[long pause]':'مکث بلند','[sigh]':'آه','[chuckle]':'خنده','[laughs]':'قهقهه',
+    '[breath]':'نفس','[cough]':'سرفه','[relieved sigh]':'نفس راحت','[gasp]':'تعجب',
+    '[whispering]':'نجوا','[soft]':'آرام','[excited]':'هیجان','[sad]':'غمگین','[angry]':'عصبانی',
+    '[formal]':'رسمی','[storytelling]':'داستانی','[resumes normal speech]':'بازگشت به لحن عادی',
 };
 
+const LEGACY_TAGS:Record<string,string>={
+    'short pause':'short pause','long pause':'long pause',sigh:'sigh',phew:'relieved sigh',laugh:'chuckle',laughter:'laughs',
+    breath:'breath',cough:'cough',gasp:'gasp',whisper:'whispering',soft:'soft',excited:'excited',sad:'sad',angry:'angry',formal:'formal',story:'storytelling',
+};
+function normalizeDirectorNotes(value:string){
+    return value.replace(/<\s*(\/?)\s*([^<>]+?)\s*>/g,(_match,closing:string,raw:string)=>{
+        const key=raw.trim().toLowerCase();
+        if(closing&&['whisper','soft','excited','sad','angry','formal','story'].includes(key))return '[resumes normal speech]';
+        return `[${LEGACY_TAGS[key]||key}]`;
+    }).replace(/[<>]/g,'');
+}
+
 function TaggedTextPreview({text}:{text:string}){
-    if(!text.match(/<[^>]+>/)) return null;
-    const pieces=text.split(/(<\/?[^>]+>)/g).filter(Boolean);
-    return <div className="mt-2 max-h-32 whitespace-pre-wrap overflow-y-auto rounded-xl border border-white/[.07] bg-dark-950/35 p-3 text-xs leading-7 text-dark-300" dir="auto">{pieces.map((piece,index)=>TAG_LABELS[piece.toLowerCase()]?<span key={index} className="mx-1 inline-flex rounded-full bg-primary-500/15 px-2 py-0.5 text-[10px] font-medium text-primary-200">{TAG_LABELS[piece.toLowerCase()]}</span>:<span key={index}>{piece}</span>)}</div>;
+    const normalized=normalizeDirectorNotes(text);
+    if(!normalized.match(/\[[^\]\n]+\]/)) return null;
+    const pieces=normalized.split(/(\[[^\]\n]+\])/g).filter(Boolean);
+    return <div className="mt-2 max-h-32 whitespace-pre-wrap overflow-y-auto rounded-xl border border-white/[.07] bg-dark-950/35 p-3 text-xs leading-7 text-dark-300" dir="auto">{pieces.map((piece,index)=>/^\[[^\]\n]+\]$/.test(piece)?<span key={index} className="mx-1 inline-flex rounded-full border border-primary-400/15 bg-primary-500/15 px-2 py-0.5 text-[10px] font-medium text-primary-200">{TAG_LABELS[piece.toLowerCase()]||piece.slice(1,-1)}</span>:<span key={index}>{piece}</span>)}</div>;
 }
 
 const formatAudioTime=(value:number)=>{const safe=Number.isFinite(value)&&value>0?Math.floor(value):0;return `${Math.floor(safe/60)}:${String(safe%60).padStart(2,'0')}`};
@@ -132,9 +143,9 @@ export default function TTSSettingsPanel(){
     useEffect(()=>{if(availableVoices.length&&!availableVoices.some(item=>item.value===voice))setVoice(availableVoices[0].value)},[availableVoices,voice]);
 
     const save=async()=>{if(!settings)return;setMessage(null);try{await update.mutateAsync({voice,gender,pitch,use_case:useCase,style,speed,auto_expression:autoExpression,model:settings.model,folder_id:folder==='default'?null:Number(folder)});setMessage({kind:'ok',text:'تنظیمات و کشوی پیش‌فرض صدا ذخیره شد.'})}catch(error:any){setMessage({kind:'error',text:error?.response?.data?.detail||'ذخیره تنظیمات انجام نشد.'})}};
-    const submit=async()=>{if(!text.trim())return;setMessage(null);try{await create.mutateAsync({text:text.trim(),title:title.trim()||'صدای ساخته‌شده',folder_id:outputMode==='save'?(folder==='default'?null:Number(folder)):null,voice,gender,pitch,use_case:useCase,style,speed,auto_expression:autoExpression,output_mode:outputMode});setMessage({kind:'ok',text:outputMode==='preview'?'صدا در حال آماده‌شدن برای پخش است.':outputMode==='telegram'?'صدا ساخته می‌شود و در تلگرام می‌آید.':'ساخت صدا شروع شد.'})}catch(error:any){setMessage({kind:'error',text:error?.response?.data?.detail||'ساخت صدا شروع نشد.'})}};
+    const submit=async()=>{const normalized=normalizeDirectorNotes(text).trim();if(!normalized)return;setText(normalized);setMessage(null);try{await create.mutateAsync({text:normalized,title:title.trim()||'صدای ساخته‌شده',folder_id:outputMode==='save'?(folder==='default'?null:Number(folder)):null,voice,gender,pitch,use_case:useCase,style,speed,auto_expression:autoExpression,output_mode:outputMode});setMessage({kind:'ok',text:outputMode==='preview'?'صدا در حال آماده‌شدن برای پخش است.':outputMode==='telegram'?'صدا ساخته می‌شود و در تلگرام می‌آید.':'ساخت صدا شروع شد.'})}catch(error:any){setMessage({kind:'error',text:error?.response?.data?.detail||'ساخت صدا شروع نشد.'})}};
     const insertText=(value:string,cursorOffset=value.length)=>{const target=textAreaRef.current;const start=target?.selectionStart??text.length;const end=target?.selectionEnd??start;setText(`${text.slice(0,start)}${value}${text.slice(end)}`);requestAnimationFrame(()=>{target?.focus();target?.setSelectionRange(start+cursorOffset,start+cursorOffset)})};
-    const insertScopedCue=(tag:string)=>{const target=textAreaRef.current;const start=target?.selectionStart??text.length;const end=target?.selectionEnd??start;const selected=text.slice(start,end)||'متن این بخش';const value=`<${tag}>${selected}</${tag}>`;insertText(value,`<${tag}>`.length+(end>start?selected.length:0))};
+    const insertScopedCue=(tag:string)=>{const target=textAreaRef.current;const start=target?.selectionStart??text.length;const end=target?.selectionEnd??start;const selected=text.slice(start,end)||'متن این بخش';const value=`${tag}${selected}[resumes normal speech]`;insertText(value,tag.length+(end>start?selected.length:0))};
     const playVoicePreview=async(targetVoice=voice)=>{if(!settings)return;setPreviewing(true);setMessage(null);try{const key=new Request(`${window.location.origin}/__komod_tts_preview_v3__/${encodeURIComponent(settings.model)}/${encodeURIComponent(targetVoice)}`);let cached:Response|undefined;try{await Promise.all(['komod-tts-previews-v1','komod-tts-previews-v2'].map(name=>caches.delete(name)));cached=await (await caches.open('komod-tts-previews-v3')).match(key)}catch{/* Cache API may be unavailable */}let blob:Blob;if(cached)blob=await cached.blob();else{const response=await api.get<ArrayBuffer>(`/tts/preview/${encodeURIComponent(targetVoice)}`,{responseType:'arraybuffer'});blob=new Blob([response.data],{type:'audio/wav'});try{await (await caches.open('komod-tts-previews-v3')).put(key,new Response(blob,{headers:{'Content-Type':'audio/wav'}}))}catch{/* normal playback still works */}}if(previewUrl.startsWith('blob:'))URL.revokeObjectURL(previewUrl);setPreviewUrl(URL.createObjectURL(blob))}catch(error:any){setMessage({kind:'error',text:error?.response?.data?.detail||'پخش نمونه صدا انجام نشد.'})}finally{setPreviewing(false)}};
     const submitSTT=async()=>{if(!sttFileId)return;setMessage(null);try{await createSTT.mutateAsync({file_id:sttFileId,title:sttTitle.trim()||'رونویسی صدا',prompt:sttPrompt.trim(),folder_id:sttOutput==='save'?(sttFolder==='default'?null:Number(sttFolder)):null,output_mode:sttOutput});setMessage({kind:'ok',text:'تبدیل صدا به متن شروع شد.'});setSttPanel('history')}catch(error:any){setMessage({kind:'error',text:error?.response?.data?.detail||'تبدیل صدا به متن شروع نشد.'})}};
     const cueTools=<><p className="mt-3 text-[11px] text-dark-500">رویدادهای کوتاه</p><div className="mt-1.5 flex flex-wrap gap-1.5">{CUES.map(item=><button type="button" key={item.tag} onClick={()=>insertText(item.tag)} className="rounded-lg bg-white/[.05] px-2.5 py-1.5 text-[11px] text-dark-300 hover:bg-primary-500/10 hover:text-primary-200">{item.label}</button>)}</div><p className="mt-3 text-[11px] text-dark-500">لحن یک بخش: متن را انتخاب کن، سپس یکی را بزن</p><div className="mt-1.5 flex flex-wrap gap-1.5">{SCOPED_CUES.map(item=><button type="button" key={item.tag} onClick={()=>insertScopedCue(item.tag)} className="rounded-lg border border-primary-400/15 bg-primary-500/[.07] px-2.5 py-1.5 text-[11px] text-primary-200">{item.label}</button>)}</div></>;
@@ -150,7 +161,7 @@ export default function TTSSettingsPanel(){
             {!settings?.available&&<p className="mt-4 rounded-xl bg-amber-500/10 px-3 py-2 text-sm text-amber-200">برای فعال‌شدن این بخش، کلید Gemini باید روی سرور تنظیم شود.</p>}
             <div className="mt-5 grid gap-3 sm:grid-cols-2"><label className="text-xs text-dark-400">نام خروجی<input value={title} onChange={event=>setTitle(event.target.value)} className="input mt-1.5 w-full" maxLength={180}/></label>{outputMode==='save'&&<label className="text-xs text-dark-400">کشوی مقصد و پیش‌فرض<CustomSelect className="mt-1.5" value={folder} onChange={setFolder} options={folderOptions}/></label>}</div>
             <div className="mt-3 grid grid-cols-3 gap-1 rounded-2xl border border-white/[.07] bg-dark-950/40 p-1" role="radiogroup" aria-label="محل خروجی صدا">{([{value:'save',label:'ذخیره در کمد'},{value:'preview',label:'فقط پخش'},{value:'telegram',label:'فقط تلگرام'}] as const).map(item=><button type="button" key={item.value} role="radio" aria-checked={outputMode===item.value} onClick={()=>setOutputMode(item.value)} className={`min-h-10 rounded-xl px-2 text-xs transition ${outputMode===item.value?'bg-primary-500 text-white shadow-lg shadow-primary-950/20':'text-dark-400 hover:bg-white/[.05] hover:text-white'}`}>{item.label}</button>)}</div>
-            <div className={editorFullscreen?'fixed inset-0 z-[280] overflow-y-auto bg-dark-950 p-4 sm:p-8':'mt-3'}><div className="mb-2 flex items-center justify-between"><span className="text-xs text-dark-400">متن و پیش‌نمایش</span><button type="button" onClick={()=>setEditorFullscreen(value=>!value)} className="btn-icon" title={editorFullscreen?'خروج از تمام‌صفحه':'تمام‌صفحه'}>{editorFullscreen?<Minimize2 className="h-4 w-4"/>:<Maximize2 className="h-4 w-4"/>}</button></div><div className={editorFullscreen?'grid items-start gap-4 sm:grid-cols-2':''}><label className="block text-xs text-dark-400">متن<textarea ref={textAreaRef} value={text} onChange={event=>setText(event.target.value)} className={`input mt-1.5 w-full resize-y leading-8 ${editorFullscreen?'min-h-[52dvh]':'min-h-48'}`} placeholder="متنت را اینجا بنویس یا بچسبان…" maxLength={200000}/></label><TaggedTextPreview text={text}/></div>{editorFullscreen&&<div className="mt-4 rounded-2xl border border-white/[.07] bg-dark-900/70 p-3">{cueTools}</div>}</div>
+            <div className={editorFullscreen?'fixed inset-0 z-[280] overflow-y-auto bg-dark-950 p-4 sm:p-8':'mt-3'}><div className="mb-2 flex items-center justify-between"><span className="text-xs text-dark-400">متن و پیش‌نمایش</span><button type="button" onClick={()=>setEditorFullscreen(value=>!value)} className="btn-icon" title={editorFullscreen?'خروج از تمام‌صفحه':'تمام‌صفحه'}>{editorFullscreen?<Minimize2 className="h-4 w-4"/>:<Maximize2 className="h-4 w-4"/>}</button></div><div className={editorFullscreen?'grid items-start gap-4 sm:grid-cols-2':''}><label className="block text-xs text-dark-400">متن<textarea ref={textAreaRef} value={text} onChange={event=>setText(normalizeDirectorNotes(event.target.value))} className={`input mt-1.5 w-full resize-y leading-8 ${editorFullscreen?'min-h-[52dvh]':'min-h-48'}`} placeholder="متنت را اینجا بنویس یا بچسبان…" maxLength={200000}/></label><TaggedTextPreview text={text}/></div>{editorFullscreen&&<div className="mt-4 rounded-2xl border border-white/[.07] bg-dark-900/70 p-3">{cueTools}</div>}</div>
             {!editorFullscreen&&cueTools}
             <div className="mt-2 flex items-center justify-between gap-3 text-[11px] text-dark-500"><span>{text.length.toLocaleString('fa-IR')} نویسه</span><button type="button" disabled={!text} onClick={()=>setText('')} className="rounded-lg px-2 py-1 text-red-300 transition hover:bg-red-500/10 disabled:opacity-30">پاک‌کردن متن</button></div>
             <button disabled={!settings?.available||!text.trim()||create.isPending} onClick={()=>void submit()} className="btn-primary mt-4 flex min-h-12 w-full items-center justify-center gap-2 disabled:opacity-40"><AudioLines className="h-5 w-5"/>{create.isPending?'در حال افزودن…':outputMode==='save'?'ساخت و ذخیره':outputMode==='telegram'?'ساخت و ارسال':'ساخت و پخش'}</button>

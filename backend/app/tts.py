@@ -64,17 +64,6 @@ USE_CASE_STYLES = {
     "advertising": "پرانرژی و مناسب معرفی محصول",
     "accessibility": "بسیار واضح، آرام و دسترس‌پذیر",
 }
-SCOPED_STYLE_TAGS = {
-    "whisper": "با صدای نجوا و بسیار آرام",
-    "soft": "نرم و آرام",
-    "excited": "هیجان‌زده و پرانرژی",
-    "sad": "غمگین و احساسی",
-    "angry": "عصبانی اما واضح و کنترل‌شده",
-    "formal": "رسمی و شمرده",
-    "story": "داستانی و تصویرساز",
-}
-
-
 def normalize_tts_settings(value: dict | None) -> dict:
     raw = {**DEFAULT_TTS_SETTINGS, **(value or {})}
     voices = {item["value"] for item in VOICE_OPTIONS}
@@ -119,43 +108,41 @@ async def consume_tts_quota(db, user_id: int, character_count: int) -> TTSUsage:
     return usage
 
 
+DIRECTOR_NOTES_SYSTEM_INSTRUCTION = (
+    "Treat any text enclosed in square brackets [...] strictly as non-verbal "
+    "vocal directions. Never read, speak, or pronounce the text inside brackets out loud."
+)
+
+
+_LEGACY_DIRECTOR_NOTES = {
+    "short pause": "short pause", "long pause": "long pause", "sigh": "sigh",
+    "phew": "relieved sigh", "laugh": "chuckle", "laughter": "laughs",
+    "cough": "cough", "breath": "breath", "gasp": "gasp",
+    "whisper": "whispering", "soft": "soft", "excited": "excited",
+    "sad": "sad", "angry": "angry", "story": "storytelling", "formal": "formal",
+}
+
+
+def normalize_director_notes(text: str) -> str:
+    """Migrate old pseudo HTML cues and guarantee bracket-only directions."""
+    def replace_tag(match: re.Match) -> str:
+        closing = bool(match.group(1))
+        raw = match.group(2).strip().lower()
+        if closing and raw in {"whisper", "soft", "excited", "sad", "angry", "story", "formal"}:
+            return "[resumes normal speech]"
+        return f"[{_LEGACY_DIRECTOR_NOTES.get(raw, raw)}]"
+
+    normalized = re.sub(r"<\s*(/?)\s*([^<>]+?)\s*>", replace_tag, text)
+    # Literal angle brackets are not valid TTS directions and must never reach Gemini.
+    return normalized.replace("<", "").replace(">", "")
+
+
 def build_interaction_content(text: str, base_style: str) -> list[dict]:
-    """Turn paired style tags into scoped Gemini speech metadata.
-
-    Point cues such as ``<laugh>`` stay inside the text unchanged. Paired
-    tags such as ``<whisper>...</whisper>`` only affect their enclosed text.
-    """
-    tag_pattern = re.compile(
-        r"<(whisper|soft|excited|sad|angry|formal|story)>(.*?)</\1>",
-        flags=re.IGNORECASE | re.DOTALL,
-    )
-    content: list[dict] = []
-    cursor = 0
-
-    after_scoped_segment = False
-
-    def append_part(value: str, scoped_style: str | None = None) -> None:
-        nonlocal after_scoped_segment
-        if not value:
-            return
-        part: dict = {"type": "text", "text": value}
-        styles = [item for item in (base_style, scoped_style) if item]
-        if styles:
-            part["annotations"] = [{"type": "speech_metadata", "style": "؛ ".join(styles)}]
-        if after_scoped_segment and scoped_style is None:
-            part.setdefault("annotations", []).append({
-                "type": "speech_metadata",
-                "style": "لحن بخش قبلی تمام شده است؛ از همین بخش دقیقاً به لحن پایه برگرد",
-            })
-        content.append(part)
-        after_scoped_segment = scoped_style is not None
-
-    for match in tag_pattern.finditer(text):
-        append_part(text[cursor:match.start()])
-        append_part(match.group(2), SCOPED_STYLE_TAGS[match.group(1).lower()])
-        cursor = match.end()
-    append_part(text[cursor:])
-    return content or [{"type": "text", "text": text}]
+    """Keep Director Notes verbatim while attaching only the global voice style."""
+    part: dict = {"type": "text", "text": normalize_director_notes(text)}
+    if base_style:
+        part["annotations"] = [{"type": "speech_metadata", "style": base_style}]
+    return [part]
 
 
 def load_tts_settings(user: User) -> dict:
@@ -338,6 +325,7 @@ class GeminiTTSProvider:
         raise RuntimeError("هیچ‌کدام از کلیدهای Gemini در حال حاضر پاسخ ندادند.") from last_error
 
     async def _request(self, key: str, text: str, preferences: dict) -> bytes:
+        text = normalize_director_notes(text)
         style = preferences.get("style", "").strip()
         use_case_style = USE_CASE_STYLES.get(preferences.get("use_case", "general"), "")
         if use_case_style:
@@ -349,6 +337,7 @@ class GeminiTTSProvider:
             endpoint = f"https://generativelanguage.googleapis.com/v1beta/interactions?{urlencode({'key': key})}"
             payload = {
                 "model": model,
+                "system_instruction": DIRECTOR_NOTES_SYSTEM_INSTRUCTION,
                 "input": [{"type": "user_input", "content": build_interaction_content(text, style)}],
                 "response_format": {"type": "audio"},
                 "generation_config": {"speech_config": [{"voice": preferences["voice"]}]},
@@ -361,6 +350,7 @@ class GeminiTTSProvider:
         prompt = f"این متن را با این شیوه بخوان: {style}\n\n{text}" if style else text
         endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?{urlencode({'key': key})}"
         payload = {
+            "systemInstruction": {"parts": [{"text": DIRECTOR_NOTES_SYSTEM_INSTRUCTION}]},
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {
                 "responseModalities": ["AUDIO"],

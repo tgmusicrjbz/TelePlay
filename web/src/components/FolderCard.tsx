@@ -24,6 +24,11 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
     const token = localStorage.getItem('access_token') || '';
     const coverUrl = folder.cover_url ? `${folder.cover_url}${folder.cover_url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}` : null;
     const folderColor = folder.color || undefined;
+    const folderCardStyle = folderColor ? {
+        backgroundColor: `${folderColor}18`,
+        borderColor: `${folderColor}55`,
+        boxShadow: `inset -3px 0 0 ${folderColor}aa`,
+    } : undefined;
 
     // Check if this folder's context menu is active
     const showMenu = activeContextMenu?.type === 'folder' && activeContextMenu?.item.id === folder.id;
@@ -94,6 +99,7 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
     if (viewMode === 'list') {
         return (
             <div
+                style={folderCardStyle}
                 className={`relative flex items-center gap-4 p-3 rounded-xl cursor-pointer transition-all duration-200 animate-slide-up active:scale-[0.99]
                     glass-card hover:bg-white/[0.03] border-white/[0.05] group
                     ${dropStyles} ${selectedStyles}`}
@@ -153,6 +159,7 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
     const dense = viewMode === 'dense';
     return (
         <div
+            style={folderCardStyle}
             className={`${dense ? 'p-2.5' : 'p-4'} rounded-xl cursor-pointer transition-all duration-300 group relative animate-scale-in select-none
                 glass-card hover:bg-dark-800/60 hover:shadow-xl hover:shadow-black/20 hover:-translate-y-1
                 ${dropStyles} ${selectedStyles}`}
