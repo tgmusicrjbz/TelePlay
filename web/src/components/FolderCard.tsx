@@ -21,6 +21,9 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
     const { activeContextMenu, setActiveContextMenu } = useAppStore();
     const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const longPressed = useRef(false);
+    const token = localStorage.getItem('access_token') || '';
+    const coverUrl = folder.cover_url ? `${folder.cover_url}${folder.cover_url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}` : null;
+    const folderColor = folder.color || undefined;
 
     // Check if this folder's context menu is active
     const showMenu = activeContextMenu?.type === 'folder' && activeContextMenu?.item.id === folder.id;
@@ -106,13 +109,14 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
                 data-folder-id={folder.id}
             >
                 {selectionMode && <button onClick={handleSelectClick} className="absolute left-0 top-0 z-10 flex h-11 w-11 items-center justify-center" aria-label={selected ? 'لغو انتخاب کشو' : 'انتخاب کشو'}><span className={`flex h-6 w-6 items-center justify-center rounded-md border ${selected ? 'border-primary-400 bg-primary-500 text-white' : 'border-white/30 bg-dark-900/90'}`}>{selected && <Check className="h-4 w-4"/>}</span></button>}
-                <div 
+                <div
+                    style={folderColor && !coverUrl ? { backgroundColor: `${folderColor}22`, borderColor: `${folderColor}66` } : undefined}
                     className={`relative w-12 h-12 rounded-lg flex items-center justify-center shrink-0 border transition-colors
                         ${selected 
                             ? 'bg-primary-500/20 border-primary-500/40' 
                             : 'bg-primary-500/10 border-primary-500/20 group-hover:bg-primary-500/20'}`}
                 >
-                    <FolderIcon className={`w-6 h-6 transition-colors ${selected ? 'text-primary-300' : 'text-primary-400 group-hover:text-primary-300'}`} />
+                    {coverUrl ? <img src={coverUrl} alt="" className="h-full w-full rounded-lg object-cover"/> : folder.icon ? <span className="text-2xl leading-none">{folder.icon}</span> : <FolderIcon style={folderColor ? {color:folderColor}:undefined} className={`w-6 h-6 transition-colors ${selected ? 'text-primary-300' : 'text-primary-400 group-hover:text-primary-300'}`} />}
                     {(folder.is_pinned || folder.is_favorite) && <span className="absolute -right-1 -top-1 flex items-center gap-0.5 rounded-full border border-white/10 bg-dark-900/95 p-1 shadow-lg">{folder.is_pinned && <Pin className="h-3 w-3 fill-current text-primary-300"/>}{folder.is_favorite && <Star className="h-3 w-3 fill-current text-amber-300"/>}</span>}
                 </div>
 
@@ -164,13 +168,14 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
             data-folder-id={folder.id}
         >
             <div className={`flex items-start justify-between ${dense ? 'mb-2' : 'mb-3'}`}>
-                <div 
+                <div
+                    style={folderColor && !coverUrl ? { backgroundColor: `${folderColor}22`, borderColor: `${folderColor}66` } : undefined}
                     className={`relative w-10 h-10 rounded-lg flex items-center justify-center border group-hover:scale-110 transition-all duration-300
                         ${selected 
                             ? 'bg-gradient-to-br from-primary-500/20 to-primary-500/10 border-primary-500/40' 
                             : 'bg-gradient-to-br from-primary-500/10 to-primary-500/5 border-primary-500/20 group-hover:border-primary-500/30'}`}
                 >
-                    <FolderIcon className={`w-5 h-5 transition-colors ${selected ? 'text-primary-300' : 'text-primary-400'}`} />
+                    {coverUrl ? <img src={coverUrl} alt="" className="h-full w-full rounded-lg object-cover"/> : folder.icon ? <span className="text-xl leading-none">{folder.icon}</span> : <FolderIcon style={folderColor ? {color:folderColor}:undefined} className={`w-5 h-5 transition-colors ${selected ? 'text-primary-300' : 'text-primary-400'}`} />}
                     {(folder.is_pinned || folder.is_favorite) && <span className="absolute -right-1 -top-1 flex items-center gap-0.5 rounded-full border border-white/10 bg-dark-900/95 p-0.5 shadow-lg">{folder.is_pinned && <Pin className="h-2.5 w-2.5 fill-current text-primary-300"/>}{folder.is_favorite && <Star className="h-2.5 w-2.5 fill-current text-amber-300"/>}</span>}
                 </div>
                 <div className="flex items-center gap-1">

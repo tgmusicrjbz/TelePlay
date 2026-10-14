@@ -92,7 +92,11 @@ async def fetch_recent_files(db: AsyncSession, user_id: int, limit: int) -> List
     """Get recently added files across all folders."""
     query = (
         select(File)
-        .where(File.user_id == user_id, File.is_hidden.is_(False), ~exists().where(Playlist.cover_file_id == File.id, Playlist.user_id == user_id))
+        .where(
+            File.user_id == user_id, File.is_hidden.is_(False),
+            ~exists().where(Playlist.cover_file_id == File.id, Playlist.user_id == user_id),
+            ~exists().where(Folder.cover_file_id == File.id, Folder.user_id == user_id),
+        )
         .options(selectinload(File.watch_progress))
         .order_by(desc(File.created_at))
         .limit(limit)

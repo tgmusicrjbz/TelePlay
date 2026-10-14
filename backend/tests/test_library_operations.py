@@ -302,6 +302,20 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertIsNone(cleared.description)
 
+    async def test_folder_color_and_icon_can_be_customized(self):
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            updated = await update_folder(
+                self.folder_id, FolderUpdate(color="#12abef", icon="🎵"), db, user
+            )
+            self.assertEqual(updated.color, "#12ABEF")
+            self.assertEqual(updated.icon, "🎵")
+            cleared = await update_folder(
+                self.folder_id, FolderUpdate(color="", icon=""), db, user
+            )
+            self.assertIsNone(cleared.color)
+            self.assertIsNone(cleared.icon)
+
     async def test_activity_feeds_include_recent_and_in_progress_files(self):
         async with async_session() as db:
             user = await db.get(User, self.user_id)

@@ -4,7 +4,7 @@
 import { useEffect, useCallback, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { FolderPlus, Folder as FolderIcon, Grid, LayoutGrid, List, Search, ChevronRight, Home, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, StickyNote, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ChevronUp, Plus, CheckSquare, Square, ListChecks, ListPlus, Upload, Star, RefreshCw, Link2, DownloadCloud, Download, Send, Eye, EyeOff, Minus, Pause, Play, Tags, Cloud, CloudOff, AudioLines, FileAudio } from 'lucide-react';
-import { api, useFiles, useFolders, useFolderTree, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useActivityFeed, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile, useImportLink, useTagSettings, useUnlockVault, useWorkspaces, sendFilesToTelegram } from '../lib/api';
+import { api, useFiles, useFolders, useFolderTree, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useActivityFeed, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile, useImportLink, useTagSettings, useUnlockVault, useWorkspaces, sendFilesToTelegram, useTTSJobs, useSTTJobs } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { cacheAllTextNotes, queueOfflineText, saveFileOffline } from '../lib/offline';
 import FileCard from './FileCard';
@@ -118,6 +118,16 @@ export default function FileBrowser() {
     const [vaultPassword, setVaultPassword] = useState('');
     const unlockVault = useUnlockVault();
     useTagSettings();
+    const {data:globalTTSJobs=[],isSuccess:ttsJobsReady}=useTTSJobs();
+    const {data:globalSTTJobs=[],isSuccess:sttJobsReady}=useSTTJobs();
+    const knownSpeechJobs=useRef<Record<string,string>>({});
+    const speechJobsInitialized=useRef(false);
+    useEffect(()=>{
+        if(!ttsJobsReady||!sttJobsReady)return;
+        const combined=[...globalTTSJobs.map(job=>({...job,kind:'tts'})),...globalSTTJobs.map(job=>({...job,kind:'stt'}))];
+        if(!speechJobsInitialized.current){combined.forEach(job=>{knownSpeechJobs.current[`${job.kind}:${job.id}`]=job.state});speechJobsInitialized.current=true;return}
+        combined.forEach(job=>{const key=`${job.kind}:${job.id}`;const previous=knownSpeechJobs.current[key];if(previous&&previous!==job.state&&job.state==='done')addToast(job.kind==='tts'?'صدات آماده شد 🎧':'متنت آماده شد 📝','success');if(previous&&previous!==job.state&&job.state==='error')addToast(job.message||'پردازش صدا انجام نشد.','error');knownSpeechJobs.current[key]=job.state});
+    },[globalTTSJobs,globalSTTJobs,ttsJobsReady,sttJobsReady,addToast]);
     const hiddenPressTimer = useRef<number | null>(null);
     const hiddenPressTriggered = useRef(false);
     const uploadAbortRef = useRef<AbortController | null>(null);

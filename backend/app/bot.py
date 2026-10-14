@@ -29,6 +29,8 @@ from .auth import create_access_token
 from .services import escape_like, select_best_thumbnail
 from .downloader import ImportJob, link_importer
 from .tts import TTSJob, VOICE_OPTIONS, consume_tts_quota, load_tts_settings, tts_queue
+from .stt import STTJob, consume_stt_quota, stt_queue
+from .gemini_keys import decrypt_user_keys
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -1027,20 +1029,20 @@ async def help_command(client, message: Message):
 @tg_client.on_message(filters.command("tts") & filters.private)
 async def tts_command(client, message: Message):
     """Create a voice from command text or a replied-to text message."""
-    if not tts_queue.available:
+    user = await get_or_create_user(
+        message.from_user.id, message.from_user.username,
+        message.from_user.first_name, message.from_user.last_name,
+    )
+    personal_keys = decrypt_user_keys(user.gemini_api_keys_encrypted)
+    if not tts_queue.available and not personal_keys:
         await message.reply("تبدیل متن به صدا هنوز روی سرور فعال نشده.")
         return
     direct_text = message.text.split(maxsplit=1)[1].strip() if message.text and len(message.text.split(maxsplit=1)) > 1 else ""
     replied = message.reply_to_message
     source_text = direct_text or ((replied.text or replied.caption or "").strip() if replied else "")
     if not source_text:
-        user = await get_or_create_user(message.from_user.id, message.from_user.username, message.from_user.first_name, message.from_user.last_name)
         await message.reply(**tts_bot_settings_view(load_tts_settings(user)))
         return
-    user = await get_or_create_user(
-        message.from_user.id, message.from_user.username,
-        message.from_user.first_name, message.from_user.last_name,
-    )
     folder_id = await get_active_drawer_id(message.from_user.id)
     title_line = next((line.strip() for line in source_text.splitlines() if line.strip()), "صدای ساخته‌شده")
     preferences = load_tts_settings(user)
@@ -1054,9 +1056,50 @@ async def tts_command(client, message: Message):
         user_id=user.id, telegram_id=user.telegram_id, text=source_text,
         title=title_line[:80], folder_id=folder_id,
         preferences=preferences, output_mode=preferences.get("bot_output_mode", "save"),
+        api_keys=personal_keys,
     )
     position = await tts_queue.enqueue(job)
     await message.reply(f"🎙️ متن رفت توی صف ساخت صدا · جایگاه {to_persian_digits(str(position))}\nوقتی آماده بشه همین‌جا می‌فرستمش.")
+
+
+@tg_client.on_message(filters.command("stt") & filters.private)
+async def stt_command(client, message: Message):
+    """Transcribe an audio/video file by replying to its Telegram message."""
+    user = await get_or_create_user(
+        message.from_user.id, message.from_user.username,
+        message.from_user.first_name, message.from_user.last_name,
+    )
+    personal_keys = decrypt_user_keys(user.gemini_api_keys_encrypted)
+    if not stt_queue.available and not personal_keys:
+        await message.reply("استخراج متن هنوز روی سرور فعال نشده.")
+        return
+    replied = message.reply_to_message
+    media = next((getattr(replied, name, None) for name in ("audio", "voice", "video", "video_note", "document") if replied and getattr(replied, name, None)), None)
+    if media is None:
+        await message.reply("روی یک فایل صوتی یا ویدیویی ریپلای کن و `/stt` را بفرست.")
+        return
+    async with async_session() as db:
+        source = (await db.execute(select(File).where(
+            File.user_id == user.id, File.file_unique_id == media.file_unique_id,
+            File.file_type.in_(("audio", "video")),
+        ).order_by(File.id.desc()))).scalars().first()
+        if source is None:
+            await message.reply("اول فایل را برای ربات بفرست تا در کمد ذخیره شود؛ بعد روی همان پیام `/stt` بزن.")
+            return
+        try:
+            await consume_stt_quota(db, user.id, int(source.duration or getattr(media, "duration", 0) or 0))
+        except ValueError as error:
+            await message.reply(f"⛔ {error}")
+            return
+    folder_id = await get_active_drawer_id(message.from_user.id)
+    source_name = Path(source.file_name).stem.strip() or "صدا"
+    job = STTJob(
+        user_id=user.id, source_file_id=source.id, title=f"📝 متن {source_name}"[:180],
+        folder_id=folder_id, output_mode="save", telegram_id=message.from_user.id,
+        api_keys=personal_keys,
+    )
+    position = await stt_queue.enqueue(job)
+    await message.reply(f"📝 استخراج متن شروع شد · جایگاه {to_persian_digits(str(position))}")
 
 
 def tts_bot_settings_view(preferences: dict) -> dict:
@@ -1401,6 +1444,64 @@ async def handle_file(client, message: Message):
                 await status_msg.edit("❌ نتونستم فایل رو پردازش کنم. چند لحظه دیگه دوباره امتحان کن.")
             else:
                 await message.reply("❌ نتونستم فایل رو پردازش کنم. چند لحظه دیگه دوباره امتحان کن.")
+
+
+async def import_personal_channel_post(message: Message) -> None:
+    """Index a manual post from a user's configured personal storage channel."""
+    await asyncio.sleep(5)  # Let normal app/bot uploads write their database row first.
+    channel_id = message.chat.id
+    async with async_session() as db:
+        duplicate = (await db.execute(select(File.id).where(
+            File.storage_channel_id == channel_id, File.channel_message_id == message.id,
+        ))).scalar_one_or_none()
+        if duplicate is not None:
+            return
+        owners = (await db.execute(select(User).where(User.storage_channel_id == channel_id, User.is_active.is_(True)))).scalars().all()
+        if len(owners) != 1:
+            return
+        user = owners[0]
+        folder = await ensure_default_folder(db, user.id)
+        if message.text and not any(getattr(message, field, None) for field in ("video", "audio", "voice", "animation", "video_note", "document", "photo")):
+            content = message.text.strip()
+            if not content:
+                return
+            title = sanitize_filename(next((line.strip() for line in content.splitlines() if line.strip()), "یادداشت")[:80])
+            record = File(
+                user_id=user.id, folder_id=folder.id, channel_message_id=message.id, storage_channel_id=channel_id,
+                file_id=f"text:{message.id}", file_unique_id=f"channel:{channel_id}:text:{message.id}",
+                file_name=title, description=content[:1024], file_size=len(content.encode("utf-8")),
+                mime_type="text/plain; charset=utf-8", file_type="text",
+            )
+        else:
+            media = next((getattr(message, field, None) for field in ("video", "audio", "voice", "animation", "video_note", "document") if getattr(message, field, None)), None)
+            is_photo = bool(getattr(message, "photo", None))
+            if is_photo:
+                media = select_best_thumbnail(message.photo.sizes)
+            if media is None:
+                return
+            mime = getattr(media, "mime_type", None) or ("image/jpeg" if is_photo else "audio/ogg" if getattr(message, "voice", None) else None)
+            file_type = "video" if any(getattr(message, field, None) for field in ("video", "animation", "video_note")) else "audio" if any(getattr(message, field, None) for field in ("audio", "voice")) else "image" if is_photo or (mime or "").startswith("image/") else "document"
+            raw_name = getattr(media, "file_name", None) or f"{file_type}_{message.id}{'.jpg' if is_photo else '.ogg' if file_type == 'audio' else '.mp4' if file_type == 'video' else ''}"
+            record = File(
+                user_id=user.id, folder_id=folder.id, channel_message_id=message.id, storage_channel_id=channel_id,
+                file_id=media.file_id, file_unique_id=media.file_unique_id, file_name=sanitize_filename(raw_name),
+                description=(message.caption or "").strip()[:1024] or None,
+                tags_json=json.dumps(extract_tags_from_caption(message.caption or ""), ensure_ascii=False),
+                file_size=getattr(media, "file_size", 0) or 0, mime_type=mime, file_type=file_type,
+                duration=getattr(media, "duration", None), width=getattr(media, "width", None), height=getattr(media, "height", None),
+                thumbnail_file_id=media.file_id if is_photo else (select_best_thumbnail(getattr(media, "thumbs", None)).file_id if select_best_thumbnail(getattr(media, "thumbs", None)) else None),
+            )
+        db.add(record)
+        await db.commit()
+        logger.info("Indexed manual channel post channel=%s message=%s user=%s", channel_id, message.id, user.id)
+
+
+@tg_client.on_message(filters.channel & (filters.text | filters.video | filters.audio | filters.voice | filters.document | filters.photo | filters.animation | filters.video_note), group=5)
+async def handle_personal_channel_post(client, message: Message):
+    """Automatically add manual posts from a configured personal channel."""
+    if getattr(message, "outgoing", False) or getattr(getattr(message, "from_user", None), "is_self", False):
+        return
+    asyncio.create_task(import_personal_channel_post(message))
 
 
 @tg_client.on_message(filters.private & filters.regex(r"https?://(?:www\.)?(?:youtube\.com|youtu\.be|instagram\.com)/"), group=-1)

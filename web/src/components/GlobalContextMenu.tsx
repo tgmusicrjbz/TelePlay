@@ -1,18 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../lib/store';
-import { TelegramFile, Folder, api, canPreviewText, sendFilesToTelegram, useUpdateFile, useUpdateFolder } from '../lib/api';
-import { Play, Download, DownloadCloud, Link, Edit, FolderInput, Trash2, Globe, ShieldOff, HardDriveDownload, Eye, EyeOff, AlignLeft, ListPlus, Heart, Info, Pin, Tags, ChevronDown, ChevronUp, X, AudioLines, Send } from 'lucide-react';
+import { TelegramFile, Folder, api, canPreviewText, sendFilesToTelegram, useUpdateFile, useUpdateFolder, useUploadFile } from '../lib/api';
+import { Play, Download, DownloadCloud, Link, Edit, FolderInput, Trash2, Globe, ShieldOff, HardDriveDownload, Eye, EyeOff, AlignLeft, ListPlus, Heart, Info, Pin, Tags, ChevronDown, ChevronUp, X, AudioLines, Send, Palette, Image as ImageIcon } from 'lucide-react';
 import { saveFileOffline } from '../lib/offline';
 
 export default function GlobalContextMenu() {
     const { activeContextMenu, setActiveContextMenu, setPreviewFile, setContentPreviewFile, setDetailsFile, setMoveItems, setMoveFiles, setDeleteConfirm, setRenameFile, setRenameFolder, setDescriptionItem, selectedFileIds, selectedFiles, setPlaylistFile, setActiveSection, addToast } = useAppStore();
     const updateFile = useUpdateFile();
     const updateFolder = useUpdateFolder();
+    const uploadFile = useUploadFile();
     const menuRef = useRef<HTMLDivElement>(null);
     const [copiedId, setCopiedId] = useState<string | null>(null);
     const [showMore, setShowMore] = useState(false);
+    const [showFolderAppearance, setShowFolderAppearance] = useState(false);
 
-    useEffect(() => setShowMore(false), [activeContextMenu?.type, activeContextMenu?.item.id]);
+    useEffect(() => { setShowMore(false); setShowFolderAppearance(false); }, [activeContextMenu?.type, activeContextMenu?.item.id]);
 
     // Close menu on escape
     useEffect(() => {
@@ -238,12 +240,18 @@ export default function GlobalContextMenu() {
                             <ActionTile icon={<FolderInput/>} label="جابه‌جایی" onClick={()=>handleAction(()=>setMoveItems({files:[],folders:[folder]}))}/>
                         </div>
                         <button className="mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-white/[.07] bg-white/[.035] text-sm text-dark-300" onClick={()=>setShowMore(value=>!value)}>{showMore?<ChevronUp className="h-4 w-4"/>:<ChevronDown className="h-4 w-4"/>}{showMore?'بستن گزینه‌های بیشتر':'گزینه‌های بیشتر'}</button>
-                        {showMore&&<div className="mt-3 grid grid-cols-2 gap-2 border-t border-white/[.07] pt-3"><ActionTile icon={<AlignLeft/>} label={folder.description?'ویرایش توضیحات':'افزودن توضیحات'} onClick={()=>handleAction(()=>setDescriptionItem({type:'folder',item:folder}))}/><ActionTile icon={folder.is_hidden?<Eye/>:<EyeOff/>} label={folder.is_hidden?'خروج از گاوصندوق':'مخفی کردن'} onClick={async()=>{setActiveContextMenu(null);try{await updateFolder.mutateAsync({id:folder.id,is_hidden:!folder.is_hidden});addToast(folder.is_hidden?'کشو از گاوصندوق بیرون آمد.':'کشو مخفی شد 🔒');}catch(error:any){addToast(error?.response?.data?.detail||'ابتدا برای گاوصندوق رمز تعیین کن.','error');}}}/><ActionTile danger icon={<Trash2/>} label="حذف کشو" onClick={()=>handleAction(()=>setDeleteConfirm({type:'folder',items:[folder]}))}/></div>}
+                        {showMore&&<div className="mt-3 border-t border-white/[.07] pt-3"><div className="grid grid-cols-2 gap-2"><ActionTile icon={<Palette/>} label="ظاهر کشو" onClick={()=>setShowFolderAppearance(value=>!value)}/><ActionTile icon={<AlignLeft/>} label={folder.description?'ویرایش توضیحات':'افزودن توضیحات'} onClick={()=>handleAction(()=>setDescriptionItem({type:'folder',item:folder}))}/><ActionTile icon={folder.is_hidden?<Eye/>:<EyeOff/>} label={folder.is_hidden?'خروج از گاوصندوق':'مخفی کردن'} onClick={async()=>{setActiveContextMenu(null);try{await updateFolder.mutateAsync({id:folder.id,is_hidden:!folder.is_hidden});addToast(folder.is_hidden?'کشو از گاوصندوق بیرون آمد.':'کشو مخفی شد 🔒');}catch(error:any){addToast(error?.response?.data?.detail||'ابتدا برای گاوصندوق رمز تعیین کن.','error');}}}/><ActionTile danger icon={<Trash2/>} label="حذف کشو" onClick={()=>handleAction(()=>setDeleteConfirm({type:'folder',items:[folder]}))}/></div>{showFolderAppearance&&<FolderAppearanceEditor folder={folder} pending={updateFolder.isPending||uploadFile.isPending} onUpdate={async data=>{await updateFolder.mutateAsync({id:folder.id,...data});addToast('ظاهر کشو ذخیره شد.');}} onUpload={async file=>{const uploaded=await uploadFile.mutateAsync({file,folderId:null});await updateFolder.mutateAsync({id:folder.id,cover_file_id:uploaded.id});addToast('کاور کشو عوض شد.');}}/>}</div>}
                     </>}
                 </> : null}
             </div>
         </div>
     </>;
+}
+
+function FolderAppearanceEditor({folder,pending,onUpdate,onUpload}:{folder:Folder;pending:boolean;onUpdate:(data:{color?:string|null;icon?:string|null;cover_file_id?:number|null})=>Promise<void>;onUpload:(file:File)=>Promise<void>}){
+    const icons=['📁','🗂️','🎵','🎬','📚','💼','⭐','🔒'];
+    const colors=['#8B5CF6','#EC4899','#F59E0B','#10B981','#06B6D4','#3B82F6','#EF4444'];
+    return <div className="mt-3 space-y-3 rounded-2xl border border-white/[.07] bg-dark-950/55 p-3"><p className="text-xs font-medium text-dark-300">آیکون و رنگ</p><div className="grid grid-cols-8 gap-1.5">{icons.map(icon=><button key={icon} disabled={pending} onClick={()=>void onUpdate({icon})} className={`flex aspect-square items-center justify-center rounded-xl border text-lg ${folder.icon===icon?'border-primary-400 bg-primary-500/15':'border-white/[.06] bg-white/[.03]'}`}>{icon}</button>)}</div><div className="flex flex-wrap items-center gap-2">{colors.map(color=><button key={color} disabled={pending} aria-label={`رنگ ${color}`} onClick={()=>void onUpdate({color})} className={`h-8 w-8 rounded-full border-2 ${folder.color===color?'border-white ring-2 ring-primary-400/40':'border-white/20'}`} style={{backgroundColor:color}}/>)}<input dir="ltr" type="color" value={folder.color||'#8B5CF6'} disabled={pending} onChange={event=>void onUpdate({color:event.target.value})} className="h-8 w-10 cursor-pointer rounded-lg border-0 bg-transparent p-0" title="رنگ دلخواه"/></div><div className="grid grid-cols-2 gap-2"><label className="flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl bg-primary-500/10 text-xs text-primary-200"><ImageIcon className="h-4 w-4"/>انتخاب کاور<input type="file" accept="image/*" className="hidden" disabled={pending} onChange={event=>{const file=event.target.files?.[0];event.target.value='';if(file)void onUpload(file)}}/></label><button disabled={pending||!folder.cover_file_id} onClick={()=>void onUpdate({cover_file_id:null})} className="min-h-11 rounded-xl bg-white/[.04] text-xs text-dark-300 disabled:opacity-40">حذف کاور</button></div><button disabled={pending} onClick={()=>void onUpdate({icon:null,color:null,cover_file_id:null})} className="w-full text-center text-[11px] text-dark-500 hover:text-white">بازگشت به ظاهر پیش‌فرض</button></div>;
 }
 
 function ActionTile({icon,label,onClick,danger=false}:{icon:React.ReactElement;label:string;onClick:()=>void|Promise<void>;danger?:boolean}){

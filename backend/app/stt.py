@@ -60,6 +60,7 @@ class GeminiSTTProvider:
         self.api_keys = api_keys
         self.cursor = 0
         self.cooldowns: dict[str, datetime] = {}
+        self._key_lock = asyncio.Lock()
 
     def _ordered_keys(self) -> list[str]:
         if not self.api_keys:
@@ -71,7 +72,11 @@ class GeminiSTTProvider:
 
     async def transcribe(self, path: Path, mime_type: str, prompt: str) -> str:
         last_error: Exception | None = None
-        for key in self._ordered_keys():
+        async with self._key_lock:
+            ordered_keys = self._ordered_keys()
+            if ordered_keys:
+                self.cursor = (self.api_keys.index(ordered_keys[0]) + 1) % len(self.api_keys)
+        for key in ordered_keys:
             try:
                 result = await asyncio.to_thread(self._request, key, path, mime_type, prompt)
                 self.cursor = (self.api_keys.index(key) + 1) % len(self.api_keys)
@@ -199,6 +204,8 @@ class STTJob:
     folder_id: int | None
     prompt: str = ""
     output_mode: str = "save"
+    telegram_id: int | None = None
+    api_keys: list[str] | None = None
     id: str = ""
 
 
@@ -209,23 +216,35 @@ class STTQueue:
         self.statuses: dict[str, dict] = {}
         self.controls: dict[str, bool] = {}
         self.task: asyncio.Task | None = None
+        self.tasks: list[asyncio.Task] = []
 
     @property
     def available(self) -> bool:
         return bool(self.provider.api_keys)
 
     async def start(self) -> None:
-        if self.available and (self.task is None or self.task.done()):
-            self.task = asyncio.create_task(self._run(), name="gemini-stt-worker")
+        if self.available and not any(not task.done() for task in self.tasks):
+            worker_count = min(4, max(1, len(self.provider.api_keys)))
+            self.tasks = [asyncio.create_task(self._run(), name=f"gemini-stt-worker-{index + 1}") for index in range(worker_count)]
+            self.task = self.tasks[0]
 
     async def stop(self) -> None:
-        if self.task:
-            self.task.cancel()
-            await asyncio.gather(self.task, return_exceptions=True)
-            self.task = None
+        for task in self.tasks:
+            task.cancel()
+        if self.tasks:
+            await asyncio.gather(*self.tasks, return_exceptions=True)
+        self.tasks = []
+        self.task = None
 
     async def enqueue(self, job: STTJob) -> int:
-        await self.start()
+        if not self.available and not job.api_keys:
+            raise RuntimeError("GEMINI_API_KEYS is not configured")
+        if job.api_keys and not self.available and not any(not task.done() for task in self.tasks):
+            worker_count = min(4, len(job.api_keys))
+            self.tasks = [asyncio.create_task(self._run(), name=f"gemini-stt-worker-{index + 1}") for index in range(worker_count)]
+            self.task = self.tasks[0]
+        else:
+            await self.start()
         job.id = job.id or uuid.uuid4().hex
         self.statuses[job.id] = {"id": job.id, "user_id": job.user_id, "source_file_id": job.source_file_id, "title": job.title, "state": "queued", "message": "منتظر نوبت", "progress": 0, "created_at": datetime.utcnow().isoformat()}
         self.controls[job.id] = False
@@ -270,6 +289,7 @@ class STTQueue:
                 self.queue.task_done()
 
     async def _process(self, job: STTJob) -> None:
+        provider = GeminiSTTProvider(list(dict.fromkeys((job.api_keys or []) + self.provider.api_keys))) if job.api_keys else self.provider
         async with async_session() as db:
             source = (await db.execute(select(File).where(File.id == job.source_file_id, File.user_id == job.user_id))).scalar_one_or_none()
             user = await db.get(User, job.user_id)
@@ -296,7 +316,7 @@ class STTQueue:
                 if self.controls.get(job.id):
                     return
                 self.statuses[job.id].update(state="transcribing", message="در حال تبدیل", progress=45)
-                markdown = await self.provider.transcribe(media_path, mime_type, job.prompt)
+                markdown = await provider.transcribe(media_path, mime_type, job.prompt)
             if self.controls.get(job.id):
                 return
             if job.output_mode == "temporary":
@@ -305,6 +325,11 @@ class STTQueue:
             self.statuses[job.id].update(state="saving", message="ذخیره Markdown", progress=85)
             stored = await self._store(db, user, job, markdown)
             self.statuses[job.id].update(state="done", message="متن ذخیره شد", progress=100, content=markdown, file_id=stored.id, finished_at=datetime.utcnow().isoformat())
+            if job.telegram_id:
+                try:
+                    await telegram.tg_client.copy_message(job.telegram_id, stored.storage_channel_id or settings.telegram_storage_channel_id, stored.channel_message_id)
+                except Exception:
+                    logger.warning("STT output was saved but could not be sent to user %s", job.telegram_id, exc_info=True)
 
     async def _store(self, db, user: User, job: STTJob, markdown: str) -> File:
         folder_id = job.folder_id
@@ -321,7 +346,7 @@ class STTQueue:
             target = user.storage_channel_id or settings.telegram_storage_channel_id
             message = await telegram.tg_client.send_document(target, str(path), caption=job.title[:1024])
             media = message.document
-            record = File(user_id=user.id, folder_id=folder_id, file_id=media.file_id, file_unique_id=media.file_unique_id, channel_message_id=message.id, storage_channel_id=target, file_name=path.name, description="🎙️ رونویسی‌شده با هوش مصنوعی", file_size=media.file_size or os.path.getsize(path), mime_type="text/markdown", file_type="text")
+            record = File(user_id=user.id, folder_id=folder_id, file_id=media.file_id, file_unique_id=media.file_unique_id, channel_message_id=message.id, storage_channel_id=target, file_name=path.name, description="🎙️ رونویسی‌شده با هوش مصنوعی", tags_json=json.dumps(["صدا‌به‌متن"], ensure_ascii=False), file_size=media.file_size or os.path.getsize(path), mime_type="text/markdown", file_type="text")
             db.add(record); await db.commit(); await db.refresh(record)
             return record
 

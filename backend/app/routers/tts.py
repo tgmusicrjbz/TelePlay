@@ -12,7 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import get_current_user
 from ..database import get_db
 from ..models import Folder, TTSVoicePreview, User
-from ..tts import TTSJob, VOICE_OPTIONS, consume_tts_quota, load_tts_settings, normalize_tts_settings, tts_queue
+from ..tts import GeminiTTSProvider, TTSJob, VOICE_OPTIONS, consume_tts_quota, load_tts_settings, normalize_tts_settings, tts_queue
+from ..gemini_keys import decrypt_user_keys, encrypt_user_keys
 
 router = APIRouter(prefix="/tts", tags=["Text to speech"])
 VOICE_PREVIEW_VERSION = "v3"
@@ -44,11 +45,44 @@ class TTSCreate(BaseModel):
     output_mode: Literal["save", "preview", "telegram"] = "save"
 
 
+class GeminiKeysUpdate(BaseModel):
+    keys: list[str] = Field(default_factory=list, max_length=8)
+
+
+def gemini_key_summary(user: User) -> dict:
+    keys = decrypt_user_keys(user.gemini_api_keys_encrypted)
+    return {"count": len(keys), "masked": [f"••••{key[-4:]}" for key in keys]}
+
+
+@router.get("/personal-keys")
+async def get_personal_keys(current_user: User = Depends(get_current_user)):
+    return gemini_key_summary(current_user)
+
+
+@router.put("/personal-keys")
+async def update_personal_keys(payload: GeminiKeysUpdate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    keys = list(dict.fromkeys(key.strip() for key in payload.keys if key.strip()))
+    if any(len(key) < 20 for key in keys):
+        raise HTTPException(status_code=400, detail="یکی از کلیدهای Gemini معتبر نیست.")
+    current_user.gemini_api_keys_encrypted = encrypt_user_keys(keys)
+    await db.commit()
+    return gemini_key_summary(current_user)
+
+
+@router.delete("/personal-keys")
+async def delete_personal_keys(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    current_user.gemini_api_keys_encrypted = None
+    await db.commit()
+    return {"count": 0, "masked": []}
+
+
 @router.get("/settings")
 async def get_tts_settings(current_user: User = Depends(get_current_user)):
+    personal_keys = decrypt_user_keys(current_user.gemini_api_keys_encrypted)
     return {
         **load_tts_settings(current_user),
-        "available": tts_queue.available,
+        "available": tts_queue.available or bool(personal_keys),
+        "personal_key_count": len(personal_keys),
         "voices": VOICE_OPTIONS,
     }
 
@@ -66,7 +100,8 @@ async def update_tts_settings(
     preferences = normalize_tts_settings(payload.model_dump())
     current_user.tts_settings_json = json.dumps(preferences, ensure_ascii=False)
     await db.commit()
-    return {**preferences, "available": tts_queue.available, "voices": VOICE_OPTIONS}
+    personal_keys = decrypt_user_keys(current_user.gemini_api_keys_encrypted)
+    return {**preferences, "available": tts_queue.available or bool(personal_keys), "personal_key_count": len(personal_keys), "voices": VOICE_OPTIONS}
 
 
 @router.post("/jobs", status_code=202)
@@ -75,7 +110,8 @@ async def create_tts_job(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    if not tts_queue.available:
+    personal_keys = decrypt_user_keys(current_user.gemini_api_keys_encrypted)
+    if not tts_queue.available and not personal_keys:
         raise HTTPException(status_code=503, detail="کلید Gemini TTS هنوز روی سرور تنظیم نشده است.")
     if payload.folder_id is not None:
         folder = (await db.execute(select(Folder).where(Folder.id == payload.folder_id, Folder.user_id == current_user.id))).scalar_one_or_none()
@@ -100,6 +136,7 @@ async def create_tts_job(
         user_id=current_user.id, telegram_id=current_user.telegram_id,
         text=payload.text.strip(), title=payload.title.strip(), folder_id=target_folder_id,
         preferences=preferences, output_mode=payload.output_mode,
+        api_keys=personal_keys,
     )
     position = await tts_queue.enqueue(job)
     return {"job_id": job.id, "queue_position": position, "message": "ساخت صدا شروع شد."}
@@ -114,7 +151,8 @@ async def preview_tts_voice(
     voice_info = next((item for item in VOICE_OPTIONS if item["value"] == voice), None)
     if voice_info is None:
         raise HTTPException(status_code=404, detail="این گوینده پیدا نشد.")
-    if not tts_queue.available:
+    personal_keys = decrypt_user_keys(current_user.gemini_api_keys_encrypted)
+    if not tts_queue.available and not personal_keys:
         raise HTTPException(status_code=503, detail="کلید Gemini TTS هنوز روی سرور تنظیم نشده است.")
     preferences = load_tts_settings(current_user)
     preferences.update(voice=voice, style="طبیعی، واضح و دوستانه", auto_expression=False, use_case="general", speed=1)
@@ -127,7 +165,8 @@ async def preview_tts_voice(
         TTSVoicePreview.model == preview_model_key, TTSVoicePreview.voice == voice,
     ))).scalar_one_or_none()
     if cached is None:
-        audio = await tts_queue.provider.synthesize(
+        provider = GeminiTTSProvider(list(dict.fromkeys(personal_keys + tts_queue.provider.api_keys))) if personal_keys else tts_queue.provider
+        audio = await provider.synthesize(
             "سلام. من یکی از صداهای کُمُدم. این نمونه رو گوش کن و اگه خوشت اومد من رو انتخاب کن.",
             preferences,
         )

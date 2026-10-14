@@ -10,6 +10,7 @@ from ..auth import get_current_user
 from ..database import get_db
 from ..models import File, Folder, User
 from ..stt import STTJob, consume_stt_quota, stt_queue
+from ..gemini_keys import decrypt_user_keys
 
 router = APIRouter(prefix="/stt", tags=["Speech to text"])
 
@@ -24,7 +25,8 @@ class STTCreate(BaseModel):
 
 @router.post("/jobs", status_code=202)
 async def create_stt_job(payload: STTCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    if not stt_queue.available:
+    personal_keys = decrypt_user_keys(current_user.gemini_api_keys_encrypted)
+    if not stt_queue.available and not personal_keys:
         raise HTTPException(status_code=503, detail="کلید Gemini روی سرور تنظیم نشده است.")
     source = (await db.execute(select(File).where(File.id == payload.file_id, File.user_id == current_user.id))).scalar_one_or_none()
     if source is None or source.file_type not in {"audio", "video"}:
@@ -35,7 +37,7 @@ async def create_stt_job(payload: STTCreate, current_user: User = Depends(get_cu
         await consume_stt_quota(db, current_user.id, int(source.duration or 0))
     except ValueError as error:
         raise HTTPException(status_code=429, detail=str(error)) from error
-    job = STTJob(user_id=current_user.id, source_file_id=source.id, title=payload.title.strip(), folder_id=payload.folder_id, prompt=payload.prompt.strip(), output_mode=payload.output_mode)
+    job = STTJob(user_id=current_user.id, source_file_id=source.id, title=payload.title.strip(), folder_id=payload.folder_id, prompt=payload.prompt.strip(), output_mode=payload.output_mode, api_keys=personal_keys)
     position = await stt_queue.enqueue(job)
     return {"job_id": job.id, "queue_position": position, "message": "تبدیل صدا به متن شروع شد."}
 

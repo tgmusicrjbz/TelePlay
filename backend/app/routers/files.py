@@ -399,7 +399,10 @@ async def list_files(
         query = query.where(File.is_hidden.is_(False))
 
     if not include_playlist_covers:
-        query = query.where(~exists().where(Playlist.cover_file_id == File.id, Playlist.user_id == current_user.id))
+        query = query.where(
+            ~exists().where(Playlist.cover_file_id == File.id, Playlist.user_id == current_user.id),
+            ~exists().where(Folder.cover_file_id == File.id, Folder.user_id == current_user.id),
+        )
     
     
     # Apply filters
@@ -473,7 +476,11 @@ async def get_recent_files(
     current_user: User = Depends(get_current_user),
 ):
     """Get recently added files across all folders."""
-    query = select(File).where(File.user_id == current_user.id, File.is_hidden.is_(False), ~exists().where(Playlist.cover_file_id == File.id, Playlist.user_id == current_user.id)).options(selectinload(File.watch_progress))
+    query = select(File).where(
+        File.user_id == current_user.id, File.is_hidden.is_(False),
+        ~exists().where(Playlist.cover_file_id == File.id, Playlist.user_id == current_user.id),
+        ~exists().where(Folder.cover_file_id == File.id, Folder.user_id == current_user.id),
+    ).options(selectinload(File.watch_progress))
     files = (await db.execute(apply_file_sort(query, sort).limit(limit))).scalars().all()
     
     return FileListResponse(
@@ -495,7 +502,11 @@ async def get_activity(
     recent = await fetch_recent_files(db, current_user.id, limit)
     favorites = (await db.execute(
         select(File)
-        .where(File.user_id == current_user.id, File.is_hidden.is_(False), File.is_favorite.is_(True), ~exists().where(Playlist.cover_file_id == File.id, Playlist.user_id == current_user.id))
+        .where(
+            File.user_id == current_user.id, File.is_hidden.is_(False), File.is_favorite.is_(True),
+            ~exists().where(Playlist.cover_file_id == File.id, Playlist.user_id == current_user.id),
+            ~exists().where(Folder.cover_file_id == File.id, Folder.user_id == current_user.id),
+        )
         .options(selectinload(File.watch_progress))
         .order_by(File.updated_at.desc(), File.id.desc())
         .limit(limit)

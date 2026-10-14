@@ -297,6 +297,7 @@ class GeminiTTSProvider:
         self.api_keys = api_keys
         self.cursor = 0
         self.cooldowns: dict[str, datetime] = {}
+        self._key_lock = asyncio.Lock()
 
     def _ordered_keys(self) -> list[str]:
         if not self.api_keys:
@@ -308,7 +309,11 @@ class GeminiTTSProvider:
 
     async def synthesize(self, text: str, preferences: dict) -> bytes:
         last_error: Exception | None = None
-        for key in self._ordered_keys():
+        async with self._key_lock:
+            ordered_keys = self._ordered_keys()
+            if ordered_keys:
+                self.cursor = (self.api_keys.index(ordered_keys[0]) + 1) % len(self.api_keys)
+        for key in ordered_keys:
             try:
                 audio = await self._request(key, text, preferences)
                 self.cursor = (self.api_keys.index(key) + 1) % len(self.api_keys)
@@ -420,6 +425,7 @@ class TTSJob:
     folder_id: int | None
     preferences: dict
     output_mode: str = "save"
+    api_keys: list[str] | None = None
     id: str = ""
 
 
@@ -431,7 +437,8 @@ class TTSQueue:
         self.controls: dict[str, dict[str, bool]] = {}
         self.audio_outputs: dict[str, bytes] = {}
         self.task: asyncio.Task | None = None
-        self.active_job_id: str | None = None
+        self.tasks: list[asyncio.Task] = []
+        self.active_job_ids: set[str] = set()
 
     @property
     def available(self) -> bool:
@@ -440,19 +447,28 @@ class TTSQueue:
     async def start(self) -> None:
         if not self.available:
             return
-        if self.task is None or self.task.done():
-            self.task = asyncio.create_task(self._run(), name="gemini-tts-worker")
+        if not any(not task.done() for task in self.tasks):
+            worker_count = min(4, max(1, len(self.provider.api_keys)))
+            self.tasks = [asyncio.create_task(self._run(), name=f"gemini-tts-worker-{index + 1}") for index in range(worker_count)]
+            self.task = self.tasks[0]
 
     async def stop(self) -> None:
-        if self.task:
-            self.task.cancel()
-            await asyncio.gather(self.task, return_exceptions=True)
-            self.task = None
+        for task in self.tasks:
+            task.cancel()
+        if self.tasks:
+            await asyncio.gather(*self.tasks, return_exceptions=True)
+        self.tasks = []
+        self.task = None
 
     async def enqueue(self, job: TTSJob) -> int:
-        if not self.available:
+        if not self.available and not job.api_keys:
             raise RuntimeError("GEMINI_API_KEYS is not configured")
-        await self.start()
+        if job.api_keys and not self.available and not any(not task.done() for task in self.tasks):
+            worker_count = min(4, len(job.api_keys))
+            self.tasks = [asyncio.create_task(self._run(), name=f"gemini-tts-worker-{index + 1}") for index in range(worker_count)]
+            self.task = self.tasks[0]
+        else:
+            await self.start()
         job.id = job.id or uuid.uuid4().hex
         chunks = split_long_text(job.text)
         self.statuses[job.id] = {
@@ -510,7 +526,7 @@ class TTSQueue:
         if not item or item["user_id"] != user_id or not control or item["state"] in TERMINAL_STATES:
             return dict(item) if item and item["user_id"] == user_id else None
         control["paused"] = not control["paused"]
-        item.update(state="paused" if control["paused"] else ("synthesizing" if self.active_job_id == job_id else "queued"), message="متوقف شد" if control["paused"] else "ادامه یافت")
+        item.update(state="paused" if control["paused"] else ("synthesizing" if job_id in self.active_job_ids else "queued"), message="متوقف شد" if control["paused"] else "ادامه یافت")
         return dict(item)
 
     def cancel(self, job_id: str, user_id: int) -> dict | None:
@@ -532,7 +548,7 @@ class TTSQueue:
         while True:
             job = await self.queue.get()
             try:
-                self.active_job_id = job.id
+                self.active_job_ids.add(job.id)
                 await self._process(job)
             except asyncio.CancelledError:
                 raise
@@ -540,17 +556,18 @@ class TTSQueue:
                 logger.exception("TTS job %s failed", job.id)
                 self.statuses[job.id].update(state="error", message=str(error) or "ساخت صدا انجام نشد.", finished_at=datetime.utcnow().isoformat())
             finally:
-                self.active_job_id = None
+                self.active_job_ids.discard(job.id)
                 self.queue.task_done()
 
     async def _process(self, job: TTSJob) -> None:
+        provider = GeminiTTSProvider(list(dict.fromkeys((job.api_keys or []) + self.provider.api_keys))) if job.api_keys else self.provider
         chunks = split_long_text(job.text)
         parts: list[bytes] = []
         for index, chunk in enumerate(chunks, 1):
             if not await self._checkpoint(job):
                 return
             self.statuses[job.id].update(state="synthesizing", message=f"بخش {to_persian_digits(index)} از {to_persian_digits(len(chunks))}")
-            parts.append(await self.provider.synthesize(chunk, job.preferences))
+            parts.append(await provider.synthesize(chunk, job.preferences))
             self.statuses[job.id].update(chunks_done=index, progress=round(index / len(chunks) * 80))
         if not await self._checkpoint(job):
             return
@@ -645,6 +662,7 @@ class TTSQueue:
                     file_unique_id=media.file_unique_id, channel_message_id=message.id,
                     storage_channel_id=target_channel, file_name=output_path.name,
                     description="🤖 تولیدشده با هوش مصنوعی", file_size=media.file_size or os.path.getsize(output_path),
+                    tags_json=json.dumps(["متن‌به‌صدا"], ensure_ascii=False),
                     mime_type=getattr(media, "mime_type", None) or ("audio/ogg" if is_voice else "audio/wav"),
                     file_type="audio", duration=getattr(media, "duration", None),
                     thumbnail_file_id=(select_best_thumbnail(getattr(media, "thumbs", None)).file_id if select_best_thumbnail(getattr(media, "thumbs", None)) else None),

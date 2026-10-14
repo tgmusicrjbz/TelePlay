@@ -29,6 +29,7 @@ class User(Base):
     show_file_tags: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     file_tag_limit: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
     tts_settings_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    gemini_api_keys_encrypted: Mapped[Optional[str]] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     auth_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -136,7 +137,9 @@ class Folder(Base):
     description: Mapped[Optional[str]] = mapped_column(Text)
     color: Mapped[Optional[str]] = mapped_column(String(7))
     icon: Mapped[Optional[str]] = mapped_column(String(16))
-    cover_file_id: Mapped[Optional[int]] = mapped_column(ForeignKey("files.id", ondelete="SET NULL"), nullable=True)
+    cover_file_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("files.id", ondelete="SET NULL", use_alter=True, name="fk_folder_cover_file"), nullable=True
+    )
     is_favorite: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_pinned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -149,7 +152,6 @@ class Folder(Base):
     parent: Mapped[Optional["Folder"]] = relationship(back_populates="children", remote_side=[id])
     children: Mapped[List["Folder"]] = relationship(back_populates="parent", cascade="all, delete-orphan")
     files: Mapped[List["File"]] = relationship(back_populates="folder", foreign_keys="File.folder_id")
-    cover_file: Mapped[Optional["File"]] = relationship(foreign_keys="Folder.cover_file_id", post_update=True)
     
     # Indexes
     __table_args__ = (
