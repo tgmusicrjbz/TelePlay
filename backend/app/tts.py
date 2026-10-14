@@ -342,7 +342,18 @@ class GeminiTTSProvider:
                 "response_format": {"type": "audio"},
                 "generation_config": {"speech_config": [{"voice": preferences["voice"]}]},
             }
-            result = await asyncio.to_thread(self._request_sync, endpoint, payload)
+            try:
+                result = await asyncio.to_thread(self._request_sync, endpoint, payload)
+            except GeminiRequestError as error:
+                # Some released TTS variants reject developer/system instructions
+                # even though the Interactions endpoint otherwise accepts them.
+                # Keep Director Notes in the transcript and retry without that
+                # optional field so a model capability mismatch does not block TTS.
+                if not _rejects_system_instruction(error):
+                    raise
+                logger.info("Gemini TTS model rejected system_instruction; retrying without it")
+                fallback_payload = {name: value for name, value in payload.items() if name != "system_instruction"}
+                result = await asyncio.to_thread(self._request_sync, endpoint, fallback_payload)
             raw, mime_type = extract_interaction_audio(result)
             rate_match = re.search(r"rate=(\d+)", mime_type)
             return _pcm_to_wav(raw, int(rate_match.group(1)) if rate_match else 24000)
@@ -357,7 +368,14 @@ class GeminiTTSProvider:
                 "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": preferences["voice"]}}},
             },
         }
-        result = await asyncio.to_thread(self._request_sync, endpoint, payload)
+        try:
+            result = await asyncio.to_thread(self._request_sync, endpoint, payload)
+        except GeminiRequestError as error:
+            if not _rejects_system_instruction(error):
+                raise
+            logger.info("Gemini TTS model rejected systemInstruction; retrying without it")
+            fallback_payload = {name: value for name, value in payload.items() if name != "systemInstruction"}
+            result = await asyncio.to_thread(self._request_sync, endpoint, fallback_payload)
         try:
             inline = result["candidates"][0]["content"]["parts"][0]["inlineData"]
             raw = base64.b64decode(inline["data"])
@@ -400,6 +418,18 @@ class GeminiRequestError(RuntimeError):
         except (TypeError, ValueError, AttributeError):
             pass
         return "تگ‌ها، متن یا تنظیمات انتخاب‌شده با این مدل سازگار نیستند."
+
+
+def _rejects_system_instruction(error: GeminiRequestError) -> bool:
+    """Return True only for model variants without developer-instruction support."""
+    if error.status != 400:
+        return False
+    detail = error.detail.lower()
+    return (
+        "developer instruction is not defined" in detail
+        or "system instruction is not defined" in detail
+        or ("system_instruction" in detail and "not defined" in detail)
+    )
 
 
 def to_persian_digits(value: object) -> str:

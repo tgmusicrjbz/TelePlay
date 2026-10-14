@@ -143,6 +143,33 @@ class TTSHelpersTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(text_part["annotations"][0]["type"], "speech_metadata")
         self.assertEqual(captured["payload"]["system_instruction"], DIRECTOR_NOTES_SYSTEM_INSTRUCTION)
 
+    async def test_gemini_38_retries_without_system_instruction_when_model_rejects_it(self):
+        provider = GeminiTTSProvider(["key"])
+        expected = wav_with_frames(b"\\x05\\x00" * 8)
+        payloads = []
+
+        def fake_request(_endpoint, payload):
+            payloads.append(payload)
+            if "system_instruction" in payload:
+                raise GeminiRequestError(400, "Developer instruction is not defined for model")
+            return {
+                "status": "completed",
+                "steps": [{
+                    "type": "model_output",
+                    "content": [{"type": "audio", "data": base64.b64encode(expected).decode("ascii"), "mime_type": "audio/wav"}],
+                }],
+            }
+
+        provider._request_sync = fake_request
+        preferences = normalize_tts_settings({"model": "gemini-3.8-flash-tts"})
+        result = await provider._request("key", "سلام <laugh>", preferences)
+
+        self.assertEqual(result, expected)
+        self.assertEqual(len(payloads), 2)
+        self.assertIn("system_instruction", payloads[0])
+        self.assertNotIn("system_instruction", payloads[1])
+        self.assertEqual(payloads[1]["input"][0]["content"][0]["text"], "سلام [chuckle]")
+
     def test_interaction_audio_supports_sdk_convenience_shape(self):
         expected = wav_with_frames(b"\x04\x00" * 4)
         raw, mime_type = extract_interaction_audio({
