@@ -113,6 +113,11 @@ DIRECTOR_NOTES_SYSTEM_INSTRUCTION = (
     "vocal directions. Never read, speak, or pronounce the text inside brackets out loud."
 )
 
+DIRECTOR_NOTES_PERFORMANCE_STYLE = (
+    "Follow every square-bracketed Director Note as a non-verbal performance direction. "
+    "Do not speak or pronounce the words inside square brackets."
+)
+
 
 _LEGACY_DIRECTOR_NOTES = {
     "short pause": "short pause", "long pause": "long pause", "sigh": "sigh",
@@ -138,10 +143,10 @@ def normalize_director_notes(text: str) -> str:
 
 
 def build_interaction_content(text: str, base_style: str) -> list[dict]:
-    """Keep Director Notes verbatim while attaching only the global voice style."""
+    """Keep Director Notes verbatim and pass their rules as speech metadata."""
     part: dict = {"type": "text", "text": normalize_director_notes(text)}
-    if base_style:
-        part["annotations"] = [{"type": "speech_metadata", "style": base_style}]
+    performance_style = "; ".join(value for value in (base_style, DIRECTOR_NOTES_PERFORMANCE_STYLE) if value)
+    part["annotations"] = [{"type": "speech_metadata", "style": performance_style}]
     return [part]
 
 
@@ -337,23 +342,11 @@ class GeminiTTSProvider:
             endpoint = f"https://generativelanguage.googleapis.com/v1beta/interactions?{urlencode({'key': key})}"
             payload = {
                 "model": model,
-                "system_instruction": DIRECTOR_NOTES_SYSTEM_INSTRUCTION,
                 "input": [{"type": "user_input", "content": build_interaction_content(text, style)}],
                 "response_format": {"type": "audio"},
                 "generation_config": {"speech_config": [{"voice": preferences["voice"]}]},
             }
-            try:
-                result = await asyncio.to_thread(self._request_sync, endpoint, payload)
-            except GeminiRequestError as error:
-                # Some released TTS variants reject developer/system instructions
-                # even though the Interactions endpoint otherwise accepts them.
-                # Keep Director Notes in the transcript and retry without that
-                # optional field so a model capability mismatch does not block TTS.
-                if not _rejects_system_instruction(error):
-                    raise
-                logger.info("Gemini TTS model rejected system_instruction; retrying without it")
-                fallback_payload = {name: value for name, value in payload.items() if name != "system_instruction"}
-                result = await asyncio.to_thread(self._request_sync, endpoint, fallback_payload)
+            result = await asyncio.to_thread(self._request_sync, endpoint, payload)
             raw, mime_type = extract_interaction_audio(result)
             rate_match = re.search(r"rate=(\d+)", mime_type)
             return _pcm_to_wav(raw, int(rate_match.group(1)) if rate_match else 24000)

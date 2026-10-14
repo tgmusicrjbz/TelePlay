@@ -61,7 +61,8 @@ class TTSHelpersTests(unittest.IsolatedAsyncioTestCase):
     def test_legacy_scoped_tags_become_director_notes(self):
         content = build_interaction_content("شروع <whisper>این بخش آرام است.</whisper> پایان", "روان")
         self.assertEqual(content[0]["text"], "شروع [whispering]این بخش آرام است.[resumes normal speech] پایان")
-        self.assertEqual(content[0]["annotations"][0]["style"], "روان")
+        self.assertTrue(content[0]["annotations"][0]["style"].startswith("روان; "))
+        self.assertIn("Do not speak", content[0]["annotations"][0]["style"])
         self.assertNotIn("<", content[0]["text"])
 
     def test_point_cues_are_kept_verbatim(self):
@@ -141,17 +142,16 @@ class TTSHelpersTests(unittest.IsolatedAsyncioTestCase):
         text_part = captured["payload"]["input"][0]["content"][0]
         self.assertEqual(text_part["text"], "متن اصلی")
         self.assertEqual(text_part["annotations"][0]["type"], "speech_metadata")
-        self.assertEqual(captured["payload"]["system_instruction"], DIRECTOR_NOTES_SYSTEM_INSTRUCTION)
+        self.assertNotIn("system_instruction", captured["payload"])
+        self.assertIn("Do not speak", text_part["annotations"][0]["style"])
 
-    async def test_gemini_38_retries_without_system_instruction_when_model_rejects_it(self):
+    async def test_gemini_38_sends_director_notes_without_unsupported_system_instruction(self):
         provider = GeminiTTSProvider(["key"])
         expected = wav_with_frames(b"\\x05\\x00" * 8)
         payloads = []
 
         def fake_request(_endpoint, payload):
             payloads.append(payload)
-            if "system_instruction" in payload:
-                raise GeminiRequestError(400, "Developer instruction is not defined for model")
             return {
                 "status": "completed",
                 "steps": [{
@@ -165,10 +165,11 @@ class TTSHelpersTests(unittest.IsolatedAsyncioTestCase):
         result = await provider._request("key", "سلام <laugh>", preferences)
 
         self.assertEqual(result, expected)
-        self.assertEqual(len(payloads), 2)
-        self.assertIn("system_instruction", payloads[0])
-        self.assertNotIn("system_instruction", payloads[1])
-        self.assertEqual(payloads[1]["input"][0]["content"][0]["text"], "سلام [chuckle]")
+        self.assertEqual(len(payloads), 1)
+        self.assertNotIn("system_instruction", payloads[0])
+        text_part = payloads[0]["input"][0]["content"][0]
+        self.assertEqual(text_part["text"], "سلام [chuckle]")
+        self.assertIn("Do not speak", text_part["annotations"][0]["style"])
 
     def test_interaction_audio_supports_sdk_convenience_shape(self):
         expected = wav_with_frames(b"\x04\x00" * 4)
