@@ -1,13 +1,24 @@
 /**
  * MediaPlayer - full screen video/audio player
  */
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipBack, SkipForward, Download, AlertTriangle, Copy, PictureInPicture2, Gauge, ChevronDown, ChevronUp, Repeat2, Shuffle, Headphones, RotateCcw, RotateCw, Clock3, ListPlus, ListMusic, GripVertical, Trash2, RectangleHorizontal, Smartphone, MonitorSmartphone, Film, LockKeyhole, UnlockKeyhole } from 'lucide-react';
 import { TelegramFile, useUpdateProgress, useFile, api } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { DndContext, DragEndEvent, PointerSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+
+const queueObjectIds = new WeakMap<object, string>();
+let queueObjectSequence = 0;
+function stableQueueId(file: TelegramFile) {
+    let id = queueObjectIds.get(file);
+    if (!id) {
+        id = `queue-${file.id}-${++queueObjectSequence}`;
+        queueObjectIds.set(file, id);
+    }
+    return id;
+}
 
 export default function MediaPlayer() {
     const { previewFile: file, setPreviewFile, isPlayerMinimized, setPlayerMinimized, clearQueue } = useAppStore();
@@ -40,6 +51,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [streamRetry, setStreamRetry] = useState(0);
+    const queueRows = useMemo(() => playQueue.map((item, index) => ({ item, index, id: stableQueueId(item) })), [playQueue]);
     const hideControlsTimeout = useRef<ReturnType<typeof setTimeout>>();
     const singleTapTimeout = useRef<ReturnType<typeof setTimeout>>();
     const feedbackTimeout = useRef<ReturnType<typeof setTimeout>>();
@@ -969,9 +981,9 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                 <div className="absolute inset-0 z-[100] flex items-end justify-center bg-black/55 backdrop-blur-sm sm:items-center sm:p-5" onPointerUp={event=>event.stopPropagation()} onClick={() => setShowQueue(false)}>
                     <section dir="rtl" className="flex max-h-[78dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-[2rem] border border-white/10 bg-dark-900/98 shadow-2xl sm:rounded-3xl" onClick={event => event.stopPropagation()}>
                         <header className="flex items-center gap-3 border-b border-white/[.07] px-4 py-3"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary-500/12 text-primary-200"><ListMusic className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h2 className="font-bold">صف پخش</h2><p className="mt-0.5 text-[11px] text-dark-400">{Math.max(0, playQueue.length-queueIndex-1).toLocaleString('fa-IR')} مورد در ادامه</p></div><button className="btn-icon" onClick={() => setShowQueue(false)} aria-label="بستن صف"><X className="h-5 w-5"/></button></header>
-                        <DndContext sensors={queueSensors} onDragEnd={({active,over}:DragEndEvent)=>{if(!over||active.id===over.id)return;const from=active.data.current?.sortable?.index;const to=over.data.current?.sortable?.index;if(typeof from!=='number'||typeof to!=='number')return;moveQueueItem(from,to)}}>
-                            <SortableContext items={playQueue.map((_,index)=>`queue-${index}`)} strategy={verticalListSortingStrategy}>
-                                <div className="min-h-0 overflow-y-auto p-3">{playQueue.map((item,index)=><SortableQueueRow key={`queue-${index}`} item={item} index={index} currentIndex={queueIndex} onPlay={()=>{useAppStore.getState().playQueueItem(index);setShowQueue(false)}} onRemove={()=>removeQueueItem(index)}/>)}</div>
+                        <DndContext sensors={queueSensors} onDragEnd={({active,over}:DragEndEvent)=>{if(!over||active.id===over.id)return;const from=queueRows.findIndex(row=>row.id===active.id);const to=queueRows.findIndex(row=>row.id===over.id);if(from<0||to<0)return;moveQueueItem(from,to)}}>
+                            <SortableContext items={queueRows.map(row=>row.id)} strategy={verticalListSortingStrategy}>
+                                <div className="min-h-0 overflow-y-auto p-3">{queueRows.map(({item,index,id})=><SortableQueueRow key={id} sortableId={id} item={item} index={index} currentIndex={queueIndex} onPlay={()=>{useAppStore.getState().playQueueItem(index);setShowQueue(false)}} onRemove={()=>removeQueueItem(index)}/>)}</div>
                             </SortableContext>
                         </DndContext>
                     </section>
@@ -981,8 +993,8 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     );
 }
 
-function SortableQueueRow({item,index,currentIndex,onPlay,onRemove}:{item:TelegramFile;index:number;currentIndex:number;onPlay:()=>void;onRemove:()=>void}) {
-    const sortable=useSortable({id:`queue-${index}`});
+function SortableQueueRow({sortableId,item,index,currentIndex,onPlay,onRemove}:{sortableId:string;item:TelegramFile;index:number;currentIndex:number;onPlay:()=>void;onRemove:()=>void}) {
+    const sortable=useSortable({id:sortableId});
     const current=index===currentIndex;
     return <article ref={sortable.setNodeRef} style={{transform:CSS.Transform.toString(sortable.transform),transition:sortable.transition}} className={`mb-1.5 flex items-center gap-2 rounded-2xl p-2 ${current?'bg-primary-500/12 ring-1 ring-primary-400/20':'bg-white/[.025]'} ${sortable.isDragging?'z-20 opacity-70 shadow-2xl':''}`}>
         <button {...sortable.attributes} {...sortable.listeners} className="flex h-9 w-8 shrink-0 touch-none items-center justify-center rounded-xl text-dark-400 hover:bg-white/[.06] hover:text-white" aria-label="جابه‌جایی در صف"><GripVertical className="h-4 w-4"/></button>

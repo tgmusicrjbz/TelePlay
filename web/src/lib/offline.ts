@@ -13,7 +13,7 @@ export const OFFLINE_CHANGED_EVENT = 'komod-offline-changed';
 export const OFFLINE_PROGRESS_EVENT = 'komod-offline-progress';
 
 export interface OfflineMedia { id: number; file: TelegramFile; blob: Blob; savedAt: string; folderId?: string | null; ownerUserId?: number; }
-export interface OfflinePlaylist { id: number; name: string; description?: string | null; fileIds: number[]; totalCount: number; failedCount?: number; savedAt: string; folderId?: string | null; ownerUserId?: number; }
+export interface OfflinePlaylist { id: number; name: string; description?: string | null; fileIds: number[]; totalCount: number; failedCount?: number; savedAt: string; folderId?: string | null; ownerUserId?: number; position?: number; }
 export interface OfflineText { id: number; file: TelegramFile; content: string; savedAt: string; folderId?: string | null; ownerUserId?: number; }
 export interface OfflineFolder { id: string; name: string; createdAt: string; ownerUserId?: number; }
 export interface OfflineTextDraft { id: number; name: string; content: string; folderId: number | null; createdAt: string; ownerUserId?: number; }
@@ -259,7 +259,7 @@ export async function savePlaylistOffline(playlist: Playlist, onProgress?: (prog
         throw new Error('هیچ‌کدام از فایل‌های پلی‌لیست دانلود نشدند؛ اتصال ربات به کانال ذخیره‌سازی را بررسی کن.');
     }
     const previous = (await listOfflinePlaylists()).find(item => item.id === playlist.id);
-    const record: OfflinePlaylist = { id: playlist.id, name: playlist.name, description: playlist.description, fileIds: savedIds, totalCount: playable.length, failedCount: failed, savedAt: new Date().toISOString(), folderId: previous?.folderId || null, ownerUserId: activeUserId() };
+    const record: OfflinePlaylist = { id: playlist.id, name: playlist.name, description: playlist.description, fileIds: savedIds, totalCount: playable.length, failedCount: failed, savedAt: new Date().toISOString(), folderId: previous?.folderId || null, ownerUserId: activeUserId(), position: previous?.position };
     await transaction<IDBValidKey>(PLAYLIST_STORE, 'readwrite', store => store.put(record));
     window.dispatchEvent(new Event(OFFLINE_CHANGED_EVENT));
     emitProgress({ id: jobId, kind: 'playlist', title: playlist.name, state: 'done', done, total: playable.length, failed, currentName: '', loaded: [...loadedByFile.values()].reduce((sum, value) => sum + value, 0), size: totalSize });
@@ -271,7 +271,8 @@ export async function createOfflinePlaylist(name:string,fileIds:number[]=[],desc
     const clean=name.trim().slice(0,120);if(!clean)throw new Error('نام پلی‌لیست را وارد کن.');
     const mediaIds=new Set((await listOfflineMedia()).map(item=>item.id));
     const ids=fileIds.filter((id,index)=>mediaIds.has(id)&&fileIds.indexOf(id)===index);
-    const record:OfflinePlaylist={id:-Date.now(),name:clean,description:description.trim()||null,fileIds:ids,totalCount:ids.length,failedCount:0,savedAt:new Date().toISOString(),ownerUserId:activeUserId()};
+    const existing=await listOfflinePlaylists();
+    const record:OfflinePlaylist={id:-Date.now(),name:clean,description:description.trim()||null,fileIds:ids,totalCount:ids.length,failedCount:0,savedAt:new Date().toISOString(),ownerUserId:activeUserId(),position:existing.length};
     await transaction<IDBValidKey>(PLAYLIST_STORE,'readwrite',store=>store.put(record));window.dispatchEvent(new Event(OFFLINE_CHANGED_EVENT));return record;
 }
 
@@ -282,6 +283,16 @@ export async function updateOfflinePlaylist(id:number,changes:{name?:string;desc
     if(changes.fileIds){const mediaIds=new Set((await listOfflineMedia()).map(item=>item.id));fileIds=changes.fileIds.filter((value,index)=>mediaIds.has(value)&&changes.fileIds!.indexOf(value)===index)}
     const next:OfflinePlaylist={...current,name:changes.name?.trim().slice(0,120)||current.name,description:changes.description===undefined?current.description:changes.description.trim()||null,fileIds,totalCount:fileIds.length,savedAt:new Date().toISOString()};
     await transaction<IDBValidKey>(PLAYLIST_STORE,'readwrite',store=>store.put(next));window.dispatchEvent(new Event(OFFLINE_CHANGED_EVENT));return next;
+}
+
+export async function reorderOfflinePlaylists(ids:number[]):Promise<void>{
+    const playlists=await listOfflinePlaylists();
+    const byId=new Map(playlists.map(item=>[item.id,item]));
+    for(const [position,id] of ids.entries()){
+        const item=byId.get(id);if(!item)continue;
+        await transaction<IDBValidKey>(PLAYLIST_STORE,'readwrite',store=>store.put({...item,position}));
+    }
+    window.dispatchEvent(new Event(OFFLINE_CHANGED_EVENT));
 }
 
 export async function offlinePlaylistFiles(playlist: OfflinePlaylist): Promise<TelegramFile[]> {
