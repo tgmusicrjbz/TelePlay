@@ -5,8 +5,8 @@ import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipBack, SkipForward, Download, AlertTriangle, Copy, PictureInPicture2, Gauge, ChevronDown, ChevronUp, Repeat2, Shuffle, Headphones, RotateCcw, RotateCw, Clock3, ListPlus, ListMusic, GripVertical, Trash2, RectangleHorizontal, Smartphone, MonitorSmartphone, Film, LockKeyhole, UnlockKeyhole, MoreHorizontal, Save, History } from 'lucide-react';
 import { TelegramFile, useUpdateProgress, useFile, api, useCreatePlaylist, useAddPlaylistItems } from '../lib/api';
 import { useAppStore } from '../lib/store';
-import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
-import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { DndContext, DragEndEvent, KeyboardSensor, PointerSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 
 export default function MediaPlayer() {
@@ -25,7 +25,7 @@ interface MediaPlayerContentProps {
 }
 
 function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaPlayerContentProps) {
-    const { playQueue, queueIndex, repeatMode, playNext, playPrevious, shuffleQueue, removeQueueItem, moveQueueItem, setRepeatMode, setPlaylistFile, addToast } = useAppStore();
+    const { playQueue, queueIndex, repeatMode, playNext, playPrevious, shuffleQueue, removeQueueItem, moveQueueItem, appendQueueItems, setRepeatMode, setPlaylistFile, addToast } = useAppStore();
     const videoRef = useRef<HTMLVideoElement>(null);
     const nextAudioRef = useRef<HTMLAudioElement>(null);
     const crossfadeCarry = useRef<{fileId:number;time:number}|null>(null);
@@ -70,12 +70,16 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     const [historyItems, setHistoryItems] = useState<TelegramFile[]>([]);
     const [queueName, setQueueName] = useState('');
     const [showQueueSave, setShowQueueSave] = useState(false);
+    const [recommendations, setRecommendations] = useState<TelegramFile[]>([]);
+    const [showRecommendations, setShowRecommendations] = useState(false);
     const [crossfadeSeconds, setCrossfadeSeconds] = useState(()=>Math.max(0,Math.min(6,Number(localStorage.getItem('komod-crossfade-seconds')||0))));
     const createPlaylist = useCreatePlaylist();
     const addPlaylistItems = useAddPlaylistItems();
     const [showVideoMoreMenu, setShowVideoMoreMenu] = useState(false);
     const queueSensors = useSensors(
         useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+        useSensor(TouchSensor, {activationConstraint:{delay:180,tolerance:8}}),
+        useSensor(KeyboardSensor, {coordinateGetter:sortableKeyboardCoordinates}),
     );
     const formatPlayerTime = (seconds: number) => {
         const safe = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
@@ -126,6 +130,13 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
         if (!historyItems.length) {
             try { setHistoryItems((await api.get('/files/play-history',{params:{per_page:50}})).data.files || []); }
             catch { addToast('تاریخچه پخش بارگذاری نشد.', 'error'); }
+        }
+    };
+    const loadRecommendations = async () => {
+        setShowRecommendations(value=>!value);
+        if (!recommendations.length) {
+            try { setRecommendations((await api.get('/files/recommendations',{params:{after_file_id:file.id,limit:12}})).data||[]); }
+            catch { addToast('پیشنهادهای پخش آماده نشد.', 'error'); }
         }
     };
 
@@ -615,8 +626,9 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
         return `${window.location.origin}${url}`;
     };
 
-    const isOfflineSource = file.stream_url.startsWith('blob:');
-    const relativeStreamUrl = isOfflineSource ? file.stream_url : `${file.stream_url}${file.stream_url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token || '')}&retry=${streamRetry}`;
+    const selectedStreamUrl = audioOnly && audioVariantUrl ? audioVariantUrl : file.stream_url;
+    const isOfflineSource = selectedStreamUrl.startsWith('blob:');
+    const relativeStreamUrl = isOfflineSource ? selectedStreamUrl : `${selectedStreamUrl}${selectedStreamUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(token || '')}&retry=${streamRetry}`;
     const authorizedStreamUrl = isOfflineSource ? relativeStreamUrl : getAbsoluteUrl(relativeStreamUrl);
     const externalUrl = publicUrl || authorizedStreamUrl;
     const nextQueueFile = playQueue[queueIndex + 1] || (repeatMode === 'all' ? playQueue[0] : undefined);
@@ -916,7 +928,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                         {isVideo && <div className="relative">
                             <button onClick={() => { setShowVideoMoreMenu(open => !open); setShowSleepMenu(false); }} className={`rounded-lg p-2 transition-all ${showVideoMoreMenu || repeatMode !== 'off' || audioOnly || sleepMode !== 'off' ? 'bg-primary-500/25 text-primary-200' : 'text-white/80 hover:bg-white/10'}`} title="گزینه‌های بیشتر" aria-expanded={showVideoMoreMenu}><MoreHorizontal className="h-5 w-5"/></button>
                             {showVideoMoreMenu && <div role="menu" aria-label="گزینه‌های بیشتر ویدیو" className="absolute left-0 top-full z-50 mt-2 w-56 overflow-hidden rounded-2xl border border-white/10 bg-dark-900/98 p-1.5 text-right shadow-2xl backdrop-blur-xl">
-                                <button className="context-menu-item w-full" onClick={() => setAudioOnly(current => !current)}><Headphones className="h-4 w-4"/><span>{audioOnly ? 'بازگشت به تصویر' : 'پخش فقط صدا'}</span></button>
+                                <button disabled={preparingAudio} className="context-menu-item w-full disabled:opacity-50" onClick={()=>void toggleAudioOnly()}><Headphones className="h-4 w-4"/><span>{preparingAudio?'در حال آماده‌سازی…':audioOnly ? 'بازگشت به تصویر' : 'پخش فقط صدا'}</span></button>
                                 <button className="context-menu-item w-full" onClick={() => setRepeatMode(repeatMode === 'off' ? (hasQueue ? 'all' : 'one') : repeatMode === 'all' ? 'one' : 'off')}><Repeat2 className="h-4 w-4"/><span className="min-w-0 flex-1">{repeatMode === 'off' ? 'تکرار خاموش' : repeatMode === 'all' ? 'تکرار همه ویدیوها' : 'تکرار همین ویدیو'}</span>{repeatMode === 'one'&&<strong className="text-primary-200">۱</strong>}</button>
                                 <button className="context-menu-item w-full" onClick={() => setShowSleepMenu(open => !open)}><Clock3 className="h-4 w-4"/><span className="min-w-0 flex-1">تایمر خواب</span>{sleepMode !== 'off'&&<span className="h-2 w-2 rounded-full bg-primary-400"/>}</button>
                                 {showSleepMenu && <div className="mx-1 mb-1 grid grid-cols-2 gap-1 rounded-xl bg-black/25 p-1">
@@ -1026,7 +1038,8 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
 
                                 {isVideo && (
                                     <button
-                                        onClick={() => setAudioOnly(current => !current)}
+                                        onClick={() => void toggleAudioOnly()}
+                                        disabled={preparingAudio}
                                         className={`p-2 rounded-lg transition-all ${audioOnly ? 'bg-primary-500/30 text-primary-300' : 'hover:bg-white/10 text-white/80 hover:text-white'}`}
                                         title={audioOnly ? 'بازگشت به پخش ویدیو' : 'پخش فقط صدا'}
                                     >
@@ -1066,10 +1079,10 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
             {!isMinimized && showQueue && (
                 <div className="absolute inset-0 z-[100] flex items-end justify-center bg-black/55 backdrop-blur-sm sm:items-center sm:p-5" onPointerUp={event=>event.stopPropagation()} onClick={() => setShowQueue(false)}>
                     <section dir="rtl" className="flex max-h-[78dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-[2rem] border border-white/10 bg-dark-900/98 shadow-2xl sm:rounded-3xl" onClick={event => event.stopPropagation()}>
-                        <header className="flex items-center gap-3 border-b border-white/[.07] px-4 py-3"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary-500/12 text-primary-200"><ListMusic className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h2 className="font-bold">{showHistory?'تاریخچه پخش':'صف پخش'}</h2><p className="mt-0.5 text-[11px] text-dark-400">{showHistory?`${historyItems.length.toLocaleString('fa-IR')} مورد اخیر`:`${Math.max(0, playQueue.length-queueIndex-1).toLocaleString('fa-IR')} مورد در ادامه`}</p></div><button className={`btn-icon ${showHistory?'text-primary-300':''}`} onClick={()=>void loadHistory()} title="تاریخچه"><History className="h-4 w-4"/></button><button className="btn-icon" onClick={()=>setShowQueueSave(value=>!value)} title="ذخیره صف"><Save className="h-4 w-4"/></button><button className="btn-icon" onClick={() => setShowQueue(false)} aria-label="بستن صف"><X className="h-5 w-5"/></button></header>
-                        {!showHistory&&<div className="flex items-center gap-2 border-b border-white/[.07] px-3 py-2"><span className="ml-auto text-[11px] text-dark-400">گذار نرم</span>{[0,2,4,6].map(seconds=><button key={seconds} onClick={()=>setCrossfadeSeconds(seconds)} className={`rounded-lg px-2.5 py-1 text-[10px] ${crossfadeSeconds===seconds?'bg-primary-500 text-white':'bg-white/[.05] text-dark-300'}`}>{seconds?`${seconds.toLocaleString('fa-IR')} ثانیه`:'بدون فاصله'}</button>)}</div>}
+                        <header className="flex items-center gap-2 border-b border-white/[.07] px-3 py-3"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary-500/12 text-primary-200"><ListMusic className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h2 className="font-bold">{showHistory?'تاریخچه پخش':showRecommendations?'پیشنهاد بعدی':'صف پخش'}</h2><p className="mt-0.5 text-[11px] text-dark-400">{showHistory?`${historyItems.length.toLocaleString('fa-IR')} مورد اخیر`:showRecommendations?`${recommendations.length.toLocaleString('fa-IR')} پیشنهاد`:`${Math.max(0, playQueue.length-queueIndex-1).toLocaleString('fa-IR')} مورد در ادامه`}</p></div><button className={`btn-icon ${showRecommendations?'text-primary-300':''}`} onClick={()=>{setShowHistory(false);void loadRecommendations()}} title="پیشنهادها"><ListPlus className="h-4 w-4"/></button><button className={`btn-icon ${showHistory?'text-primary-300':''}`} onClick={()=>{setShowRecommendations(false);void loadHistory()}} title="تاریخچه"><History className="h-4 w-4"/></button><button className="btn-icon" onClick={()=>setShowQueueSave(value=>!value)} title="ذخیره صف"><Save className="h-4 w-4"/></button><button className="btn-icon" onClick={() => setShowQueue(false)} aria-label="بستن صف"><X className="h-5 w-5"/></button></header>
+                        {!showHistory&&!showRecommendations&&<div className="flex items-center gap-2 overflow-x-auto border-b border-white/[.07] px-3 py-2"><span className="ml-auto shrink-0 text-[11px] text-dark-400">گذار نرم</span>{[0,2,4,6].map(seconds=><button key={seconds} onClick={()=>setCrossfadeSeconds(seconds)} className={`shrink-0 rounded-lg px-2.5 py-1 text-[10px] ${crossfadeSeconds===seconds?'bg-primary-500 text-white':'bg-white/[.05] text-dark-300'}`}>{seconds?`${seconds.toLocaleString('fa-IR')} ثانیه`:'بدون فاصله'}</button>)}</div>}
                         {showQueueSave&&<div className="flex gap-2 border-b border-white/[.07] p-3"><input autoFocus value={queueName} onChange={event=>setQueueName(event.target.value)} onKeyDown={event=>{if(event.key==='Enter')void saveNamedQueue()}} className="input min-w-0 flex-1 text-sm" placeholder="نام این صف"/><button disabled={!queueName.trim()||createPlaylist.isPending||addPlaylistItems.isPending} onClick={()=>void saveNamedQueue()} className="btn-primary shrink-0 px-4 text-xs disabled:opacity-40">ذخیره</button></div>}
-                        {showHistory?<div className="min-h-0 overflow-y-auto p-3">{historyItems.map((item,index)=><button key={item.id} onClick={()=>{useAppStore.getState().startQueue(historyItems,index);setShowHistory(false)}} className="mb-1.5 flex w-full items-center gap-3 rounded-2xl bg-white/[.025] p-3 text-right hover:bg-white/[.06]"><History className="h-4 w-4 shrink-0 text-dark-500"/><span dir="auto" className="min-w-0 flex-1 truncate text-sm">{item.file_name.replace(/\.[^.]+$/,'')}</span><span className="text-[10px] text-dark-500">{item.last_pos?`${Math.floor(item.last_pos/60).toLocaleString('fa-IR')} دقیقه`:''}</span></button>)}</div>:<DndContext sensors={queueSensors} onDragEnd={({active,over}:DragEndEvent)=>{if(!over||active.id===over.id)return;const from=queueRows.findIndex(row=>row.id===active.id);const to=queueRows.findIndex(row=>row.id===over.id);if(from<0||to<0)return;moveQueueItem(from,to)}}>
+                        {showHistory?<div className="min-h-0 overflow-y-auto p-3">{historyItems.map((item,index)=><button key={item.id} onClick={()=>{useAppStore.getState().startQueue(historyItems,index);setShowHistory(false)}} className="mb-1.5 flex w-full items-center gap-3 rounded-2xl bg-white/[.025] p-3 text-right hover:bg-white/[.06]"><History className="h-4 w-4 shrink-0 text-dark-500"/><span dir="auto" className="min-w-0 flex-1 truncate text-sm">{item.file_name.replace(/\.[^.]+$/,'')}</span><span className="text-[10px] text-dark-500">{item.last_pos?`${Math.floor(item.last_pos/60).toLocaleString('fa-IR')} دقیقه`:''}</span></button>)}</div>:showRecommendations?<div className="min-h-0 overflow-y-auto p-3">{recommendations.map(item=><div key={item.id} className="mb-1.5 flex items-center gap-2 rounded-2xl bg-white/[.025] p-2"><button onClick={()=>useAppStore.getState().startQueue([item],0)} dir="auto" className="min-w-0 flex-1 truncate p-1 text-right text-sm">{item.file_name.replace(/\.[^.]+$/,'')}</button><button onClick={()=>{appendQueueItems([item]);setRecommendations(items=>items.filter(value=>value.id!==item.id))}} className="btn-icon h-9 w-9" title="افزودن به صف"><ListPlus className="h-4 w-4"/></button></div>)}</div>:<DndContext sensors={queueSensors} onDragEnd={({active,over}:DragEndEvent)=>{if(!over||active.id===over.id)return;const from=queueRows.findIndex(row=>row.id===active.id);const to=queueRows.findIndex(row=>row.id===over.id);if(from<0||to<0)return;moveQueueItem(from,to)}}>
                             <SortableContext items={queueRows.map(row=>row.id)} strategy={verticalListSortingStrategy}>
                                 <div className="min-h-0 overflow-y-auto p-3">{queueRows.map(({item,index,id})=><SortableQueueRow key={id} sortableId={id} item={item} index={index} currentIndex={queueIndex} onPlay={()=>{useAppStore.getState().playQueueItem(index);setShowQueue(false)}} onRemove={()=>removeQueueItem(index)}/>)}</div>
                             </SortableContext>

@@ -13,7 +13,7 @@ from ..models import Folder, File, User, WatchProgress
 from ..schemas import FolderResponse, FolderCreate, FolderUpdate, FolderWithChildren
 from ..auth import get_current_user, has_vault_access, require_vault_access, workspace_scope
 from ..telegram import delete_from_storage_channel
-from ..services import unreferenced_storage_messages
+from ..services import unreferenced_audio_variant_messages, unreferenced_storage_messages
 
 
 router = APIRouter(prefix="/folders", tags=["Folders"])
@@ -115,12 +115,16 @@ async def delete_folder_contents(db: AsyncSession, folder: Folder, delete_conten
     owner = await db.get(User, folder.user_id)
     if owner is None or owner.delete_storage_files:
         messages_by_channel = await unreferenced_storage_messages(db, files)
+        audio_messages_by_channel = await unreferenced_audio_variant_messages(db, files)
         for channel_id, message_ids in messages_by_channel.items():
             for start in range(0, len(message_ids), 100):
                 batch = message_ids[start:start + 100]
                 deleted = await delete_from_storage_channel(batch, channel_id) if channel_id is not None else await delete_from_storage_channel(batch)
                 if not deleted:
                     logger.warning("Telegram cleanup failed for folder %s; deleting stale database rows", folder.id)
+        for channel_id, message_ids in audio_messages_by_channel.items():
+            for start in range(0, len(message_ids), 100):
+                await delete_from_storage_channel(message_ids[start:start + 100], channel_id)
     file_ids = [file.id for file in files]
     if file_ids:
         await db.execute(delete(WatchProgress).where(WatchProgress.file_id.in_(file_ids)))

@@ -158,6 +158,7 @@ async def prepare_audio_variant(
             file.audio_variant_file_id = media.file_id
             file.audio_variant_unique_id = media.file_unique_id
             file.audio_variant_message_id = sent.id
+            file.audio_variant_storage_channel_id = target or settings.telegram_storage_channel_id
             file.audio_variant_size = media.file_size or output.stat().st_size
             await db.commit()
         return {"stream_url": f"/api/stream/{file.id}/audio", "size": file.audio_variant_size, "cached": False}
@@ -175,7 +176,7 @@ async def stream_audio_variant(
         raise HTTPException(status_code=404, detail="نسخه صوتی هنوز آماده نشده است.")
     if file.is_hidden:
         require_vault_access(request, current_user)
-    message = await get_message_from_channel(file.audio_variant_message_id, file.storage_channel_id)
+    message = await get_message_from_channel(file.audio_variant_message_id, file.audio_variant_storage_channel_id)
     if message is None:
         raise HTTPException(status_code=404, detail="نسخه صوتی پیدا نشد.")
     start, end = parse_range_header(request.headers.get("range"), file.audio_variant_size)

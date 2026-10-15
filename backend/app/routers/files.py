@@ -39,6 +39,7 @@ from ..services import (
     fetch_continue_watching_files,
     select_best_thumbnail,
     unreferenced_storage_messages,
+    unreferenced_audio_variant_messages,
 )
 
 router = APIRouter(prefix="/files", tags=["Files"])
@@ -341,6 +342,52 @@ async def playback_history(
     )
 
 
+@router.get("/recommendations", response_model=list[FileResponse])
+async def playback_recommendations(
+    after_file_id: Optional[int] = Query(None), limit: int = Query(12, ge=1, le=30),
+    db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    """Suggest media using the current file, tags, folders and recent playback."""
+    current = await db.get(File, after_file_id) if after_file_id else None
+    if current is not None and current.user_id != current_user.id:
+        current = None
+    recent = (await db.execute(select(File).join(WatchProgress, WatchProgress.file_id == File.id).where(
+        File.user_id == current_user.id, WatchProgress.user_id == current_user.id,
+    ).order_by(WatchProgress.updated_at.desc()).limit(40))).scalars().all()
+    folder_affinity: dict[int | None, int] = {}
+    tag_affinity: dict[str, int] = {}
+    for rank, item in enumerate(recent):
+        weight = max(1, 10 - rank // 4)
+        folder_affinity[item.folder_id] = folder_affinity.get(item.folder_id, 0) + weight
+        try:
+            tags = json.loads(item.tags_json or "[]")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            tags = []
+        for tag in tags:
+            tag_affinity[str(tag).casefold()] = tag_affinity.get(str(tag).casefold(), 0) + weight
+    candidates = (await db.execute(select(File).where(
+        File.user_id == current_user.id, File.file_type.in_(("audio", "video")),
+        File.is_hidden.is_(False), File.id != (after_file_id or -1),
+    ).options(selectinload(File.watch_progress)).order_by(File.created_at.desc()).limit(500))).scalars().all()
+    current_tags: set[str] = set()
+    if current:
+        try: current_tags = {str(tag).casefold() for tag in json.loads(current.tags_json or "[]")}
+        except (TypeError, ValueError, json.JSONDecodeError): pass
+    def score(item: File) -> tuple[float, int]:
+        try: tags = {str(tag).casefold() for tag in json.loads(item.tags_json or "[]")}
+        except (TypeError, ValueError, json.JSONDecodeError): tags = set()
+        value = float(folder_affinity.get(item.folder_id, 0))
+        value += sum(tag_affinity.get(tag, 0) for tag in tags)
+        if current:
+            value += 30 if item.folder_id == current.folder_id else 0
+            value += 18 * len(tags & current_tags)
+            value += 8 if item.file_type == current.file_type else 0
+        value += 3 if item.is_favorite else 0
+        return value, item.id
+    selected = sorted(candidates, key=score, reverse=True)[:limit]
+    return [FileResponse(**add_urls_to_file(item)) for item in selected]
+
+
 @router.post("/upload", response_model=FileResponse, status_code=201)
 async def upload_file(
     upload: UploadFile = FormFile(...),
@@ -397,6 +444,7 @@ async def upload_file(
                 audio_variant_file_id=duplicate.audio_variant_file_id,
                 audio_variant_unique_id=duplicate.audio_variant_unique_id,
                 audio_variant_message_id=duplicate.audio_variant_message_id,
+                audio_variant_storage_channel_id=duplicate.audio_variant_storage_channel_id,
                 audio_variant_size=duplicate.audio_variant_size,
             )
             db.add(shortcut)
@@ -972,6 +1020,8 @@ async def delete_file(
         if messages:
             channel_id, message_ids = next(iter(messages.items()))
             storage_deleted = await delete_from_storage_channel(message_ids, channel_id)
+        for channel_id, message_ids in (await unreferenced_audio_variant_messages(db, [file])).items():
+            await delete_from_storage_channel(message_ids, channel_id)
     
     # Delete from database
     await db.delete(file)
@@ -1001,6 +1051,7 @@ async def batch_delete_files(
     # Telegram message ids are only unique inside their own channel.
     if current_user.delete_storage_files:
         messages_by_channel = await unreferenced_storage_messages(db, files)
+        audio_messages_by_channel = await unreferenced_audio_variant_messages(db, files)
         for channel_id, msg_ids in messages_by_channel.items():
             for start in range(0, len(msg_ids), 100):
                 batch = msg_ids[start:start + 100]
@@ -1008,6 +1059,9 @@ async def batch_delete_files(
                     await delete_from_storage_channel(batch)
                 else:
                     await delete_from_storage_channel(batch, channel_id)
+        for channel_id, msg_ids in audio_messages_by_channel.items():
+            for start in range(0, len(msg_ids), 100):
+                await delete_from_storage_channel(msg_ids[start:start + 100], channel_id)
     
     # Delete from DB
     for file in files:

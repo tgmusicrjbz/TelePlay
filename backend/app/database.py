@@ -162,6 +162,7 @@ async def init_db():
             ("audio_variant_file_id", "VARCHAR(255)"),
             ("audio_variant_unique_id", "VARCHAR(255)"),
             ("audio_variant_message_id", "BIGINT"),
+            ("audio_variant_storage_channel_id", "BIGINT"),
             ("audio_variant_size", "BIGINT"),
         ):
             if column_name not in columns:

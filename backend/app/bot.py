@@ -26,7 +26,7 @@ from .database import async_session
 from .models import User, File, Folder, LoginCode, Playlist, PlaylistItem, BotUserState
 from .config import get_settings
 from .auth import create_access_token
-from .services import escape_like, select_best_thumbnail, unreferenced_storage_messages
+from .services import escape_like, select_best_thumbnail, unreferenced_audio_variant_messages, unreferenced_storage_messages
 from .downloader import ImportJob, link_importer
 from .tts import TTSJob, VOICE_OPTIONS, consume_tts_quota, load_tts_settings, tts_queue
 from .stt import STTJob, consume_stt_quota, stt_queue
@@ -1393,6 +1393,7 @@ async def _handle_file_impl(client, message: Message, status_msg: Message):
                     audio_variant_file_id=duplicate.audio_variant_file_id,
                     audio_variant_unique_id=duplicate.audio_variant_unique_id,
                     audio_variant_message_id=duplicate.audio_variant_message_id,
+                    audio_variant_storage_channel_id=duplicate.audio_variant_storage_channel_id,
                     audio_variant_size=duplicate.audio_variant_size,
                 )
                 db.add(shortcut)
@@ -2161,6 +2162,7 @@ async def handle_callback(client, callback: CallbackQuery):
             files = (await db.execute(select(File).where(File.user_id == user.id, File.id.in_(selected_ids)))).scalars().all() if user else []
             if user and user.delete_storage_files:
                 messages_by_channel = await unreferenced_storage_messages(db, files)
+                audio_messages_by_channel = await unreferenced_audio_variant_messages(db, files)
                 for channel_id, message_ids in messages_by_channel.items():
                     for start in range(0, len(message_ids), 100):
                         batch = message_ids[start:start + 100]
@@ -2168,6 +2170,9 @@ async def handle_callback(client, callback: CallbackQuery):
                         if not deleted:
                             await callback.answer("حذف از فضای ذخیره‌سازی انجام نشد.", show_alert=True)
                             return
+                for channel_id, message_ids in audio_messages_by_channel.items():
+                    for start in range(0, len(message_ids), 100):
+                        await delete_from_storage_channel(message_ids[start:start + 100], channel_id)
             for file in files:
                 await db.delete(file)
             await db.commit()
@@ -2989,6 +2994,8 @@ async def handle_callback(client, callback: CallbackQuery):
                 if not await delete_from_storage_channel(message_ids, channel_id):
                     await callback.answer("فایل از فضای ذخیره‌سازی پاک نشد؛ دوباره تلاش کن.", show_alert=True)
                     return
+            for channel_id, message_ids in (await unreferenced_audio_variant_messages(db, [file])).items():
+                await delete_from_storage_channel(message_ids, channel_id)
             await db.delete(file)
             await db.commit()
         

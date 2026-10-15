@@ -111,6 +111,26 @@ async def unreferenced_storage_messages(db: AsyncSession, files: List[File]) -> 
         grouped.setdefault(channel_id, []).append(message_id)
     return grouped
 
+
+async def unreferenced_audio_variant_messages(db: AsyncSession, files: List[File]) -> dict[int | None, list[int]]:
+    """Return cached audio variants that are no longer shared by surviving shortcuts."""
+    deleting_ids = {item.id for item in files if item.id is not None}
+    references = {(item.audio_variant_storage_channel_id, item.audio_variant_message_id) for item in files if item.audio_variant_message_id}
+    if not references:
+        return {}
+    conditions = [and_(
+        File.audio_variant_storage_channel_id.is_(None) if channel_id is None else File.audio_variant_storage_channel_id == channel_id,
+        File.audio_variant_message_id == message_id,
+    ) for channel_id, message_id in references]
+    query = select(File.audio_variant_storage_channel_id, File.audio_variant_message_id).where(or_(*conditions))
+    if deleting_ids:
+        query = query.where(File.id.notin_(deleting_ids))
+    retained = set((await db.execute(query)).all())
+    grouped: dict[int | None, list[int]] = {}
+    for channel_id, message_id in references - retained:
+        grouped.setdefault(channel_id, []).append(message_id)
+    return grouped
+
 async def fetch_recent_files(db: AsyncSession, user_id: int, limit: int) -> List[File]:
     """Get recently added files across all folders."""
     query = (

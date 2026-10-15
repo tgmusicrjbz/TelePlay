@@ -113,6 +113,7 @@ interface AppState {
     shuffleQueue: () => void;
     removeQueueItem: (index: number) => void;
     moveQueueItem: (from: number, to: number) => void;
+    appendQueueItems: (files: TelegramFile[]) => void;
     setRepeatMode: (mode: 'off' | 'all' | 'one') => void;
     clearQueue: () => void;
 
@@ -308,6 +309,11 @@ export const useAppStore = create<AppState>((set) => ({
         else if (from < queueIndex && to >= queueIndex) queueIndex -= 1;
         else if (from > queueIndex && to <= queueIndex) queueIndex += 1;
         return { playQueue: next, queueIndex };
+    }),
+    appendQueueItems: (files) => set((state) => {
+        const existing = new Set(state.playQueue.map(item => item.id));
+        const additions = files.filter(item => !existing.has(item.id) && ['audio','video'].includes(item.file_type));
+        return additions.length ? {playQueue:[...state.playQueue,...additions]} : state;
     }),
     setRepeatMode: (repeatMode) => set({ repeatMode }),
     clearQueue: () => set({ playQueue: [], queueIndex: -1 }),

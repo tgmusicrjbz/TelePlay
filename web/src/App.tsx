@@ -20,7 +20,7 @@ function PlayerCloudSync() {
     const startQueue = useAppStore(state => state.startQueue);
     const setRepeatMode = useAppStore(state => state.setRepeatMode);
     const setPlayerMinimized = useAppStore(state => state.setPlayerMinimized);
-    const hydrated = useRef(false);
+    const [hydrated, setHydrated] = useState(false);
     useEffect(() => {
         let cancelled = false;
         void api.get('/files/player-state').then(({data}) => {
@@ -30,17 +30,17 @@ function PlayerCloudSync() {
                 setRepeatMode(data.repeat_mode || 'off');
                 setPlayerMinimized(true);
             }
-        }).catch(() => undefined).finally(() => { if (!cancelled) hydrated.current = true; });
+        }).catch(() => undefined).finally(() => { if (!cancelled) setHydrated(true); });
         return () => { cancelled = true; };
     }, [setPlayerMinimized, setRepeatMode, startQueue]);
     useEffect(() => {
-        if (!hydrated.current) return;
+        if (!hydrated) return;
         const timer = window.setTimeout(() => void api.put('/files/player-state', {
             file_ids: playQueue.map(item => item.id), current_index: queueIndex,
             repeat_mode: repeatMode, position: 0,
         }).catch(() => undefined), 900);
         return () => window.clearTimeout(timer);
-    }, [playQueue, queueIndex, repeatMode]);
+    }, [hydrated, playQueue, queueIndex, repeatMode]);
     return null;
 }
 

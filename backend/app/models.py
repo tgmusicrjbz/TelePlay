@@ -224,6 +224,7 @@ class File(Base):
     audio_variant_file_id: Mapped[Optional[str]] = mapped_column(String(255))
     audio_variant_unique_id: Mapped[Optional[str]] = mapped_column(String(255))
     audio_variant_message_id: Mapped[Optional[int]] = mapped_column(BigInteger)
+    audio_variant_storage_channel_id: Mapped[Optional[int]] = mapped_column(BigInteger)
     audio_variant_size: Mapped[Optional[int]] = mapped_column(BigInteger)
     
     # Sharing

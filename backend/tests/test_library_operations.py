@@ -34,6 +34,10 @@ from app.routers.files import (
     batch_update_files,
     delete_file,
     get_activity,
+    get_player_state,
+    playback_history,
+    playback_recommendations,
+    save_player_state,
     get_storage_stats,
     get_text_preview,
     list_files,
@@ -45,7 +49,7 @@ from app.routers.files import (
 from app.routers.folders import delete_folder_contents, list_folders, update_folder
 from app.routers.streaming import stored_message_response
 from app.routers.playlists import add_playlist_items, create_playlist, reorder_playlist, shuffle_playlist
-from app.schemas import BatchFileUpdate, CredentialsUpdate, FileUpdate, FolderUpdate, PasswordLoginRequest, PlaylistAddItems, PlaylistCreate, PlaylistReorder, TagDefinition, TagSettingsUpdate
+from app.schemas import BatchFileUpdate, CredentialsUpdate, FileUpdate, FolderUpdate, PasswordLoginRequest, PlayerStateUpdate, PlaylistAddItems, PlaylistCreate, PlaylistReorder, TagDefinition, TagSettingsUpdate
 from app.telegram import configure_main_client, start_one_client
 from app import telegram
 
@@ -502,6 +506,34 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result.file_name, "duplicate.txt")
             self.assertEqual(result.file_id, original.file_id)
             fake_client.send_document.assert_not_awaited()
+
+    async def test_player_state_round_trip_preserves_queue_order(self):
+        async with async_session() as db:
+            first = self.make_file(self.user_id, None, 910); first.file_type = "audio"
+            second = self.make_file(self.user_id, None, 911); second.file_type = "video"
+            db.add_all([first, second]); await db.commit()
+            user = await db.get(User, self.user_id)
+            saved = await save_player_state(PlayerStateUpdate(
+                file_ids=[second.id, first.id], current_index=1, repeat_mode="all", position=42,
+            ), db, user)
+            self.assertEqual([item.id for item in saved.files], [second.id, first.id])
+            restored = await get_player_state(db, user)
+            self.assertEqual([item.id for item in restored.files], [second.id, first.id])
+            self.assertEqual((restored.current_index, restored.repeat_mode, restored.position), (1, "all", 42))
+
+    async def test_history_and_recommendations_use_progress_folder_and_tags(self):
+        async with async_session() as db:
+            current = self.make_file(self.user_id, self.folder_id, 912); current.file_type = "audio"; current.tags_json = '["آرام"]'
+            related = self.make_file(self.user_id, self.folder_id, 913); related.file_type = "audio"; related.tags_json = '["آرام"]'
+            unrelated = self.make_file(self.user_id, None, 914); unrelated.file_type = "video"
+            db.add_all([current, related, unrelated]); await db.flush()
+            db.add(WatchProgress(user_id=self.user_id, file_id=current.id, position=12, duration=100))
+            await db.commit()
+            user = await db.get(User, self.user_id)
+            history = await playback_history(1, 30, db, user)
+            self.assertEqual(history.files[0].id, current.id)
+            suggestions = await playback_recommendations(current.id, 10, db, user)
+            self.assertEqual(suggestions[0].id, related.id)
 
     async def test_deleting_shortcut_keeps_shared_storage_message(self):
         async with async_session() as db:
