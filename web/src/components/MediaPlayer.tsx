@@ -2,23 +2,12 @@
  * MediaPlayer - full screen video/audio player
  */
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import { X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipBack, SkipForward, Download, AlertTriangle, Copy, PictureInPicture2, Gauge, ChevronDown, ChevronUp, Repeat2, Shuffle, Headphones, RotateCcw, RotateCw, Clock3, ListPlus, ListMusic, GripVertical, Trash2, RectangleHorizontal, Smartphone, MonitorSmartphone, Film, LockKeyhole, UnlockKeyhole } from 'lucide-react';
+import { X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipBack, SkipForward, Download, AlertTriangle, Copy, PictureInPicture2, Gauge, ChevronDown, ChevronUp, Repeat2, Shuffle, Headphones, RotateCcw, RotateCw, Clock3, ListPlus, ListMusic, GripVertical, Trash2, RectangleHorizontal, Smartphone, MonitorSmartphone, Film, LockKeyhole, UnlockKeyhole, MoreHorizontal } from 'lucide-react';
 import { TelegramFile, useUpdateProgress, useFile, api } from '../lib/api';
 import { useAppStore } from '../lib/store';
-import { DndContext, DragEndEvent, PointerSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-
-const queueObjectIds = new WeakMap<object, string>();
-let queueObjectSequence = 0;
-function stableQueueId(file: TelegramFile) {
-    let id = queueObjectIds.get(file);
-    if (!id) {
-        id = `queue-${file.id}-${++queueObjectSequence}`;
-        queueObjectIds.set(file, id);
-    }
-    return id;
-}
 
 export default function MediaPlayer() {
     const { previewFile: file, setPreviewFile, isPlayerMinimized, setPlayerMinimized, clearQueue } = useAppStore();
@@ -51,7 +40,9 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [streamRetry, setStreamRetry] = useState(0);
-    const queueRows = useMemo(() => playQueue.map((item, index) => ({ item, index, id: stableQueueId(item) })), [playQueue]);
+    // Include the occurrence index so repeated instances of the same file never
+    // share a dnd-kit identifier. IDs only need to remain stable for one drag.
+    const queueRows = useMemo(() => playQueue.map((item, index) => ({ item, index, id: `queue-${item.id}-${index}` })), [playQueue]);
     const hideControlsTimeout = useRef<ReturnType<typeof setTimeout>>();
     const singleTapTimeout = useRef<ReturnType<typeof setTimeout>>();
     const feedbackTimeout = useRef<ReturnType<typeof setTimeout>>();
@@ -69,9 +60,9 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     const [skipFeedback, setSkipFeedback] = useState<'backward' | 'forward' | null>(null);
     const [thumbnailFailed, setThumbnailFailed] = useState(false);
     const [showQueue, setShowQueue] = useState(false);
+    const [showVideoMoreMenu, setShowVideoMoreMenu] = useState(false);
     const queueSensors = useSensors(
-        useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-        useSensor(TouchSensor, { activationConstraint: { delay: 140, tolerance: 7 } }),
+        useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     );
     const formatPlayerTime = (seconds: number) => {
         const safe = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
@@ -436,14 +427,14 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
         // Music controls stay visible. Hiding transport controls on every tap is
         // useful for video, but makes an audio player feel broken.
         if (!isVideo) return;
-        if (showVolumePopover || showSpeedMenu || showSleepMenu) return;
+        if (showVolumePopover || showSpeedMenu || showSleepMenu || showVideoMoreMenu) return;
         hideControlsTimeout.current = setTimeout(() => {
             if (!isMinimized) {
                 setShowControls(false);
                 setShowSpeedMenu(false);
             }
         }, 3000);
-    }, [controlsLocked, isMinimized, isVideo, showSleepMenu, showSpeedMenu, showVolumePopover]);
+    }, [controlsLocked, isMinimized, isVideo, showSleepMenu, showSpeedMenu, showVideoMoreMenu, showVolumePopover]);
 
     const toggleVideoControls = useCallback(() => {
         if (hideControlsTimeout.current) clearTimeout(hideControlsTimeout.current);
@@ -823,7 +814,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                             {showSpeedMenu && <div role="menu" aria-label="سرعت پخش" className="absolute left-1/2 top-full mt-2 w-32 -translate-x-1/2 overflow-hidden rounded-xl border border-white/10 bg-dark-900/95 p-1.5 shadow-2xl backdrop-blur-md">{[0.75, 1, 1.25, 1.5, 2].map(speed => <button key={speed} role="menuitem" onClick={() => setSpeed(speed)} className={`block w-full rounded-lg px-3 py-2 text-center text-sm transition-colors ${playbackSpeed === speed ? 'bg-primary-500/25 text-primary-200' : 'text-white/80 hover:bg-white/10'}`}>{speed === 1 ? '1.0' : speed}x</button>)}</div>}
                         </div>
                         {!isVideo && <button onClick={() => handleSkip(10)} className="rounded-lg p-2 text-white/80 hover:bg-white/10" title="۱۰ ثانیه جلو"><RotateCw className="h-5 w-5" /></button>}
-                        <div className="relative">
+                        {!isVideo && <div className="relative">
                             <button onClick={() => setShowSleepMenu(open => !open)} className={`p-2 rounded-lg transition-all ${sleepMode !== 'off' ? 'bg-primary-500/30 text-primary-300' : 'hover:bg-white/10 text-white/80'}`} title="تایمر خواب"><Clock3 className="h-5 w-5" /></button>
                             {showSleepMenu && <div role="menu" aria-label="تایمر خواب" className="absolute left-1/2 top-full mt-2 w-48 -translate-x-1/2 overflow-hidden rounded-xl border border-white/10 bg-dark-900/95 p-1.5 text-right shadow-2xl backdrop-blur-md">
                                 <p className="px-3 py-2 text-xs text-dark-400">توقف خودکار پخش</p>
@@ -835,12 +826,23 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                                 <button className="context-menu-item w-full" onClick={() => setSleepTimer('end')}>پایان پلی‌لیست</button>
                                 {sleepMode !== 'off' && <button className="context-menu-item w-full text-red-300" onClick={() => setSleepTimer('off')}>لغو تایمر</button>}
                             </div>}
-                        </div>
-                        {isVideo && <button onClick={() => setAudioOnly(current => !current)} className={`p-2 rounded-lg transition-all ${audioOnly ? 'bg-primary-500/30 text-primary-300' : 'hover:bg-white/10 text-white/80'}`} title={audioOnly ? 'بازگشت به پخش ویدیو' : 'پخش فقط صدا'}><Headphones className="w-5 h-5" /></button>}
+                        </div>}
                         {isVideo && <button onClick={() => void toggleVideoOrientation()} className={`rounded-lg p-2 transition-all ${videoOrientation !== 'auto' ? 'bg-primary-500/30 text-primary-300' : 'text-white/80 hover:bg-white/10'}`} title={videoOrientation === 'auto' ? 'چرخش خودکار؛ بعدی: افقی' : videoOrientation === 'landscape' ? 'قفل افقی؛ بعدی: عمودی' : 'قفل عمودی؛ بعدی: خودکار'}>{videoOrientation === 'landscape' ? <RectangleHorizontal className="h-5 w-5"/> : videoOrientation === 'portrait' ? <Smartphone className="h-5 w-5"/> : <MonitorSmartphone className="h-5 w-5"/>}</button>}
                         {isVideo && <div className="relative"><button onClick={() => window.matchMedia('(pointer: coarse)').matches ? toggleMute() : setShowVolumePopover(open => !open)} className="rounded-lg p-2 text-white/80 hover:bg-white/10" title="صدا">{isMuted || volume === 0 ? <VolumeX className="h-5 w-5"/> : <Volume2 className="h-5 w-5"/>}</button>{showVolumePopover && <div className="absolute left-1/2 top-full z-50 mt-2 flex w-36 -translate-x-1/2 items-center rounded-xl border border-white/10 bg-dark-900/95 p-3 shadow-2xl"><input type="range" min={0} max={1} step={0.05} value={isMuted ? 0 : volume} onChange={handleVolumeChange} className="h-1 w-full cursor-pointer appearance-none rounded-full bg-white/30" aria-label="شدت صدا"/></div>}</div>}
+                        {isVideo && <div className="relative">
+                            <button onClick={() => { setShowVideoMoreMenu(open => !open); setShowSleepMenu(false); }} className={`rounded-lg p-2 transition-all ${showVideoMoreMenu || repeatMode !== 'off' || audioOnly || sleepMode !== 'off' ? 'bg-primary-500/25 text-primary-200' : 'text-white/80 hover:bg-white/10'}`} title="گزینه‌های بیشتر" aria-expanded={showVideoMoreMenu}><MoreHorizontal className="h-5 w-5"/></button>
+                            {showVideoMoreMenu && <div role="menu" aria-label="گزینه‌های بیشتر ویدیو" className="absolute left-0 top-full z-50 mt-2 w-56 overflow-hidden rounded-2xl border border-white/10 bg-dark-900/98 p-1.5 text-right shadow-2xl backdrop-blur-xl">
+                                <button className="context-menu-item w-full" onClick={() => setAudioOnly(current => !current)}><Headphones className="h-4 w-4"/><span>{audioOnly ? 'بازگشت به تصویر' : 'پخش فقط صدا'}</span></button>
+                                <button className="context-menu-item w-full" onClick={() => setRepeatMode(repeatMode === 'off' ? (hasQueue ? 'all' : 'one') : repeatMode === 'all' ? 'one' : 'off')}><Repeat2 className="h-4 w-4"/><span className="min-w-0 flex-1">{repeatMode === 'off' ? 'تکرار خاموش' : repeatMode === 'all' ? 'تکرار همه ویدیوها' : 'تکرار همین ویدیو'}</span>{repeatMode === 'one'&&<strong className="text-primary-200">۱</strong>}</button>
+                                <button className="context-menu-item w-full" onClick={() => setShowSleepMenu(open => !open)}><Clock3 className="h-4 w-4"/><span className="min-w-0 flex-1">تایمر خواب</span>{sleepMode !== 'off'&&<span className="h-2 w-2 rounded-full bg-primary-400"/>}</button>
+                                {showSleepMenu && <div className="mx-1 mb-1 grid grid-cols-2 gap-1 rounded-xl bg-black/25 p-1">
+                                    {([['15','۱۵ دقیقه'],['30','۳۰ دقیقه'],['45','۴۵ دقیقه'],['60','۱ ساعت'],['track','پایان ویدیو'],['end','پایان صف']] as const).map(([mode,label])=><button key={mode} onClick={()=>setSleepTimer(mode)} className={`rounded-lg px-2 py-2 text-[11px] ${sleepMode===mode?'bg-primary-500/25 text-primary-200':'text-dark-300 hover:bg-white/[.05]'}`}>{label}</button>)}
+                                    {sleepMode !== 'off'&&<button onClick={()=>setSleepTimer('off')} className="col-span-2 rounded-lg px-2 py-2 text-[11px] text-red-300 hover:bg-red-500/10">لغو تایمر</button>}
+                                </div>}
+                                {document.pictureInPictureEnabled && <button className="context-menu-item w-full" onClick={togglePiP}><PictureInPicture2 className="h-4 w-4"/><span>{isPiP ? 'خروج از تصویر در تصویر' : 'تصویر در تصویر'}</span></button>}
+                            </div>}
+                        </div>}
                         <button onClick={lockControls} className="rounded-lg p-2 text-white/80 hover:bg-white/10" title="قفل لمس"><LockKeyhole className="h-5 w-5"/></button>
-                        {isVideo && document.pictureInPictureEnabled && <button onClick={togglePiP} className={`p-2 rounded-lg transition-all ${isPiP ? 'bg-primary-500/30 text-primary-300' : 'hover:bg-white/10 text-white/80'}`} title="تصویر در تصویر"><PictureInPicture2 className="w-5 h-5" /></button>}
                         <button onClick={toggleFullscreen} className="p-2 rounded-lg hover:bg-white/10 text-white/80" title={isFullscreen ? 'خروج از تمام‌صفحه' : 'تمام‌صفحه'}>{isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}</button>
                     </div>
 
