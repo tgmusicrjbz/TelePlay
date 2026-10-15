@@ -412,7 +412,7 @@ class STTQueue:
             target = user.storage_channel_id or settings.telegram_storage_channel_id
             message = await telegram.tg_client.send_document(target, str(path), caption=job.title[:1024])
             media = message.document
-            record = File(user_id=user.id, folder_id=folder_id, file_id=media.file_id, file_unique_id=media.file_unique_id, channel_message_id=message.id, storage_channel_id=target, file_name=path.name, description="🎙️ رونویسی‌شده با هوش مصنوعی", tags_json=json.dumps(["صدا‌به‌متن"], ensure_ascii=False), file_size=media.file_size or os.path.getsize(path), mime_type="text/markdown", file_type="text")
+            record = File(user_id=user.id, folder_id=folder_id, file_id=media.file_id, file_unique_id=media.file_unique_id, channel_message_id=message.id, storage_channel_id=target, file_name=path.name, description="🎙️ رونویسی‌شده با هوش مصنوعی", search_text=markdown, tags_json=json.dumps(["صدا‌به‌متن"], ensure_ascii=False), file_size=media.file_size or os.path.getsize(path), mime_type="text/markdown", file_type="text")
             db.add(record); await db.commit(); await db.refresh(record)
             return record
 

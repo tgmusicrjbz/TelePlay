@@ -202,6 +202,9 @@ class File(Base):
     # File metadata
     file_name: Mapped[str] = mapped_column(String(500), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
+    # Private normalized source used by library search. It is intentionally
+    # absent from FileResponse so note contents never leak in list endpoints.
+    search_text: Mapped[Optional[str]] = mapped_column(Text)
     tags_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
     is_favorite: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_pinned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

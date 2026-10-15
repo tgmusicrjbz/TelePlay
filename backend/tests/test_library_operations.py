@@ -188,6 +188,33 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             tag_without_hash = await list_files(None, None, "مهم", 1, 20, db, user)
             self.assertEqual(tag_without_hash.total, 1)
 
+    async def test_search_finds_full_note_content_without_exposing_it(self):
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            note = self.make_file(user.id, self.folder_id, 777)
+            note.file_type = "text"
+            note.file_name = "یادداشت معمولی"
+            db.add(note)
+            await db.commit()
+
+            legacy_message = SimpleNamespace(
+                text="جلسه درباره معماری سامانه و برنامه انتشار نسخه بعدی",
+                document=None,
+            )
+            with patch("app.routers.files.get_message_from_channel", new_callable=AsyncMock, return_value=legacy_message) as load_note:
+                result = await list_files(None, None, "معماری سامانه", 1, 20, db, user)
+                load_note.assert_awaited_once_with(note.channel_message_id, note.storage_channel_id)
+            self.assertEqual(result.total, 1)
+            self.assertEqual(result.files[0].id, note.id)
+            self.assertFalse(hasattr(result.files[0], "search_text"))
+            await db.refresh(note)
+            self.assertIn("معماری سامانه", note.search_text)
+
+            with patch("app.routers.files.get_message_from_channel", new_callable=AsyncMock) as load_note_again:
+                tag_only = await list_files(None, None, "#معماری", 1, 20, db, user)
+                load_note_again.assert_not_awaited()
+            self.assertEqual(tag_only.total, 0)
+
     async def test_batch_files_can_be_hidden(self):
         async with async_session() as db:
             user = await db.get(User, self.user_id)

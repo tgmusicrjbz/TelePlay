@@ -2,6 +2,7 @@
 File management API endpoints.
 """
 from typing import Optional
+import asyncio
 import json
 import re
 from fastapi import APIRouter, Depends, File as FormFile, Form, HTTPException, Query, Request, UploadFile
@@ -40,6 +41,7 @@ from ..services import (
 router = APIRouter(prefix="/files", tags=["Files"])
 settings = get_settings()
 logger = logging.getLogger(__name__)
+_text_index_locks: dict[int, asyncio.Lock] = {}
 
 
 class TextContentUpdate(BaseModel):
@@ -79,6 +81,48 @@ def detect_upload_type(filename: str, mime_type: str | None) -> str:
     if mime.startswith("image/") or extension in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}:
         return "image"
     return "document"
+
+
+def decode_searchable_text(raw: bytes) -> str | None:
+    """Decode supported small text files for private full-content search."""
+    if not raw or len(raw) > 1024 * 1024:
+        return None
+    encoding = "utf-16" if raw.startswith((b"\xff\xfe", b"\xfe\xff")) else "utf-8-sig"
+    try:
+        return raw.decode(encoding)[:1_000_000]
+    except UnicodeDecodeError:
+        return None
+
+
+async def index_missing_text_notes(db: AsyncSession, user_id: int) -> int:
+    """Lazily index legacy notes once, keeping app startup fast."""
+    lock = _text_index_locks.setdefault(user_id, asyncio.Lock())
+    async with lock:
+        notes = (await db.execute(select(File).where(
+            File.user_id == user_id, File.file_type == "text", File.search_text.is_(None)
+        ).order_by(File.id))).scalars().all()
+        indexed = 0
+        for note in notes:
+            try:
+                message = await get_message_from_channel(note.channel_message_id, note.storage_channel_id)
+                if message is None:
+                    continue
+                document = getattr(message, "document", None)
+                if document is None:
+                    content = getattr(message, "text", None) or note.description or ""
+                elif (note.file_size or 0) <= 1024 * 1024:
+                    contents = await telegram.tg_client.download_media(message, in_memory=True)
+                    content = decode_searchable_text(contents.getvalue()) if contents is not None else None
+                else:
+                    content = ""
+                if content is not None:
+                    note.search_text = content
+                    indexed += 1
+            except Exception:
+                logger.warning("Could not index legacy text note %s", note.id, exc_info=True)
+        if indexed:
+            await db.commit()
+        return indexed
 
 
 @router.post("/import-link", status_code=202)
@@ -188,6 +232,7 @@ async def upload_file(
             raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
         file_type = detect_upload_type(filename, upload.content_type)
+        search_text = decode_searchable_text(Path(temporary_path).read_bytes()) if file_type == "text" and file_size <= 1024 * 1024 else None
         embedded_cover_path: str | None = None
         if file_type == "audio" and Path(filename).suffix.lower() == ".mp3":
             cover_bytes = extract_embedded_cover(temporary_path)
@@ -227,6 +272,7 @@ async def upload_file(
             storage_channel_id=target_channel_id,
             file_name=filename,
             description=(description or "").strip()[:1024] or None,
+            search_text=search_text,
             file_size=media.file_size or file_size,
             mime_type=getattr(media, "mime_type", None) or upload.content_type,
             file_type=file_type,
@@ -300,14 +346,22 @@ async def get_text_preview(
     if message is None:
         raise HTTPException(status_code=404, detail="Message not found in storage")
     if file.file_type == "text" and getattr(message, "document", None) is None:
-        return {"content": message.text or ""}
+        content = message.text or ""
+        if file.search_text != content:
+            file.search_text = content
+            await db.commit()
+        return {"content": content}
     contents = await telegram.tg_client.download_media(message, in_memory=True)
     if contents is None:
         raise HTTPException(status_code=502, detail="Could not load text document")
     try:
         raw = contents.getvalue()
         encoding = "utf-16" if raw.startswith((b"\xff\xfe", b"\xfe\xff")) else "utf-8-sig"
-        return {"content": raw.decode(encoding)}
+        content = raw.decode(encoding)
+        if file.search_text != content:
+            file.search_text = content
+            await db.commit()
+        return {"content": content}
     except UnicodeDecodeError:
         raise HTTPException(status_code=415, detail="Only UTF-8 and UTF-16 text preview is supported")
 
@@ -359,6 +413,7 @@ async def update_text_content(
         logger.exception("Could not edit text note %s", file_id)
         raise HTTPException(status_code=502, detail="Could not update text in Telegram") from error
     file.updated_at = datetime.utcnow()
+    file.search_text = payload.content
     await db.commit()
     return {"content": payload.content, "file": add_urls_to_file(file)}
 
@@ -421,6 +476,11 @@ async def list_files(
     if favorite_only:
         query = query.where(File.is_favorite.is_(True))
     if search:
+        # Older notes predate the local content index. Populate them on the
+        # first content search so existing libraries become searchable too.
+        search_terms = [term.strip() for term in re.split(r"[;؛,،]+", search.strip()) if term.strip()]
+        if any(not term.startswith("#") for term in search_terms):
+            await index_missing_text_notes(db, current_user.id)
         # Semicolon-separated groups are alternatives (OR). Terms separated by a
         # comma inside each group must all match (AND). Persian punctuation is
         # accepted too: `درس،مهم؛موسیقی`.
@@ -443,6 +503,7 @@ async def list_files(
                         File.file_name.ilike(escaped, escape="\\"),
                         File.description.ilike(escaped, escape="\\"),
                         File.tags_json.ilike(escaped, escape="\\"),
+                        File.search_text.ilike(escaped, escape="\\"),
                     ))
             if and_terms:
                 or_groups.append(and_(*and_terms))

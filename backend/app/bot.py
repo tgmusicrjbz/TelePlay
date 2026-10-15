@@ -1470,7 +1470,7 @@ async def import_personal_channel_post(message: Message) -> None:
                 user_id=user.id, folder_id=folder.id, channel_message_id=message.id, storage_channel_id=channel_id,
                 file_id=f"text:{message.id}", file_unique_id=f"channel:{channel_id}:text:{message.id}",
                 file_name=title, description=content[:1024], file_size=len(content.encode("utf-8")),
-                mime_type="text/plain; charset=utf-8", file_type="text",
+                search_text=content, mime_type="text/plain; charset=utf-8", file_type="text",
             )
         else:
             media = next((getattr(message, field, None) for field in ("video", "audio", "voice", "animation", "video_note", "document") if getattr(message, field, None)), None)
@@ -1557,7 +1557,7 @@ async def handle_text_note(client, message: Message):
                 user_id=user.id, folder_id=active_drawer_id, channel_message_id=stored.id, storage_channel_id=target_channel_id,
                 file_id=f"text:{stored.id}", file_unique_id=f"text:{stored.id}",
                 file_name=title, file_size=len(content.encode("utf-8")),
-                mime_type="text/plain; charset=utf-8", file_type="text",
+                search_text=content, mime_type="text/plain; charset=utf-8", file_type="text",
             )
             db.add(note)
             await db.commit()
