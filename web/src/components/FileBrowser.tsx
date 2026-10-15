@@ -1,7 +1,7 @@
 /**
  * Main FileBrowser component - the core of the web interface
  */
-import { useEffect, useCallback, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useCallback, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { FolderPlus, Folder as FolderIcon, Grid, LayoutGrid, List, Search, ChevronRight, Home, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, StickyNote, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ChevronUp, Plus, CheckSquare, Square, ListChecks, ListPlus, Upload, Star, RefreshCw, Link2, DownloadCloud, Download, Send, Eye, EyeOff, Minus, Pause, Play, Tags, Cloud, CloudOff, AudioLines, FileAudio } from 'lucide-react';
 import { api, useFiles, useFolders, useFolderTree, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useActivityFeed, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile, useImportLink, useTagSettings, useUnlockVault, useWorkspaces, sendFilesToTelegram, useTTSJobs, useSTTJobs } from '../lib/api';
@@ -17,12 +17,19 @@ import DescriptionModal from './DescriptionModal';
 import BatchEditModal from './BatchEditModal';
 import Sidebar from './Sidebar';
 import Toasts from './Toasts';
-import PlaylistBrowser from './PlaylistBrowser';
-import SettingsPage from './SettingsPage';
-import DownloadsPage from './DownloadsPage';
 import CustomSelect from './CustomSelect';
 import { applyTheme, getStoredTheme } from '../lib/theme';
 import { publishLocalTransfer } from '../lib/transfers';
+
+// These three screens pull in most of the editor, playlist and offline-library
+// code. Loading them only when opened keeps the initial mini-app bundle small.
+const PlaylistBrowser = lazy(() => import('./PlaylistBrowser'));
+const SettingsPage = lazy(() => import('./SettingsPage'));
+const DownloadsPage = lazy(() => import('./DownloadsPage'));
+
+function SectionFallback() {
+    return <div className="mx-auto mt-6 h-52 w-full max-w-5xl animate-pulse rounded-3xl bg-dark-800/70" aria-label="در حال باز کردن بخش"/>;
+}
 
 const sortLabels: Record<SortField, string> = {
     name: 'نام', type: 'نوع', size: 'حجم', duration: 'مدت',
@@ -1142,7 +1149,7 @@ export default function FileBrowser() {
                             <button className="mr-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-300 hover:bg-white/10" aria-label="پایان انتخاب گروهی" title="پایان انتخاب" onClick={cancelSelection}><X className="h-5 w-5" /></button>
                         </div>
                     )}
-                    {activeSection === 'playlists' ? <PlaylistBrowser /> : activeSection === 'settings' ? <SettingsPage /> : activeSection === 'downloads' ? <DownloadsPage /> : <>
+                    {activeSection === 'playlists' ? <Suspense fallback={<SectionFallback/>}><PlaylistBrowser /></Suspense> : activeSection === 'settings' ? <Suspense fallback={<SectionFallback/>}><SettingsPage /></Suspense> : activeSection === 'downloads' ? <Suspense fallback={<SectionFallback/>}><DownloadsPage /></Suspense> : <>
                     <div className="max-w-7xl mx-auto mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div className="flex min-w-0 items-center gap-3">
                             <h1 className="truncate text-2xl font-bold tracking-tight text-white sm:text-3xl">{sectionTitle}</h1>

@@ -3,6 +3,8 @@ FastAPI main application with Telegram MTProto client lifecycle.
 """
 import logging
 import asyncio
+import secrets
+import traceback
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,7 +13,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, JSONResponse
 from urllib.parse import urlencode
 import os
 
@@ -116,6 +118,35 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+
+@app.middleware("http")
+async def track_unexpected_errors(request: Request, call_next):
+    """Attach a trace ID to responses and persist unexpected failures for admins."""
+    request_id = secrets.token_hex(6)
+    try:
+        response = await call_next(request)
+    except Exception as error:
+        logger.exception("Unhandled request error [%s] %s %s", request_id, request.method, request.url.path)
+        try:
+            from .database import async_session
+            from .models import ErrorLog
+            async with async_session() as db:
+                db.add(ErrorLog(
+                    error_id=request_id, method=request.method[:12], path=request.url.path[:512],
+                    message=str(error)[:2000] or error.__class__.__name__,
+                    traceback=traceback.format_exc()[-12000:],
+                ))
+                await db.commit()
+        except Exception:
+            logger.exception("Could not persist request error [%s]", request_id)
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "یک خطای پیش‌بینی‌نشده رخ داد.", "error_id": request_id},
+            headers={"X-Request-ID": request_id},
+        )
+    response.headers["X-Request-ID"] = request_id
+    return response
+
 # CORS middleware - Properly configured for production
 # List allowed origins explicitly instead of using "*"
 allowed_origins = [
@@ -132,7 +163,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept", "Range", "X-Workspace-User", "X-Komod-Device-ID"],
-    expose_headers=["Content-Range", "Accept-Ranges", "Content-Length"],
+    expose_headers=["Content-Range", "Accept-Ranges", "Content-Length", "X-Request-ID"],
 )
 
 

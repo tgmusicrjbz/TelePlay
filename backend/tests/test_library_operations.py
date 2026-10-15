@@ -26,9 +26,9 @@ from starlette.requests import Request
 from sqlalchemy import select
 
 from app.database import Base, async_session, engine
-from app.models import AuthSession, BotUserState, File, Folder, Playlist, PlaylistItem, ProcessingJob, TTSUsage, User, WatchProgress
+from app.models import AuthSession, BotUserState, ErrorLog, File, Folder, Playlist, PlaylistItem, ProcessingJob, TTSUsage, User, WatchProgress
 from app.routers.auth import _session_for_device, password_login, update_credentials
-from app.routers.accounts import admin_health, delete_tag_definition, get_tag_settings, update_tag_settings
+from app.routers.accounts import admin_error_logs, admin_health, delete_tag_definition, get_tag_settings, resolve_admin_error, update_tag_settings
 from app.stt import consume_stt_quota
 from app.routers.files import (
     batch_update_files,
@@ -111,6 +111,17 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(services["telegram"].active, 1)
         self.assertEqual([job.id for job in result.stuck_jobs], ["stuck-health-job"])
         self.assertFalse(hasattr(result.stuck_jobs[0], "payload_json"))
+
+    async def test_admin_can_review_and_resolve_tracked_errors(self):
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            db.add(ErrorLog(error_id="abc123def456", method="GET", path="/api/test", message="boom", traceback="private trace"))
+            await db.commit()
+            rows = await admin_error_logs(user, db)
+            self.assertEqual(rows[0]["error_id"], "abc123def456")
+            self.assertNotIn("traceback", rows[0])
+            result = await resolve_admin_error("abc123def456", user, db)
+            self.assertTrue(result["resolved"])
 
     async def test_password_credentials_can_be_enabled_and_used(self):
         async with async_session() as db:
@@ -427,6 +438,33 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(markup.inline_keyboard[2][0].text, "▶️ پخش همه (از اول)")
         self.assertIn("⚙️ تنظیمات نام و توضیح", labels)
         self.assertIn("🗑️ حذف پلی‌لیست", labels)
+
+    async def test_playlist_item_reorder_is_returned_and_persisted(self):
+        """The web client reorders playlist-item IDs, including duplicate files."""
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            first = self.make_file(user.id, None, 311)
+            first.file_type, first.file_name = "audio", "repeat.mp3"
+            second = self.make_file(user.id, None, 312)
+            second.file_type, second.file_name = "video", "clip.mp4"
+            db.add_all([first, second])
+            await db.commit()
+            playlist = await create_playlist(PlaylistCreate(name="ترتیب آیتم‌ها"), db, user)
+            created = await add_playlist_items(
+                playlist.id,
+                PlaylistAddItems(file_ids=[first.id, second.id, first.id], allow_duplicates=True),
+                db,
+                user,
+            )
+            requested = [created.items[2].id, created.items[0].id, created.items[1].id]
+            response = await reorder_playlist(playlist.id, PlaylistReorder(item_ids=requested), db, user)
+            self.assertEqual([item.id for item in response.items], requested)
+
+        async with async_session() as db:
+            stored = (await db.execute(
+                select(PlaylistItem).where(PlaylistItem.playlist_id == playlist.id).order_by(PlaylistItem.position)
+            )).scalars().all()
+            self.assertEqual([item.id for item in stored], requested)
 
     async def test_playlist_rejects_non_media_file(self):
         async with async_session() as db:

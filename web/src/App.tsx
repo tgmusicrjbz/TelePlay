@@ -1,19 +1,36 @@
 import { Routes, Route, Navigate, useSearchParams, useNavigate } from 'react-router-dom';
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api, AuthResponse, getKomodDeviceId, resolveServerUrl, useCurrentUser, useLoginWithCode, usePasswordLogin, useBotInfo, useGenerateLoginCode } from './lib/api';
 import FileBrowser from './components/FileBrowser';
-import GlobalContextMenu from './components/GlobalContextMenu';
 import PwaManager from './components/PwaManager';
-import MediaPlayer from './components/MediaPlayer';
-import ContentPreview from './components/ContentPreview';
-import AddToPlaylistDialog from './components/AddToPlaylistDialog';
-import FileDetailsSheet from './components/FileDetailsSheet';
 import OfflineDownloadProgressPanel from './components/OfflineDownloadProgress';
 import { restoreSavedSession, saveAuthenticatedAccount } from './lib/accounts';
 import { syncOfflineTextOutbox } from './lib/offline';
 import { syncOfflineMutations } from './lib/offlineMutations';
 import { useAppStore } from './lib/store';
+
+const GlobalContextMenu = lazy(() => import('./components/GlobalContextMenu'));
+const MediaPlayer = lazy(() => import('./components/MediaPlayer'));
+const ContentPreview = lazy(() => import('./components/ContentPreview'));
+const AddToPlaylistDialog = lazy(() => import('./components/AddToPlaylistDialog'));
+const FileDetailsSheet = lazy(() => import('./components/FileDetailsSheet'));
+
+function DeferredOverlays() {
+    const previewFile = useAppStore(state => state.previewFile);
+    const contentPreviewFile = useAppStore(state => state.contentPreviewFile);
+    const detailsFile = useAppStore(state => state.detailsFile);
+    const contextMenu = useAppStore(state => state.activeContextMenu);
+    const playlistFile = useAppStore(state => state.playlistFile);
+    const playlistFiles = useAppStore(state => state.playlistFiles);
+    return <Suspense fallback={null}>
+        {contextMenu && <GlobalContextMenu />}
+        {previewFile && <MediaPlayer />}
+        {contentPreviewFile && <ContentPreview />}
+        {(playlistFile || playlistFiles.length > 0) && <AddToPlaylistDialog />}
+        {detailsFile && <FileDetailsSheet />}
+    </Suspense>;
+}
 
 function PlayerCloudSync() {
     const playQueue = useAppStore(state => state.playQueue);
@@ -494,12 +511,8 @@ function App() {
                     path="/*"
                     element={
                         <ProtectedRoute>
-                            <GlobalContextMenu />
+                            <DeferredOverlays />
                             <PlayerCloudSync />
-                            <MediaPlayer />
-                            <ContentPreview />
-                            <AddToPlaylistDialog />
-                            <FileDetailsSheet />
                             <OfflineDownloadProgressPanel />
                             <FileBrowser />
                         </ProtectedRoute>

@@ -42,6 +42,7 @@ export interface AdminStats { active_users: number; total_users: number; total_f
 export interface ServiceHealthItem { key:string; label:string; status:'healthy'|'warning'|'error'|'disabled'; message:string; queued:number; active:number; latency_ms?:number|null; }
 export interface StuckJob { id:string; kind:string; title:string; state:string; progress:number; updated_at:string; }
 export interface AdminHealth { checked_at:string; overall:'healthy'|'warning'|'error'; services:ServiceHealthItem[]; stuck_jobs:StuckJob[]; }
+export interface AdminErrorLog { id:number; error_id:string; method:string; path:string; message:string; resolved:boolean; created_at:string; }
 export interface AccountPreferences { delete_storage_files: boolean; }
 export interface TagDefinition { name: string; color: string; file_count?: number; }
 export interface TagSettings { tags: TagDefinition[]; show_file_tags: boolean; display_limit: number; }
@@ -866,11 +867,50 @@ export const useRemovePlaylistItem = () => usePlaylistMutation(async ({ id, item
     ({itemId},current)=>({...current,items:(current?.items||[]).filter(item=>item.id!==itemId),item_count:Math.max(0,(current?.item_count||0)-1),updated_at:new Date().toISOString()} as Playlist)
 );
 
-export const useReorderPlaylist = () => usePlaylistMutation(async ({ id, itemIds }: { id: number; itemIds: number[] }) =>
-    (await api.put<Playlist>(`/playlists/${id}/reorder`, { item_ids: itemIds })).data,
-    ({id,itemIds},current)=>({entity:'playlist',method:'put',url:`/playlists/${id}/reorder`,payload:{item_ids:itemIds},baseUpdatedAt:current?.updated_at,conflictUrl:`/playlists/${id}`}),
-    ({itemIds},current)=>{const byId=new Map((current?.items||[]).map(item=>[item.id,item]));return{...current,items:itemIds.map((id,index)=>({...byId.get(id)!,position:index})).filter(Boolean),updated_at:new Date().toISOString()} as Playlist}
-);
+export const useReorderPlaylist = () => {
+    const queryClient = useQueryClient();
+    type Variables = { id: number; itemIds: number[] };
+    const applyOrder = (current: Playlist | undefined, itemIds: number[], server?: Playlist) => {
+        const source = server || current;
+        if (!source) return source;
+        const byId = new Map(source.items.map(item => [item.id, item]));
+        // The requested order is authoritative.  Some database drivers can return a
+        // just-updated relationship in its previous in-session order; accepting that
+        // response made a dropped row visibly jump back to its old position.
+        const items = itemIds
+            .map((itemId, position) => {
+                const item = byId.get(itemId);
+                return item ? { ...item, position } : null;
+            })
+            .filter((item): item is PlaylistItem => item !== null);
+        return items.length === itemIds.length ? { ...source, items } : source;
+    };
+    return useMutation({
+        mutationFn: async ({ id, itemIds }: Variables) => {
+            const current = queryClient.getQueryData<Playlist>(['playlists', id]);
+            const server = await runOrQueueMetadataMutation(
+                async () => (await api.put<Playlist>(`/playlists/${id}/reorder`, { item_ids: itemIds })).data,
+                { entity: 'playlist', method: 'put', url: `/playlists/${id}/reorder`, payload: { item_ids: itemIds }, baseUpdatedAt: current?.updated_at, conflictUrl: `/playlists/${id}` },
+                () => applyOrder(current, itemIds) as Playlist,
+            );
+            return applyOrder(current, itemIds, server) as Playlist;
+        },
+        onMutate: async ({ id, itemIds }) => {
+            await queryClient.cancelQueries({ queryKey: ['playlists', id] });
+            const previous = queryClient.getQueryData<Playlist>(['playlists', id]);
+            const optimistic = applyOrder(previous, itemIds);
+            if (optimistic) queryClient.setQueryData(['playlists', id], optimistic);
+            return { previous };
+        },
+        onError: (_error, { id }, context) => {
+            if (context?.previous) queryClient.setQueryData(['playlists', id], context.previous);
+        },
+        onSuccess: (playlist) => {
+            queryClient.setQueryData(['playlists', playlist.id], playlist);
+            queryClient.invalidateQueries({ queryKey: ['playlists'], exact: true });
+        },
+    });
+};
 
 export const useShufflePlaylist = () => usePlaylistMutation(async (id: number) =>
     (await api.post<Playlist>(`/playlists/${id}/shuffle`)).data,
@@ -1001,6 +1041,8 @@ export const useRevokeWorkspace = () => {
 export const useAdminUsers = (enabled: boolean) => useQuery({ queryKey: ['adminUsers'], queryFn: async () => (await api.get<AdminUser[]>('/admin/users')).data, enabled, retry: 2, staleTime: 30_000 });
 export const useAdminStats = (enabled: boolean) => useQuery({ queryKey: ['adminStats'], queryFn: async () => (await api.get<AdminStats>('/admin/stats')).data, enabled, retry: 2, staleTime: 30_000 });
 export const useAdminHealth = (enabled: boolean) => useQuery({ queryKey: ['adminHealth'], queryFn: async () => (await api.get<AdminHealth>('/admin/health')).data, enabled, retry: 1, staleTime: 10_000, refetchInterval: enabled ? 30_000 : false });
+export const useAdminErrors = (enabled: boolean) => useQuery({ queryKey: ['adminErrors'], queryFn: async () => (await api.get<AdminErrorLog[]>('/admin/errors')).data, enabled, retry: 1, staleTime: 15_000 });
+export const useResolveAdminError = () => { const queryClient=useQueryClient(); return useMutation({ mutationFn: async(errorId:string)=>(await api.patch(`/admin/errors/${errorId}`)).data, onSuccess:()=>queryClient.invalidateQueries({queryKey:['adminErrors']}) }); };
 export const useAccountPreferences = () => useQuery({ queryKey: ['accountPreferences'], queryFn: async () => (await api.get<AccountPreferences>('/accounts/preferences')).data });
 export const useVaultStatus = () => useQuery({ queryKey: ['vaultStatus'], queryFn: async () => (await api.get<VaultStatus>('/accounts/vault')).data });
 export const useSetVaultPassword = () => {

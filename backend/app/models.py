@@ -319,3 +319,17 @@ class LoginCode(Base):
     telegram_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ErrorLog(Base):
+    """A short, administrator-visible record for unexpected API failures."""
+    __tablename__ = "error_logs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    error_id: Mapped[str] = mapped_column(String(16), unique=True, nullable=False, index=True)
+    method: Mapped[str] = mapped_column(String(12), nullable=False)
+    path: Mapped[str] = mapped_column(String(512), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    traceback: Mapped[Optional[str]] = mapped_column(Text)
+    resolved: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)

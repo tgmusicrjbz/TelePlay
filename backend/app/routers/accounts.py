@@ -533,3 +533,26 @@ async def update_admin_user(user_id: int, payload: AdminUserUpdate, admin: User 
         "stt_total_jobs": usage.stt_total_jobs if usage else 0,
         "stt_total_seconds": usage.stt_total_seconds if usage else 0,
     })
+
+
+@router.get("/admin/errors")
+async def admin_error_logs(_: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    """Return recent unexpected failures without exposing credentials or tracebacks."""
+    from ..models import ErrorLog
+    rows = (await db.execute(select(ErrorLog).order_by(ErrorLog.created_at.desc()).limit(50))).scalars().all()
+    return [{
+        "id": row.id, "error_id": row.error_id, "method": row.method,
+        "path": row.path, "message": row.message, "resolved": row.resolved,
+        "created_at": row.created_at,
+    } for row in rows]
+
+
+@router.patch("/admin/errors/{error_id}")
+async def resolve_admin_error(error_id: str, _: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    from ..models import ErrorLog
+    row = (await db.execute(select(ErrorLog).where(ErrorLog.error_id == error_id))).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="گزارش خطا پیدا نشد")
+    row.resolved = True
+    await db.commit()
+    return {"error_id": error_id, "resolved": True}
