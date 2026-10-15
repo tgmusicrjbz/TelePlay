@@ -91,10 +91,9 @@ async def lifespan(app: FastAPI):
             await link_importer.start()
         except Exception:
             logger.exception("Background link importer could not start; the rest of the app remains available")
-    if tts_queue.available:
-        await tts_queue.start()
-    if stt_queue.available:
-        await stt_queue.start()
+    # Recovery also supports users who configured only personal Gemini keys.
+    await tts_queue.start()
+    await stt_queue.start()
     
     yield
     

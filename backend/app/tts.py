@@ -26,6 +26,8 @@ from . import telegram
 from .config import get_settings
 from .database import async_session
 from .models import File, Folder, TTSUsage, User
+from .gemini_keys import decrypt_user_keys
+from .processing_jobs import create_job, delete_finished_jobs, delete_job, load_jobs, update_job
 from .services import sanitize_filename, select_best_thumbnail
 
 logger = logging.getLogger(__name__)
@@ -452,18 +454,58 @@ class TTSQueue:
         self.task: asyncio.Task | None = None
         self.tasks: list[asyncio.Task] = []
         self.active_job_ids: set[str] = set()
+        self.durable_job_ids: set[str] = set()
+        self._recovered = False
 
     @property
     def available(self) -> bool:
         return bool(self.provider.api_keys)
 
     async def start(self) -> None:
-        if not self.available:
+        if not self._recovered:
+            await self._recover()
+            self._recovered = True
+        if not self.available and self.queue.empty():
             return
         if not any(not task.done() for task in self.tasks):
-            worker_count = min(4, max(1, len(self.provider.api_keys)))
+            recovered_key_count = max((len(job.api_keys or []) for job in list(self.queue._queue)), default=0)
+            worker_count = min(4, max(1, len(self.provider.api_keys), recovered_key_count))
             self.tasks = [asyncio.create_task(self._run(), name=f"gemini-tts-worker-{index + 1}") for index in range(worker_count)]
             self.task = self.tasks[0]
+
+    async def _recover(self) -> None:
+        for payload, status in await load_jobs("tts"):
+            if not status or not payload:
+                continue
+            job_id = str(status.get("id") or payload.get("id") or "")
+            if not job_id or job_id in self.statuses:
+                continue
+            if status.get("state") in TERMINAL_STATES:
+                # Temporary audio bytes cannot survive a process restart.
+                if payload.get("output_mode") != "preview":
+                    self.statuses[job_id] = status
+                continue
+            async with async_session() as db:
+                user = await db.get(User, int(payload["user_id"]))
+            if user is None:
+                continue
+            job = TTSJob(
+                user_id=user.id,
+                telegram_id=int(payload.get("telegram_id") or user.telegram_id),
+                text=str(payload.get("text") or ""),
+                title=str(payload.get("title") or "صدای ساخته‌شده"),
+                folder_id=payload.get("folder_id"),
+                preferences=dict(payload.get("preferences") or {}),
+                output_mode=str(payload.get("output_mode") or "save"),
+                api_keys=decrypt_user_keys(user.gemini_api_keys_encrypted),
+                id=job_id,
+            )
+            status.update(state="queued", message="ادامه پس از راه‌اندازی دوباره", progress=0)
+            self.statuses[job_id] = status
+            self.controls[job_id] = {"paused": False, "cancelled": False}
+            self.durable_job_ids.add(job_id)
+            await self._persist_status(job_id)
+            await self.queue.put(job)
 
     async def stop(self) -> None:
         for task in self.tasks:
@@ -490,8 +532,29 @@ class TTSQueue:
             "title": job.title, "created_at": datetime.utcnow().isoformat(),
         }
         self.controls[job.id] = {"paused": False, "cancelled": False}
+        await create_job(
+            job_id=job.id, user_id=job.user_id, kind="tts", title=job.title,
+            payload={
+                "id": job.id, "user_id": job.user_id, "telegram_id": job.telegram_id,
+                "text": job.text, "title": job.title, "folder_id": job.folder_id,
+                "preferences": job.preferences, "output_mode": job.output_mode,
+            },
+            status=self.statuses[job.id],
+        )
+        self.durable_job_ids.add(job.id)
         await self.queue.put(job)
         return self.queue.qsize()
+
+    async def _persist_status(self, job_id: str) -> None:
+        if job_id in self.durable_job_ids and job_id in self.statuses:
+            await update_job(job_id, self.statuses[job_id])
+
+    def _persist_soon(self, job_id: str) -> None:
+        try:
+            if job_id in self.durable_job_ids:
+                asyncio.get_running_loop().create_task(update_job(job_id, dict(self.statuses[job_id])))
+        except (RuntimeError, KeyError):
+            pass
 
     def status(self, job_id: str, user_id: int) -> dict | None:
         item = self.statuses.get(job_id)
@@ -515,6 +578,7 @@ class TTSQueue:
                 self.statuses.pop(job_id, None)
                 self.controls.pop(job_id, None)
                 self.audio_outputs.pop(job_id, None)
+                self.durable_job_ids.discard(job_id)
 
     def dismiss(self, job_id: str, user_id: int) -> bool:
         item = self.statuses.get(job_id)
@@ -523,6 +587,11 @@ class TTSQueue:
         self.statuses.pop(job_id, None)
         self.controls.pop(job_id, None)
         self.audio_outputs.pop(job_id, None)
+        self.durable_job_ids.discard(job_id)
+        try:
+            asyncio.get_running_loop().create_task(delete_job(job_id, user_id))
+        except RuntimeError:
+            pass
         return True
 
     def clear_finished(self, user_id: int) -> int:
@@ -531,6 +600,11 @@ class TTSQueue:
             self.statuses.pop(job_id, None)
             self.controls.pop(job_id, None)
             self.audio_outputs.pop(job_id, None)
+            self.durable_job_ids.discard(job_id)
+        try:
+            asyncio.get_running_loop().create_task(delete_finished_jobs("tts", user_id))
+        except RuntimeError:
+            pass
         return len(job_ids)
 
     def toggle_pause(self, job_id: str, user_id: int) -> dict | None:
@@ -540,6 +614,7 @@ class TTSQueue:
             return dict(item) if item and item["user_id"] == user_id else None
         control["paused"] = not control["paused"]
         item.update(state="paused" if control["paused"] else ("synthesizing" if job_id in self.active_job_ids else "queued"), message="متوقف شد" if control["paused"] else "ادامه یافت")
+        self._persist_soon(job_id)
         return dict(item)
 
     def cancel(self, job_id: str, user_id: int) -> dict | None:
@@ -549,6 +624,7 @@ class TTSQueue:
             return dict(item) if item and item["user_id"] == user_id else None
         control.update(cancelled=True, paused=False)
         item.update(state="cancelled", message="لغو شد", finished_at=datetime.utcnow().isoformat())
+        self._persist_soon(job_id)
         return dict(item)
 
     async def _checkpoint(self, job: TTSJob) -> bool:
@@ -568,6 +644,7 @@ class TTSQueue:
             except Exception as error:
                 logger.exception("TTS job %s failed", job.id)
                 self.statuses[job.id].update(state="error", message=str(error) or "ساخت صدا انجام نشد.", finished_at=datetime.utcnow().isoformat())
+                await self._persist_status(job.id)
             finally:
                 self.active_job_ids.discard(job.id)
                 self.queue.task_done()
@@ -580,11 +657,14 @@ class TTSQueue:
             if not await self._checkpoint(job):
                 return
             self.statuses[job.id].update(state="synthesizing", message=f"بخش {to_persian_digits(index)} از {to_persian_digits(len(chunks))}")
+            await self._persist_status(job.id)
             parts.append(await provider.synthesize(chunk, job.preferences))
             self.statuses[job.id].update(chunks_done=index, progress=round(index / len(chunks) * 80))
+            await self._persist_status(job.id)
         if not await self._checkpoint(job):
             return
         self.statuses[job.id].update(state="merging", message="آماده‌سازی نهایی", progress=85)
+        await self._persist_status(job.id)
         wav_data = await asyncio.to_thread(merge_wav, parts)
         if job.output_mode == "preview":
             self.audio_outputs[job.id] = wav_data
@@ -592,6 +672,7 @@ class TTSQueue:
                 state="done", message="آمادهٔ پخش", progress=100,
                 stream_url=f"/api/tts/jobs/{job.id}/audio", finished_at=datetime.utcnow().isoformat(),
             )
+            await self._persist_status(job.id)
             return
         if job.output_mode == "telegram":
             await self._send_only(job, wav_data)
@@ -599,12 +680,14 @@ class TTSQueue:
                 state="done", message="در تلگرام فرستاده شد", progress=100,
                 finished_at=datetime.utcnow().isoformat(),
             )
+            await self._persist_status(job.id)
             return
         stored = await self._store(job, wav_data)
         self.statuses[job.id].update(
             state="done", message="صدا آماده شد", progress=100, file_id=stored.id,
             stream_url=f"/api/stream/{stored.id}?workspace={stored.user_id}", finished_at=datetime.utcnow().isoformat(),
         )
+        await self._persist_status(job.id)
 
     async def _send_only(self, job: TTSJob, wav_data: bytes) -> None:
         with tempfile.TemporaryDirectory(prefix="komod-tts-send-") as temporary_dir:
@@ -622,6 +705,7 @@ class TTSQueue:
                 await asyncio.to_thread(subprocess.run, command, check=True, capture_output=True)
                 output_path = ogg_path
             self.statuses[job.id].update(state="uploading", message="ارسال به تلگرام", progress=90)
+            await self._persist_status(job.id)
             if output_path.suffix == ".ogg":
                 await telegram.tg_client.send_voice(job.telegram_id, str(output_path), caption=job.title[:1024])
             else:
@@ -662,6 +746,7 @@ class TTSQueue:
                         raise RuntimeError("کشوی مقصد پیدا نشد.")
                 target_channel = user.storage_channel_id or settings.telegram_storage_channel_id
                 self.statuses[job.id].update(state="uploading", message="ذخیره در کمد", progress=90)
+                await self._persist_status(job.id)
                 if is_voice:
                     message = await telegram.tg_client.send_voice(target_channel, str(output_path), caption=job.title[:1024])
                     media = message.voice

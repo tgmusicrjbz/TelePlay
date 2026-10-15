@@ -14,11 +14,19 @@ os.environ.setdefault("TELEGRAM_STORAGE_CHANNEL_ID", "-1001234567890")
 os.environ.setdefault("JWT_SECRET", "test-secret")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from app.database import Base, async_session, engine
+from app.models import ProcessingJob, User
+from app.processing_jobs import create_job
 from app.stt import GeminiSTTProvider, STTJob, STTQueue
 from app.tts import GeminiRequestError
 
 
 class STTQueueTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.drop_all)
+            await connection.run_sync(Base.metadata.create_all)
+
     async def test_provider_rotates_after_rate_limit(self):
         provider = GeminiSTTProvider(["first", "second"])
         calls = []
@@ -71,6 +79,36 @@ class STTQueueTests(unittest.IsolatedAsyncioTestCase):
         result = queue.cancel(job.id, 3)
         self.assertEqual(result["state"], "cancelled")
         self.assertTrue(queue.controls[job.id])
+
+    async def test_pending_job_is_recovered_after_queue_restart(self):
+        async with async_session() as db:
+            user = User(telegram_id=778899)
+            db.add(user)
+            await db.commit()
+            await db.refresh(user)
+            user_id = user.id
+        status = {
+            "id": "recover-stt", "user_id": user_id, "source_file_id": 42,
+            "title": "نمونه", "state": "transcribing", "message": "در حال تبدیل",
+            "progress": 45, "created_at": "2026-10-15T10:00:00",
+        }
+        await create_job(
+            job_id="recover-stt", user_id=user_id, kind="stt", title="نمونه",
+            payload={"id": "recover-stt", "user_id": user_id, "source_file_id": 42,
+                     "title": "نمونه", "folder_id": None, "prompt": "", "output_mode": "save"},
+            status=status,
+        )
+        queue = STTQueue(GeminiSTTProvider([]))
+        await queue._recover()
+        recovered = queue.status("recover-stt", user_id)
+        self.assertEqual(recovered["state"], "queued")
+        self.assertEqual(queue.queue.qsize(), 1)
+        queued_job = await queue.queue.get()
+        self.assertEqual((queued_job.id, queued_job.source_file_id), ("recover-stt", 42))
+        queue.queue.task_done()
+        async with async_session() as db:
+            persisted = await db.get(ProcessingJob, "recover-stt")
+            self.assertEqual(persisted.state, "queued")
 
 
 if __name__ == "__main__":

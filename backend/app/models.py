@@ -126,6 +126,32 @@ class TTSUsage(Base):
     )
 
 
+class ProcessingJob(Base):
+    """Durable state for background TTS/STT work across app restarts."""
+    __tablename__ = "processing_jobs"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    kind: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
+    state: Mapped[str] = mapped_column(String(32), default="queued", nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    progress: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    message: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    result_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+    __table_args__ = (
+        Index("idx_processing_job_user_kind_created", user_id, kind, created_at),
+    )
+
+
 class Folder(Base):
     """User-created folder for organizing files."""
     __tablename__ = "folders"

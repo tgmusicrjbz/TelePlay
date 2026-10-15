@@ -24,6 +24,8 @@ from . import telegram
 from .config import get_settings
 from .database import async_session
 from .models import File, Folder, TTSUsage, User
+from .gemini_keys import decrypt_user_keys
+from .processing_jobs import create_job, delete_job, load_jobs, update_job
 from .services import sanitize_filename
 from .tts import GeminiRequestError
 
@@ -217,16 +219,49 @@ class STTQueue:
         self.controls: dict[str, bool] = {}
         self.task: asyncio.Task | None = None
         self.tasks: list[asyncio.Task] = []
+        self.durable_job_ids: set[str] = set()
+        self._recovered = False
 
     @property
     def available(self) -> bool:
         return bool(self.provider.api_keys)
 
     async def start(self) -> None:
-        if self.available and not any(not task.done() for task in self.tasks):
-            worker_count = min(4, max(1, len(self.provider.api_keys)))
+        if not self._recovered:
+            await self._recover()
+            self._recovered = True
+        if (self.available or not self.queue.empty()) and not any(not task.done() for task in self.tasks):
+            recovered_key_count = max((len(job.api_keys or []) for job in list(self.queue._queue)), default=0)
+            worker_count = min(4, max(1, len(self.provider.api_keys), recovered_key_count))
             self.tasks = [asyncio.create_task(self._run(), name=f"gemini-stt-worker-{index + 1}") for index in range(worker_count)]
             self.task = self.tasks[0]
+
+    async def _recover(self) -> None:
+        for payload, status in await load_jobs("stt"):
+            if not status or not payload:
+                continue
+            job_id = str(status.get("id") or payload.get("id") or "")
+            if not job_id or job_id in self.statuses:
+                continue
+            if status.get("state") in TERMINAL_STATES:
+                self.statuses[job_id] = status
+                continue
+            async with async_session() as db:
+                user = await db.get(User, int(payload["user_id"]))
+            if user is None:
+                continue
+            job = STTJob(
+                user_id=user.id, source_file_id=int(payload["source_file_id"]),
+                title=str(payload.get("title") or "رونویسی صدا"), folder_id=payload.get("folder_id"),
+                prompt=str(payload.get("prompt") or ""), output_mode=str(payload.get("output_mode") or "save"),
+                telegram_id=payload.get("telegram_id"), api_keys=decrypt_user_keys(user.gemini_api_keys_encrypted), id=job_id,
+            )
+            status.update(state="queued", message="ادامه پس از راه‌اندازی دوباره", progress=0)
+            self.statuses[job_id] = status
+            self.controls[job_id] = False
+            self.durable_job_ids.add(job_id)
+            await self._persist_status(job_id)
+            await self.queue.put(job)
 
     async def stop(self) -> None:
         for task in self.tasks:
@@ -248,8 +283,27 @@ class STTQueue:
         job.id = job.id or uuid.uuid4().hex
         self.statuses[job.id] = {"id": job.id, "user_id": job.user_id, "source_file_id": job.source_file_id, "title": job.title, "state": "queued", "message": "منتظر نوبت", "progress": 0, "created_at": datetime.utcnow().isoformat()}
         self.controls[job.id] = False
+        await create_job(
+            job_id=job.id, user_id=job.user_id, kind="stt", title=job.title,
+            payload={"id": job.id, "user_id": job.user_id, "source_file_id": job.source_file_id,
+                     "title": job.title, "folder_id": job.folder_id, "prompt": job.prompt,
+                     "output_mode": job.output_mode, "telegram_id": job.telegram_id},
+            status=self.statuses[job.id],
+        )
+        self.durable_job_ids.add(job.id)
         await self.queue.put(job)
         return self.queue.qsize()
+
+    async def _persist_status(self, job_id: str) -> None:
+        if job_id in self.durable_job_ids and job_id in self.statuses:
+            await update_job(job_id, self.statuses[job_id])
+
+    def _persist_soon(self, job_id: str) -> None:
+        try:
+            if job_id in self.durable_job_ids:
+                asyncio.get_running_loop().create_task(update_job(job_id, dict(self.statuses[job_id])))
+        except (RuntimeError, KeyError):
+            pass
 
     def status(self, job_id: str, user_id: int) -> dict | None:
         item = self.statuses.get(job_id)
@@ -265,6 +319,7 @@ class STTQueue:
         if item["state"] not in TERMINAL_STATES:
             self.controls[job_id] = True
             item.update(state="cancelled", message="لغو شد", finished_at=datetime.utcnow().isoformat())
+            self._persist_soon(job_id)
         return dict(item)
 
     def dismiss(self, job_id: str, user_id: int) -> bool:
@@ -272,6 +327,11 @@ class STTQueue:
         if not item or item["user_id"] != user_id or item["state"] not in TERMINAL_STATES:
             return False
         self.statuses.pop(job_id, None); self.controls.pop(job_id, None)
+        self.durable_job_ids.discard(job_id)
+        try:
+            asyncio.get_running_loop().create_task(delete_job(job_id, user_id))
+        except RuntimeError:
+            pass
         return True
 
     async def _run(self) -> None:
@@ -285,6 +345,7 @@ class STTQueue:
             except Exception as error:
                 logger.exception("STT job %s failed", job.id)
                 self.statuses[job.id].update(state="error", message=str(error) or "تبدیل صدا به متن انجام نشد.", finished_at=datetime.utcnow().isoformat())
+                await self._persist_status(job.id)
             finally:
                 self.queue.task_done()
 
@@ -303,6 +364,7 @@ class STTQueue:
                 suffix = Path(source.file_name).suffix or mimetypes.guess_extension(source.mime_type or "") or ".bin"
                 input_path = Path(directory) / f"source{suffix}"
                 self.statuses[job.id].update(state="downloading", message="دریافت فایل", progress=10)
+                await self._persist_status(job.id)
                 downloaded = await telegram.tg_client.download_media(message, file_name=str(input_path))
                 if not downloaded:
                     raise RuntimeError("دریافت فایل از فضای ذخیره‌سازی انجام نشد.")
@@ -316,15 +378,19 @@ class STTQueue:
                 if self.controls.get(job.id):
                     return
                 self.statuses[job.id].update(state="transcribing", message="در حال تبدیل", progress=45)
+                await self._persist_status(job.id)
                 markdown = await provider.transcribe(media_path, mime_type, job.prompt)
             if self.controls.get(job.id):
                 return
             if job.output_mode == "temporary":
                 self.statuses[job.id].update(state="done", message="متن آماده است", progress=100, content=markdown, finished_at=datetime.utcnow().isoformat())
+                await self._persist_status(job.id)
                 return
             self.statuses[job.id].update(state="saving", message="ذخیره Markdown", progress=85)
+            await self._persist_status(job.id)
             stored = await self._store(db, user, job, markdown)
             self.statuses[job.id].update(state="done", message="متن ذخیره شد", progress=100, content=markdown, file_id=stored.id, finished_at=datetime.utcnow().isoformat())
+            await self._persist_status(job.id)
             if job.telegram_id:
                 try:
                     await telegram.tg_client.copy_message(job.telegram_id, stored.storage_channel_id or settings.telegram_storage_channel_id, stored.channel_message_id)
