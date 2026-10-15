@@ -23,6 +23,7 @@ from .auth import create_access_token
 from .config import get_settings
 from .database import async_session
 from .models import File, Folder, User
+from .processing_jobs import create_job, delete_finished_jobs, delete_job, load_jobs, update_job
 from .services import sanitize_filename, select_best_thumbnail
 from . import telegram
 
@@ -43,6 +44,7 @@ class ImportJob:
     quality: str = "480"
     notify: bool = True
     default_folder: bool = False
+    retry_count: int = 0
     id: str = ""
 
 
@@ -112,6 +114,8 @@ class LinkImportService:
         self.statuses: dict[str, dict] = {}
         self.controls: dict[str, dict[str, bool]] = {}
         self.active_job_id: str | None = None
+        self.durable_job_ids: set[str] = set()
+        self._recovered = False
 
     @property
     def available(self) -> bool:
@@ -120,6 +124,9 @@ class LinkImportService:
     async def start(self) -> None:
         if not self.available:
             return
+        if not self._recovered:
+            await self._recover()
+            self._recovered = True
         if self.client is None:
             self.client = Client(
                 "komod-worker",
@@ -138,6 +145,31 @@ class LinkImportService:
             self.task = asyncio.create_task(self._run(), name="link-import-worker")
             logger.info("Background link importer started")
 
+    async def _recover(self) -> None:
+        for payload, status in await load_jobs("link", recent_for=timedelta(seconds=45)):
+            if not payload or not status:
+                continue
+            job_id = str(status.get("id") or payload.get("id") or "")
+            if not job_id or job_id in self.statuses:
+                continue
+            if status.get("state") in {"done", "error", "cancelled"}:
+                self.statuses[job_id] = status
+                self.durable_job_ids.add(job_id)
+                continue
+            job = ImportJob(
+                url=str(payload.get("url") or ""), user_id=int(payload["user_id"]),
+                telegram_id=int(payload["telegram_id"]), folder_id=payload.get("folder_id"),
+                quality=str(payload.get("quality") or "480"), notify=bool(payload.get("notify", True)),
+                default_folder=bool(payload.get("default_folder", False)),
+                retry_count=int(status.get("retry_count") or 0), id=job_id,
+            )
+            status.update(state="queued", message="ادامه پس از راه‌اندازی دوباره", progress=0)
+            self.statuses[job_id] = status
+            self.controls[job_id] = {"paused": False, "cancelled": False}
+            self.durable_job_ids.add(job_id)
+            await self._persist_status(job_id)
+            await self.queue.put(job)
+
     async def stop(self) -> None:
         if self.task:
             self.task.cancel()
@@ -153,10 +185,29 @@ class LinkImportService:
         if self.client is None or self.task is None or self.task.done():
             await self.start()
         job.id = job.id or uuid.uuid4().hex
-        self.statuses[job.id] = {"id": job.id, "user_id": job.user_id, "url": job.url, "quality": job.quality, "folder_id": job.folder_id, "state": "queued", "message": "در صف", "saved": 0, "created_at": datetime.utcnow().isoformat()}
+        self.statuses[job.id] = {"id": job.id, "user_id": job.user_id, "url": job.url, "quality": job.quality, "folder_id": job.folder_id, "state": "queued", "message": "در صف", "saved": 0, "progress": 0, "retry_count": job.retry_count, "created_at": datetime.utcnow().isoformat()}
         self.controls[job.id] = {"paused": False, "cancelled": False}
+        await create_job(
+            job_id=job.id, user_id=job.user_id, kind="link", title=job.url,
+            payload={"id": job.id, "url": job.url, "user_id": job.user_id,
+                     "telegram_id": job.telegram_id, "folder_id": job.folder_id,
+                     "quality": job.quality, "notify": job.notify, "default_folder": job.default_folder},
+            status=self.statuses[job.id],
+        )
+        self.durable_job_ids.add(job.id)
         await self.queue.put(job)
         return self.queue.qsize()
+
+    async def _persist_status(self, job_id: str) -> None:
+        if job_id in self.durable_job_ids and job_id in self.statuses:
+            await update_job(job_id, self.statuses[job_id])
+
+    def _persist_soon(self, job_id: str) -> None:
+        try:
+            if job_id in self.durable_job_ids:
+                asyncio.get_running_loop().create_task(update_job(job_id, dict(self.statuses[job_id])))
+        except (RuntimeError, KeyError):
+            pass
 
     def status(self, job_id: str, user_id: int) -> dict | None:
         status = self.statuses.get(job_id)
@@ -182,6 +233,11 @@ class LinkImportService:
         for job_id in expired:
             self.statuses.pop(job_id, None)
             self.controls.pop(job_id, None)
+            self.durable_job_ids.discard(job_id)
+            try:
+                asyncio.get_running_loop().create_task(delete_job(job_id, user_id))
+            except RuntimeError:
+                pass
         jobs = [dict(item) for item in self.statuses.values() if item["user_id"] == user_id]
         return sorted(jobs, key=lambda item: item.get("created_at", ""), reverse=True)[:100]
 
@@ -196,6 +252,7 @@ class LinkImportService:
         else:
             state = "downloading" if self.active_job_id == job_id else "queued"
             status.update(state=state, message="ادامه یافت")
+        self._persist_soon(job_id)
         return status
 
     def cancel(self, job_id: str, user_id: int) -> dict | None:
@@ -206,6 +263,7 @@ class LinkImportService:
         control["cancelled"] = True
         control["paused"] = False
         status.update(state="cancelled", message="لغو شد", finished_at=datetime.utcnow().isoformat())
+        self._persist_soon(job_id)
         return status
 
     def clear_finished(self, user_id: int) -> int:
@@ -216,6 +274,11 @@ class LinkImportService:
         for job_id in removable:
             self.statuses.pop(job_id, None)
             self.controls.pop(job_id, None)
+            self.durable_job_ids.discard(job_id)
+        try:
+            asyncio.get_running_loop().create_task(delete_finished_jobs("link", user_id))
+        except RuntimeError:
+            pass
         return len(removable)
 
     async def _checkpoint(self, job: ImportJob) -> bool:
@@ -231,7 +294,8 @@ class LinkImportService:
                 self.active_job_id = job.id
                 if not await self._checkpoint(job):
                     continue
-                self.statuses[job.id].update(state="downloading", message="در حال دریافت فایل اصلی")
+                self.statuses[job.id].update(state="downloading", message="در حال دریافت فایل اصلی", progress=10)
+                await self._persist_status(job.id)
                 playlist_title, playlist_entries = await asyncio.to_thread(_youtube_playlist_entries, job.url)
                 sources = playlist_entries or [{"url": job.url, "title": ""}]
                 items: list[dict] = []
@@ -239,7 +303,9 @@ class LinkImportService:
                     if not await self._checkpoint(job):
                         break
                     if len(sources) > 1:
-                        self.statuses[job.id].update(message=f"مورد {source_index} از {len(sources)}")
+                        progress = 10 + round((source_index - 1) / len(sources) * 65)
+                        self.statuses[job.id].update(message=f"مورد {source_index} از {len(sources)}", progress=progress)
+                        await self._persist_status(job.id)
                     downloaded = await self._download(job, source["url"], job.quality)
                     for item_index, item in enumerate(downloaded, 1):
                         item["source_url"] = source["url"]
@@ -250,23 +316,40 @@ class LinkImportService:
                     items.extend(downloaded)
                 if not await self._checkpoint(job):
                     continue
+                self.statuses[job.id].update(state="saving", message="در حال ذخیره در کمد", progress=80)
+                await self._persist_status(job.id)
                 saved = await self._store(job, items)
                 if not saved:
                     raise RuntimeError("هیچ فایل قابل ذخیره‌ای در پاسخ پیدا نشد")
                 if job.notify:
                     count = str(len(saved)).translate(str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹"))
                     await self._notify(job, f"✅ {count} فایل به کمد اضافه شد.")
-                self.statuses[job.id].update(state="done", message="آماده شد", saved=len(saved), finished_at=datetime.utcnow().isoformat())
+                self.statuses[job.id].update(state="done", message="آماده شد", saved=len(saved), progress=100, finished_at=datetime.utcnow().isoformat())
+                await self._persist_status(job.id)
             except asyncio.CancelledError:
                 raise
             except ImportCancelled:
                 self.statuses[job.id].update(state="cancelled", message="لغو شد", finished_at=datetime.utcnow().isoformat())
+                await self._persist_status(job.id)
             except Exception as error:
-                logger.exception("Link import failed for %s", job.url)
                 friendly_error = _friendly_import_error(error)
+                if isinstance(error, TimeoutError) and job.retry_count < 2 and not self.controls.get(job.id, {}).get("cancelled"):
+                    job.retry_count += 1
+                    logger.warning("Link import timed out; retrying %s (%s/2)", job.url, job.retry_count)
+                    self.statuses[job.id].update(
+                        state="queued", message=f"تلاش دوباره ({job.retry_count + 1} از 3)",
+                        progress=0, retry_count=job.retry_count,
+                    )
+                    await self._persist_status(job.id)
+                    await asyncio.sleep(2)
+                    if await self._checkpoint(job):
+                        await self.queue.put(job)
+                    continue
+                logger.exception("Link import failed for %s", job.url)
                 if job.notify:
                     await self._notify(job, f"❌ {friendly_error}")
                 self.statuses[job.id].update(state="error", message=friendly_error, finished_at=datetime.utcnow().isoformat())
+                await self._persist_status(job.id)
             finally:
                 if self.active_job_id == job.id:
                     self.active_job_id = None
@@ -373,6 +456,7 @@ class LinkImportService:
                 )]
                 if language_buttons and not any(button_ready(button) for button in language_buttons):
                     self.statuses[job.id].update(message="منتظر آماده‌شدن انتخاب زبان")
+                    await self._persist_status(job.id)
                     if time.monotonic() - started_at > 45:
                         raise TimeoutError("گزینه زبان سرویس دانلود آماده نشد")
                 language_button = next((button for button in language_buttons if button_key(message, button) not in clicked and (button_ready(button) or time.monotonic() - started_at > 8)), None)
