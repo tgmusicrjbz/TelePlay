@@ -163,6 +163,8 @@ class FileResponse(FileBase):
     is_pinned: bool = False
     is_hidden: bool = False
     is_shortcut: bool = False
+    audio_stream_url: Optional[str] = None
+    audio_variant_size: Optional[int] = None
     
     model_config = ConfigDict(from_attributes=True)
 
@@ -174,6 +176,21 @@ class FileListResponse(BaseModel):
     per_page: int
     search_mode: Literal["exact", "fuzzy"] = "exact"
     suggestions: List[str] = Field(default_factory=list)
+
+
+class PlayerStateUpdate(BaseModel):
+    file_ids: List[int] = Field(default_factory=list, max_length=250)
+    current_index: int = Field(default=-1, ge=-1, le=249)
+    repeat_mode: Literal["off", "all", "one"] = "off"
+    position: int = Field(default=0, ge=0)
+
+
+class PlayerStateResponse(BaseModel):
+    files: List[FileResponse] = Field(default_factory=list)
+    current_index: int = -1
+    repeat_mode: Literal["off", "all", "one"] = "off"
+    position: int = 0
+    updated_at: Optional[datetime] = None
 
 
 class ActivityResponse(BaseModel):

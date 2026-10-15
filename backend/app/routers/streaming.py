@@ -2,8 +2,12 @@
 Streaming API endpoints for media playback.
 """
 import re
+import asyncio
 import logging
 import mimetypes
+import shutil
+import tempfile
+from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +23,7 @@ from ..telegram import get_message_from_channel
 from ..streaming import stream_file as stream_file_generator
 from ..services import select_best_thumbnail
 from ..media_metadata import extract_embedded_cover
+from ..config import get_settings
 
 # Logger for internal debugging (not exposed to users)
 logger = logging.getLogger(__name__)
@@ -27,6 +32,8 @@ logger = logging.getLogger(__name__)
 limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter(prefix="/stream", tags=["Streaming"])
+settings = get_settings()
+_audio_variant_locks: dict[int, asyncio.Lock] = {}
 
 
 def media_type_for(file: File) -> str:
@@ -94,6 +101,96 @@ async def stored_message_response(file: File, message, range_header: str | None,
         status_code=206 if range_header else 200,
         headers=headers,
     )
+
+
+@router.post("/{file_id}/audio-variant")
+async def prepare_audio_variant(
+    file_id: int, request: Request, db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Create and cache a low-bandwidth AAC version for video audio-only mode."""
+    file = (await db.execute(select(File).where(
+        File.id == file_id, File.user_id == current_user.id,
+    ))).scalar_one_or_none()
+    if file is None or file.file_type != "video":
+        raise HTTPException(status_code=404, detail="Video not found")
+    if file.is_hidden:
+        require_vault_access(request, current_user)
+    if file.audio_variant_message_id:
+        return {"stream_url": f"/api/stream/{file.id}/audio", "size": file.audio_variant_size, "cached": True}
+    if not shutil.which("ffmpeg"):
+        raise HTTPException(status_code=503, detail="نسخه کم‌حجم صدا روی این سرور فعال نیست.")
+    lock = _audio_variant_locks.setdefault(file_id, asyncio.Lock())
+    async with lock:
+        await db.refresh(file)
+        if file.audio_variant_message_id:
+            return {"stream_url": f"/api/stream/{file.id}/audio", "size": file.audio_variant_size, "cached": True}
+        message = await get_message_from_channel(file.channel_message_id, file.storage_channel_id)
+        if message is None:
+            raise HTTPException(status_code=404, detail="فایل ویدیو در فضای ذخیره‌سازی پیدا نشد.")
+        with tempfile.TemporaryDirectory(prefix="komod-audio-") as temporary:
+            source = Path(temporary) / "source"
+            output = Path(temporary) / "audio.m4a"
+            downloaded = await telegram.tg_client.download_media(message, file_name=str(source))
+            if not downloaded:
+                raise HTTPException(status_code=502, detail="دریافت ویدیو برای ساخت نسخه صوتی انجام نشد.")
+            process = await asyncio.create_subprocess_exec(
+                "ffmpeg", "-y", "-loglevel", "error", "-i", str(downloaded),
+                "-vn", "-c:a", "aac", "-b:a", "64k", "-movflags", "+faststart", str(output),
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                _, stderr = await asyncio.wait_for(process.communicate(), timeout=900)
+            except asyncio.TimeoutError:
+                process.kill(); await process.communicate()
+                raise HTTPException(status_code=504, detail="ساخت نسخه صوتی بیش از حد طول کشید.")
+            if process.returncode or not output.exists():
+                logger.error("Audio variant ffmpeg failed: %s", stderr.decode("utf-8", "ignore")[-1000:])
+                raise HTTPException(status_code=502, detail="ساخت نسخه کم‌حجم صدا انجام نشد.")
+            target = file.storage_channel_id or current_user.storage_channel_id
+            sent = await telegram.tg_client.send_audio(
+                chat_id=target or settings.telegram_storage_channel_id,
+                audio=str(output), title=f"صدای {Path(file.file_name).stem}"[:64],
+            )
+            media = sent.audio or sent.document
+            if media is None:
+                raise HTTPException(status_code=502, detail="ذخیره نسخه صوتی انجام نشد.")
+            file.audio_variant_file_id = media.file_id
+            file.audio_variant_unique_id = media.file_unique_id
+            file.audio_variant_message_id = sent.id
+            file.audio_variant_size = media.file_size or output.stat().st_size
+            await db.commit()
+        return {"stream_url": f"/api/stream/{file.id}/audio", "size": file.audio_variant_size, "cached": False}
+
+
+@router.get("/{file_id}/audio")
+async def stream_audio_variant(
+    file_id: int, request: Request, db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    file = (await db.execute(select(File).where(
+        File.id == file_id, File.user_id == current_user.id,
+    ))).scalar_one_or_none()
+    if file is None or not file.audio_variant_message_id or not file.audio_variant_size:
+        raise HTTPException(status_code=404, detail="نسخه صوتی هنوز آماده نشده است.")
+    if file.is_hidden:
+        require_vault_access(request, current_user)
+    message = await get_message_from_channel(file.audio_variant_message_id, file.storage_channel_id)
+    if message is None:
+        raise HTTPException(status_code=404, detail="نسخه صوتی پیدا نشد.")
+    start, end = parse_range_header(request.headers.get("range"), file.audio_variant_size)
+    if start >= file.audio_variant_size or end < start:
+        return Response(status_code=416, headers={"Content-Range": f"bytes */{file.audio_variant_size}"})
+    async def audio_streamer():
+        async for chunk in stream_file_generator(telegram.tg_client, message, start, end):
+            yield chunk
+    headers = {
+        "Accept-Ranges": "bytes", "Content-Length": str(end - start + 1),
+        "Cache-Control": "private, max-age=86400", "Content-Type": "audio/mp4",
+    }
+    if request.headers.get("range"):
+        headers["Content-Range"] = f"bytes {start}-{end}/{file.audio_variant_size}"
+    return StreamingResponse(audio_streamer(), status_code=206 if request.headers.get("range") else 200, media_type="audio/mp4", headers=headers)
 
 
 @router.get("/{file_id}")

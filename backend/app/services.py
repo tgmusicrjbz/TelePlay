@@ -78,6 +78,8 @@ def add_urls_to_file(file: File) -> dict:
         "is_pinned": bool(file.is_pinned),
         "is_hidden": bool(file.is_hidden),
         "is_shortcut": bool(file.is_shortcut),
+        "audio_stream_url": f"/api/stream/{file.id}/audio?workspace={file.user_id}" if file.audio_variant_message_id else None,
+        "audio_variant_size": file.audio_variant_size,
         "stream_url": f"/api/stream/{file.id}?workspace={file.user_id}",
         "thumbnail_url": f"/api/stream/{file.id}/thumbnail?quality=best&workspace={file.user_id}" if file.thumbnail_file_id else None,
         "last_pos": file.watch_progress[0].position if file.watch_progress else 0,

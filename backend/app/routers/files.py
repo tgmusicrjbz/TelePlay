@@ -23,7 +23,7 @@ from urllib.parse import urlparse
 
 from ..database import get_db
 from ..models import File, User, WatchProgress, Folder, Playlist
-from ..schemas import ActivityResponse, BatchFileUpdate, FileResponse, FileListResponse, FileUpdate, WatchProgressUpdate
+from ..schemas import ActivityResponse, BatchFileUpdate, FileResponse, FileListResponse, FileUpdate, PlayerStateResponse, PlayerStateUpdate, WatchProgressUpdate
 from ..auth import get_current_user, has_vault_access, require_scoped_folder, require_vault_access, workspace_scope
 from ..telegram import delete_from_storage_channel, get_message_from_channel
 from .. import telegram
@@ -267,6 +267,80 @@ async def clear_finished_import_links(current_user: User = Depends(get_current_u
     return {"removed": removed}
 
 
+@router.get("/player-state", response_model=PlayerStateResponse)
+async def get_player_state(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Restore the latest queue and position on another signed-in device."""
+    try:
+        state = json.loads(current_user.player_state_json or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        state = {}
+    ids = [int(value) for value in state.get("file_ids", [])[:250] if str(value).isdigit()]
+    files = (await db.execute(select(File).where(
+        File.user_id == current_user.id, File.id.in_(ids),
+        File.file_type.in_(("audio", "video")), File.is_hidden.is_(False),
+    ).options(selectinload(File.watch_progress)))).scalars().all() if ids else []
+    by_id = {item.id: item for item in files}
+    ordered = [by_id[file_id] for file_id in ids if file_id in by_id]
+    index = min(max(int(state.get("current_index", -1)), -1), len(ordered) - 1)
+    return PlayerStateResponse(
+        files=[FileResponse(**add_urls_to_file(item)) for item in ordered],
+        current_index=index,
+        repeat_mode=state.get("repeat_mode") if state.get("repeat_mode") in {"off", "all", "one"} else "off",
+        position=max(0, int(state.get("position", 0) or 0)),
+        updated_at=state.get("updated_at"),
+    )
+
+
+@router.put("/player-state", response_model=PlayerStateResponse)
+async def save_player_state(
+    payload: PlayerStateUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    unique_ids = list(dict.fromkeys(payload.file_ids))
+    files = (await db.execute(select(File).where(
+        File.user_id == current_user.id, File.id.in_(unique_ids),
+        File.file_type.in_(("audio", "video")), File.is_hidden.is_(False),
+    ).options(selectinload(File.watch_progress)))).scalars().all() if unique_ids else []
+    by_id = {item.id: item for item in files}
+    ordered = [by_id[file_id] for file_id in unique_ids if file_id in by_id]
+    index = min(max(payload.current_index, -1), len(ordered) - 1)
+    now = datetime.utcnow()
+    current_user.player_state_json = json.dumps({
+        "file_ids": [item.id for item in ordered], "current_index": index,
+        "repeat_mode": payload.repeat_mode, "position": payload.position,
+        "updated_at": now.isoformat(),
+    })
+    await db.commit()
+    return PlayerStateResponse(
+        files=[FileResponse(**add_urls_to_file(item)) for item in ordered],
+        current_index=index, repeat_mode=payload.repeat_mode,
+        position=payload.position, updated_at=now,
+    )
+
+
+@router.get("/play-history", response_model=FileListResponse)
+async def playback_history(
+    page: int = Query(1, ge=1), per_page: int = Query(30, ge=1, le=100),
+    db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    base = select(File).join(WatchProgress, WatchProgress.file_id == File.id).where(
+        WatchProgress.user_id == current_user.id, File.user_id == current_user.id,
+        File.file_type.in_(("audio", "video")), File.is_hidden.is_(False),
+    )
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
+    files = (await db.execute(base.options(selectinload(File.watch_progress)).order_by(
+        WatchProgress.updated_at.desc()
+    ).offset((page - 1) * per_page).limit(per_page))).scalars().unique().all()
+    return FileListResponse(
+        files=[FileResponse(**add_urls_to_file(item)) for item in files],
+        total=total, page=page, per_page=per_page,
+    )
+
+
 @router.post("/upload", response_model=FileResponse, status_code=201)
 async def upload_file(
     upload: UploadFile = FormFile(...),
@@ -320,6 +394,10 @@ async def upload_file(
                 file_type=duplicate.file_type, duration=duplicate.duration,
                 width=duplicate.width, height=duplicate.height,
                 thumbnail_file_id=duplicate.thumbnail_file_id,
+                audio_variant_file_id=duplicate.audio_variant_file_id,
+                audio_variant_unique_id=duplicate.audio_variant_unique_id,
+                audio_variant_message_id=duplicate.audio_variant_message_id,
+                audio_variant_size=duplicate.audio_variant_size,
             )
             db.add(shortcut)
             await db.commit()
@@ -1101,6 +1179,16 @@ async def update_progress(
         watch_progress.position = progress.position
         if progress.duration:
              watch_progress.duration = int(progress.duration)
+    try:
+        player_state = json.loads(current_user.player_state_json or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        player_state = {}
+    file_ids = player_state.get("file_ids") or []
+    current_index = int(player_state.get("current_index", -1))
+    if 0 <= current_index < len(file_ids) and file_ids[current_index] == file_id:
+        player_state["position"] = progress.position
+        player_state["updated_at"] = datetime.utcnow().isoformat()
+        current_user.player_state_json = json.dumps(player_state)
         
     await db.commit()
     await db.refresh(watch_progress)

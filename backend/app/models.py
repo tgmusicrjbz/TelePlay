@@ -29,6 +29,7 @@ class User(Base):
     show_file_tags: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     file_tag_limit: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
     tts_settings_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    player_state_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
     gemini_api_keys_encrypted: Mapped[Optional[str]] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     auth_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
@@ -220,6 +221,10 @@ class File(Base):
     width: Mapped[Optional[int]] = mapped_column(Integer)
     height: Mapped[Optional[int]] = mapped_column(Integer)
     thumbnail_file_id: Mapped[Optional[str]] = mapped_column(String(255))
+    audio_variant_file_id: Mapped[Optional[str]] = mapped_column(String(255))
+    audio_variant_unique_id: Mapped[Optional[str]] = mapped_column(String(255))
+    audio_variant_message_id: Mapped[Optional[int]] = mapped_column(BigInteger)
+    audio_variant_size: Mapped[Optional[int]] = mapped_column(BigInteger)
     
     # Sharing
     public_hash: Mapped[Optional[str]] = mapped_column(String(64), unique=True, index=True)

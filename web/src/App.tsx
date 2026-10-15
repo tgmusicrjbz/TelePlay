@@ -11,6 +11,38 @@ import FileDetailsSheet from './components/FileDetailsSheet';
 import OfflineDownloadProgressPanel from './components/OfflineDownloadProgress';
 import { restoreSavedSession, saveAuthenticatedAccount } from './lib/accounts';
 import { syncOfflineTextOutbox } from './lib/offline';
+import { useAppStore } from './lib/store';
+
+function PlayerCloudSync() {
+    const playQueue = useAppStore(state => state.playQueue);
+    const queueIndex = useAppStore(state => state.queueIndex);
+    const repeatMode = useAppStore(state => state.repeatMode);
+    const startQueue = useAppStore(state => state.startQueue);
+    const setRepeatMode = useAppStore(state => state.setRepeatMode);
+    const setPlayerMinimized = useAppStore(state => state.setPlayerMinimized);
+    const hydrated = useRef(false);
+    useEffect(() => {
+        let cancelled = false;
+        void api.get('/files/player-state').then(({data}) => {
+            if (cancelled) return;
+            if (!useAppStore.getState().playQueue.length && data.files?.length) {
+                startQueue(data.files, Math.max(0, data.current_index));
+                setRepeatMode(data.repeat_mode || 'off');
+                setPlayerMinimized(true);
+            }
+        }).catch(() => undefined).finally(() => { if (!cancelled) hydrated.current = true; });
+        return () => { cancelled = true; };
+    }, [setPlayerMinimized, setRepeatMode, startQueue]);
+    useEffect(() => {
+        if (!hydrated.current) return;
+        const timer = window.setTimeout(() => void api.put('/files/player-state', {
+            file_ids: playQueue.map(item => item.id), current_index: queueIndex,
+            repeat_mode: repeatMode, position: 0,
+        }).catch(() => undefined), 900);
+        return () => window.clearTimeout(timer);
+    }, [playQueue, queueIndex, repeatMode]);
+    return null;
+}
 
 function AuthCallback() {
     const [searchParams] = useSearchParams();
@@ -457,6 +489,7 @@ function App() {
                     element={
                         <ProtectedRoute>
                             <GlobalContextMenu />
+                            <PlayerCloudSync />
                             <MediaPlayer />
                             <ContentPreview />
                             <AddToPlaylistDialog />

@@ -102,6 +102,8 @@ async def init_db():
             await conn.execute(text("ALTER TABLE users ADD COLUMN file_tag_limit INTEGER NOT NULL DEFAULT 2"))
         if "tts_settings_json" not in user_columns:
             await conn.execute(text("ALTER TABLE users ADD COLUMN tts_settings_json TEXT NOT NULL DEFAULT '{}'"))
+        if "player_state_json" not in user_columns:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN player_state_json TEXT NOT NULL DEFAULT '{}'"))
         if "gemini_api_keys_encrypted" not in user_columns:
             await conn.execute(text("ALTER TABLE users ADD COLUMN gemini_api_keys_encrypted TEXT"))
         if "login_username" not in user_columns:
@@ -156,6 +158,14 @@ async def init_db():
             hidden_type = "BOOLEAN" if url.drivername.startswith("postgresql") else "INTEGER"
             hidden_default = "FALSE" if url.drivername.startswith("postgresql") else "0"
             await conn.execute(text(f"ALTER TABLE files ADD COLUMN is_hidden {hidden_type} NOT NULL DEFAULT {hidden_default}"))
+        for column_name, column_type in (
+            ("audio_variant_file_id", "VARCHAR(255)"),
+            ("audio_variant_unique_id", "VARCHAR(255)"),
+            ("audio_variant_message_id", "BIGINT"),
+            ("audio_variant_size", "BIGINT"),
+        ):
+            if column_name not in columns:
+                await conn.execute(text(f"ALTER TABLE files ADD COLUMN {column_name} {column_type}"))
         playlist_columns = await conn.run_sync(
             lambda sync_conn: {column["name"] for column in inspect(sync_conn).get_columns("playlists")}
         )

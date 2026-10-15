@@ -97,6 +97,8 @@ export interface TelegramFile {
     is_pinned?: boolean;
     is_hidden?: boolean;
     is_shortcut?: boolean;
+    audio_stream_url?: string | null;
+    audio_variant_size?: number | null;
     tags?: string[];
 }
 
@@ -108,6 +110,7 @@ export interface FileListResponse {
     search_mode?: 'exact' | 'fuzzy';
     suggestions?: string[];
 }
+export interface PlayerState { files: TelegramFile[]; current_index: number; repeat_mode: 'off'|'all'|'one'; position: number; updated_at?: string|null; }
 
 export interface ActivityFeed {
     continue_watching: TelegramFile[];

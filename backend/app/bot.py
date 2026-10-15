@@ -1390,6 +1390,10 @@ async def _handle_file_impl(client, message: Message, status_msg: Message):
                     mime_type=duplicate.mime_type, file_type=duplicate.file_type,
                     duration=duplicate.duration, width=duplicate.width, height=duplicate.height,
                     thumbnail_file_id=duplicate.thumbnail_file_id,
+                    audio_variant_file_id=duplicate.audio_variant_file_id,
+                    audio_variant_unique_id=duplicate.audio_variant_unique_id,
+                    audio_variant_message_id=duplicate.audio_variant_message_id,
+                    audio_variant_size=duplicate.audio_variant_size,
                 )
                 db.add(shortcut)
                 await db.commit()

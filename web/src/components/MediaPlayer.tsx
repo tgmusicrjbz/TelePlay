@@ -2,8 +2,8 @@
  * MediaPlayer - full screen video/audio player
  */
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import { X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipBack, SkipForward, Download, AlertTriangle, Copy, PictureInPicture2, Gauge, ChevronDown, ChevronUp, Repeat2, Shuffle, Headphones, RotateCcw, RotateCw, Clock3, ListPlus, ListMusic, GripVertical, Trash2, RectangleHorizontal, Smartphone, MonitorSmartphone, Film, LockKeyhole, UnlockKeyhole, MoreHorizontal } from 'lucide-react';
-import { TelegramFile, useUpdateProgress, useFile, api } from '../lib/api';
+import { X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipBack, SkipForward, Download, AlertTriangle, Copy, PictureInPicture2, Gauge, ChevronDown, ChevronUp, Repeat2, Shuffle, Headphones, RotateCcw, RotateCw, Clock3, ListPlus, ListMusic, GripVertical, Trash2, RectangleHorizontal, Smartphone, MonitorSmartphone, Film, LockKeyhole, UnlockKeyhole, MoreHorizontal, Save, History } from 'lucide-react';
+import { TelegramFile, useUpdateProgress, useFile, api, useCreatePlaylist, useAddPlaylistItems } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -27,6 +27,9 @@ interface MediaPlayerContentProps {
 function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaPlayerContentProps) {
     const { playQueue, queueIndex, repeatMode, playNext, playPrevious, shuffleQueue, removeQueueItem, moveQueueItem, setRepeatMode, setPlaylistFile, addToast } = useAppStore();
     const videoRef = useRef<HTMLVideoElement>(null);
+    const nextAudioRef = useRef<HTMLAudioElement>(null);
+    const crossfadeCarry = useRef<{fileId:number;time:number}|null>(null);
+    const crossfadeStarted = useRef(false);
     const containerRef = useRef<HTMLDivElement>(null);
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
@@ -55,11 +58,21 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     const [sleepMode, setSleepMode] = useState<'off' | '15' | '30' | '45' | '60' | 'track' | 'end'>('off');
     const sleepTimeout = useRef<ReturnType<typeof setTimeout>>();
     const [audioOnly, setAudioOnly] = useState(false);
+    const [audioVariantUrl, setAudioVariantUrl] = useState<string|null>(file.audio_stream_url || null);
+    const [preparingAudio, setPreparingAudio] = useState(false);
+    const audioSwitchPosition = useRef<number|null>(null);
     const [videoOrientation, setVideoOrientation] = useState<'auto' | 'portrait' | 'landscape'>('auto');
     const [controlsLocked, setControlsLocked] = useState(false);
     const [skipFeedback, setSkipFeedback] = useState<'backward' | 'forward' | null>(null);
     const [thumbnailFailed, setThumbnailFailed] = useState(false);
     const [showQueue, setShowQueue] = useState(false);
+    const [showHistory, setShowHistory] = useState(false);
+    const [historyItems, setHistoryItems] = useState<TelegramFile[]>([]);
+    const [queueName, setQueueName] = useState('');
+    const [showQueueSave, setShowQueueSave] = useState(false);
+    const [crossfadeSeconds, setCrossfadeSeconds] = useState(()=>Math.max(0,Math.min(6,Number(localStorage.getItem('komod-crossfade-seconds')||0))));
+    const createPlaylist = useCreatePlaylist();
+    const addPlaylistItems = useAddPlaylistItems();
     const [showVideoMoreMenu, setShowVideoMoreMenu] = useState(false);
     const queueSensors = useSensors(
         useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -74,6 +87,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     const formatPersianMetaTime = (seconds: number) => formatPlayerTime(seconds).replace(/\d/g, digit => '۰۱۲۳۴۵۶۷۸۹'[Number(digit)]);
 
     useEffect(() => setThumbnailFailed(false), [file.id]);
+    useEffect(()=>{setAudioOnly(false);setAudioVariantUrl(file.audio_stream_url||null);},[file.id,file.audio_stream_url]);
 
     // Fetch fresh file details to get latest progress
     const { data: extendedFile } = useFile(file.id);
@@ -81,6 +95,39 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
 
     const isVideo = file.file_type === 'video';
     const hasQueue = playQueue.length > 0;
+    const toggleAudioOnly = async () => {
+        if (preparingAudio) return;
+        audioSwitchPosition.current = videoRef.current?.currentTime || 0;
+        if (audioOnly) { setAudioOnly(false); return; }
+        if (audioVariantUrl) { setAudioOnly(true); return; }
+        setPreparingAudio(true);
+        addToast('نسخه کم‌حجم صدا در حال آماده‌شدن است…');
+        try {
+            const {data}=await api.post(`/stream/${file.id}/audio-variant`);
+            setAudioVariantUrl(data.stream_url); setAudioOnly(true);
+            addToast('نسخه کم‌حجم صدا آماده شد 🎧');
+        } catch(error:any) {
+            audioSwitchPosition.current=null;
+            addToast(error?.response?.data?.detail||'ساخت نسخه صوتی انجام نشد.','error');
+        } finally { setPreparingAudio(false); }
+    };
+    const saveNamedQueue = async () => {
+        const name = queueName.trim();
+        if (!name || !playQueue.length) return;
+        try {
+            const playlist = await createPlaylist.mutateAsync({name, description:'ذخیره‌شده از صف پخش'});
+            await addPlaylistItems.mutateAsync({id:playlist.id,fileIds:playQueue.map(item=>item.id),allowDuplicates:true});
+            setQueueName(''); setShowQueueSave(false);
+            addToast('صف پخش به‌عنوان پلی‌لیست ذخیره شد 💾');
+        } catch (error:any) { addToast(error?.response?.data?.detail || 'ذخیره صف انجام نشد.', 'error'); }
+    };
+    const loadHistory = async () => {
+        setShowHistory(value=>!value);
+        if (!historyItems.length) {
+            try { setHistoryItems((await api.get('/files/play-history',{params:{per_page:50}})).data.files || []); }
+            catch { addToast('تاریخچه پخش بارگذاری نشد.', 'error'); }
+        }
+    };
 
     // Auto-ensure public link exists for VLC/Download/Copy
     useEffect(() => {
@@ -251,6 +298,19 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
             const mediaDuration = Number.isFinite(videoRef.current.duration) ? videoRef.current.duration : 0;
             const nextTime = Math.max(0, videoRef.current.currentTime || 0);
             setCurrentTime(mediaDuration > 0 ? Math.min(nextTime, mediaDuration) : nextTime);
+            const nextFile = playQueue[queueIndex + 1];
+            const remaining = mediaDuration - nextTime;
+            if (!isVideo && nextFile?.file_type === 'audio' && crossfadeSeconds > 0 && remaining > 0 && remaining <= crossfadeSeconds && !crossfadeStarted.current && nextAudioRef.current) {
+                crossfadeStarted.current = true;
+                const outgoing = videoRef.current;
+                const incoming = nextAudioRef.current;
+                incoming.currentTime = 0; incoming.volume = 0;
+                void incoming.play().then(()=>{
+                    const started=performance.now();
+                    const fade=()=>{const ratio=Math.min(1,(performance.now()-started)/(crossfadeSeconds*1000));outgoing.volume=volume*(1-ratio);incoming.volume=volume*ratio;if(ratio<1&&crossfadeStarted.current)requestAnimationFrame(fade)};
+                    requestAnimationFrame(fade);
+                }).catch(()=>{crossfadeStarted.current=false});
+            }
         }
     };
 
@@ -260,6 +320,18 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
             setDuration(nextDuration);
             setCurrentTime(current => nextDuration > 0 ? Math.min(current, nextDuration) : current);
             videoRef.current.playbackRate = playbackSpeed;
+            const carry = crossfadeCarry.current;
+            if (carry?.fileId === file.id) {
+                videoRef.current.currentTime = Math.min(carry.time, Math.max(0, nextDuration - .1));
+                videoRef.current.volume = volume;
+                nextAudioRef.current?.pause();
+                crossfadeCarry.current = null;
+            }
+            if (audioSwitchPosition.current !== null) {
+                videoRef.current.currentTime = Math.min(audioSwitchPosition.current, Math.max(0, nextDuration - .1));
+                setCurrentTime(videoRef.current.currentTime);
+                audioSwitchPosition.current = null;
+            }
             setIsLoading(false);
         }
     };
@@ -293,6 +365,11 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
             videoRef.current.play();
             return;
         }
+        const nextFile = playQueue[queueIndex + 1];
+        if (crossfadeStarted.current && nextFile && nextAudioRef.current) {
+            crossfadeCarry.current = {fileId:nextFile.id,time:nextAudioRef.current.currentTime};
+        }
+        crossfadeStarted.current = false;
         if (!playNext()) setIsPlaying(false);
     };
 
@@ -353,6 +430,8 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
             window.removeEventListener('pagehide', keepPlaybackAlive);
         };
     }, [file.id]);
+
+    useEffect(()=>{localStorage.setItem('komod-crossfade-seconds',String(crossfadeSeconds));},[crossfadeSeconds]);
 
     const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (videoRef.current) {
@@ -540,6 +619,10 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     const relativeStreamUrl = isOfflineSource ? file.stream_url : `${file.stream_url}${file.stream_url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token || '')}&retry=${streamRetry}`;
     const authorizedStreamUrl = isOfflineSource ? relativeStreamUrl : getAbsoluteUrl(relativeStreamUrl);
     const externalUrl = publicUrl || authorizedStreamUrl;
+    const nextQueueFile = playQueue[queueIndex + 1] || (repeatMode === 'all' ? playQueue[0] : undefined);
+    const nextQueueStream = nextQueueFile?.file_type === 'audio'
+        ? (nextQueueFile.stream_url.startsWith('blob:') ? nextQueueFile.stream_url : getAbsoluteUrl(`${nextQueueFile.stream_url}${nextQueueFile.stream_url.includes('?')?'&':'?'}token=${encodeURIComponent(token||'')}`))
+        : null;
 
     // Authorized Thumbnail URL
     const relativeThumbnailUrl = file.thumbnail_url ? `${file.thumbnail_url}${file.thumbnail_url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token || '')}` : null;
@@ -633,6 +716,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
             onDoubleClick={!isMinimized && !controlsLocked ? toggleFullscreen : undefined}
         >
             {/* Media Element - Always present */}
+            {nextQueueStream&&<audio ref={nextAudioRef} src={nextQueueStream} preload="auto" className="hidden"/>}
             <div className={`w-full h-full ${isMinimized ? 'hidden' : 'flex items-center justify-center'}`}>
                 {error ? (
                     <div className="text-center p-8 max-w-md glass-panel z-10 animate-scale-in">
@@ -982,12 +1066,14 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
             {!isMinimized && showQueue && (
                 <div className="absolute inset-0 z-[100] flex items-end justify-center bg-black/55 backdrop-blur-sm sm:items-center sm:p-5" onPointerUp={event=>event.stopPropagation()} onClick={() => setShowQueue(false)}>
                     <section dir="rtl" className="flex max-h-[78dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-[2rem] border border-white/10 bg-dark-900/98 shadow-2xl sm:rounded-3xl" onClick={event => event.stopPropagation()}>
-                        <header className="flex items-center gap-3 border-b border-white/[.07] px-4 py-3"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary-500/12 text-primary-200"><ListMusic className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h2 className="font-bold">صف پخش</h2><p className="mt-0.5 text-[11px] text-dark-400">{Math.max(0, playQueue.length-queueIndex-1).toLocaleString('fa-IR')} مورد در ادامه</p></div><button className="btn-icon" onClick={() => setShowQueue(false)} aria-label="بستن صف"><X className="h-5 w-5"/></button></header>
-                        <DndContext sensors={queueSensors} onDragEnd={({active,over}:DragEndEvent)=>{if(!over||active.id===over.id)return;const from=queueRows.findIndex(row=>row.id===active.id);const to=queueRows.findIndex(row=>row.id===over.id);if(from<0||to<0)return;moveQueueItem(from,to)}}>
+                        <header className="flex items-center gap-3 border-b border-white/[.07] px-4 py-3"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary-500/12 text-primary-200"><ListMusic className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h2 className="font-bold">{showHistory?'تاریخچه پخش':'صف پخش'}</h2><p className="mt-0.5 text-[11px] text-dark-400">{showHistory?`${historyItems.length.toLocaleString('fa-IR')} مورد اخیر`:`${Math.max(0, playQueue.length-queueIndex-1).toLocaleString('fa-IR')} مورد در ادامه`}</p></div><button className={`btn-icon ${showHistory?'text-primary-300':''}`} onClick={()=>void loadHistory()} title="تاریخچه"><History className="h-4 w-4"/></button><button className="btn-icon" onClick={()=>setShowQueueSave(value=>!value)} title="ذخیره صف"><Save className="h-4 w-4"/></button><button className="btn-icon" onClick={() => setShowQueue(false)} aria-label="بستن صف"><X className="h-5 w-5"/></button></header>
+                        {!showHistory&&<div className="flex items-center gap-2 border-b border-white/[.07] px-3 py-2"><span className="ml-auto text-[11px] text-dark-400">گذار نرم</span>{[0,2,4,6].map(seconds=><button key={seconds} onClick={()=>setCrossfadeSeconds(seconds)} className={`rounded-lg px-2.5 py-1 text-[10px] ${crossfadeSeconds===seconds?'bg-primary-500 text-white':'bg-white/[.05] text-dark-300'}`}>{seconds?`${seconds.toLocaleString('fa-IR')} ثانیه`:'بدون فاصله'}</button>)}</div>}
+                        {showQueueSave&&<div className="flex gap-2 border-b border-white/[.07] p-3"><input autoFocus value={queueName} onChange={event=>setQueueName(event.target.value)} onKeyDown={event=>{if(event.key==='Enter')void saveNamedQueue()}} className="input min-w-0 flex-1 text-sm" placeholder="نام این صف"/><button disabled={!queueName.trim()||createPlaylist.isPending||addPlaylistItems.isPending} onClick={()=>void saveNamedQueue()} className="btn-primary shrink-0 px-4 text-xs disabled:opacity-40">ذخیره</button></div>}
+                        {showHistory?<div className="min-h-0 overflow-y-auto p-3">{historyItems.map((item,index)=><button key={item.id} onClick={()=>{useAppStore.getState().startQueue(historyItems,index);setShowHistory(false)}} className="mb-1.5 flex w-full items-center gap-3 rounded-2xl bg-white/[.025] p-3 text-right hover:bg-white/[.06]"><History className="h-4 w-4 shrink-0 text-dark-500"/><span dir="auto" className="min-w-0 flex-1 truncate text-sm">{item.file_name.replace(/\.[^.]+$/,'')}</span><span className="text-[10px] text-dark-500">{item.last_pos?`${Math.floor(item.last_pos/60).toLocaleString('fa-IR')} دقیقه`:''}</span></button>)}</div>:<DndContext sensors={queueSensors} onDragEnd={({active,over}:DragEndEvent)=>{if(!over||active.id===over.id)return;const from=queueRows.findIndex(row=>row.id===active.id);const to=queueRows.findIndex(row=>row.id===over.id);if(from<0||to<0)return;moveQueueItem(from,to)}}>
                             <SortableContext items={queueRows.map(row=>row.id)} strategy={verticalListSortingStrategy}>
                                 <div className="min-h-0 overflow-y-auto p-3">{queueRows.map(({item,index,id})=><SortableQueueRow key={id} sortableId={id} item={item} index={index} currentIndex={queueIndex} onPlay={()=>{useAppStore.getState().playQueueItem(index);setShowQueue(false)}} onRemove={()=>removeQueueItem(index)}/>)}</div>
                             </SortableContext>
-                        </DndContext>
+                        </DndContext>}
                     </section>
                 </div>
             )}
