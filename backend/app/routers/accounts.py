@@ -1,7 +1,8 @@
 """Account switching, shared spaces and administrator controls."""
 import json
 import hashlib
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from passlib.context import CryptContext
@@ -12,8 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import create_vault_token, get_current_user, require_vault_access
 from ..config import get_settings
 from ..database import get_db
-from ..models import AuthSession, File, Folder, TTSUsage, User, WorkspaceGrant
-from ..schemas import AccountPreferences, AdminStatsResponse, AdminUserCreate, AdminUserResponse, AdminUserUpdate, StorageChannelResponse, StorageChannelUpdate, TagDefinitionResponse, TagSettingsResponse, TagSettingsUpdate, VaultPasswordRequest, VaultStatus, VaultTokenResponse, WorkspaceGrantCreate, WorkspaceResponse
+from ..models import AuthSession, File, Folder, ProcessingJob, TTSUsage, User, WorkspaceGrant
+from ..schemas import AccountPreferences, AdminHealthResponse, AdminStatsResponse, AdminUserCreate, AdminUserResponse, AdminUserUpdate, ServiceHealthItem, StorageChannelResponse, StorageChannelUpdate, StuckJobResponse, TagDefinitionResponse, TagSettingsResponse, TagSettingsUpdate, VaultPasswordRequest, VaultStatus, VaultTokenResponse, WorkspaceGrantCreate, WorkspaceResponse
 from .. import telegram
 
 router = APIRouter(tags=["Accounts"])
@@ -322,6 +323,91 @@ async def admin_stats(_: User = Depends(require_admin), db: AsyncSession = Depen
         stt_jobs_today=int(stt_jobs_today or 0), stt_total_jobs=int(stt_total_jobs or 0),
         stt_total_seconds=int(stt_total_seconds or 0),
     )
+
+
+@router.get("/admin/health", response_model=AdminHealthResponse)
+async def admin_health(_: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    """Return a small, non-sensitive operational snapshot for administrators."""
+    from ..downloader import link_importer
+    from ..stt import stt_queue
+    from ..tts import tts_queue
+
+    services: list[ServiceHealthItem] = []
+    started = time.perf_counter()
+    try:
+        await db.execute(select(1))
+        latency_ms = round((time.perf_counter() - started) * 1000)
+        services.append(ServiceHealthItem(
+            key="database", label="دیتابیس", status="healthy",
+            message=f"پاسخ‌گو در {latency_ms} میلی‌ثانیه", latency_ms=latency_ms,
+        ))
+    except Exception:
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        services.append(ServiceHealthItem(
+            key="database", label="دیتابیس", status="error",
+            message="اتصال دیتابیس برقرار نیست",
+        ))
+
+    connected_bots = sum(1 for client in telegram.clients if getattr(client, "is_connected", False))
+    bot_status = "healthy" if connected_bots else "error"
+    services.append(ServiceHealthItem(
+        key="telegram", label="ربات تلگرام", status=bot_status,
+        message=f"{connected_bots} اتصال فعال" if connected_bots else "ربات به تلگرام متصل نیست",
+        active=connected_bots,
+    ))
+
+    link_worker_alive = bool(link_importer.task and not link_importer.task.done())
+    if not link_importer.available:
+        link_status, link_message = "disabled", "سشن دریافت لینک تنظیم نشده"
+    elif link_worker_alive and link_importer.client is not None:
+        link_status, link_message = "healthy", "دریافت لینک آماده است"
+    else:
+        link_status, link_message = "error", "پردازشگر لینک متوقف شده"
+    services.append(ServiceHealthItem(
+        key="links", label="افزودن با لینک", status=link_status, message=link_message,
+        queued=link_importer.queue.qsize(), active=1 if link_importer.active_job_id else 0,
+    ))
+
+    def speech_service(key: str, label: str, queue_service) -> ServiceHealthItem:
+        workers = sum(1 for task in queue_service.tasks if not task.done())
+        queued = queue_service.queue.qsize()
+        if queue_service.available:
+            status = "healthy" if workers else "warning"
+            message = f"{workers} پردازشگر آماده" if workers else "کلید فعال است؛ پردازشگر هنگام درخواست اجرا می‌شود"
+        elif queued or workers:
+            status, message = "warning", "فقط با کلیدهای شخصی کاربران فعال است"
+        else:
+            status, message = "disabled", "کلید سراسری تنظیم نشده"
+        active = len(getattr(queue_service, "active_job_ids", set()))
+        if key == "stt":
+            active = sum(1 for item in queue_service.statuses.values() if item.get("state") in {"downloading", "transcribing", "saving"})
+        return ServiceHealthItem(key=key, label=label, status=status, message=message, queued=queued, active=active)
+
+    services.append(speech_service("tts", "متن به صدا", tts_queue))
+    services.append(speech_service("stt", "صدا به متن", stt_queue))
+
+    active_states = ("queued", "paused", "downloading", "synthesizing", "merging", "uploading", "transcribing", "saving", "processing")
+    cutoff = datetime.utcnow() - timedelta(minutes=15)
+    try:
+        stuck_rows = (await db.execute(
+            select(ProcessingJob)
+            .where(ProcessingJob.state.in_(active_states), ProcessingJob.updated_at < cutoff)
+            .order_by(ProcessingJob.updated_at.asc())
+            .limit(20)
+        )).scalars().all()
+    except Exception:
+        stuck_rows = []
+    stuck_jobs = [StuckJobResponse(
+        id=job.id, kind=job.kind, title=job.title, state=job.state,
+        progress=max(0, min(job.progress or 0, 100)), updated_at=job.updated_at,
+    ) for job in stuck_rows]
+
+    statuses = {item.status for item in services}
+    overall = "error" if "error" in statuses else "warning" if stuck_jobs or "warning" in statuses else "healthy"
+    return AdminHealthResponse(checked_at=datetime.utcnow(), overall=overall, services=services, stuck_jobs=stuck_jobs)
 
 
 @router.get("/admin/users", response_model=list[AdminUserResponse])

@@ -383,6 +383,32 @@ class AdminStatsResponse(BaseModel):
     stt_total_seconds: int = 0
 
 
+class ServiceHealthItem(BaseModel):
+    key: str
+    label: str
+    status: Literal["healthy", "warning", "error", "disabled"]
+    message: str
+    queued: int = 0
+    active: int = 0
+    latency_ms: Optional[int] = None
+
+
+class StuckJobResponse(BaseModel):
+    id: str
+    kind: str
+    title: str
+    state: str
+    progress: int = 0
+    updated_at: datetime
+
+
+class AdminHealthResponse(BaseModel):
+    checked_at: datetime
+    overall: Literal["healthy", "warning", "error"]
+    services: list[ServiceHealthItem] = Field(default_factory=list)
+    stuck_jobs: list[StuckJobResponse] = Field(default_factory=list)
+
+
 class StorageChannelUpdate(BaseModel):
     channel_id: int
 

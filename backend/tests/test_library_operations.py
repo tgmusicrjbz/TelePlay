@@ -6,7 +6,7 @@ import asyncio
 import json
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -26,9 +26,9 @@ from starlette.requests import Request
 from sqlalchemy import select
 
 from app.database import Base, async_session, engine
-from app.models import AuthSession, BotUserState, File, Folder, Playlist, PlaylistItem, TTSUsage, User, WatchProgress
+from app.models import AuthSession, BotUserState, File, Folder, Playlist, PlaylistItem, ProcessingJob, TTSUsage, User, WatchProgress
 from app.routers.auth import _session_for_device, password_login, update_credentials
-from app.routers.accounts import delete_tag_definition, get_tag_settings, update_tag_settings
+from app.routers.accounts import admin_health, delete_tag_definition, get_tag_settings, update_tag_settings
 from app.stt import consume_stt_quota
 from app.routers.files import (
     batch_update_files,
@@ -84,6 +84,25 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             "headers": [(b"user-agent", b"Komod Test"), (b"x-komod-device-id", b"test-device")],
             "client": ("127.0.0.1", 1234),
         })
+
+    async def test_admin_health_reports_connected_bot_and_stuck_jobs(self):
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            db.add(ProcessingJob(
+                id="stuck-health-job", user_id=user.id, kind="stt", state="transcribing",
+                title="نمونهٔ گیرکرده", progress=42, message="internal detail",
+                payload_json='{"secret":"must-not-leak"}',
+                updated_at=datetime.utcnow() - timedelta(minutes=20),
+            ))
+            await db.commit()
+            with patch.object(telegram, "clients", [SimpleNamespace(is_connected=True)]):
+                result = await admin_health(user, db)
+        services = {item.key: item for item in result.services}
+        self.assertEqual(result.overall, "warning")
+        self.assertEqual(services["database"].status, "healthy")
+        self.assertEqual(services["telegram"].active, 1)
+        self.assertEqual([job.id for job in result.stuck_jobs], ["stuck-health-job"])
+        self.assertFalse(hasattr(result.stuck_jobs[0], "payload_json"))
 
     async def test_password_credentials_can_be_enabled_and_used(self):
         async with async_session() as db:

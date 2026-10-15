@@ -38,6 +38,9 @@ export interface AuthSession { id: string; device_name: string; user_agent?: str
 export interface Workspace { user_id: number; telegram_id: number; name: string; username?: string | null; permission: 'owner' | 'read' | 'write'; folder_ids: number[]; file_ids: number[]; }
 export interface AdminUser extends User { total_size: number; file_count: number; session_count: number; tts_daily_limit:number; tts_max_chars:number; tts_used_today:number; tts_total_jobs:number; tts_total_chars:number; stt_daily_limit:number; stt_max_seconds:number; stt_used_today:number; stt_total_jobs:number; stt_total_seconds:number; }
 export interface AdminStats { active_users: number; total_users: number; total_files: number; total_size: number; tts_jobs_today:number; tts_total_jobs:number; tts_total_chars:number; stt_jobs_today:number; stt_total_jobs:number; stt_total_seconds:number; }
+export interface ServiceHealthItem { key:string; label:string; status:'healthy'|'warning'|'error'|'disabled'; message:string; queued:number; active:number; latency_ms?:number|null; }
+export interface StuckJob { id:string; kind:string; title:string; state:string; progress:number; updated_at:string; }
+export interface AdminHealth { checked_at:string; overall:'healthy'|'warning'|'error'; services:ServiceHealthItem[]; stuck_jobs:StuckJob[]; }
 export interface AccountPreferences { delete_storage_files: boolean; }
 export interface TagDefinition { name: string; color: string; file_count?: number; }
 export interface TagSettings { tags: TagDefinition[]; show_file_tags: boolean; display_limit: number; }
@@ -937,6 +940,7 @@ export const useRevokeWorkspace = () => {
 };
 export const useAdminUsers = (enabled: boolean) => useQuery({ queryKey: ['adminUsers'], queryFn: async () => (await api.get<AdminUser[]>('/admin/users')).data, enabled, retry: 2, staleTime: 30_000 });
 export const useAdminStats = (enabled: boolean) => useQuery({ queryKey: ['adminStats'], queryFn: async () => (await api.get<AdminStats>('/admin/stats')).data, enabled, retry: 2, staleTime: 30_000 });
+export const useAdminHealth = (enabled: boolean) => useQuery({ queryKey: ['adminHealth'], queryFn: async () => (await api.get<AdminHealth>('/admin/health')).data, enabled, retry: 1, staleTime: 10_000, refetchInterval: enabled ? 30_000 : false });
 export const useAccountPreferences = () => useQuery({ queryKey: ['accountPreferences'], queryFn: async () => (await api.get<AccountPreferences>('/accounts/preferences')).data });
 export const useVaultStatus = () => useQuery({ queryKey: ['vaultStatus'], queryFn: async () => (await api.get<VaultStatus>('/accounts/vault')).data });
 export const useSetVaultPassword = () => {
