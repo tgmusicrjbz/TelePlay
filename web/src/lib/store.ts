@@ -4,6 +4,48 @@
 import { create } from 'zustand';
 import { TelegramFile, Folder } from './api';
 
+type SavedPlayerState = {
+    version: 1;
+    queue: TelegramFile[];
+    queueIndex: number;
+    current: TelegramFile | null;
+    repeatMode: 'off' | 'all' | 'one';
+};
+
+function playerStorageKey() {
+    let account = 'guest';
+    try {
+        const user = JSON.parse(localStorage.getItem('user') || '{}');
+        account = String(user.telegram_id || user.id || account);
+    } catch { /* use isolated guest state */ }
+    const workspace = localStorage.getItem('komod-active-workspace') || 'own';
+    return `komod-player-state:${account}:${workspace}`;
+}
+
+function restorableMedia(file: unknown): file is TelegramFile {
+    if (!file || typeof file !== 'object') return false;
+    const item = file as TelegramFile;
+    return Number.isFinite(item.id) && ['audio', 'video'].includes(item.file_type) && !String(item.stream_url || '').startsWith('blob:');
+}
+
+function loadPlayerState(): SavedPlayerState {
+    const empty: SavedPlayerState = { version: 1, queue: [], queueIndex: -1, current: null, repeatMode: 'off' };
+    try {
+        const raw = JSON.parse(localStorage.getItem(playerStorageKey()) || 'null') as Partial<SavedPlayerState> | null;
+        if (!raw || raw.version !== 1) return empty;
+        const queue = Array.isArray(raw.queue) ? raw.queue.filter(restorableMedia).slice(0, 250) : [];
+        const requestedIndex = Number(raw.queueIndex);
+        const queueIndex = queue.length ? Math.min(Math.max(Number.isInteger(requestedIndex) ? requestedIndex : 0, 0), queue.length - 1) : -1;
+        const current = restorableMedia(raw.current) ? raw.current : queue[queueIndex] || null;
+        const repeatMode = ['off', 'all', 'one'].includes(String(raw.repeatMode)) ? raw.repeatMode as SavedPlayerState['repeatMode'] : 'off';
+        return { version: 1, queue, queueIndex, current, repeatMode };
+    } catch {
+        return empty;
+    }
+}
+
+const restoredPlayer = loadPlayerState();
+
 interface AppState {
     // Current navigation
     currentFolderId: number | null;
@@ -169,7 +211,7 @@ export const useAppStore = create<AppState>((set) => ({
     setViewMode: (mode) => set({ viewMode: mode }),
 
     // Modals
-    previewFile: null,
+    previewFile: restoredPlayer.current,
     setPreviewFile: (file) => set({ previewFile: file }),
     contentPreviewFile: null,
     setContentPreviewFile: (file) => set({ contentPreviewFile: file }),
@@ -206,11 +248,11 @@ export const useAppStore = create<AppState>((set) => ({
     setClipboard: (clipboard) => set({ clipboard }),
 
     // Player state
-    isPlayerMinimized: false,
+    isPlayerMinimized: Boolean(restoredPlayer.current),
     setPlayerMinimized: (minimized) => set({ isPlayerMinimized: minimized }),
-    playQueue: [],
-    queueIndex: -1,
-    repeatMode: 'off',
+    playQueue: restoredPlayer.queue,
+    queueIndex: restoredPlayer.queueIndex,
+    repeatMode: restoredPlayer.repeatMode,
     startQueue: (files, index = 0) => set({ playQueue: files, queueIndex: index, previewFile: files[index] || null, isPlayerMinimized: false }),
     playQueueItem: (index) => set((state) => ({ queueIndex: index, previewFile: state.playQueue[index] || state.previewFile })),
     playNext: () => {
@@ -304,3 +346,25 @@ export const useAppStore = create<AppState>((set) => ({
     selectionBox: null,
     setSelectionBox: (box) => set({ selectionBox: box }),
 }));
+
+let lastSavedPlayerState = '';
+useAppStore.subscribe((state) => {
+    try {
+        const queue = state.playQueue.filter(restorableMedia).slice(0, 250);
+        const current = restorableMedia(state.previewFile) ? state.previewFile : null;
+        const payload: SavedPlayerState = {
+            version: 1,
+            queue,
+            queueIndex: queue.length ? Math.min(Math.max(state.queueIndex, 0), queue.length - 1) : -1,
+            current,
+            repeatMode: state.repeatMode,
+        };
+        const serialized = JSON.stringify(payload);
+        if (serialized === lastSavedPlayerState) return;
+        lastSavedPlayerState = serialized;
+        if (!current && !queue.length) localStorage.removeItem(playerStorageKey());
+        else localStorage.setItem(playerStorageKey(), serialized);
+    } catch {
+        // Playback must continue even when browser storage is unavailable/full.
+    }
+});
