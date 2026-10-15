@@ -104,6 +104,8 @@ export interface FileListResponse {
     total: number;
     page: number;
     per_page: number;
+    search_mode?: 'exact' | 'fuzzy';
+    suggestions?: string[];
 }
 
 export interface ActivityFeed {

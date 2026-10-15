@@ -215,6 +215,28 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
                 load_note_again.assert_not_awaited()
             self.assertEqual(tag_only.total, 0)
 
+    async def test_search_tolerates_typo_and_returns_suggestions(self):
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            file = self.make_file(user.id, self.folder_id, 778)
+            file.file_name = "گزارش معماری پروژه.md"
+            file.search_text = "تصمیم‌های راهبردی جلسه تیم محصول"
+            db.add(file)
+            await db.commit()
+
+            title_typo = await list_files(None, None, "مهماری", 1, 20, db, user)
+            self.assertEqual(title_typo.search_mode, "fuzzy")
+            self.assertEqual(title_typo.files[0].id, file.id)
+            self.assertIn("گزارش معماری پروژه", title_typo.suggestions)
+
+            content_typo = await list_files(None, None, "راهبرذی", 1, 20, db, user)
+            self.assertEqual(content_typo.search_mode, "fuzzy")
+            self.assertEqual(content_typo.files[0].id, file.id)
+
+            unrelated = await list_files(None, None, "هواشناسی", 1, 20, db, user)
+            self.assertEqual(unrelated.total, 0)
+            self.assertEqual(unrelated.suggestions, [])
+
     async def test_batch_files_can_be_hidden(self):
         async with async_session() as db:
             user = await db.get(User, self.user_id)

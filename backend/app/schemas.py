@@ -171,6 +171,8 @@ class FileListResponse(BaseModel):
     total: int
     page: int
     per_page: int
+    search_mode: Literal["exact", "fuzzy"] = "exact"
+    suggestions: List[str] = Field(default_factory=list)
 
 
 class ActivityResponse(BaseModel):

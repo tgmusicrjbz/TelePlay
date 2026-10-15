@@ -3,6 +3,7 @@ File management API endpoints.
 """
 from typing import Optional
 import asyncio
+from difflib import SequenceMatcher
 import json
 import re
 from fastapi import APIRouter, Depends, File as FormFile, Form, HTTPException, Query, Request, UploadFile
@@ -87,6 +88,72 @@ def decode_searchable_text(raw: bytes) -> str | None:
     """Decode supported small text files for private full-content search."""
     if not raw or len(raw) > 1024 * 1024:
         return None
+
+
+def normalize_fuzzy_text(value: str) -> str:
+    """Normalize common Persian/Arabic variants before typo comparison."""
+    value = (value or "").casefold().replace("ي", "ی").replace("ك", "ک")
+    value = value.replace("ة", "ه").replace("ۀ", "ه").replace("ؤ", "و")
+    value = re.sub(r"[\u064b-\u065f\u0670\u200c\u200d]", "", value)
+    value = re.sub(r"[^0-9a-zآ-ی]+", " ", value)
+    return " ".join(value.split())
+
+
+def fuzzy_text_score(needle: str, value: str) -> float:
+    """Return the best bounded similarity against words and short phrases."""
+    sampled = value if len(value) <= 20_000 else f"{value[:10_000]} {value[-10_000:]}"
+    normalized = normalize_fuzzy_text(sampled)
+    if not needle or not normalized:
+        return 0.0
+    if needle in normalized:
+        return 1.0
+    needle_words = needle.split()
+    words = normalized.split()[:600]
+    if not words:
+        return 0.0
+    if len(needle_words) == 1:
+        target = needle_words[0]
+        target_chars = set(target)
+        compatible = [word for word in words if abs(len(word) - len(target)) <= max(2, len(target) // 3)]
+        likely = sorted(
+            compatible,
+            key=lambda word: len(target_chars & set(word)) / max(1, len(target_chars | set(word))),
+            reverse=True,
+        )[:24]
+        return max((SequenceMatcher(None, target, word).ratio() for word in likely), default=0.0)
+    best = 0.0
+    width = len(needle_words)
+    needle_chars = set(needle)
+    for size in {max(1, width - 1), width, width + 1}:
+        phrases = (" ".join(words[index:index + size]) for index in range(0, max(0, len(words) - size + 1)))
+        likely = sorted(
+            phrases,
+            key=lambda phrase: len(needle_chars & set(phrase)) / max(1, len(needle_chars | set(phrase))),
+            reverse=True,
+        )[:24]
+        for phrase in likely:
+            best = max(best, SequenceMatcher(None, needle, phrase).ratio())
+            if best >= 0.94:
+                return best
+    return best
+
+
+def fuzzy_file_score(file: File, search: str) -> float:
+    """Rank one file without exposing its indexed note content."""
+    needle = normalize_fuzzy_text(search)
+    if len(needle) < 3:
+        return 0.0
+    try:
+        tags = " ".join(str(item) for item in json.loads(file.tags_json or "[]"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        tags = ""
+    title = str(Path(file.file_name).stem)
+    return max(
+        fuzzy_text_score(needle, title),
+        fuzzy_text_score(needle, tags),
+        fuzzy_text_score(needle, file.description or ""),
+        fuzzy_text_score(needle, file.search_text or ""),
+    )
     encoding = "utf-16" if raw.startswith((b"\xff\xfe", b"\xfe\xff")) else "utf-8-sig"
     try:
         return raw.decode(encoding)[:1_000_000]
@@ -475,6 +542,7 @@ async def list_files(
             query = query.where(File.file_type.in_(file_types))
     if favorite_only:
         query = query.where(File.is_favorite.is_(True))
+    base_query = query
     if search:
         # Older notes predate the local content index. Populate them on the
         # first content search so existing libraries become searchable too.
@@ -513,6 +581,33 @@ async def list_files(
     # Get total count
     count_query = select(func.count()).select_from(query.subquery())
     total = (await db.execute(count_query)).scalar()
+
+    # Preserve exact search semantics first. A single plain phrase falls back
+    # to typo-tolerant ranking only when there are no exact matches.
+    simple_fuzzy_search = bool(search and not re.search(r"[#;؛,،]", search) and len(normalize_fuzzy_text(search)) >= 3)
+    if simple_fuzzy_search and not total:
+        candidates = (await db.execute(base_query.limit(2000))).scalars().unique().all()
+        threshold = 0.72 if len(normalize_fuzzy_text(search)) <= 5 else 0.64
+        ranked = sorted(
+            ((fuzzy_file_score(file, search), file) for file in candidates),
+            key=lambda item: (-item[0], item[1].file_name.casefold(), item[1].id),
+        )
+        ranked = [item for item in ranked if item[0] >= threshold]
+        if ranked:
+            fuzzy_files = [item[1] for item in ranked]
+            page_files = fuzzy_files[(page - 1) * per_page:page * per_page]
+            suggestions = []
+            for file in fuzzy_files:
+                suggestion = Path(file.file_name).stem.strip()
+                if suggestion and suggestion.casefold() not in {item.casefold() for item in suggestions}:
+                    suggestions.append(suggestion)
+                if len(suggestions) == 5:
+                    break
+            return FileListResponse(
+                files=[FileResponse(**add_urls_to_file(file)) for file in page_files],
+                total=len(fuzzy_files), page=page, per_page=per_page,
+                search_mode="fuzzy", suggestions=suggestions,
+            )
     
     # Apply pagination
     query = apply_file_sort(query, sort)
@@ -526,6 +621,8 @@ async def list_files(
         total=total,
         page=page,
         per_page=per_page,
+        search_mode="exact",
+        suggestions=[],
     )
 
 

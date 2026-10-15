@@ -245,8 +245,14 @@ export default function FileBrowser() {
         return () => { window.removeEventListener('komod-root-mode-changed', refreshMode); window.removeEventListener('komod-incoming-folder-changed', refreshIncoming); };
     }, []);
 
+    const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(searchQuery);
+    useEffect(() => {
+        const timer = window.setTimeout(() => setDebouncedSearchQuery(searchQuery.trim()), 300);
+        return () => window.clearTimeout(timer);
+    }, [searchQuery]);
+
     // Data Fetching
-    const { data: filesList, isLoading: filesLoading, isFetching: filesFetching, error: filesError, refetch: refetchFiles } = useFiles(hiddenOnly || searchQuery.trim() ? undefined : effectiveFolderId, fileTypeFilter.join(',') || undefined, searchQuery || undefined, page, sortValue, favoriteOnly, false, showHidden, hiddenOnly);
+    const { data: filesList, isLoading: filesLoading, isFetching: filesFetching, error: filesError, refetch: refetchFiles } = useFiles(hiddenOnly || debouncedSearchQuery ? undefined : effectiveFolderId, fileTypeFilter.join(',') || undefined, debouncedSearchQuery || undefined, page, sortValue, favoriteOnly, false, showHidden, hiddenOnly);
     const { data: activityFeed, isLoading: activityLoading, isError: activityError, refetch: refetchActivity } = useActivityFeed(activeSection === 'activity', 50);
     
 
@@ -1039,6 +1045,10 @@ export default function FileBrowser() {
                                 onChange={(e) => setSearchQuery(e.target.value)}
                                 className="w-full bg-dark-800/50 border border-white/[0.06] rounded-lg pr-9 pl-3 py-1.5 text-sm text-white focus:outline-none focus:border-primary-500/50 focus:bg-dark-800 transition-all"
                             />
+                            {activeSection === 'files' && searchQuery.trim() === debouncedSearchQuery && filesList?.search_mode === 'fuzzy' && Boolean(filesList.suggestions?.length) && <div className="absolute inset-x-0 top-[calc(100%+.45rem)] z-50 rounded-2xl border border-white/[.09] bg-dark-900/95 p-2 shadow-2xl backdrop-blur-xl">
+                                <p className="px-2 pb-1.5 text-[11px] text-dark-400">نتیجهٔ دقیق پیدا نشد؛ شاید منظورت این‌هاست:</p>
+                                <div className="flex flex-wrap gap-1.5">{filesList.suggestions!.map(suggestion=><button key={suggestion} type="button" onClick={()=>setSearchQuery(suggestion)} className="max-w-full truncate rounded-xl bg-primary-500/10 px-2.5 py-1.5 text-xs text-primary-200 transition hover:bg-primary-500/20">{suggestion}</button>)}</div>
+                            </div>}
                         </div>}
                         {activeSection === 'playlists' && <span className="truncate text-sm font-semibold text-white">🎧 پلی‌لیست‌ها</span>}
                         {activeSection === 'settings' && <span className="truncate text-sm font-semibold text-white">⚙️ تنظیمات</span>}
