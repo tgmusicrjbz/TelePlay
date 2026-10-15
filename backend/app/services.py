@@ -5,7 +5,7 @@ import json
 import re
 from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc, exists
+from sqlalchemy import select, desc, exists, and_, or_
 from sqlalchemy.orm import selectinload
 
 from .models import File, WatchProgress, Folder, Playlist
@@ -77,6 +77,7 @@ def add_urls_to_file(file: File) -> dict:
         "is_favorite": bool(file.is_favorite),
         "is_pinned": bool(file.is_pinned),
         "is_hidden": bool(file.is_hidden),
+        "is_shortcut": bool(file.is_shortcut),
         "stream_url": f"/api/stream/{file.id}?workspace={file.user_id}",
         "thumbnail_url": f"/api/stream/{file.id}/thumbnail?quality=best&workspace={file.user_id}" if file.thumbnail_file_id else None,
         "last_pos": file.watch_progress[0].position if file.watch_progress else 0,
@@ -87,6 +88,26 @@ def add_urls_to_file(file: File) -> dict:
         data["public_stream_url"] = f"/api/stream/s/{file.public_hash}"
         
     return data
+
+
+async def unreferenced_storage_messages(db: AsyncSession, files: List[File]) -> dict[int | None, list[int]]:
+    """Group remote messages that no surviving File row references."""
+    deleting_ids = {item.id for item in files if item.id is not None}
+    references = {(item.storage_channel_id, item.channel_message_id) for item in files}
+    if not references:
+        return {}
+    conditions = [and_(
+        File.storage_channel_id.is_(None) if channel_id is None else File.storage_channel_id == channel_id,
+        File.channel_message_id == message_id,
+    ) for channel_id, message_id in references]
+    query = select(File.storage_channel_id, File.channel_message_id).where(or_(*conditions))
+    if deleting_ids:
+        query = query.where(File.id.notin_(deleting_ids))
+    retained = set((await db.execute(query)).all())
+    grouped: dict[int | None, list[int]] = {}
+    for channel_id, message_id in references - retained:
+        grouped.setdefault(channel_id, []).append(message_id)
+    return grouped
 
 async def fetch_recent_files(db: AsyncSession, user_id: int, limit: int) -> List[File]:
     """Get recently added files across all folders."""

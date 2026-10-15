@@ -32,6 +32,7 @@ from app.routers.accounts import admin_health, delete_tag_definition, get_tag_se
 from app.stt import consume_stt_quota
 from app.routers.files import (
     batch_update_files,
+    delete_file,
     get_activity,
     get_storage_stats,
     get_text_preview,
@@ -479,6 +480,43 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
                     await db.execute(select(File).where(File.channel_message_id == 901))
                 ).scalar_one()
                 self.assertEqual(saved.description, "توضیح")
+                self.assertEqual(saved.content_hash, "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08")
+
+    async def test_duplicate_web_upload_creates_shortcut_without_sending_again(self):
+        async with async_session() as db:
+            original = self.make_file(self.user_id, None, 902)
+            original.content_hash = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+            db.add(original)
+            await db.commit()
+            user = await db.get(User, self.user_id)
+            upload = UploadFile(
+                file=io.BytesIO(b"test"), filename="duplicate.txt",
+                headers=Headers({"content-type": "text/plain"}),
+            )
+            fake_client = SimpleNamespace(
+                send_video=AsyncMock(), send_audio=AsyncMock(), send_document=AsyncMock(),
+            )
+            with patch("app.routers.files.telegram.tg_client", fake_client):
+                result = await upload_file(upload, None, None, db, user)
+            self.assertTrue(result.is_shortcut)
+            self.assertEqual(result.file_name, "duplicate.txt")
+            self.assertEqual(result.file_id, original.file_id)
+            fake_client.send_document.assert_not_awaited()
+
+    async def test_deleting_shortcut_keeps_shared_storage_message(self):
+        async with async_session() as db:
+            original = self.make_file(self.user_id, None, 903)
+            shortcut = self.make_file(self.user_id, None, 903)
+            shortcut.file_unique_id = original.file_unique_id
+            shortcut.is_shortcut = True
+            db.add_all([original, shortcut])
+            await db.commit()
+            user = await db.get(User, self.user_id)
+            with patch("app.routers.files.delete_from_storage_channel", new_callable=AsyncMock) as remove:
+                result = await delete_file(shortcut.id, db, user)
+            self.assertFalse(result["storage_deleted"])
+            remove.assert_not_awaited()
+            self.assertIsNotNone(await db.get(File, original.id))
 
     async def test_multiple_file_types_can_be_filtered_together(self):
         async with async_session() as db:

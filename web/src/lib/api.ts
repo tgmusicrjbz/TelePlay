@@ -96,6 +96,7 @@ export interface TelegramFile {
     is_favorite?: boolean;
     is_pinned?: boolean;
     is_hidden?: boolean;
+    is_shortcut?: boolean;
     tags?: string[];
 }
 

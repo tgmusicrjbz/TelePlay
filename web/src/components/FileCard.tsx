@@ -2,7 +2,7 @@
  * FileCard component - displays a single file in grid or list view
  */
 import { useEffect, useRef, useState } from 'react';
-import { Play, MoreVertical, Film, Music, FileText, Image, Check, Star, Pin } from 'lucide-react';
+import { Play, MoreVertical, Film, Music, FileText, Image, Check, Star, Pin, Link2 } from 'lucide-react';
 import { TelegramFile, formatFileSize, formatDuration, useUpdateFile } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import TagChips from './TagChips';
@@ -122,6 +122,7 @@ export default function FileCard({
                     {file.description && <p dir="auto" className="text-xs text-dark-400 line-clamp-2 mt-0.5" title={file.description}>{file.description}</p>}
                     <TagChips tags={file.tags} compact/>
                     <div className="flex items-center gap-3 text-xs text-dark-400 mt-1">
+                        {file.is_shortcut && <span className="flex items-center gap-1 text-primary-300" title="میانبر فایل موجود"><Link2 className="h-3 w-3"/> میانبر</span>}
                         <span className="flex items-center gap-1">
                             {getSmallIcon()}
                             <span>{typeLabel}</span>
@@ -184,6 +185,7 @@ export default function FileCard({
         >
             {selectionMode && <div className="absolute left-0 top-0 z-20 flex h-11 w-11 items-center justify-center"><div className={`flex h-6 w-6 items-center justify-center rounded-md border ${selected ? 'border-primary-400 bg-primary-500 text-white' : 'border-white/30 bg-dark-900/90'}`}>{selected && <Check className="h-4 w-4" />}</div></div>}
             {file.is_pinned && <span className="absolute left-10 top-2 z-20 rounded-full bg-dark-950/75 p-1.5 text-primary-300" title="پین‌شده"><Pin className="h-3.5 w-3.5 fill-current"/></span>}
+            {file.is_shortcut && <span className="absolute bottom-14 right-3 z-20 flex items-center gap-1 rounded-full border border-white/10 bg-dark-950/80 px-2 py-1 text-[10px] text-primary-200" title="میانبر فایل موجود"><Link2 className="h-3 w-3"/> میانبر</span>}
             <button onClick={toggleFavorite} disabled={updateFile.isPending} className={`absolute right-2 top-2 z-20 flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-dark-950/75 backdrop-blur ${file.is_favorite ? 'text-amber-300' : 'text-white/65 opacity-0 group-hover:opacity-100'}`} title={file.is_favorite ? 'برداشتن نشان' : 'نشان کردن'}><Star className={`h-4 w-4 ${file.is_favorite ? 'fill-current' : ''}`}/></button>
             <div className={`aspect-video rounded-lg ${dense ? 'mb-2' : 'mb-3'} overflow-hidden relative border ${selected ? 'border-primary-500/20' : 'border-white/[0.05]'} bg-dark-900/50`}>
                 {authorizedThumbnailUrl && !thumbnailFailed ? (

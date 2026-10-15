@@ -133,6 +133,13 @@ async def init_db():
             await conn.execute(text("ALTER TABLE files ADD COLUMN description TEXT"))
         if "search_text" not in columns:
             await conn.execute(text("ALTER TABLE files ADD COLUMN search_text TEXT"))
+        if "content_hash" not in columns:
+            await conn.execute(text("ALTER TABLE files ADD COLUMN content_hash VARCHAR(64)"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_files_content_hash ON files (content_hash)"))
+        if "is_shortcut" not in columns:
+            shortcut_type = "BOOLEAN" if url.drivername.startswith("postgresql") else "INTEGER"
+            shortcut_default = "FALSE" if url.drivername.startswith("postgresql") else "0"
+            await conn.execute(text(f"ALTER TABLE files ADD COLUMN is_shortcut {shortcut_type} NOT NULL DEFAULT {shortcut_default}"))
         if "tags_json" not in columns:
             await conn.execute(text("ALTER TABLE files ADD COLUMN tags_json TEXT NOT NULL DEFAULT '[]'"))
         if "storage_channel_id" not in columns:

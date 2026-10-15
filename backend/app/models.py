@@ -205,6 +205,8 @@ class File(Base):
     # Private normalized source used by library search. It is intentionally
     # absent from FileResponse so note contents never leak in list endpoints.
     search_text: Mapped[Optional[str]] = mapped_column(Text)
+    content_hash: Mapped[Optional[str]] = mapped_column(String(64), index=True)
+    is_shortcut: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     tags_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
     is_favorite: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_pinned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

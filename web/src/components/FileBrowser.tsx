@@ -357,14 +357,18 @@ export default function FileBrowser() {
         uploadAbortRef.current = controller;
         setUploadPanelMode('open');
         let uploaded = 0;
+        let shortcuts = 0;
         try {
             for (const file of selected) {
                 setUploadProgress({name:file.name,index:uploaded+1,total:selected.length,percent:0,phase:'uploading'});
-                await uploadFileMutation.mutateAsync({ file, folderId: incomingFolderId, signal: controller.signal, onProgress: percent => setUploadProgress({name:file.name,index:uploaded+1,total:selected.length,percent,phase:percent >= 100 ? 'processing' : 'uploading'}) });
+                const saved = await uploadFileMutation.mutateAsync({ file, folderId: incomingFolderId, signal: controller.signal, onProgress: percent => setUploadProgress({name:file.name,index:uploaded+1,total:selected.length,percent,phase:percent >= 100 ? 'processing' : 'uploading'}) });
+                if (saved.is_shortcut) shortcuts += 1;
                 uploaded += 1;
             }
             publishLocalTransfer({id:'device-upload',kind:'upload',title:selected[selected.length-1]?.name||'آپلود از دستگاه',state:'done',percent:100,detail:`${uploaded} فایل ذخیره شد`});
-            addToast(`${uploaded.toLocaleString('fa-IR')} فایل با موفقیت به کمد اضافه شد 📥`);
+            addToast(shortcuts
+                ? `${uploaded.toLocaleString('fa-IR')} مورد اضافه شد؛ ${shortcuts.toLocaleString('fa-IR')} فایل تکراری به‌صورت میانبر ذخیره شد 🔗`
+                : `${uploaded.toLocaleString('fa-IR')} فایل با موفقیت به کمد اضافه شد 📥`);
             handleRefresh();
         } catch (error:any) {
             publishLocalTransfer({id:'device-upload',kind:'upload',title:selected[Math.min(uploaded,selected.length-1)]?.name||'آپلود از دستگاه',state:controller.signal.aborted?'cancelled':'error',percent:selected.length?Math.round(uploaded/selected.length*100):0,detail:controller.signal.aborted?'آپلود لغو شد':'آپلود ناموفق بود'});

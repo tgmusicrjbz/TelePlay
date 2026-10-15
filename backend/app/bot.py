@@ -26,7 +26,7 @@ from .database import async_session
 from .models import User, File, Folder, LoginCode, Playlist, PlaylistItem, BotUserState
 from .config import get_settings
 from .auth import create_access_token
-from .services import escape_like, select_best_thumbnail
+from .services import escape_like, select_best_thumbnail, unreferenced_storage_messages
 from .downloader import ImportJob, link_importer
 from .tts import TTSJob, VOICE_OPTIONS, consume_tts_quota, load_tts_settings, tts_queue
 from .stt import STTJob, consume_stt_quota, stt_queue
@@ -1360,6 +1360,46 @@ async def _handle_file_impl(client, message: Message, status_msg: Message):
         return
     
     try:
+        # Telegram's file_unique_id is stable for the same media. Reuse the
+        # stored message and create a lightweight library shortcut instead of
+        # forwarding the bytes again.
+        async with async_session() as db:
+            duplicate = (await db.execute(select(File).where(
+                File.user_id == user.id,
+                File.file_unique_id == media.file_unique_id,
+            ).order_by(File.id.asc()))).scalars().first()
+            if duplicate is not None:
+                if active_drawer_id is None:
+                    active_drawer_id = (await ensure_default_folder(db, user.id)).id
+                incoming_name = getattr(media, "file_name", None) or (
+                    f"photo_{message.id}.jpg" if getattr(message, "photo", None)
+                    else f"voice_{message.id}.ogg" if getattr(message, "voice", None)
+                    else f"video_note_{message.id}.mp4" if getattr(message, "video_note", None)
+                    else f"{file_type}_{message.id}"
+                )
+                shortcut = File(
+                    user_id=user.id, folder_id=active_drawer_id,
+                    file_id=duplicate.file_id, file_unique_id=duplicate.file_unique_id,
+                    channel_message_id=duplicate.channel_message_id,
+                    storage_channel_id=duplicate.storage_channel_id,
+                    file_name=sanitize_filename(incoming_name),
+                    description=message.caption.strip()[:1024] if message.caption else None,
+                    search_text=duplicate.search_text, content_hash=duplicate.content_hash,
+                    tags_json=json.dumps(extract_tags_from_caption(message.caption or ""), ensure_ascii=False),
+                    is_shortcut=True, file_size=duplicate.file_size,
+                    mime_type=duplicate.mime_type, file_type=duplicate.file_type,
+                    duration=duplicate.duration, width=duplicate.width, height=duplicate.height,
+                    thumbnail_file_id=duplicate.thumbnail_file_id,
+                )
+                db.add(shortcut)
+                await db.commit()
+                await db.refresh(shortcut)
+                await status_msg.edit(
+                    f"🔗 این فایل از قبل توی کمد بود؛ میانبر «{display_filename(shortcut.file_name)}» ساخته شد.",
+                    reply_markup=file_detail_keyboard(shortcut),
+                )
+                return
+
         # Forward to storage channel
         target_channel_id = user.storage_channel_id or settings.telegram_storage_channel_id
         forwarded = await asyncio.wait_for(forward_to_storage_channel(message, target_channel_id), timeout=120)
@@ -2116,9 +2156,7 @@ async def handle_callback(client, callback: CallbackQuery):
             user = (await db.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one_or_none()
             files = (await db.execute(select(File).where(File.user_id == user.id, File.id.in_(selected_ids)))).scalars().all() if user else []
             if user and user.delete_storage_files:
-                messages_by_channel: dict[int | None, list[int]] = {}
-                for item in files:
-                    messages_by_channel.setdefault(item.storage_channel_id, []).append(item.channel_message_id)
+                messages_by_channel = await unreferenced_storage_messages(db, files)
                 for channel_id, message_ids in messages_by_channel.items():
                     for start in range(0, len(message_ids), 100):
                         batch = message_ids[start:start + 100]
@@ -2941,11 +2979,12 @@ async def handle_callback(client, callback: CallbackQuery):
                 return
             
             file_name = file.file_name
-            channel_msg_id = file.channel_message_id
-            
-            if not await delete_from_storage_channel(channel_msg_id, file.storage_channel_id):
-                await callback.answer("فایل از فضای ذخیره‌سازی پاک نشد؛ دوباره تلاش کن.", show_alert=True)
-                return
+            messages = await unreferenced_storage_messages(db, [file])
+            if messages:
+                channel_id, message_ids = next(iter(messages.items()))
+                if not await delete_from_storage_channel(message_ids, channel_id):
+                    await callback.answer("فایل از فضای ذخیره‌سازی پاک نشد؛ دوباره تلاش کن.", show_alert=True)
+                    return
             await db.delete(file)
             await db.commit()
         

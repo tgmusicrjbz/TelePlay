@@ -3,6 +3,7 @@ File management API endpoints.
 """
 from typing import Optional
 import asyncio
+import hashlib
 from difflib import SequenceMatcher
 import json
 import re
@@ -37,6 +38,7 @@ from ..services import (
     fetch_recent_files, 
     fetch_continue_watching_files,
     select_best_thumbnail,
+    unreferenced_storage_messages,
 )
 
 router = APIRouter(prefix="/files", tags=["Files"])
@@ -291,15 +293,40 @@ async def upload_file(
     try:
         temporary_dir = tempfile.mkdtemp(prefix="komod-upload-")
         temporary_path = str(Path(temporary_dir) / filename)
+        digest = hashlib.sha256()
         with open(temporary_path, "wb") as temporary:
             while chunk := await upload.read(1024 * 1024):
                 temporary.write(chunk)
+                digest.update(chunk)
         file_size = os.path.getsize(temporary_path)
         if file_size == 0:
             raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
         file_type = detect_upload_type(filename, upload.content_type)
+        content_hash = digest.hexdigest()
         search_text = decode_searchable_text(Path(temporary_path).read_bytes()) if file_type == "text" and file_size <= 1024 * 1024 else None
+        duplicate = (await db.execute(select(File).where(
+            File.user_id == current_user.id, File.content_hash == content_hash,
+        ).order_by(File.id.asc()))).scalars().first()
+        if duplicate is not None:
+            shortcut = File(
+                user_id=current_user.id, folder_id=folder_id,
+                file_id=duplicate.file_id, file_unique_id=duplicate.file_unique_id,
+                channel_message_id=duplicate.channel_message_id,
+                storage_channel_id=duplicate.storage_channel_id,
+                file_name=filename, description=(description or "").strip()[:1024] or None,
+                search_text=duplicate.search_text, content_hash=content_hash, is_shortcut=True,
+                file_size=duplicate.file_size, mime_type=duplicate.mime_type,
+                file_type=duplicate.file_type, duration=duplicate.duration,
+                width=duplicate.width, height=duplicate.height,
+                thumbnail_file_id=duplicate.thumbnail_file_id,
+            )
+            db.add(shortcut)
+            await db.commit()
+            shortcut = (await db.execute(select(File).where(File.id == shortcut.id).options(
+                selectinload(File.watch_progress)
+            ))).scalar_one()
+            return FileResponse(**add_urls_to_file(shortcut))
         embedded_cover_path: str | None = None
         if file_type == "audio" and Path(filename).suffix.lower() == ".mp3":
             cover_bytes = extract_embedded_cover(temporary_path)
@@ -340,6 +367,7 @@ async def upload_file(
             file_name=filename,
             description=(description or "").strip()[:1024] or None,
             search_text=search_text,
+            content_hash=content_hash,
             file_size=media.file_size or file_size,
             mime_type=getattr(media, "mime_type", None) or upload.content_type,
             file_type=file_type,
@@ -471,7 +499,13 @@ async def update_text_content(
             file.channel_message_id = replacement.id
             file.file_size = media.file_size or len(payload.content.encode("utf-8"))
             file.mime_type = media.mime_type or "text/markdown"
-            await delete_from_storage_channel(old_message_id, file.storage_channel_id)
+            remaining = (await db.execute(select(File.id).where(
+                File.id != file.id,
+                File.storage_channel_id == file.storage_channel_id,
+                File.channel_message_id == old_message_id,
+            ).limit(1))).scalar_one_or_none()
+            if remaining is None:
+                await delete_from_storage_channel(old_message_id, file.storage_channel_id)
         else:
             await telegram.tg_client.edit_message_text(file.storage_channel_id or settings.telegram_storage_channel_id, file.channel_message_id, payload.content)
             file.file_name = sanitize_filename(payload.content.strip().splitlines()[0][:80])
@@ -481,6 +515,8 @@ async def update_text_content(
         raise HTTPException(status_code=502, detail="Could not update text in Telegram") from error
     file.updated_at = datetime.utcnow()
     file.search_text = payload.content
+    file.content_hash = hashlib.sha256(payload.content.encode("utf-8")).hexdigest()
+    file.is_shortcut = False
     await db.commit()
     return {"content": payload.content, "file": add_urls_to_file(file)}
 
@@ -854,7 +890,10 @@ async def delete_file(
     # channel.  Their stale metadata must still be removable from Komod.
     storage_deleted = False
     if current_user.delete_storage_files:
-        storage_deleted = await delete_from_storage_channel(file.channel_message_id, file.storage_channel_id)
+        messages = await unreferenced_storage_messages(db, [file])
+        if messages:
+            channel_id, message_ids = next(iter(messages.items()))
+            storage_deleted = await delete_from_storage_channel(message_ids, channel_id)
     
     # Delete from database
     await db.delete(file)
@@ -883,9 +922,7 @@ async def batch_delete_files(
     
     # Telegram message ids are only unique inside their own channel.
     if current_user.delete_storage_files:
-        messages_by_channel: dict[int | None, list[int]] = {}
-        for item in files:
-            messages_by_channel.setdefault(item.storage_channel_id, []).append(item.channel_message_id)
+        messages_by_channel = await unreferenced_storage_messages(db, files)
         for channel_id, msg_ids in messages_by_channel.items():
             for start in range(0, len(msg_ids), 100):
                 batch = msg_ids[start:start + 100]

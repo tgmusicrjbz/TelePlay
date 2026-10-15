@@ -162,6 +162,7 @@ class FileResponse(FileBase):
     is_favorite: bool = False
     is_pinned: bool = False
     is_hidden: bool = False
+    is_shortcut: bool = False
     
     model_config = ConfigDict(from_attributes=True)
 
