@@ -160,6 +160,18 @@ async def init_db():
             hidden_type = "BOOLEAN" if url.drivername.startswith("postgresql") else "INTEGER"
             hidden_default = "FALSE" if url.drivername.startswith("postgresql") else "0"
             await conn.execute(text(f"ALTER TABLE files ADD COLUMN is_hidden {hidden_type} NOT NULL DEFAULT {hidden_default}"))
+        share_bool_type = "BOOLEAN" if url.drivername.startswith("postgresql") else "INTEGER"
+        share_bool_default = "TRUE" if url.drivername.startswith("postgresql") else "1"
+        if "public_expires_at" not in columns:
+            await conn.execute(text("ALTER TABLE files ADD COLUMN public_expires_at TIMESTAMP"))
+        if "public_password_hash" not in columns:
+            await conn.execute(text("ALTER TABLE files ADD COLUMN public_password_hash TEXT"))
+        if "public_allow_download" not in columns:
+            await conn.execute(text(f"ALTER TABLE files ADD COLUMN public_allow_download {share_bool_type} NOT NULL DEFAULT {share_bool_default}"))
+        if "public_view_limit" not in columns:
+            await conn.execute(text("ALTER TABLE files ADD COLUMN public_view_limit INTEGER"))
+        if "public_view_count" not in columns:
+            await conn.execute(text("ALTER TABLE files ADD COLUMN public_view_count INTEGER NOT NULL DEFAULT 0"))
         for column_name, column_type in (
             ("audio_variant_file_id", "VARCHAR(255)"),
             ("audio_variant_unique_id", "VARCHAR(255)"),

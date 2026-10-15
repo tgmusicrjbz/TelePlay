@@ -158,6 +158,11 @@ class FileResponse(FileBase):
     download_url: Optional[str] = None
     public_hash: Optional[str] = None
     public_stream_url: Optional[str] = None
+    public_expires_at: Optional[datetime] = None
+    public_allow_download: bool = True
+    public_view_limit: Optional[int] = None
+    public_view_count: int = 0
+    public_password_protected: bool = False
     last_pos: int = 0
     is_favorite: bool = False
     is_pinned: bool = False
@@ -330,6 +335,17 @@ class CredentialsUpdate(BaseModel):
 class CredentialsStatus(BaseModel):
     enabled: bool
     username: Optional[str] = None
+
+
+class PublicShareCreate(BaseModel):
+    expires_in_hours: Optional[int] = Field(default=None, ge=1, le=24 * 365)
+    password: Optional[str] = Field(default=None, min_length=4, max_length=128)
+    allow_download: bool = True
+    view_limit: Optional[int] = Field(default=None, ge=1, le=1_000_000)
+
+
+class PublicShareUnlock(BaseModel):
+    password: str = Field(min_length=1, max_length=128)
 
 
 class SessionResponse(BaseModel):

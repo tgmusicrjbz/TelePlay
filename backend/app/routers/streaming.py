@@ -7,17 +7,21 @@ import logging
 import mimetypes
 import shutil
 import tempfile
+from datetime import datetime, timedelta
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import and_, select
+from passlib.context import CryptContext
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from ..database import get_db
-from ..models import File, User
-from ..auth import get_current_user, require_vault_access
+from ..models import File, SecurityEvent, User
+from ..auth import create_public_share_token, get_current_user, require_vault_access, verify_public_share_token
+from ..schemas import PublicShareUnlock
+from ..audit import add_security_event, request_ip
 from .. import telegram
 from ..telegram import get_message_from_channel
 from ..streaming import stream_file as stream_file_generator
@@ -34,6 +38,7 @@ limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(prefix="/stream", tags=["Streaming"])
 settings = get_settings()
 _audio_variant_locks: dict[int, asyncio.Lock] = {}
+share_password_context = CryptContext(schemes=["pbkdf2_sha256"], pbkdf2_sha256__default_rounds=310_000, deprecated="auto")
 
 
 def media_type_for(file: File) -> str:
@@ -331,6 +336,64 @@ async def get_thumbnail(
         raise HTTPException(status_code=500, detail="Failed to get thumbnail")
 
 
+async def _active_public_file(public_hash: str, db: AsyncSession) -> File:
+    file = (await db.execute(select(File).where(File.public_hash == public_hash))).scalar_one_or_none()
+    if not file:
+        raise HTTPException(status_code=404, detail="این پیوند وجود ندارد یا لغو شده است.")
+    if file.public_expires_at and file.public_expires_at <= datetime.utcnow():
+        raise HTTPException(status_code=410, detail="زمان این پیوند به پایان رسیده است.")
+    return file
+
+
+@router.get("/s/{public_hash}/info")
+@limiter.limit("60/minute")
+async def public_share_info(public_hash: str, request: Request, db: AsyncSession = Depends(get_db)):
+    file = await _active_public_file(public_hash, db)
+    return {
+        "file_name": file.file_name, "file_type": file.file_type, "file_size": file.file_size,
+        "mime_type": media_type_for(file), "password_required": bool(file.public_password_hash),
+        "allow_download": file.public_allow_download, "expires_at": file.public_expires_at,
+        "view_limit": file.public_view_limit,
+        "views_remaining": max(0, file.public_view_limit - file.public_view_count) if file.public_view_limit else None,
+    }
+
+
+@router.post("/s/{public_hash}/unlock")
+@limiter.limit("10/minute")
+async def unlock_public_share(public_hash: str, payload: PublicShareUnlock, request: Request, db: AsyncSession = Depends(get_db)):
+    file = await _active_public_file(public_hash, db)
+    if not file.public_password_hash:
+        return {"access_token": create_public_share_token(public_hash)}
+    try:
+        valid = share_password_context.verify(payload.password, file.public_password_hash)
+    except Exception:
+        valid = False
+    add_security_event(db, "public_link_unlocked" if valid else "public_link_password_failed", user_id=file.user_id, request=request, success=valid, suspicious=not valid, target_type="file", target_id=file.id)
+    await db.commit()
+    if not valid:
+        raise HTTPException(status_code=401, detail="رمز پیوند درست نیست.")
+    return {"access_token": create_public_share_token(public_hash)}
+
+
+async def _register_public_view(file: File, request: Request, db: AsyncSession, download: bool) -> None:
+    ip = request_ip(request)
+    user_agent = request.headers.get("user-agent")
+    recent = (await db.execute(select(SecurityEvent.id).where(
+        SecurityEvent.event_type == "public_view",
+        SecurityEvent.target_type == "file",
+        SecurityEvent.target_id == str(file.id),
+        SecurityEvent.ip_address == ip,
+        SecurityEvent.user_agent == user_agent,
+        SecurityEvent.created_at >= datetime.utcnow() - timedelta(hours=12),
+    ).limit(1))).scalar_one_or_none()
+    if recent is None:
+        if file.public_view_limit and file.public_view_count >= file.public_view_limit:
+            raise HTTPException(status_code=429, detail="سقف مشاهده این پیوند پر شده است.")
+        file.public_view_count = int(file.public_view_count or 0) + 1
+        add_security_event(db, "public_view", user_id=file.user_id, request=request, target_type="file", target_id=file.id, details={"download": download})
+        await db.commit()
+
+
 @router.get("/s/{public_hash}")
 @limiter.limit("60/minute")  # Rate limit public streaming to prevent abuse
 async def stream_public_file(
@@ -338,14 +401,16 @@ async def stream_public_file(
     request: Request,
     db: AsyncSession = Depends(get_db),
     download: int = Query(0, description="Set to 1 to force download"),
+    access_token: str | None = Query(default=None),
 ):
     """Stream file via public link (no auth required)."""
     # Get file by hash
-    result = await db.execute(select(File).where(File.public_hash == public_hash))
-    file = result.scalar_one_or_none()
-    
-    if not file:
-        raise HTTPException(status_code=404, detail="File not found or link revoked")
+    file = await _active_public_file(public_hash, db)
+    if file.public_password_hash and not verify_public_share_token(access_token, public_hash):
+        raise HTTPException(status_code=401, detail="این پیوند با رمز محافظت شده است.")
+    if download and not file.public_allow_download:
+        raise HTTPException(status_code=403, detail="دانلود برای این پیوند غیرفعال است.")
+    await _register_public_view(file, request, db, bool(download))
         
     file_size = file.file_size
     

@@ -85,6 +85,20 @@ def create_vault_token(telegram_id: int, version: int = 0) -> str:
     return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
 
 
+def create_public_share_token(public_hash: str) -> str:
+    """Create a short-lived bearer used after unlocking a protected share."""
+    return jwt.encode({
+        "sub": public_hash,
+        "exp": datetime.utcnow() + timedelta(hours=12),
+        "type": "public-share",
+    }, settings.jwt_secret, algorithm="HS256")
+
+
+def verify_public_share_token(token: str | None, public_hash: str) -> bool:
+    payload = verify_token_payload(token or "", "public-share")
+    return bool(payload and payload.get("sub") == public_hash)
+
+
 def has_vault_access(request: Request | None, user: User) -> bool:
     if not user.vault_password_hash:
         return False

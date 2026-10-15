@@ -18,12 +18,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, delete, asc, desc, exists, false, and_, or_
 from sqlalchemy.orm import selectinload
 from pydantic import BaseModel, Field
-from datetime import datetime
+from datetime import datetime, timedelta
+from passlib.context import CryptContext
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from urllib.parse import urlparse
 
 from ..database import get_db
 from ..models import File, User, WatchProgress, Folder, Playlist
-from ..schemas import ActivityResponse, BatchFileUpdate, FileResponse, FileListResponse, FileUpdate, PlayerStateResponse, PlayerStateUpdate, WatchProgressUpdate
+from ..schemas import ActivityResponse, BatchFileUpdate, FileResponse, FileListResponse, FileUpdate, PlayerStateResponse, PlayerStateUpdate, PublicShareCreate, WatchProgressUpdate
 from ..auth import get_current_user, has_vault_access, require_scoped_folder, require_vault_access, workspace_scope
 from ..telegram import delete_from_storage_channel, get_message_from_channel
 from .. import telegram
@@ -41,10 +44,13 @@ from ..services import (
     unreferenced_storage_messages,
     unreferenced_audio_variant_messages,
 )
+from ..audit import add_security_event
 
 router = APIRouter(prefix="/files", tags=["Files"])
 settings = get_settings()
 logger = logging.getLogger(__name__)
+limiter = Limiter(key_func=get_remote_address)
+share_password_context = CryptContext(schemes=["pbkdf2_sha256"], pbkdf2_sha256__default_rounds=310_000, deprecated="auto")
 _text_index_locks: dict[int, asyncio.Lock] = {}
 
 
@@ -1334,12 +1340,15 @@ async def get_progress(
 
 
 @router.post("/{file_id}/share", response_model=FileResponse)
+@limiter.limit("20/minute")
 async def share_file(
     file_id: int,
+    request: Request,
+    payload: PublicShareCreate = PublicShareCreate(),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Generate a permanent public link for the file."""
+    """Create or replace a configurable public link for the file."""
     result = await db.execute(
         select(File).where(File.id == file_id, File.user_id == current_user.id).options(selectinload(File.watch_progress))
     )
@@ -1353,6 +1362,16 @@ async def share_file(
     # Generate hash if not exists or regenerate
     # Using 16 bytes = 32 hex chars
     file.public_hash = secrets.token_hex(16)
+    file.public_expires_at = datetime.utcnow() + timedelta(hours=payload.expires_in_hours) if payload.expires_in_hours else None
+    file.public_password_hash = share_password_context.hash(payload.password) if payload.password else None
+    file.public_allow_download = payload.allow_download
+    file.public_view_limit = payload.view_limit
+    file.public_view_count = 0
+    add_security_event(
+        db, "public_link_created", user_id=current_user.id, request=request,
+        target_type="file", target_id=file.id,
+        details={"expires": bool(payload.expires_in_hours), "password": bool(payload.password), "download": payload.allow_download, "view_limit": payload.view_limit},
+    )
     
     await db.commit()
     
@@ -1368,6 +1387,7 @@ async def share_file(
 @router.delete("/{file_id}/share", response_model=FileResponse)
 async def revoke_share(
     file_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1381,6 +1401,11 @@ async def revoke_share(
         raise HTTPException(status_code=404, detail="File not found")
     
     file.public_hash = None
+    file.public_expires_at = None
+    file.public_password_hash = None
+    file.public_view_limit = None
+    file.public_view_count = 0
+    add_security_event(db, "public_link_revoked", user_id=current_user.id, request=request, target_type="file", target_id=file.id)
     
     await db.commit()
     

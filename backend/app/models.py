@@ -230,6 +230,11 @@ class File(Base):
     
     # Sharing
     public_hash: Mapped[Optional[str]] = mapped_column(String(64), unique=True, index=True)
+    public_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    public_password_hash: Mapped[Optional[str]] = mapped_column(Text)
+    public_allow_download: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    public_view_limit: Mapped[Optional[int]] = mapped_column(Integer)
+    public_view_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -332,4 +337,21 @@ class ErrorLog(Base):
     message: Mapped[str] = mapped_column(Text, nullable=False)
     traceback: Mapped[Optional[str]] = mapped_column(Text)
     resolved: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
+class SecurityEvent(Base):
+    """Audit trail for authentication, sharing and sensitive account changes."""
+    __tablename__ = "security_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    success: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    suspicious: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    target_type: Mapped[Optional[str]] = mapped_column(String(32))
+    target_id: Mapped[Optional[str]] = mapped_column(String(128))
+    ip_address: Mapped[Optional[str]] = mapped_column(String(64))
+    user_agent: Mapped[Optional[str]] = mapped_column(Text)
+    details_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)
