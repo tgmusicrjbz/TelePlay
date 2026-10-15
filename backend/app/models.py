@@ -30,6 +30,7 @@ class User(Base):
     file_tag_limit: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
     tts_settings_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
     player_state_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    offline_manifest_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
     gemini_api_keys_encrypted: Mapped[Optional[str]] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     auth_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

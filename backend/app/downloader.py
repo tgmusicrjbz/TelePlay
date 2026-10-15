@@ -447,9 +447,11 @@ class LinkImportService:
                 buttons = [button for row in message.reply_markup.inline_keyboard for button in row if not getattr(button, "url", None)]
                 ready_buttons = [button for button in buttons if button_ready(button)]
                 # AllSaver sometimes first asks for a language and may only
-                # expose an English/UK option. Select it before looking for a
-                # quality button. Timer buttons are deliberately left alone;
-                # the same edited message is fetched again on the next pass.
+                # expose an English/UK option. A button containing an hourglass
+                # is still being prepared. Never click or mark that callback as
+                # consumed: AllSaver often keeps the same callback_data after
+                # editing the label, so doing so would permanently skip the
+                # ready button on later polls.
                 language_buttons = [button for button in buttons if (
                     any(flag in button.text for flag in ("🇬🇧", "🇺🇸", "🌐", "🌏"))
                     or re.search(r"\b(english|en)\b", button.text, re.IGNORECASE)
@@ -457,9 +459,8 @@ class LinkImportService:
                 if language_buttons and not any(button_ready(button) for button in language_buttons):
                     self.statuses[job.id].update(message="منتظر آماده‌شدن انتخاب زبان")
                     await self._persist_status(job.id)
-                    if time.monotonic() - started_at > 45:
-                        raise TimeoutError("گزینه زبان سرویس دانلود آماده نشد")
-                language_button = next((button for button in language_buttons if button_key(message, button) not in clicked and (button_ready(button) or time.monotonic() - started_at > 8)), None)
+                    continue
+                language_button = next((button for button in language_buttons if button_key(message, button) not in clicked and button_ready(button)), None)
                 if language_button and not re.search(r"\b(360|480|720|1080)p?\b", language_button.text, re.IGNORECASE):
                     if await click_button(message, language_button):
                         clicked.add(button_key(message, language_button))

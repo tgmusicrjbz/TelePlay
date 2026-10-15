@@ -34,10 +34,12 @@ from app.routers.files import (
     batch_update_files,
     delete_file,
     get_activity,
+    get_offline_manifest,
     get_player_state,
     playback_history,
     playback_recommendations,
     save_player_state,
+    save_offline_manifest,
     get_storage_stats,
     get_text_preview,
     list_files,
@@ -45,6 +47,7 @@ from app.routers.files import (
     update_file,
     upload_file,
     SendToTelegramRequest,
+    OfflineManifestUpdate,
 )
 from app.routers.folders import delete_folder_contents, list_folders, update_folder
 from app.routers.streaming import stored_message_response
@@ -520,6 +523,20 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             restored = await get_player_state(db, user)
             self.assertEqual([item.id for item in restored.files], [second.id, first.id])
             self.assertEqual((restored.current_index, restored.repeat_mode, restored.position), (1, "all", 42))
+
+    async def test_offline_manifest_keeps_owned_visible_files_in_selected_order(self):
+        async with async_session() as db:
+            first = self.make_file(self.user_id, None, 920)
+            second = self.make_file(self.user_id, None, 921)
+            hidden = self.make_file(self.user_id, None, 922); hidden.is_hidden = True
+            db.add_all([first, second, hidden]); await db.commit()
+            user = await db.get(User, self.user_id)
+            saved = await save_offline_manifest(OfflineManifestUpdate(
+                file_ids=[second.id, hidden.id, first.id, second.id],
+            ), db, user)
+            self.assertEqual(saved.file_ids, [second.id, first.id])
+            restored = await get_offline_manifest(db, user)
+            self.assertEqual(restored.file_ids, [second.id, first.id])
 
     async def test_history_and_recommendations_use_progress_folder_and_tags(self):
         async with async_session() as db:

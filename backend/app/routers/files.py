@@ -63,6 +63,16 @@ class SendToTelegramRequest(BaseModel):
     ids: list[int] = Field(min_length=1, max_length=50)
 
 
+class OfflineManifestUpdate(BaseModel):
+    file_ids: list[int] = Field(default_factory=list, max_length=1000)
+
+
+class OfflineManifestResponse(BaseModel):
+    file_ids: list[int] = Field(default_factory=list)
+    files: list[FileResponse] = Field(default_factory=list)
+    updated_at: Optional[datetime] = None
+
+
 FILE_SORT_FIELDS = {
     "name": func.lower(File.file_name),
     "type": File.file_type,
@@ -266,6 +276,55 @@ async def cancel_import_link(job_id: str, current_user: User = Depends(get_curre
 async def clear_finished_import_links(current_user: User = Depends(get_current_user)):
     removed = link_importer.clear_finished(current_user.id)
     return {"removed": removed}
+
+
+@router.get("/offline-manifest", response_model=OfflineManifestResponse)
+async def get_offline_manifest(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return the media the user selected for optional cross-device offline sync."""
+    try:
+        state = json.loads(current_user.offline_manifest_json or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        state = {}
+    ids = list(dict.fromkeys(int(value) for value in state.get("file_ids", [])[:1000] if str(value).isdigit()))
+    files = (await db.execute(select(File).where(
+        File.user_id == current_user.id,
+        File.id.in_(ids),
+        File.is_hidden.is_(False),
+    ).options(selectinload(File.watch_progress)))).scalars().all() if ids else []
+    by_id = {item.id: item for item in files}
+    ordered = [by_id[file_id] for file_id in ids if file_id in by_id]
+    return OfflineManifestResponse(
+        file_ids=[item.id for item in ordered],
+        files=[FileResponse(**add_urls_to_file(item)) for item in ordered],
+        updated_at=state.get("updated_at"),
+    )
+
+
+@router.put("/offline-manifest", response_model=OfflineManifestResponse)
+async def save_offline_manifest(
+    payload: OfflineManifestUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    ids = list(dict.fromkeys(payload.file_ids))
+    files = (await db.execute(select(File).where(
+        File.user_id == current_user.id,
+        File.id.in_(ids),
+        File.is_hidden.is_(False),
+    ).options(selectinload(File.watch_progress)))).scalars().all() if ids else []
+    by_id = {item.id: item for item in files}
+    ordered = [by_id[file_id] for file_id in ids if file_id in by_id]
+    now = datetime.utcnow()
+    current_user.offline_manifest_json = json.dumps({"file_ids": [item.id for item in ordered], "updated_at": now.isoformat()})
+    await db.commit()
+    return OfflineManifestResponse(
+        file_ids=[item.id for item in ordered],
+        files=[FileResponse(**add_urls_to_file(item)) for item in ordered],
+        updated_at=now,
+    )
 
 
 @router.get("/player-state", response_model=PlayerStateResponse)

@@ -19,13 +19,25 @@ export interface OfflineFolder { id: string; name: string; createdAt: string; ow
 export interface OfflineTextDraft { id: number; name: string; content: string; folderId: number | null; createdAt: string; ownerUserId?: number; }
 export interface OfflineDownloadProgress { done: number; total: number; failed: number; currentName: string; loaded: number; size: number; }
 export interface OfflineJobProgress extends OfflineDownloadProgress { id: string; kind: 'file' | 'playlist'; title: string; state: 'queued' | 'downloading' | 'paused' | 'cancelled' | 'done' | 'error'; }
+export interface OfflineStorageEstimate { required: number; usage: number; quota: number; available: number; enough: boolean; persistent: boolean; }
 let textOutboxSyncing = false;
-type OfflineQueueJob = { file: TelegramFile; onProgress?: (loaded:number,total:number)=>void; options?: {silentProgress?:boolean}; resolve:()=>void; reject:(error:unknown)=>void };
+type OfflineSaveOptions = {silentProgress?:boolean;skipManifest?:boolean};
+type OfflineQueueJob = { file: TelegramFile; onProgress?: (loaded:number,total:number)=>void; options?: OfflineSaveOptions; resolve:()=>void; reject:(error:unknown)=>void };
 const offlineQueue: OfflineQueueJob[] = [];
 const offlinePromises = new Map<number, Promise<void>>();
 const activeControllers = new Map<number, AbortController>();
 const playlistControls = new Map<string, { paused: boolean; cancelled: boolean }>();
 let activeOfflineJobs = 0;
+let manifestTimer: number | undefined;
+
+export const offlineDeviceSyncEnabled = () => localStorage.getItem('komod-offline-device-sync') === '1';
+export const setOfflineDeviceSyncEnabled = (enabled:boolean) => localStorage.setItem('komod-offline-device-sync', enabled ? '1' : '0');
+
+function scheduleOfflineManifestSync() {
+    if (!offlineDeviceSyncEnabled() || !navigator.onLine) return;
+    if (manifestTimer) window.clearTimeout(manifestTimer);
+    manifestTimer = window.setTimeout(() => { void pushOfflineManifest(); }, 700);
+}
 
 function emitProgress(progress: OfflineJobProgress) {
     const percent=progress.size>0?Math.min(100,progress.loaded/progress.size*100):progress.total?Math.min(100,progress.done/progress.total*100):0;
@@ -62,6 +74,16 @@ async function transaction<T>(storeName: string, mode: IDBTransactionMode, actio
 }
 
 const activeUserId = () => cachedCurrentUser()?.id;
+
+export async function estimateOfflineStorage(required = 0): Promise<OfflineStorageEstimate> {
+    const estimate = await navigator.storage?.estimate?.();
+    const usage = Number(estimate?.usage || 0);
+    const quota = Number(estimate?.quota || 0);
+    const available = quota > 0 ? Math.max(0, quota - usage) : Number.POSITIVE_INFINITY;
+    let persistent = false;
+    try { persistent = Boolean(await navigator.storage?.persisted?.()); } catch { /* unsupported browser */ }
+    return { required: Math.max(0, required), usage, quota, available, enough: !Number.isFinite(available) || available >= required, persistent };
+}
 const belongsToActiveUser = (record: {ownerUserId?:number;file?:TelegramFile}) => {
     const userId=activeUserId();
     return Boolean(userId && (record.ownerUserId===userId || record.file?.user_id===userId));
@@ -117,7 +139,7 @@ export async function removeOfflineFolder(id: string): Promise<void> {
     window.dispatchEvent(new Event(OFFLINE_CHANGED_EVENT));
 }
 
-async function performFileOffline(file: TelegramFile, onProgress?: (loaded: number, total: number) => void, options?: { silentProgress?: boolean }): Promise<void> {
+async function performFileOffline(file: TelegramFile, onProgress?: (loaded: number, total: number) => void, options?: OfflineSaveOptions): Promise<void> {
     if (!navigator.onLine) throw new Error('برای ذخیره اولیه باید آنلاین باشی.');
     const jobId = `file-${file.id}`;
     if (!options?.silentProgress) emitProgress({ id: jobId, kind: 'file', title: file.file_name, state: 'downloading', done: 0, total: 1, failed: 0, currentName: file.file_name, loaded: 0, size: file.file_size });
@@ -130,6 +152,8 @@ async function performFileOffline(file: TelegramFile, onProgress?: (loaded: numb
             if (!options?.silentProgress) emitProgress({ id: jobId, kind: 'file', title: file.file_name, state: 'done', done: 1, total: 1, failed: 0, currentName: file.file_name, loaded: file.file_size, size: file.file_size });
             return;
         }
+        const storage = await estimateOfflineStorage(Math.ceil((file.file_size || 0) * 1.05));
+        if (!storage.enough) throw new Error('فضای آزاد این دستگاه برای ذخیره این فایل کافی نیست.');
         const source = file.stream_url.replace(/^\/api/, '');
         const response = await api.get<Blob>(source, {
             responseType: 'blob',
@@ -146,6 +170,7 @@ async function performFileOffline(file: TelegramFile, onProgress?: (loaded: numb
         if (!blob.size) throw new Error('فایل خالی دریافت شد.');
         await transaction<IDBValidKey>(MEDIA_STORE, 'readwrite', store => store.put({ id: file.id, file, blob, savedAt: new Date().toISOString(), ownerUserId: activeUserId() } satisfies OfflineMedia));
         window.dispatchEvent(new Event(OFFLINE_CHANGED_EVENT));
+        if (!options?.skipManifest) scheduleOfflineManifestSync();
         if (!options?.silentProgress) emitProgress({ id: jobId, kind: 'file', title: file.file_name, state: 'done', done: 1, total: 1, failed: 0, currentName: file.file_name, loaded: blob.size, size: blob.size });
     } catch (error) {
         const cancelled = controller.signal.aborted;
@@ -200,7 +225,7 @@ function pumpOfflineQueue() {
 }
 
 /** Queue downloads globally; requests are processed one at a time. */
-export function saveFileOffline(file: TelegramFile, onProgress?: (loaded: number, total: number) => void, options?: { silentProgress?: boolean }): Promise<void> {
+export function saveFileOffline(file: TelegramFile, onProgress?: (loaded: number, total: number) => void, options?: OfflineSaveOptions): Promise<void> {
     const existing = offlinePromises.get(file.id);
     if (existing) return existing;
     const promise = new Promise<void>((resolve, reject) => {
@@ -308,12 +333,14 @@ export async function removeOfflinePlaylist(id: number): Promise<void> {
 export async function removeOfflineMedia(id: number): Promise<void> {
     await transaction<undefined>(MEDIA_STORE, 'readwrite', store => store.delete(id) as IDBRequest<undefined>);
     window.dispatchEvent(new Event(OFFLINE_CHANGED_EVENT));
+    scheduleOfflineManifestSync();
 }
 
 export async function removeOfflineText(id: number): Promise<void> {
     await transaction<undefined>(TEXT_STORE, 'readwrite', store => store.delete(id) as IDBRequest<undefined>);
     if (id < 0) await transaction<undefined>(TEXT_OUTBOX_STORE, 'readwrite', store => store.delete(id) as IDBRequest<undefined>);
     window.dispatchEvent(new Event(OFFLINE_CHANGED_EVENT));
+    scheduleOfflineManifestSync();
 }
 
 export async function offlinePlaybackFile(record: OfflineMedia): Promise<TelegramFile> {
@@ -323,6 +350,33 @@ export async function offlinePlaybackFile(record: OfflineMedia): Promise<Telegra
 export async function cacheTextFile(file: TelegramFile, content?: string): Promise<void> {
     const text = content ?? (await api.get<{ content: string }>(`/files/${file.id}/text`)).data.content;
     await transaction<IDBValidKey>(TEXT_STORE, 'readwrite', store => store.put({ id: file.id, file, content: text, savedAt: new Date().toISOString(), ownerUserId: activeUserId() } satisfies OfflineText));
+    scheduleOfflineManifestSync();
+}
+
+export async function pushOfflineManifest(): Promise<number> {
+    if (!navigator.onLine) return 0;
+    const [media,texts]=await Promise.all([listOfflineMedia(),listOfflineTexts()]);
+    const fileIds=[...new Set([...media.map(item=>item.id),...texts.map(item=>item.id)].filter(id=>id>0))];
+    await api.put('/files/offline-manifest',{file_ids:fileIds});
+    return fileIds.length;
+}
+
+export async function pullOfflineManifest(onProgress?: (done:number,total:number)=>void): Promise<{downloaded:number;failed:number}> {
+    if (!navigator.onLine) throw new Error('برای همگام‌سازی باید آنلاین باشی.');
+    const {data}=await api.get<{files:TelegramFile[]}>('/files/offline-manifest');
+    const [media,texts]=await Promise.all([listOfflineMedia(),listOfflineTexts()]);
+    const existing=new Set([...media.map(item=>item.id),...texts.map(item=>item.id)]);
+    const missing=(data.files||[]).filter(file=>!existing.has(file.id));
+    let downloaded=0,failed=0;
+    for(const file of missing){
+        try{
+            if(file.file_type==='text')await cacheTextFile(file);
+            else await saveFileOffline(file,undefined,{skipManifest:true});
+            downloaded+=1;
+        }catch{failed+=1}
+        onProgress?.(downloaded+failed,missing.length);
+    }
+    return {downloaded,failed};
 }
 
 export async function queueOfflineText(name: string, content: string, folderId: number | null): Promise<OfflineTextDraft> {

@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate, useSearchParams, useNavigate } from 'react-router-dom';
 import { useEffect, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { api, AuthResponse, getKomodDeviceId, resolveServerUrl, useCurrentUser, useLoginWithCode, usePasswordLogin, useBotInfo, useGenerateLoginCode } from './lib/api';
 import FileBrowser from './components/FileBrowser';
 import GlobalContextMenu from './components/GlobalContextMenu';
@@ -11,6 +12,7 @@ import FileDetailsSheet from './components/FileDetailsSheet';
 import OfflineDownloadProgressPanel from './components/OfflineDownloadProgress';
 import { restoreSavedSession, saveAuthenticatedAccount } from './lib/accounts';
 import { syncOfflineTextOutbox } from './lib/offline';
+import { syncOfflineMutations } from './lib/offlineMutations';
 import { useAppStore } from './lib/store';
 
 function PlayerCloudSync() {
@@ -175,14 +177,18 @@ function TelegramWebAppBootstrap({ children }: { children: React.ReactNode }) {
 }
 
 function OfflineTextSync() {
+    const addToast = useAppStore(state=>state.addToast);
+    const queryClient=useQueryClient();
     useEffect(() => {
-        const sync = () => { if (navigator.onLine && localStorage.getItem('komod-force-offline') !== '1') void syncOfflineTextOutbox(); };
+        const sync = () => { if (navigator.onLine && localStorage.getItem('komod-force-offline') !== '1') { void syncOfflineTextOutbox(); void syncOfflineMutations(config=>api.request(config)); } };
+        const finished=(event:Event)=>{const result=(event as CustomEvent<{synced:number;conflicts:number}>).detail;if(result?.synced){addToast(`${result.synced.toLocaleString('fa-IR')} تغییر آفلاین همگام شد.`);void queryClient.invalidateQueries()}if(result?.conflicts)addToast(`${result.conflicts.toLocaleString('fa-IR')} تغییر به‌خاطر نسخه جدیدتر آنلاین اعمال نشد.`,'error')};
         sync();
         const timer = window.setInterval(sync, 30000);
         window.addEventListener('online', sync);
+        window.addEventListener('komod-offline-sync-finished',finished);
         document.addEventListener('visibilitychange', sync);
-        return () => { window.clearInterval(timer); window.removeEventListener('online', sync); document.removeEventListener('visibilitychange', sync); };
-    }, []);
+        return () => { window.clearInterval(timer); window.removeEventListener('online', sync); window.removeEventListener('komod-offline-sync-finished',finished); document.removeEventListener('visibilitychange', sync); };
+    }, [addToast,queryClient]);
     return null;
 }
 

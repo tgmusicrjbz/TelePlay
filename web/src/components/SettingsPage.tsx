@@ -259,7 +259,7 @@ export default function SettingsPage() {
             <div><p className="text-xs font-semibold text-primary-300">⚙️ تنظیمات کمد</p><h1 className="mt-2 text-2xl font-bold sm:text-3xl">{viewTitle(view)}</h1><p className="mt-2 text-sm text-dark-400">{viewSubtitle(view)}</p></div>
         </header>
 
-        {sectionLinks.length>1&&<SectionJumpNav items={sectionLinks} active={selectedSubsection} onChange={setActiveSubsection}/>}
+        {sectionLinks.length>1&&<SectionJumpNav items={sectionLinks} active={selectedSubsection} onChange={setActiveSubsection} mobileGrid={view==='admin'}/>}
 
         {view === 'home' && <div className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -382,8 +382,8 @@ function ServiceHealthCard({service}:{service:{label:string;status:'healthy'|'wa
     const palette=service.status==='healthy'?'bg-emerald-400':service.status==='warning'?'bg-amber-400':service.status==='error'?'bg-red-400':'bg-dark-600';
     return <div className="rounded-2xl border border-white/[.06] bg-dark-800/45 p-4"><div className="flex items-center gap-2"><span className={`h-2.5 w-2.5 rounded-full ${palette}`}/><strong className="text-sm">{service.label}</strong></div><p className="mt-2 min-h-10 text-xs leading-5 text-dark-400">{service.message}</p>{(service.queued>0||service.active>0)&&<div className="mt-2 flex gap-2 text-[11px]"><span className="rounded-lg bg-dark-950/55 px-2 py-1">فعال: {service.active.toLocaleString('fa-IR')}</span><span className="rounded-lg bg-dark-950/55 px-2 py-1">در صف: {service.queued.toLocaleString('fa-IR')}</span></div>}</div>;
 }
-function SectionJumpNav({items,active,onChange}:{items:Array<{id:string;label:string}>;active:string|null;onChange:(id:string)=>void}){
-    return <nav className="mb-5 grid grid-cols-2 gap-1 rounded-2xl border border-white/[.08] bg-dark-950/75 p-1.5 shadow-lg sm:auto-cols-fr sm:grid-flow-col sm:grid-cols-none" aria-label="بخش‌های همین صفحه">{items.map(item=><button key={item.id} type="button" aria-current={active===item.id?'page':undefined} onClick={()=>onChange(item.id)} className={`min-h-10 min-w-0 rounded-xl px-2 text-[11px] font-semibold transition sm:px-3 sm:text-xs ${active===item.id?'bg-primary-500 text-white shadow-lg shadow-primary-950/25':'text-dark-400 hover:bg-white/[.05] hover:text-white'}`}>{item.label}</button>)}</nav>;
+function SectionJumpNav({items,active,onChange,mobileGrid=false}:{items:Array<{id:string;label:string}>;active:string|null;onChange:(id:string)=>void;mobileGrid?:boolean}){
+    return <nav className={`mb-5 gap-1 rounded-2xl border border-white/[.08] bg-dark-950/75 p-1.5 shadow-lg ${mobileGrid?'grid grid-cols-2 sm:auto-cols-fr sm:grid-flow-col sm:grid-cols-none':'flex overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'}`} aria-label="بخش‌های همین صفحه">{items.map(item=><button key={item.id} type="button" aria-current={active===item.id?'page':undefined} onClick={()=>onChange(item.id)} className={`min-h-10 rounded-xl px-3 text-xs font-semibold transition ${mobileGrid?'min-w-0 sm:flex-1':'min-w-max flex-1'} ${active===item.id?'bg-primary-500 text-white shadow-lg shadow-primary-950/25':'text-dark-400 hover:bg-white/[.05] hover:text-white'}`}>{item.label}</button>)}</nav>;
 }
 function ThemeColorControl(){
     const [value,setValue]=useState(()=>localStorage.getItem('komod-custom-color')||'#A855F7');

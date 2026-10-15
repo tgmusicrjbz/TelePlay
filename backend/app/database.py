@@ -104,6 +104,8 @@ async def init_db():
             await conn.execute(text("ALTER TABLE users ADD COLUMN tts_settings_json TEXT NOT NULL DEFAULT '{}'"))
         if "player_state_json" not in user_columns:
             await conn.execute(text("ALTER TABLE users ADD COLUMN player_state_json TEXT NOT NULL DEFAULT '{}'"))
+        if "offline_manifest_json" not in user_columns:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN offline_manifest_json TEXT NOT NULL DEFAULT '{}'"))
         if "gemini_api_keys_encrypted" not in user_columns:
             await conn.execute(text("ALTER TABLE users ADD COLUMN gemini_api_keys_encrypted TEXT"))
         if "login_username" not in user_columns:

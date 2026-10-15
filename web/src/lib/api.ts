@@ -4,6 +4,7 @@
 import axios from 'axios';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { cachedCurrentUser, clearCurrentAccountSession, updateCurrentAccountTokens } from './accounts';
+import { queueOfflineMutation, shouldQueueOffline } from './offlineMutations';
 
 const normalizeServerOrigin = (value?: string | null) => {
     const trimmed = String(value || '').trim().replace(/\/+$/, '');
@@ -361,6 +362,20 @@ api.interceptors.response.use(
     }
 );
 
+async function runOrQueueMetadataMutation<T>(
+    request:()=>Promise<T>,
+    queued:Parameters<typeof queueOfflineMutation>[0],
+    fallback:()=>T,
+):Promise<T>{
+    if(localStorage.getItem('komod-active-workspace-permission')==='read')throw new Error('این کمد فقط قابل مشاهده است.');
+    if(!navigator.onLine||localStorage.getItem('komod-force-offline')==='1'){
+        queueOfflineMutation(queued);return fallback();
+    }
+    try{return await request()}catch(error){if(!shouldQueueOffline(error))throw error;queueOfflineMutation(queued);return fallback()}
+}
+const offlineTempIds=new WeakMap<object,number>();
+const offlineTempId=(value:object)=>{let id=offlineTempIds.get(value);if(!id){id=-Date.now();offlineTempIds.set(value,id)}return id};
+
 // ============== Auth Hooks ==============
 
 export const useCurrentUser = () => {
@@ -466,8 +481,12 @@ export const useUpdateFile = () => {
     const queryClient = useQueryClient();
     return useMutation({
         mutationFn: async ({ id, ...data }: { id: number; file_name?: string; description?: string; folder_id?: number | null; is_favorite?: boolean; is_pinned?: boolean; is_hidden?: boolean; tags?: string[] }) => {
-            const { data: result } = await api.patch<TelegramFile>(`/files/${id}`, data);
-            return result;
+            const cached=queryClient.getQueryData<TelegramFile>(['file',id]);
+            return runOrQueueMetadataMutation(
+                async()=>(await api.patch<TelegramFile>(`/files/${id}`,data)).data,
+                {entity:data.tags!==undefined?'tag':'folder',method:'patch',url:`/files/${id}`,payload:data,baseUpdatedAt:cached?.updated_at},
+                ()=>({...cached,id,...data,updated_at:new Date().toISOString()} as TelegramFile),
+            );
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['files'] });
@@ -509,7 +528,7 @@ export const useMoveFiles = () => {
     const queryClient = useQueryClient();
     return useMutation({
         mutationFn: async ({ ids, folderId }: { ids: number[]; folderId: number | null }) => {
-            await api.post('/files/batch-move', { ids, folder_id: folderId });
+            await runOrQueueMetadataMutation(async()=>{await api.post('/files/batch-move',{ids,folder_id:folderId})},{entity:'folder',method:'post',url:'/files/batch-move',payload:{ids,folder_id:folderId}},()=>undefined);
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['files'] });
@@ -588,7 +607,7 @@ export const useMoveFolders = () => {
     const queryClient = useQueryClient();
     return useMutation({
         mutationFn: async ({ ids, folderId }: { ids: number[]; folderId: number | null }) => {
-            await api.post('/folders/batch-move', { ids, folder_id: folderId });
+            await runOrQueueMetadataMutation(async()=>{await api.post('/folders/batch-move',{ids,folder_id:folderId})},{entity:'folder',method:'post',url:'/folders/batch-move',payload:{ids,folder_id:folderId}},()=>undefined);
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['folders'] });
@@ -628,10 +647,11 @@ export const useCreateFolder = () => {
     const queryClient = useQueryClient();
     return useMutation({
         mutationFn: async (data: { name: string; description?: string; parent_id?: number | null }) => {
-            const { data: result } = await api.post<Folder>('/folders', data);
-            return result;
+            const tempId=-Date.now();const now=new Date().toISOString();
+            return runOrQueueMetadataMutation(async()=>(await api.post<Folder>('/folders',data)).data,{entity:'folder',method:'post',url:'/folders',payload:data,tempId},()=>({id:tempId,name:data.name,description:data.description||null,parent_id:data.parent_id??null,user_id:cachedCurrentUser()?.id||0,created_at:now,updated_at:now,file_count:0,children:[]}));
         },
-        onSuccess: () => {
+        onSuccess: (folder) => {
+            queryClient.setQueriesData<Folder[]>({predicate:query=>query.queryKey[0]==='folders'&&query.queryKey[1]===folder.parent_id},current=>current&&!current.some(item=>item.id===folder.id)?[folder,...current]:current);
             queryClient.invalidateQueries({ queryKey: ['folders'] });
             queryClient.invalidateQueries({ queryKey: ['folderTree'] });
         },
@@ -642,10 +662,11 @@ export const useUpdateFolder = () => {
     const queryClient = useQueryClient();
     return useMutation({
         mutationFn: async ({ id, ...data }: { id: number; name?: string; description?: string; parent_id?: number | null; is_favorite?: boolean; is_pinned?: boolean; is_hidden?: boolean; color?: string | null; icon?: string | null; cover_file_id?: number | null }) => {
-            const { data: result } = await api.patch<Folder>(`/folders/${id}`, data);
-            return result;
+            const cached=queryClient.getQueriesData<Folder[]>({queryKey:['folders']}).flatMap(([,items])=>items||[]).find(item=>item.id===id);
+            return runOrQueueMetadataMutation(async()=>(await api.patch<Folder>(`/folders/${id}`,data)).data,{entity:'folder',method:'patch',url:`/folders/${id}`,payload:data,baseUpdatedAt:cached?.updated_at},()=>({...cached,id,...data,updated_at:new Date().toISOString()} as Folder));
         },
-        onSuccess: () => {
+        onSuccess: (folder) => {
+            queryClient.setQueriesData<Folder[]>({queryKey:['folders']},current=>current?.map(item=>item.id===folder.id?folder:item));
             queryClient.invalidateQueries({ queryKey: ['folders'] });
             queryClient.invalidateQueries({ queryKey: ['folderTree'] });
         },
@@ -657,9 +678,12 @@ export const useDeleteFolder = () => {
     return useMutation({
         mutationFn: async ({ id, deleteContents }: { id: number; deleteContents: boolean }) => {
             const params = { delete_contents: deleteContents };
-            await api.delete(`/folders/${id}`, { params });
+            const cached=queryClient.getQueriesData<Folder[]>({queryKey:['folders']}).flatMap(([,items])=>items||[]).find(item=>item.id===id);
+            await runOrQueueMetadataMutation(async()=>{await api.delete(`/folders/${id}`,{params});return id},{entity:'folder',method:'delete',url:`/folders/${id}?delete_contents=${deleteContents}`,baseUpdatedAt:cached?.updated_at},()=>id);
+            return id;
         },
-        onSuccess: () => {
+        onSuccess: (id) => {
+            queryClient.setQueriesData<Folder[]>({queryKey:['folders']},current=>current?.filter(item=>item.id!==id));
             queryClient.invalidateQueries({ queryKey: ['folders'] });
             queryClient.invalidateQueries({ queryKey: ['folderTree'] });
             queryClient.invalidateQueries({ queryKey: ['files'] });
@@ -671,7 +695,7 @@ export const useDeleteFolders = () => {
     const queryClient = useQueryClient();
     return useMutation({
         mutationFn: async ({ ids, deleteContents }: { ids: number[]; deleteContents: boolean }) => {
-            await api.post('/folders/batch-delete', ids, { params: { delete_contents: deleteContents } });
+            await runOrQueueMetadataMutation(async()=>{await api.post('/folders/batch-delete',ids,{params:{delete_contents:deleteContents}})},{entity:'folder',method:'post',url:`/folders/batch-delete?delete_contents=${deleteContents}`,payload:ids},()=>undefined);
         },
         onSuccess: () => {
              queryClient.invalidateQueries({ queryKey: ['folders'] });
@@ -738,7 +762,11 @@ export const usePlaylists = () => useQuery<PlaylistSummary[]>({
 export const useReorderPlaylistCatalog = () => {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (playlistIds: number[]) => (await api.put<PlaylistSummary[]>('/playlists/reorder/catalog', { playlist_ids: playlistIds })).data,
+        mutationFn: async (playlistIds: number[]) => runOrQueueMetadataMutation(
+            async()=>(await api.put<PlaylistSummary[]>('/playlists/reorder/catalog',{playlist_ids:playlistIds})).data,
+            {entity:'playlist',method:'put',url:'/playlists/reorder/catalog',payload:{playlist_ids:playlistIds}},
+            ()=>{const current=queryClient.getQueryData<PlaylistSummary[]>(['playlists'])||[];const byId=new Map(current.map(item=>[item.id,item]));return playlistIds.map((id,index)=>({...byId.get(id)!,position:index})).filter(Boolean)},
+        ),
         onMutate: async (playlistIds) => {
             await queryClient.cancelQueries({ queryKey: ['playlists'] });
             const previous = queryClient.getQueryData<PlaylistSummary[]>(['playlists']);
@@ -797,12 +825,16 @@ export const usePlaylist = (id: number | null) => useQuery<Playlist>({
     enabled: id !== null,
 });
 
-const usePlaylistMutation = <TVariables>(request: (variables: TVariables) => Promise<Playlist>) => {
+const usePlaylistMutation = <TVariables>(request: (variables: TVariables) => Promise<Playlist>, queued:(variables:TVariables,current?:Playlist)=>Parameters<typeof queueOfflineMutation>[0], fallback:(variables:TVariables,current?:Playlist)=>Playlist) => {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: request,
+        mutationFn: async(variables:TVariables)=>{
+            const id=Number((variables as any)?.id);const current=Number.isFinite(id)?queryClient.getQueryData<Playlist>(['playlists',id]):undefined;
+            return runOrQueueMetadataMutation(()=>request(variables),queued(variables,current),()=>fallback(variables,current));
+        },
         onSuccess: (playlist: Playlist) => {
             queryClient.setQueryData(['playlists', playlist.id], playlist);
+            queryClient.setQueryData<PlaylistSummary[]>(['playlists'],current=>current?.some(item=>item.id===playlist.id)?current.map(item=>item.id===playlist.id?playlist:item):[playlist,...(current||[])]);
             queryClient.invalidateQueries({ queryKey: ['playlists'] });
             queryClient.invalidateQueries({ queryKey: ['files'] });
             queryClient.invalidateQueries({ queryKey: ['activity'] });
@@ -811,33 +843,45 @@ const usePlaylistMutation = <TVariables>(request: (variables: TVariables) => Pro
 };
 
 export const useCreatePlaylist = () => usePlaylistMutation(async (payload: { name: string; description?: string }) =>
-    (await api.post<Playlist>('/playlists', payload)).data
+    (await api.post<Playlist>('/playlists', payload)).data,
+    payload=>({entity:'playlist',method:'post',url:'/playlists',payload,tempId:offlineTempId(payload)}),
+    payload=>{const now=new Date().toISOString();return{id:offlineTempId(payload),name:payload.name,description:payload.description||null,item_count:0,total_duration:0,cover_url:null,cover_file_id:null,cover_urls:[],audio_count:0,video_count:0,preview_names:[],created_at:now,updated_at:now,items:[]}}
 );
 
 export const useUpdatePlaylist = () => usePlaylistMutation(async ({ id, ...payload }: { id: number; name?: string; description?: string; cover_file_id?: number | null }) =>
-    (await api.patch<Playlist>(`/playlists/${id}`, payload)).data
+    (await api.patch<Playlist>(`/playlists/${id}`, payload)).data,
+    ({id,...payload},current)=>({entity:'playlist',method:'patch',url:`/playlists/${id}`,payload,baseUpdatedAt:current?.updated_at}),
+    ({id,...payload},current)=>({...current,id,...payload,updated_at:new Date().toISOString()} as Playlist)
 );
 
 export const useAddPlaylistItems = () => usePlaylistMutation(async ({ id, fileIds, allowDuplicates = false }: { id: number; fileIds: number[]; allowDuplicates?: boolean }) =>
-    (await api.post<Playlist>(`/playlists/${id}/items`, { file_ids: fileIds, allow_duplicates: allowDuplicates })).data
+    (await api.post<Playlist>(`/playlists/${id}/items`, { file_ids: fileIds, allow_duplicates: allowDuplicates })).data,
+    ({id,fileIds,allowDuplicates},current)=>({entity:'playlist',method:'post',url:`/playlists/${id}/items`,payload:{file_ids:fileIds,allow_duplicates:allowDuplicates},baseUpdatedAt:current?.updated_at,conflictUrl:`/playlists/${id}`}),
+    (_variables,current)=>current as Playlist
 );
 
 export const useRemovePlaylistItem = () => usePlaylistMutation(async ({ id, itemId }: { id: number; itemId: number }) =>
-    (await api.delete<Playlist>(`/playlists/${id}/items/item/${itemId}`)).data
+    (await api.delete<Playlist>(`/playlists/${id}/items/item/${itemId}`)).data,
+    ({id,itemId},current)=>({entity:'playlist',method:'delete',url:`/playlists/${id}/items/item/${itemId}`,baseUpdatedAt:current?.updated_at,conflictUrl:`/playlists/${id}`}),
+    ({itemId},current)=>({...current,items:(current?.items||[]).filter(item=>item.id!==itemId),item_count:Math.max(0,(current?.item_count||0)-1),updated_at:new Date().toISOString()} as Playlist)
 );
 
 export const useReorderPlaylist = () => usePlaylistMutation(async ({ id, itemIds }: { id: number; itemIds: number[] }) =>
-    (await api.put<Playlist>(`/playlists/${id}/reorder`, { item_ids: itemIds })).data
+    (await api.put<Playlist>(`/playlists/${id}/reorder`, { item_ids: itemIds })).data,
+    ({id,itemIds},current)=>({entity:'playlist',method:'put',url:`/playlists/${id}/reorder`,payload:{item_ids:itemIds},baseUpdatedAt:current?.updated_at,conflictUrl:`/playlists/${id}`}),
+    ({itemIds},current)=>{const byId=new Map((current?.items||[]).map(item=>[item.id,item]));return{...current,items:itemIds.map((id,index)=>({...byId.get(id)!,position:index})).filter(Boolean),updated_at:new Date().toISOString()} as Playlist}
 );
 
 export const useShufflePlaylist = () => usePlaylistMutation(async (id: number) =>
-    (await api.post<Playlist>(`/playlists/${id}/shuffle`)).data
+    (await api.post<Playlist>(`/playlists/${id}/shuffle`)).data,
+    (id,current)=>({entity:'playlist',method:'post',url:`/playlists/${id}/shuffle`,baseUpdatedAt:current?.updated_at,conflictUrl:`/playlists/${id}`}),
+    (_id,current)=>current as Playlist
 );
 
 export const useDeletePlaylist = () => {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (id: number) => { await api.delete(`/playlists/${id}`); return id; },
+        mutationFn: async (id: number) => { const current=queryClient.getQueryData<Playlist>(['playlists',id]);return runOrQueueMetadataMutation(async()=>{await api.delete(`/playlists/${id}`);return id},{entity:'playlist',method:'delete',url:`/playlists/${id}`,baseUpdatedAt:current?.updated_at},()=>id); },
         onSuccess: (id) => {
             queryClient.removeQueries({ queryKey: ['playlists', id] });
             queryClient.invalidateQueries({ queryKey: ['playlists'] });
@@ -862,8 +906,11 @@ export const useBatchUpdateFiles = () => {
     const queryClient = useQueryClient();
     return useMutation({
         mutationFn: async (payload: BatchFileEdit) => {
-            const { data } = await api.post<{ message: string; updated: number }>('/files/batch-update', payload);
-            return data;
+            return runOrQueueMetadataMutation(
+                async()=>(await api.post<{message:string;updated:number}>('/files/batch-update',payload)).data,
+                {entity:'tag',method:'post',url:'/files/batch-update',payload},
+                ()=>({message:'تغییرات برای همگام‌سازی ذخیره شد.',updated:payload.ids.length}),
+            );
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['files'] });
@@ -905,8 +952,11 @@ export const useTagSettings = () => useQuery<TagSettings>({
 export const useUpdateTagSettings = () => {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (payload: Omit<TagSettings, 'tags'> & { tags: Array<{name:string;color:string}> }) =>
-            cacheTagSettings((await api.put<TagSettings>('/accounts/tags', payload)).data),
+        mutationFn: async (payload: Omit<TagSettings, 'tags'> & { tags: Array<{name:string;color:string}> }) => runOrQueueMetadataMutation(
+            async()=>cacheTagSettings((await api.put<TagSettings>('/accounts/tags',payload)).data),
+            {entity:'tag',method:'put',url:'/accounts/tags',payload},
+            ()=>cacheTagSettings({...payload,tags:payload.tags.map(item=>({...item,file_count:0}))}),
+        ),
         onSuccess: data => queryClient.setQueryData(['tag-settings'], data),
     });
 };
@@ -914,7 +964,11 @@ export const useUpdateTagSettings = () => {
 export const useDeleteTag = () => {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (name: string) => cacheTagSettings((await api.delete<TagSettings>(`/accounts/tags/${encodeURIComponent(name)}`)).data),
+        mutationFn: async (name: string) => {const current=queryClient.getQueryData<TagSettings>(['tag-settings'])||{tags:[],show_file_tags:false,display_limit:2};return runOrQueueMetadataMutation(
+            async()=>cacheTagSettings((await api.delete<TagSettings>(`/accounts/tags/${encodeURIComponent(name)}`)).data),
+            {entity:'tag',method:'delete',url:`/accounts/tags/${encodeURIComponent(name)}`},
+            ()=>cacheTagSettings({...current,tags:current.tags.filter(item=>item.name.toLocaleLowerCase('fa')!==name.toLocaleLowerCase('fa'))}),
+        )},
         onSuccess: data => {
             queryClient.setQueryData(['tag-settings'], data);
             queryClient.invalidateQueries({ queryKey: ['files'] });
