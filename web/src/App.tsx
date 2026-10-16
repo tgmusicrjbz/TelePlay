@@ -187,8 +187,16 @@ function TelegramWebAppBootstrap({ children }: { children: React.ReactNode }) {
         };
         void sync();
         const onVisible = () => { if (!document.hidden) void sync(); };
+        const onOnline = () => void sync();
         document.addEventListener('visibilitychange', onVisible);
-        return () => { cancelled = true; document.removeEventListener('visibilitychange', onVisible); };
+        window.addEventListener('online', onOnline);
+        window.addEventListener('komod-telegram-ready', onOnline);
+        return () => {
+            cancelled = true;
+            document.removeEventListener('visibilitychange', onVisible);
+            window.removeEventListener('online', onOnline);
+            window.removeEventListener('komod-telegram-ready', onOnline);
+        };
     }, []);
     if (!ready) return <div className="flex min-h-screen items-center justify-center bg-dark-950" dir="rtl"><div className="text-center"><div className="mx-auto mb-4 h-11 w-11 animate-spin rounded-full border-2 border-white/10 border-t-primary-400"/><p className="text-sm text-dark-300">در حال هماهنگ‌کردن حساب تلگرام…</p></div></div>;
     return <>{children}</>;

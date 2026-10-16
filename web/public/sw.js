@@ -1,18 +1,30 @@
-const CACHE_NAME = 'komod-shell-v15';
+const CACHE_NAME = 'komod-shell-v16';
 const COVER_CACHE = 'komod-covers-v3';
 const CORE_ASSETS = ['/', '/index.html', '/offline.html', '/manifest.webmanifest', '/komod.svg'];
+// Replaced with every emitted JS/CSS chunk by the Vite build plugin. Keeping
+// this list in the service worker makes installation atomic: a new worker is
+// activated only after the complete application shell is available offline.
+const BUILD_ASSETS = /*__KOMOD_BUILD_ASSETS__*/ [];
 
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME).then(async cache => {
-      // One optional asset must not abort installation of the whole offline app.
-      await Promise.allSettled(CORE_ASSETS.map(asset => cache.add(asset)));
       const response = await fetch('/index.html', { cache: 'no-store' });
       if (!response.ok) throw new Error('Unable to cache the application shell');
       const html = await response.clone().text();
-      await cache.put('/index.html', response);
       const assetPaths = [...html.matchAll(/(?:src|href)="(\/assets\/[^\"]+)"/g)].map(match => match[1]);
-      if (assetPaths.length) await Promise.allSettled([...new Set(assetPaths)].map(asset => cache.add(asset)));
+      const requiredAssets = [...new Set([
+        ...CORE_ASSETS.filter(asset => asset !== '/' && asset !== '/index.html'),
+        ...BUILD_ASSETS,
+        ...assetPaths,
+      ])];
+      // addAll intentionally rejects the installation if even one required
+      // chunk is missing. The previous working worker/cache then stays active.
+      await cache.addAll(requiredAssets);
+      await Promise.all([
+        cache.put('/index.html', response.clone()),
+        cache.put('/', response.clone()),
+      ]);
     }).then(() => self.skipWaiting())
   );
 });
@@ -75,11 +87,6 @@ self.addEventListener('fetch', event => {
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request, { cache: 'no-store' })
-        .then(response => {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put('/index.html', copy));
-          return response;
-        })
         .catch(async () => (await caches.match('/index.html')) || (await caches.match('/offline.html')))
     );
     return;

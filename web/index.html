@@ -26,7 +26,25 @@
   </head>
   <body class="bg-dark-950 text-white">
     <div id="root"></div>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script>
+      // Loading Telegram synchronously can block the whole PWA while offline.
+      // Load it independently and notify React if it becomes available later.
+      (() => {
+        let requested = false;
+        const loadTelegram = () => {
+          if (requested || !navigator.onLine) return;
+          requested = true;
+          const script = document.createElement('script');
+          script.src = 'https://telegram.org/js/telegram-web-app.js';
+          script.async = true;
+          script.onload = () => window.dispatchEvent(new Event('komod-telegram-ready'));
+          script.onerror = () => { requested = false; };
+          document.head.appendChild(script);
+        };
+        loadTelegram();
+        window.addEventListener('online', loadTelegram);
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
