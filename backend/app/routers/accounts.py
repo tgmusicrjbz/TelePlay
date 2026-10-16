@@ -759,6 +759,17 @@ async def add_authorized_user(payload: AdminUserCreate, _: User = Depends(requir
         user.is_active = True
         if payload.display_name is not None:
             user.display_name = payload.display_name.strip() or None
+    # If Telegram already knows this account (for example it has started the
+    # bot before), fill the real profile automatically. Failure is harmless:
+    # Telegram bots cannot resolve an arbitrary numeric id they never met.
+    if telegram.tg_client is not None:
+        try:
+            profile = await telegram.tg_client.get_users(payload.telegram_id)
+            user.username = profile.username
+            user.first_name = profile.first_name
+            user.last_name = profile.last_name
+        except Exception:
+            pass
     await db.commit()
     await db.refresh(user)
     return AdminUserResponse.model_validate(user, from_attributes=True)
@@ -788,8 +799,21 @@ async def update_admin_user(user_id: int, payload: AdminUserUpdate, admin: User 
         raise HTTPException(status_code=404, detail="User not found")
     if user.id == admin.id and payload.is_active is False:
         raise HTTPException(status_code=400, detail="نمی‌توانی حساب ادمین فعلی را غیرفعال کنی.")
-    if payload.display_name is not None:
-        user.display_name = payload.display_name.strip() or None
+    # `null` explicitly clears the administrator's alias. Checking only the
+    # value made the "use Telegram name" action a no-op.
+    if "display_name" in payload.model_fields_set:
+        user.display_name = (payload.display_name or "").strip() or None
+    # Refresh the underlying Telegram identity when possible. The custom alias
+    # stays separate, so administrators can rename the card without losing the
+    # real username/name shown below it.
+    if telegram.tg_client is not None:
+        try:
+            profile = await telegram.tg_client.get_users(user.telegram_id)
+            user.username = profile.username
+            user.first_name = profile.first_name
+            user.last_name = profile.last_name
+        except Exception:
+            pass
     if payload.is_active is not None:
         user.is_active = payload.is_active
         if not user.is_active:

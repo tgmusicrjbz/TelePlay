@@ -6,7 +6,7 @@ import { createPortal } from 'react-dom';
 import { X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipBack, SkipForward, Download, AlertTriangle, Copy, PictureInPicture2, Gauge, ChevronDown, ChevronUp, Repeat2, Shuffle, Headphones, RotateCcw, RotateCw, Clock3, ListPlus, ListMusic, GripVertical, Trash2, RectangleHorizontal, Smartphone, MonitorSmartphone, Film, LockKeyhole, UnlockKeyhole, MoreHorizontal, Save, History } from 'lucide-react';
 import { TelegramFile, useUpdateProgress, useFile, api, useCreatePlaylist, useAddPlaylistItems } from '../lib/api';
 import { useAppStore } from '../lib/store';
-import { DndContext, DragEndEvent, KeyboardSensor, PointerSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { closestCenter, DndContext, DragEndEvent, DragOverlay, KeyboardSensor, MouseSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 
@@ -82,11 +82,37 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     const createPlaylist = useCreatePlaylist();
     const addPlaylistItems = useAddPlaylistItems();
     const [showVideoMoreMenu, setShowVideoMoreMenu] = useState(false);
+    const videoMoreButtonRef = useRef<HTMLButtonElement>(null);
+    const [videoMenuPosition, setVideoMenuPosition] = useState({ top: 116, right: 12, width: 288, maxHeight: 360 });
+    const [activeQueueId, setActiveQueueId] = useState<string | null>(null);
+    const queueDropTargetRef = useRef<string | null>(null);
     const queueSensors = useSensors(
-        useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-        useSensor(TouchSensor, {activationConstraint:{delay:180,tolerance:8}}),
+        useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
+        useSensor(TouchSensor, { activationConstraint: { distance: 4 } }),
         useSensor(KeyboardSensor, {coordinateGetter:sortableKeyboardCoordinates}),
     );
+    const positionVideoMenu = useCallback(() => {
+        const rect = videoMoreButtonRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        const edge = 12;
+        const width = Math.min(288, window.innerWidth - edge * 2);
+        const right = Math.min(Math.max(edge, window.innerWidth - rect.right), window.innerWidth - width - edge);
+        const top = Math.min(rect.bottom + 8, window.innerHeight - 172);
+        setVideoMenuPosition({ top, right, width, maxHeight: Math.max(152, window.innerHeight - top - edge) });
+    }, []);
+    useEffect(() => {
+        if (!showVideoMoreMenu) return;
+        positionVideoMenu();
+        const update = () => positionVideoMenu();
+        window.addEventListener('resize', update);
+        window.addEventListener('orientationchange', update);
+        window.addEventListener('scroll', update, true);
+        return () => {
+            window.removeEventListener('resize', update);
+            window.removeEventListener('orientationchange', update);
+            window.removeEventListener('scroll', update, true);
+        };
+    }, [positionVideoMenu, showVideoMoreMenu]);
     const formatPlayerTime = (seconds: number) => {
         const safe = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
         const hours = Math.floor(safe / 3600);
@@ -909,7 +935,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                     {/* Secondary tools stay away from the transport controls. */}
                     <div data-player-controls data-player-tools className="absolute left-1/2 top-28 z-40 flex w-max max-w-[calc(100%-0.75rem)] -translate-x-1/2 flex-nowrap items-center justify-center gap-0.5 rounded-2xl border border-white/10 bg-black/45 p-1 shadow-xl backdrop-blur-md sm:top-28 sm:gap-1 sm:p-1.5">
                         {isVideo && <div className="relative">
-                            <button onClick={() => { setShowVideoMoreMenu(open => !open); setShowSleepMenu(false); }} className={`rounded-lg p-2 transition-all ${showVideoMoreMenu || repeatMode !== 'off' || audioOnly || sleepMode !== 'off' ? 'bg-primary-500/25 text-primary-200' : 'text-white/80 hover:bg-white/10'}`} title="گزینه‌های بیشتر" aria-expanded={showVideoMoreMenu}><MoreHorizontal className="h-5 w-5"/></button>
+                            <button ref={videoMoreButtonRef} onClick={() => { positionVideoMenu(); setShowVideoMoreMenu(open => !open); setShowSleepMenu(false); }} className={`rounded-lg p-2 transition-all ${showVideoMoreMenu || repeatMode !== 'off' || audioOnly || sleepMode !== 'off' ? 'bg-primary-500/25 text-primary-200' : 'text-white/80 hover:bg-white/10'}`} title="گزینه‌های بیشتر" aria-expanded={showVideoMoreMenu}><MoreHorizontal className="h-5 w-5"/></button>
                             {showVideoMoreMenu && createPortal(<>
                                 <button
                                     type="button"
@@ -917,7 +943,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                                     onClick={() => { setShowVideoMoreMenu(false); setShowSleepMenu(false); }}
                                     aria-label="بستن گزینه‌های ویدیو"
                                 />
-                                <div role="menu" aria-label="گزینه‌های بیشتر ویدیو" dir="rtl" onPointerDown={event=>event.stopPropagation()} onClick={event=>event.stopPropagation()} className="fixed inset-x-3 bottom-[max(1rem,env(safe-area-inset-bottom))] z-[301] box-border max-h-[min(65dvh,26rem)] overflow-y-auto overscroll-contain rounded-2xl border border-white/10 bg-dark-900/98 p-1.5 text-right shadow-2xl backdrop-blur-xl sm:left-auto sm:right-4 sm:w-80">
+                                <div role="menu" aria-label="گزینه‌های بیشتر ویدیو" dir="rtl" onPointerDown={event=>event.stopPropagation()} onClick={event=>event.stopPropagation()} className="fixed z-[301] box-border overflow-y-auto overscroll-contain rounded-2xl border border-white/10 bg-dark-900/98 p-1.5 text-right shadow-2xl backdrop-blur-xl" style={videoMenuPosition}>
                                 <button disabled={preparingAudio} className="context-menu-item w-full disabled:opacity-50" onClick={()=>void toggleAudioOnly()}><Headphones className="h-4 w-4"/><span>{preparingAudio?'در حال آماده‌سازی…':audioOnly ? 'بازگشت به تصویر' : 'پخش فقط صدا'}</span></button>
                                 <button className="context-menu-item w-full" onClick={() => setRepeatMode(repeatMode === 'off' ? (hasQueue ? 'all' : 'one') : repeatMode === 'all' ? 'one' : 'off')}><Repeat2 className="h-4 w-4"/><span className="min-w-0 flex-1">{repeatMode === 'off' ? 'تکرار خاموش' : repeatMode === 'all' ? 'تکرار همه ویدیوها' : 'تکرار همین ویدیو'}</span>{repeatMode === 'one'&&<strong className="text-primary-200">۱</strong>}</button>
                                 <button className="context-menu-item w-full" onClick={() => setShowSleepMenu(open => !open)}><Clock3 className="h-4 w-4"/><span className="min-w-0 flex-1">تایمر خواب</span>{sleepMode !== 'off'&&<span className="h-2 w-2 rounded-full bg-primary-400"/>}</button>
@@ -1096,10 +1122,11 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                         <header className="flex items-center gap-2 border-b border-white/[.07] px-3 py-3"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary-500/12 text-primary-200"><ListMusic className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h2 className="font-bold">{showHistory?'تاریخچه پخش':showRecommendations?'پیشنهاد بعدی':'صف پخش'}</h2><p className="mt-0.5 text-[11px] text-dark-400">{showHistory?`${historyItems.length.toLocaleString('fa-IR')} مورد اخیر`:showRecommendations?`${recommendations.length.toLocaleString('fa-IR')} پیشنهاد`:`${Math.max(0, playQueue.length-queueIndex-1).toLocaleString('fa-IR')} مورد در ادامه`}</p></div><button className={`btn-icon ${showRecommendations?'text-primary-300':''}`} onClick={()=>{setShowHistory(false);void loadRecommendations()}} title="پیشنهادها"><ListPlus className="h-4 w-4"/></button><button className={`btn-icon ${showHistory?'text-primary-300':''}`} onClick={()=>{setShowRecommendations(false);void loadHistory()}} title="تاریخچه"><History className="h-4 w-4"/></button><button className="btn-icon" onClick={()=>setShowQueueSave(value=>!value)} title="ذخیره صف"><Save className="h-4 w-4"/></button><button className="btn-icon" onClick={() => setShowQueue(false)} aria-label="بستن صف"><X className="h-5 w-5"/></button></header>
                         {!showHistory&&!showRecommendations&&<div className="flex items-center gap-2 overflow-x-auto border-b border-white/[.07] px-3 py-2"><span className="ml-auto shrink-0 text-[11px] text-dark-400">گذار نرم</span>{[0,2,4,6].map(seconds=><button key={seconds} onClick={()=>setCrossfadeSeconds(seconds)} className={`shrink-0 rounded-lg px-2.5 py-1 text-[10px] ${crossfadeSeconds===seconds?'bg-primary-500 text-white':'bg-white/[.05] text-dark-300'}`}>{seconds?`${seconds.toLocaleString('fa-IR')} ثانیه`:'بدون فاصله'}</button>)}</div>}
                         {showQueueSave&&<div className="flex gap-2 border-b border-white/[.07] p-3"><input autoFocus value={queueName} onChange={event=>setQueueName(event.target.value)} onKeyDown={event=>{if(event.key==='Enter')void saveNamedQueue()}} className="input min-w-0 flex-1 text-sm" placeholder="نام این صف"/><button disabled={!queueName.trim()||createPlaylist.isPending||addPlaylistItems.isPending} onClick={()=>void saveNamedQueue()} className="btn-primary shrink-0 px-4 text-xs disabled:opacity-40">ذخیره</button></div>}
-                        {showHistory?<div className="min-h-0 overflow-y-auto p-3">{historyItems.map((item,index)=><button key={item.id} onClick={()=>{useAppStore.getState().startQueue(historyItems,index);setShowHistory(false)}} className="mb-1.5 flex w-full items-center gap-3 rounded-2xl bg-white/[.025] p-3 text-right hover:bg-white/[.06]"><History className="h-4 w-4 shrink-0 text-dark-500"/><span dir="auto" className="min-w-0 flex-1 truncate text-sm">{item.file_name.replace(/\.[^.]+$/,'')}</span><span className="text-[10px] text-dark-500">{item.last_pos?`${Math.floor(item.last_pos/60).toLocaleString('fa-IR')} دقیقه`:''}</span></button>)}</div>:showRecommendations?<div className="min-h-0 overflow-y-auto p-3">{recommendations.map(item=><div key={item.id} className="mb-1.5 flex items-center gap-2 rounded-2xl bg-white/[.025] p-2"><button onClick={()=>useAppStore.getState().startQueue([item],0)} dir="auto" className="min-w-0 flex-1 truncate p-1 text-right text-sm">{item.file_name.replace(/\.[^.]+$/,'')}</button><button onClick={()=>{appendQueueItems([item]);setRecommendations(items=>items.filter(value=>value.id!==item.id))}} className="btn-icon h-9 w-9" title="افزودن به صف"><ListPlus className="h-4 w-4"/></button></div>)}</div>:<DndContext sensors={queueSensors} onDragEnd={({active,over}:DragEndEvent)=>{if(!over||active.id===over.id)return;const from=queueRows.findIndex(row=>row.id===active.id);const to=queueRows.findIndex(row=>row.id===over.id);if(from<0||to<0)return;moveQueueItem(from,to)}}>
+                        {showHistory?<div className="min-h-0 overflow-y-auto p-3">{historyItems.map((item,index)=><button key={item.id} onClick={()=>{useAppStore.getState().startQueue(historyItems,index);setShowHistory(false)}} className="mb-1.5 flex w-full items-center gap-3 rounded-2xl bg-white/[.025] p-3 text-right hover:bg-white/[.06]"><History className="h-4 w-4 shrink-0 text-dark-500"/><span dir="auto" className="min-w-0 flex-1 truncate text-sm">{item.file_name.replace(/\.[^.]+$/,'')}</span><span className="text-[10px] text-dark-500">{item.last_pos?`${Math.floor(item.last_pos/60).toLocaleString('fa-IR')} دقیقه`:''}</span></button>)}</div>:showRecommendations?<div className="min-h-0 overflow-y-auto p-3">{recommendations.map(item=><div key={item.id} className="mb-1.5 flex items-center gap-2 rounded-2xl bg-white/[.025] p-2"><button onClick={()=>useAppStore.getState().startQueue([item],0)} dir="auto" className="min-w-0 flex-1 truncate p-1 text-right text-sm">{item.file_name.replace(/\.[^.]+$/,'')}</button><button onClick={()=>{appendQueueItems([item]);setRecommendations(items=>items.filter(value=>value.id!==item.id))}} className="btn-icon h-9 w-9" title="افزودن به صف"><ListPlus className="h-4 w-4"/></button></div>)}</div>:<DndContext sensors={queueSensors} collisionDetection={closestCenter} onDragStart={({active})=>{const id=String(active.id);setActiveQueueId(id);queueDropTargetRef.current=id}} onDragOver={({over})=>{if(over)queueDropTargetRef.current=String(over.id)}} onDragCancel={()=>{setActiveQueueId(null);queueDropTargetRef.current=null}} onDragEnd={({active,over}:DragEndEvent)=>{setActiveQueueId(null);const activeId=String(active.id);const directTarget=over?String(over.id):null;const targetId=directTarget&&directTarget!==activeId?directTarget:queueDropTargetRef.current;queueDropTargetRef.current=null;if(!targetId||activeId===targetId)return;const from=queueRows.findIndex(row=>row.id===activeId);const to=queueRows.findIndex(row=>row.id===targetId);if(from<0||to<0)return;moveQueueItem(from,to)}}>
                             <SortableContext items={queueRows.map(row=>row.id)} strategy={verticalListSortingStrategy}>
                                 <div className="min-h-0 overflow-y-auto p-3">{queueRows.map(({item,index,id})=><SortableQueueRow key={id} sortableId={id} item={item} index={index} currentIndex={queueIndex} onPlay={()=>{useAppStore.getState().playQueueItem(index);setShowQueue(false)}} onRemove={()=>removeQueueItem(index)}/>)}</div>
                             </SortableContext>
+                            <DragOverlay dropAnimation={{duration:140,easing:'ease-out'}}>{activeQueueId&&<div className="flex min-h-14 w-[min(26rem,calc(100vw-2rem))] items-center gap-3 rounded-2xl border border-primary-400/30 bg-dark-800 px-3 shadow-2xl"><GripVertical className="h-4 w-4 text-primary-300"/><span dir="auto" className="truncate text-sm">{queueRows.find(row=>row.id===activeQueueId)?.item.file_name.replace(/\.[^.]+$/,'')}</span></div>}</DragOverlay>
                         </DndContext>}
                     </section>
                 </div>

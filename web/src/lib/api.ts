@@ -1106,7 +1106,7 @@ export const useSetStorageChannel = () => { const queryClient=useQueryClient(); 
 export const useResetStorageChannel = () => { const queryClient=useQueryClient(); return useMutation({ mutationFn: async()=>api.delete('/accounts/storage-channel'), onSuccess:()=>queryClient.invalidateQueries({queryKey:['storageChannel']}) }); };
 export const useUpdateAdminUser = () => {
     const queryClient = useQueryClient();
-    return useMutation({ mutationFn: async ({ id, ...payload }: { id: number; display_name?: string; is_active?: boolean; tts_daily_limit?:number; tts_max_chars?:number; stt_daily_limit?:number; stt_max_seconds?:number }) => (await api.patch<AdminUser>(`/admin/users/${id}`, payload)).data, onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['adminUsers'] }); queryClient.invalidateQueries({queryKey:['adminStats']}); } });
+    return useMutation({ mutationFn: async ({ id, ...payload }: { id: number; display_name?: string|null; is_active?: boolean; tts_daily_limit?:number; tts_max_chars?:number; stt_daily_limit?:number; stt_max_seconds?:number }) => (await api.patch<AdminUser>(`/admin/users/${id}`, payload)).data, onSuccess: (updated) => { queryClient.setQueryData<AdminUser[]>(['adminUsers'], current=>current?.map(item=>item.id===updated.id?updated:item)); queryClient.invalidateQueries({ queryKey: ['adminUsers'] }); queryClient.invalidateQueries({queryKey:['adminStats']}); } });
 };
 export const useAddAdminUser = () => {
     const queryClient = useQueryClient();

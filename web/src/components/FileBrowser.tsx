@@ -1225,16 +1225,14 @@ export default function FileBrowser() {
                                         </button>
                                     ))}
                                 </div>
-                                <div className="rounded-2xl border border-white/[.06] bg-dark-900/45 p-2">
+                                {savedFilters.length>0&&<div className="rounded-2xl border border-white/[.06] bg-dark-900/45 p-2">
                                     <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
                                         {savedFilters.map(filter=><div key={filter.id} className={`flex shrink-0 items-center rounded-xl border transition ${activeSavedFilterId===filter.id?'border-primary-400/35 bg-primary-500/15 text-primary-100':'border-white/[.07] bg-white/[.025] text-dark-300'}`}>
                                             <button type="button" onClick={()=>applySavedFilter(filter)} className="flex min-h-9 items-center gap-2 px-3 text-xs font-medium"><Sparkles className="h-3.5 w-3.5"/><span>{filter.name}</span></button>
                                             <button type="button" onClick={()=>void removeSavedFilter(filter.id)} className="ml-1 flex h-7 w-7 items-center justify-center rounded-lg text-dark-500 hover:bg-red-500/10 hover:text-red-300" title="حذف کشوی هوشمند"><X className="h-3.5 w-3.5"/></button>
                                         </div>)}
-                                        {!showSaveFilter&&<button type="button" onClick={()=>setShowSaveFilter(true)} className="flex min-h-9 shrink-0 items-center gap-2 rounded-xl border border-dashed border-primary-400/25 px-3 text-xs text-primary-200 hover:bg-primary-500/10"><BookmarkPlus className="h-4 w-4"/>ذخیره این فیلتر</button>}
                                     </div>
-                                    {showSaveFilter&&<div className="mt-2 flex items-center gap-2 border-t border-white/[.06] pt-2"><input autoFocus value={savedFilterName} onChange={event=>setSavedFilterName(event.target.value)} onKeyDown={event=>{if(event.key==='Enter')void saveCurrentFilter()}} className="input h-10 min-w-0 flex-1" placeholder="نام کشوی هوشمند" maxLength={40}/><button disabled={updateSavedFilters.isPending} onClick={()=>void saveCurrentFilter()} className="btn-primary h-10 shrink-0 px-3 text-xs">ذخیره</button><button onClick={()=>{setShowSaveFilter(false);setSavedFilterName('')}} className="btn-icon h-10 w-10 shrink-0"><X className="h-4 w-4"/></button></div>}
-                                </div>
+                                </div>}
                                 <div className="flex items-center justify-between gap-2 rounded-2xl border border-white/[0.06] bg-dark-900/55 p-1.5 shadow-sm">
                                     <div className="flex min-w-0 flex-wrap items-center gap-1 rounded-xl border border-white/[.07] bg-dark-950/60 p-1">
                                     <button title="تازه‌سازی" aria-label="تازه‌سازی" onClick={handleRefresh} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-dark-400 hover:text-white"><RefreshCw className={`h-4 w-4 ${filesFetching ? 'animate-spin' : ''}`}/></button>
@@ -1275,7 +1273,8 @@ export default function FileBrowser() {
                                         ))}
                                     </div>
                                     {fileTypeFilter.length > 0 && <button title="پاک‌کردن فیلترها" aria-label="پاک‌کردن فیلترها" onClick={() => toggleFileType(null)} className="mt-2 flex h-9 w-full items-center justify-center gap-2 rounded-xl text-xs text-red-300 hover:bg-red-500/10"><X className="h-4 w-4"/> پاک‌کردن فیلترها</button>}
-                                    <button type="button" onClick={()=>setShowSaveFilter(true)} className="mt-2 flex h-9 w-full items-center justify-center gap-2 rounded-xl border border-primary-400/15 bg-primary-500/[.07] text-xs text-primary-200 hover:bg-primary-500/15"><BookmarkPlus className="h-4 w-4"/> ذخیره به‌عنوان کشوی هوشمند</button>
+                                    {!showSaveFilter&&<button type="button" onClick={()=>setShowSaveFilter(true)} className="mt-2 flex h-9 w-full items-center justify-center gap-2 rounded-xl border border-primary-400/15 bg-primary-500/[.07] text-xs text-primary-200 hover:bg-primary-500/15"><BookmarkPlus className="h-4 w-4"/> ساخت کشوی هوشمند از این فیلتر</button>}
+                                    {showSaveFilter&&<div className="mt-2 flex items-center gap-2 border-t border-white/[.06] pt-2"><input autoFocus value={savedFilterName} onChange={event=>setSavedFilterName(event.target.value)} onKeyDown={event=>{if(event.key==='Enter')void saveCurrentFilter()}} className="input h-10 min-w-0 flex-1" placeholder="نام کشوی هوشمند" maxLength={40}/><button disabled={updateSavedFilters.isPending} onClick={()=>void saveCurrentFilter()} className="btn-primary h-10 shrink-0 px-3 text-xs">ساخت</button><button onClick={()=>{setShowSaveFilter(false);setSavedFilterName('')}} className="btn-icon h-10 w-10 shrink-0"><X className="h-4 w-4"/></button></div>}
                                 </div>
                             )}
                             {showSort && (

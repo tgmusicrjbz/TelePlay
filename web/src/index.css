@@ -150,6 +150,12 @@ input, textarea, select, button {
   font-family: inherit;
 }
 
+/* Direction should affect text flow, not replace the app typeface. */
+input, textarea, select,
+input[dir="ltr"], textarea[dir="ltr"], select[dir="ltr"] {
+  font-family: "Vazirmatn", system-ui, -apple-system, sans-serif !important;
+}
+
 .input-search {
   @apply bg-dark-800/40 border border-white/[0.06] rounded-xl
          pl-10 pr-4 py-2.5 text-white placeholder-dark-500
@@ -274,7 +280,7 @@ input, textarea, select, button {
   letter-spacing: .015em;
 }
 
-:lang(en), [dir="ltr"], code, pre, input[type="url"], input[type="email"] {
+:lang(en), [dir="ltr"], code, pre {
   font-family: "Segoe UI Variable", Inter, "SF Pro Text", Roboto, system-ui, sans-serif;
 }
 
