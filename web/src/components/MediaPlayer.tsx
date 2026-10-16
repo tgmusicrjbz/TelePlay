@@ -2,6 +2,7 @@
  * MediaPlayer - full screen video/audio player
  */
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipBack, SkipForward, Download, AlertTriangle, Copy, PictureInPicture2, Gauge, ChevronDown, ChevronUp, Repeat2, Shuffle, Headphones, RotateCcw, RotateCw, Clock3, ListPlus, ListMusic, GripVertical, Trash2, RectangleHorizontal, Smartphone, MonitorSmartphone, Film, LockKeyhole, UnlockKeyhole, MoreHorizontal, Save, History } from 'lucide-react';
 import { TelegramFile, useUpdateProgress, useFile, api, useCreatePlaylist, useAddPlaylistItems } from '../lib/api';
 import { useAppStore } from '../lib/store';
@@ -909,7 +910,14 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                     <div data-player-controls data-player-tools className="absolute left-1/2 top-28 z-40 flex w-max max-w-[calc(100%-0.75rem)] -translate-x-1/2 flex-nowrap items-center justify-center gap-0.5 rounded-2xl border border-white/10 bg-black/45 p-1 shadow-xl backdrop-blur-md sm:top-28 sm:gap-1 sm:p-1.5">
                         {isVideo && <div className="relative">
                             <button onClick={() => { setShowVideoMoreMenu(open => !open); setShowSleepMenu(false); }} className={`rounded-lg p-2 transition-all ${showVideoMoreMenu || repeatMode !== 'off' || audioOnly || sleepMode !== 'off' ? 'bg-primary-500/25 text-primary-200' : 'text-white/80 hover:bg-white/10'}`} title="گزینه‌های بیشتر" aria-expanded={showVideoMoreMenu}><MoreHorizontal className="h-5 w-5"/></button>
-                            {showVideoMoreMenu && <div role="menu" aria-label="گزینه‌های بیشتر ویدیو" onPointerDown={event=>event.stopPropagation()} onClick={event=>event.stopPropagation()} className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] left-1/2 z-[160] max-h-[min(60dvh,26rem)] w-[calc(100vw-1.5rem)] max-w-sm -translate-x-1/2 overflow-y-auto overscroll-contain rounded-2xl border border-white/10 bg-dark-900/98 p-1.5 text-right shadow-2xl backdrop-blur-xl">
+                            {showVideoMoreMenu && createPortal(<>
+                                <button
+                                    type="button"
+                                    className="fixed inset-0 z-[300] cursor-default bg-black/20"
+                                    onClick={() => { setShowVideoMoreMenu(false); setShowSleepMenu(false); }}
+                                    aria-label="بستن گزینه‌های ویدیو"
+                                />
+                                <div role="menu" aria-label="گزینه‌های بیشتر ویدیو" dir="rtl" onPointerDown={event=>event.stopPropagation()} onClick={event=>event.stopPropagation()} className="fixed inset-x-3 bottom-[max(1rem,env(safe-area-inset-bottom))] z-[301] box-border max-h-[min(65dvh,26rem)] overflow-y-auto overscroll-contain rounded-2xl border border-white/10 bg-dark-900/98 p-1.5 text-right shadow-2xl backdrop-blur-xl sm:left-auto sm:right-4 sm:w-80">
                                 <button disabled={preparingAudio} className="context-menu-item w-full disabled:opacity-50" onClick={()=>void toggleAudioOnly()}><Headphones className="h-4 w-4"/><span>{preparingAudio?'در حال آماده‌سازی…':audioOnly ? 'بازگشت به تصویر' : 'پخش فقط صدا'}</span></button>
                                 <button className="context-menu-item w-full" onClick={() => setRepeatMode(repeatMode === 'off' ? (hasQueue ? 'all' : 'one') : repeatMode === 'all' ? 'one' : 'off')}><Repeat2 className="h-4 w-4"/><span className="min-w-0 flex-1">{repeatMode === 'off' ? 'تکرار خاموش' : repeatMode === 'all' ? 'تکرار همه ویدیوها' : 'تکرار همین ویدیو'}</span>{repeatMode === 'one'&&<strong className="text-primary-200">۱</strong>}</button>
                                 <button className="context-menu-item w-full" onClick={() => setShowSleepMenu(open => !open)}><Clock3 className="h-4 w-4"/><span className="min-w-0 flex-1">تایمر خواب</span>{sleepMode !== 'off'&&<span className="h-2 w-2 rounded-full bg-primary-400"/>}</button>
@@ -918,7 +926,8 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                                     {sleepMode !== 'off'&&<button onClick={()=>setSleepTimer('off')} className="col-span-2 rounded-lg px-2 py-2 text-[11px] text-red-300 hover:bg-red-500/10">لغو تایمر</button>}
                                 </div>}
                                 {document.pictureInPictureEnabled && <button className="context-menu-item w-full" onClick={togglePiP}><PictureInPicture2 className="h-4 w-4"/><span>{isPiP ? 'خروج از تصویر در تصویر' : 'تصویر در تصویر'}</span></button>}
-                            </div>}
+                                </div>
+                            </>, document.body)}
                         </div>}
                         {!isVideo && <button onClick={() => setPlaylistFile(file)} className="rounded-lg p-2 text-white/80 hover:bg-white/10" title="افزودن به پلی‌لیست"><ListPlus className="h-5 w-5" /></button>}
                         {hasQueue && <button onClick={() => setShowQueue(true)} className="rounded-lg p-2 text-white/80 hover:bg-white/10" title="صف پخش"><ListMusic className="h-5 w-5" /></button>}

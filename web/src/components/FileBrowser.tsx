@@ -39,7 +39,7 @@ const sortLabels: Record<SortField, string> = {
 const extractImportUrls = (value: string) => {
     const starts = Array.from(value.matchAll(/https?:\/\//gi), match => match.index ?? -1).filter(index => index >= 0);
     return starts.map((start, index) => value.slice(start, starts[index + 1] ?? value.length)
-        .split(/[\s<>()\[\]{}"']/, 1)[0]
+        .split(/[\s<>()[\]{}"']/, 1)[0]
         .replace(/[،,.;!?]+$/g, ''))
         .filter(Boolean);
 };

@@ -850,6 +850,39 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(saved.folder_id, self.folder_id)
         self.assertIn("در کشوی", status.edit.await_args.args[0])
 
+    async def test_manual_personal_channel_post_is_added_once(self):
+        """A post written directly in a connected channel becomes a library item."""
+        from app.telegram import build_clients
+        build_clients()
+        from app.bot import import_personal_channel_post
+
+        channel_id = -1009876543210
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            user.storage_channel_id = channel_id
+            await db.commit()
+
+        message = SimpleNamespace(
+            id=4455,
+            chat=SimpleNamespace(id=channel_id),
+            text="یادداشت مستقیم از کانال\nاین متن باید در جست‌وجو هم بماند.",
+            video=None, audio=None, voice=None, animation=None,
+            video_note=None, document=None, photo=None,
+        )
+        with patch("app.bot.asyncio.sleep", new=AsyncMock()):
+            await import_personal_channel_post(message)
+            await import_personal_channel_post(message)
+
+        async with async_session() as db:
+            records = (await db.execute(select(File).where(
+                File.user_id == self.user_id,
+                File.storage_channel_id == channel_id,
+                File.channel_message_id == message.id,
+            ))).scalars().all()
+            self.assertEqual(len(records), 1)
+            self.assertEqual(records[0].file_type, "text")
+            self.assertIn("این متن", records[0].search_text)
+
     async def test_device_login_reuses_one_session(self):
         request = SimpleNamespace(
             headers={
