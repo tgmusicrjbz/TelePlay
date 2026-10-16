@@ -145,6 +145,19 @@ class TagSettingsResponse(BaseModel):
     display_limit: int = 2
 
 
+class SavedFilter(BaseModel):
+    id: str = Field(min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")
+    name: str = Field(min_length=1, max_length=40)
+    query: str = Field(default="", max_length=100)
+    file_types: List[Literal["video", "audio", "image", "document", "text"]] = Field(default_factory=list, max_length=5)
+    favorite_only: bool = False
+    sort: str = Field(default="created:desc", max_length=120)
+
+
+class SavedFiltersUpdate(BaseModel):
+    filters: List[SavedFilter] = Field(default_factory=list, max_length=20)
+
+
 class FileResponse(FileBase):
     id: int
     user_id: int

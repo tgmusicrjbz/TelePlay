@@ -94,6 +94,8 @@ async def init_db():
             await conn.execute(text(f"ALTER TABLE users ADD COLUMN delete_storage_files {delete_type} NOT NULL DEFAULT {delete_default}"))
         if "tag_settings_json" not in user_columns:
             await conn.execute(text("ALTER TABLE users ADD COLUMN tag_settings_json TEXT NOT NULL DEFAULT '[]'"))
+        if "saved_filters_json" not in user_columns:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN saved_filters_json TEXT NOT NULL DEFAULT '[]'"))
         if "show_file_tags" not in user_columns:
             tag_bool_type = "BOOLEAN" if url.drivername.startswith("postgresql") else "INTEGER"
             tag_bool_default = "FALSE" if url.drivername.startswith("postgresql") else "0"

@@ -26,6 +26,7 @@ class User(Base):
     storage_channel_id: Mapped[Optional[int]] = mapped_column(BigInteger)
     delete_storage_files: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     tag_settings_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    saved_filters_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
     show_file_tags: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     file_tag_limit: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
     tts_settings_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)

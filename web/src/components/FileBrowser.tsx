@@ -3,8 +3,8 @@
  */
 import { lazy, Suspense, useEffect, useCallback, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { FolderPlus, Folder as FolderIcon, Grid, LayoutGrid, List, Search, ChevronRight, Home, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, StickyNote, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ChevronUp, Plus, CheckSquare, Square, ListChecks, ListPlus, Upload, Star, RefreshCw, Link2, DownloadCloud, Download, Send, Eye, EyeOff, Minus, Pause, Play, Tags, Cloud, CloudOff, AudioLines, FileAudio } from 'lucide-react';
-import { api, useFiles, useFolders, useFolderTree, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useActivityFeed, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile, useImportLink, useTagSettings, useUnlockVault, useWorkspaces, sendFilesToTelegram, useTTSJobs, useSTTJobs } from '../lib/api';
+import { FolderPlus, Folder as FolderIcon, Grid, LayoutGrid, List, Search, ChevronRight, Home, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, StickyNote, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ChevronUp, Plus, CheckSquare, Square, ListChecks, ListPlus, Upload, Star, RefreshCw, Link2, DownloadCloud, Download, Send, Eye, EyeOff, Minus, Pause, Play, Tags, Cloud, CloudOff, AudioLines, FileAudio, Sparkles, BookmarkPlus } from 'lucide-react';
+import { api, useFiles, useFolders, useFolderTree, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useActivityFeed, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile, useImportLink, useTagSettings, useUnlockVault, useWorkspaces, sendFilesToTelegram, useTTSJobs, useSTTJobs, SavedFilter, useSavedFilters, useUpdateSavedFilters } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { cacheAllTextNotes, queueOfflineText, saveFileOffline } from '../lib/offline';
 import FileCard from './FileCard';
@@ -201,6 +201,11 @@ export default function FileBrowser() {
     const [textContent, setTextContent] = useState('');
     const [textFolder, setTextFolder] = useState<number | null>(null);
     const [contentScope, setContentScope] = useState<'all' | 'files' | 'folders'>('all');
+    const {data:savedFilters=[]} = useSavedFilters();
+    const updateSavedFilters = useUpdateSavedFilters();
+    const [activeSavedFilterId, setActiveSavedFilterId] = useState<string|null>(null);
+    const [showSaveFilter, setShowSaveFilter] = useState(false);
+    const [savedFilterName, setSavedFilterName] = useState('');
     const [sortCriteria, setSortCriteria] = useState<SortCriterion[]>(() => {
         try { return (JSON.parse(localStorage.getItem('komod-sort') || '') || [{ field: 'created', direction: 'desc' }]).slice(0,1); }
         catch { return [{ field: 'created', direction: 'desc' }]; }
@@ -259,7 +264,7 @@ export default function FileBrowser() {
     }, [searchQuery]);
 
     // Data Fetching
-    const { data: filesList, isLoading: filesLoading, isFetching: filesFetching, error: filesError, refetch: refetchFiles } = useFiles(hiddenOnly || debouncedSearchQuery ? undefined : effectiveFolderId, fileTypeFilter.join(',') || undefined, debouncedSearchQuery || undefined, page, sortValue, favoriteOnly, false, showHidden, hiddenOnly);
+    const { data: filesList, isLoading: filesLoading, isFetching: filesFetching, error: filesError, refetch: refetchFiles } = useFiles(hiddenOnly || debouncedSearchQuery || activeSavedFilterId ? undefined : effectiveFolderId, fileTypeFilter.join(',') || undefined, debouncedSearchQuery || undefined, page, sortValue, favoriteOnly, false, showHidden, hiddenOnly);
     const { data: activityFeed, isLoading: activityLoading, isError: activityError, refetch: refetchActivity } = useActivityFeed(activeSection === 'activity', 50);
     
 
@@ -894,7 +899,7 @@ export default function FileBrowser() {
     useEffect(() => {
         setPage(1);
         setHasMore(true);
-    }, [currentFolderId, fileTypeFilter, favoriteOnly, searchQuery, activeSection, sortValue]);
+    }, [currentFolderId, fileTypeFilter, favoriteOnly, searchQuery, activeSection, sortValue, activeSavedFilterId]);
 
     const selectedFilesForActions = displayFiles?.filter(file => selectedFileIds.has(file.id)) || [];
     const selectedPlayableFilesForActions = selectedFilesForActions.filter(file => file.file_type === 'audio' || file.file_type === 'video');
@@ -904,6 +909,7 @@ export default function FileBrowser() {
     const shownFolderCount = showFolders ? visibleFolders?.length || 0 : 0;
     const shownFileCount = showFiles ? displayFiles?.length || 0 : 0;
     const selectScope = (scope: 'all' | 'files' | 'folders') => {
+        setActiveSavedFilterId(null);
         setContentScope(scope);
         if (scope === 'folders') setFileTypeFilter(null);
         const allowed:SortField[]=scope==='files'?['name','type','size','duration','created','updated']:scope==='folders'?['name','count','created','updated']:['name','created','updated'];
@@ -911,13 +917,43 @@ export default function FileBrowser() {
         clearSelection();
     };
     const toggleFileType = (type: string | null) => {
+        setActiveSavedFilterId(null);
         if (type !== null) setContentScope('files');
         setFileTypeFilter(type);
         clearSelection();
     };
     const scopeSortFields:SortField[]=contentScope==='files'?['name','type','size','duration','created','updated']:contentScope==='folders'?['name','count','created','updated']:['name','created','updated'];
     const availableSortFields = scopeSortFields.filter(field => !sortCriteria.some(item => item.field === field));
-    const updateSort = (index: number, next: SortCriterion) => setSortCriteria(sortCriteria.map((item, itemIndex) => itemIndex === index ? next : item));
+    const updateSort = (index: number, next: SortCriterion) => { setActiveSavedFilterId(null); setSortCriteria(sortCriteria.map((item, itemIndex) => itemIndex === index ? next : item)); };
+    const applySavedFilter = (filter: SavedFilter) => {
+        const [rawField, rawDirection] = (filter.sort || 'created:desc').split(':');
+        const fields:SortField[]=['name','type','size','duration','created','updated'];
+        const field=fields.includes(rawField as SortField)?rawField as SortField:'created';
+        const direction=rawDirection==='asc'?'asc':'desc';
+        setCurrentFolderId(null);
+        setBreadcrumbs([{id:null,name:'کمد من'}]);
+        setContentScope('files');
+        setSearchQuery(filter.query);
+        setFileTypeFilter(filter.file_types);
+        setFavoriteOnly(filter.favorite_only);
+        setSortCriteria([{field,direction}]);
+        setActiveSavedFilterId(filter.id);
+        setShowFilters(false);
+        setShowSort(false);
+        clearSelection();
+    };
+    const saveCurrentFilter = async () => {
+        const name=savedFilterName.trim();
+        if(!name){addToast('یک نام برای کشوی هوشمند بنویس.','error');return}
+        const id=typeof crypto.randomUUID==='function'?crypto.randomUUID():`filter-${Date.now()}`;
+        const filter:SavedFilter={id,name:name.slice(0,40),query:searchQuery.trim().slice(0,100),file_types:fileTypeFilter.filter(type=>['video','audio','image','document','text'].includes(type)) as SavedFilter['file_types'],favorite_only:favoriteOnly,sort:sortValue||'created:desc'};
+        try{await updateSavedFilters.mutateAsync([...savedFilters,filter]);setSavedFilterName('');setShowSaveFilter(false);setActiveSavedFilterId(id);addToast('کشوی هوشمند ذخیره شد.');}
+        catch{addToast('ذخیره فیلتر انجام نشد.','error')}
+    };
+    const removeSavedFilter = async (id:string) => {
+        try{await updateSavedFilters.mutateAsync(savedFilters.filter(item=>item.id!==id));if(activeSavedFilterId===id)setActiveSavedFilterId(null);addToast('کشوی هوشمند حذف شد.');}
+        catch{addToast('حذف فیلتر انجام نشد.','error')}
+    };
     const visibleFileIds = showFiles ? displayFiles?.map(file => file.id) || [] : [];
     const visibleFolderIds = showFolders ? visibleFolders?.map(folder => folder.id) || [] : [];
     const totalSelectableFiles = showFiles ? (filesList?.total ?? visibleFileIds.length) : 0;
@@ -937,7 +973,7 @@ export default function FileBrowser() {
                     const totalPages = Math.ceil(totalSelectableFiles / perPage);
                     for (let requestedPage = 1; requestedPage <= totalPages; requestedPage += 1) {
                         const params:Record<string,unknown> = {page:requestedPage,per_page:perPage};
-                        if (!hiddenOnly && !searchQuery.trim() && effectiveFolderId !== undefined) params.folder_id = effectiveFolderId;
+                        if (!hiddenOnly && !activeSavedFilterId && !searchQuery.trim() && effectiveFolderId !== undefined) params.folder_id = effectiveFolderId;
                         if (fileTypeFilter.length) params.file_type = fileTypeFilter.join(',');
                         if (searchQuery.trim()) params.search = searchQuery.trim();
                         if (sortValue) params.sort = sortValue;
@@ -993,7 +1029,7 @@ export default function FileBrowser() {
         },650);
     };
     const endHiddenPress=()=>{if(hiddenPressTimer.current!==null){window.clearTimeout(hiddenPressTimer.current);hiddenPressTimer.current=null;}};
-    const toggleFavorites=()=>{if(hiddenPressTriggered.current){hiddenPressTriggered.current=false;return;}setFavoriteOnly(value=>!value);setPage(1);setAllFiles([]);};
+    const toggleFavorites=()=>{if(hiddenPressTriggered.current){hiddenPressTriggered.current=false;return;}setActiveSavedFilterId(null);setFavoriteOnly(value=>!value);setPage(1);setAllFiles([]);};
     const showVaultItems = async () => {
         try {
             if(!sessionStorage.getItem('komod-vault-token')) await unlockVault.mutateAsync(vaultPassword);
@@ -1053,12 +1089,12 @@ export default function FileBrowser() {
                                 type="text"
                                 placeholder="جست‌وجو در کمد…"
                                 value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
+                                onChange={(e) => {setActiveSavedFilterId(null);setSearchQuery(e.target.value)}}
                                 className="w-full bg-dark-800/50 border border-white/[0.06] rounded-lg pr-9 pl-3 py-1.5 text-sm text-white focus:outline-none focus:border-primary-500/50 focus:bg-dark-800 transition-all"
                             />
                             {activeSection === 'files' && searchQuery.trim() === debouncedSearchQuery && filesList?.search_mode === 'fuzzy' && Boolean(filesList.suggestions?.length) && <div className="absolute inset-x-0 top-[calc(100%+.45rem)] z-50 rounded-2xl border border-white/[.09] bg-dark-900/95 p-2 shadow-2xl backdrop-blur-xl">
                                 <p className="px-2 pb-1.5 text-[11px] text-dark-400">نتیجهٔ دقیق پیدا نشد؛ شاید منظورت این‌هاست:</p>
-                                <div className="flex flex-wrap gap-1.5">{filesList.suggestions!.map(suggestion=><button key={suggestion} type="button" onClick={()=>setSearchQuery(suggestion)} className="max-w-full truncate rounded-xl bg-primary-500/10 px-2.5 py-1.5 text-xs text-primary-200 transition hover:bg-primary-500/20">{suggestion}</button>)}</div>
+                                <div className="flex flex-wrap gap-1.5">{filesList.suggestions!.map(suggestion=><button key={suggestion} type="button" onClick={()=>{setActiveSavedFilterId(null);setSearchQuery(suggestion)}} className="max-w-full truncate rounded-xl bg-primary-500/10 px-2.5 py-1.5 text-xs text-primary-200 transition hover:bg-primary-500/20">{suggestion}</button>)}</div>
                             </div>}
                         </div>}
                         {activeSection === 'playlists' && <span className="truncate text-sm font-semibold text-white">🎧 پلی‌لیست‌ها</span>}
@@ -1189,6 +1225,16 @@ export default function FileBrowser() {
                                         </button>
                                     ))}
                                 </div>
+                                <div className="rounded-2xl border border-white/[.06] bg-dark-900/45 p-2">
+                                    <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
+                                        {savedFilters.map(filter=><div key={filter.id} className={`flex shrink-0 items-center rounded-xl border transition ${activeSavedFilterId===filter.id?'border-primary-400/35 bg-primary-500/15 text-primary-100':'border-white/[.07] bg-white/[.025] text-dark-300'}`}>
+                                            <button type="button" onClick={()=>applySavedFilter(filter)} className="flex min-h-9 items-center gap-2 px-3 text-xs font-medium"><Sparkles className="h-3.5 w-3.5"/><span>{filter.name}</span></button>
+                                            <button type="button" onClick={()=>void removeSavedFilter(filter.id)} className="ml-1 flex h-7 w-7 items-center justify-center rounded-lg text-dark-500 hover:bg-red-500/10 hover:text-red-300" title="حذف کشوی هوشمند"><X className="h-3.5 w-3.5"/></button>
+                                        </div>)}
+                                        {!showSaveFilter&&<button type="button" onClick={()=>setShowSaveFilter(true)} className="flex min-h-9 shrink-0 items-center gap-2 rounded-xl border border-dashed border-primary-400/25 px-3 text-xs text-primary-200 hover:bg-primary-500/10"><BookmarkPlus className="h-4 w-4"/>ذخیره این فیلتر</button>}
+                                    </div>
+                                    {showSaveFilter&&<div className="mt-2 flex items-center gap-2 border-t border-white/[.06] pt-2"><input autoFocus value={savedFilterName} onChange={event=>setSavedFilterName(event.target.value)} onKeyDown={event=>{if(event.key==='Enter')void saveCurrentFilter()}} className="input h-10 min-w-0 flex-1" placeholder="نام کشوی هوشمند" maxLength={40}/><button disabled={updateSavedFilters.isPending} onClick={()=>void saveCurrentFilter()} className="btn-primary h-10 shrink-0 px-3 text-xs">ذخیره</button><button onClick={()=>{setShowSaveFilter(false);setSavedFilterName('')}} className="btn-icon h-10 w-10 shrink-0"><X className="h-4 w-4"/></button></div>}
+                                </div>
                                 <div className="flex items-center justify-between gap-2 rounded-2xl border border-white/[0.06] bg-dark-900/55 p-1.5 shadow-sm">
                                     <div className="flex min-w-0 flex-wrap items-center gap-1 rounded-xl border border-white/[.07] bg-dark-950/60 p-1">
                                     <button title="تازه‌سازی" aria-label="تازه‌سازی" onClick={handleRefresh} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-dark-400 hover:text-white"><RefreshCw className={`h-4 w-4 ${filesFetching ? 'animate-spin' : ''}`}/></button>
@@ -1229,13 +1275,14 @@ export default function FileBrowser() {
                                         ))}
                                     </div>
                                     {fileTypeFilter.length > 0 && <button title="پاک‌کردن فیلترها" aria-label="پاک‌کردن فیلترها" onClick={() => toggleFileType(null)} className="mt-2 flex h-9 w-full items-center justify-center gap-2 rounded-xl text-xs text-red-300 hover:bg-red-500/10"><X className="h-4 w-4"/> پاک‌کردن فیلترها</button>}
+                                    <button type="button" onClick={()=>setShowSaveFilter(true)} className="mt-2 flex h-9 w-full items-center justify-center gap-2 rounded-xl border border-primary-400/15 bg-primary-500/[.07] text-xs text-primary-200 hover:bg-primary-500/15"><BookmarkPlus className="h-4 w-4"/> ذخیره به‌عنوان کشوی هوشمند</button>
                                 </div>
                             )}
                             {showSort && (
                                 <div className="mt-3 border-t border-white/[0.06] pt-3">
                                     <div className="mb-3 flex items-center justify-between gap-3">
                                         <p className="text-sm font-medium text-white">مرتب‌سازی</p>
-                                        <button onClick={() => setSortCriteria([{ field: 'created', direction: 'desc' }])} className="shrink-0 text-xs text-dark-400 hover:text-white">حالت پیش‌فرض</button>
+                                        <button onClick={() => {setActiveSavedFilterId(null);setSortCriteria([{ field: 'created', direction: 'desc' }])}} className="shrink-0 text-xs text-dark-400 hover:text-white">حالت پیش‌فرض</button>
                                     </div>
                                     <div className="grid gap-1.5">
                                         {sortCriteria.map((item, index) => (
@@ -1249,7 +1296,7 @@ export default function FileBrowser() {
                                         ))}
                                     </div>
                                     {availableSortFields.length > 0 && <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
-                                        {availableSortFields.map(field => <button key={field} className="flex min-h-10 items-center justify-center rounded-xl border border-white/10 bg-dark-800 px-2 text-xs text-dark-300 hover:border-primary-500/30 hover:text-white" onClick={() => setSortCriteria([{ field, direction: field==='created'||field==='updated'?'desc':'asc' }])}>{sortLabels[field]}</button>)}
+                                        {availableSortFields.map(field => <button key={field} className="flex min-h-10 items-center justify-center rounded-xl border border-white/10 bg-dark-800 px-2 text-xs text-dark-300 hover:border-primary-500/30 hover:text-white" onClick={() => {setActiveSavedFilterId(null);setSortCriteria([{ field, direction: field==='created'||field==='updated'?'desc':'asc' }])}}>{sortLabels[field]}</button>)}
                                     </div>}
                                 </div>
                             )}

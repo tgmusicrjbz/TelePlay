@@ -24,11 +24,12 @@ from fastapi import HTTPException
 from starlette.datastructures import Headers, UploadFile
 from starlette.requests import Request
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from app.database import Base, async_session, engine
 from app.models import AuthSession, BotUserState, ErrorLog, File, Folder, Playlist, PlaylistItem, ProcessingJob, SecurityEvent, TTSUsage, User, WatchProgress
 from app.routers.auth import _session_for_device, password_login, update_credentials
-from app.routers.accounts import admin_error_logs, admin_health, delete_tag_definition, export_account_data, get_tag_settings, resolve_admin_error, update_tag_settings
+from app.routers.accounts import admin_error_logs, admin_health, delete_tag_definition, export_account_data, get_saved_filters, get_tag_settings, import_account_data, resolve_admin_error, update_saved_filters, update_tag_settings
 from app.stt import consume_stt_quota
 from app.routers.files import (
     batch_update_files,
@@ -53,7 +54,7 @@ from app.routers.files import (
 from app.routers.folders import delete_folder_contents, list_folders, update_folder
 from app.routers.streaming import public_share_info, stored_message_response, unlock_public_share
 from app.routers.playlists import add_playlist_items, create_playlist, reorder_playlist, shuffle_playlist
-from app.schemas import BatchFileUpdate, CredentialsUpdate, FileUpdate, FolderUpdate, PasswordLoginRequest, PlayerStateUpdate, PlaylistAddItems, PlaylistCreate, PlaylistReorder, PublicShareCreate, PublicShareUnlock, TagDefinition, TagSettingsUpdate
+from app.schemas import BatchFileUpdate, CredentialsUpdate, FileUpdate, FolderUpdate, PasswordLoginRequest, PlayerStateUpdate, PlaylistAddItems, PlaylistCreate, PlaylistReorder, PublicShareCreate, PublicShareUnlock, SavedFilter, SavedFiltersUpdate, TagDefinition, TagSettingsUpdate
 from app.telegram import configure_main_client, start_one_client
 from app import telegram
 
@@ -143,6 +144,10 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
                 AuthSession.user_id == self.user_id, AuthSession.revoked_at.is_(None)
             ))).scalars().all()
             self.assertEqual(len(sessions), 1)
+            login_events = (await db.execute(select(SecurityEvent).where(
+                SecurityEvent.user_id == self.user_id, SecurityEvent.event_type == "login_success"
+            ))).scalars().all()
+            self.assertEqual(len(login_events), 1)
 
     async def test_tag_settings_counts_and_hash_search(self):
         async with async_session() as db:
@@ -440,6 +445,27 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("⚙️ تنظیمات نام و توضیح", labels)
         self.assertIn("🗑️ حذف پلی‌لیست", labels)
 
+    async def test_saved_filters_are_validated_and_persisted(self):
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            payload = SavedFiltersUpdate(filters=[SavedFilter(
+                id="music-notes",
+                name="  صداهای نشان‌شده  ",
+                query="#مهم",
+                file_types=["audio", "audio"],
+                favorite_only=True,
+                sort="name:asc",
+            )])
+            saved = await update_saved_filters(payload, user, db)
+            self.assertEqual(saved[0]["name"], "صداهای نشان‌شده")
+            self.assertEqual(saved[0]["file_types"], ["audio"])
+
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            restored = await get_saved_filters(user)
+            self.assertEqual(restored[0]["query"], "#مهم")
+            self.assertTrue(restored[0]["favorite_only"])
+
     async def test_playlist_item_reorder_is_returned_and_persisted(self):
         """The web client reorders playlist-item IDs, including duplicate files."""
         async with async_session() as db:
@@ -602,6 +628,31 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             serialized = response.body.decode("utf-8")
             self.assertNotIn("must-not-leak", serialized)
             self.assertNotIn("also-secret", serialized)
+
+    async def test_account_backup_restore_merges_file_metadata_and_playlists(self):
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            media = await db.get(File, self.direct_file_id)
+            media.file_type = "audio"
+            media.file_name = "original.mp3"
+            media.tags_json = '["آرشیو"]'
+            playlist = Playlist(user_id=user.id, name="نسخه پشتیبان", position=0)
+            db.add(playlist); await db.flush()
+            db.add(PlaylistItem(playlist_id=playlist.id, file_id=media.id, position=0))
+            await db.commit()
+            backup = json.loads((await export_account_data(user, db)).body.decode("utf-8"))
+            media.file_name = "changed.mp3"
+            media.tags_json = "[]"
+            await db.delete(playlist)
+            await db.commit()
+            request = Request({"type":"http","method":"POST","path":"/api/accounts/import","headers":[(b"user-agent",b"Komod Test")],"client":("127.0.0.1",1234)})
+            result = await import_account_data(request, backup, user, db)
+            await db.refresh(media)
+            self.assertEqual(media.file_name, "original.mp3")
+            self.assertEqual(json.loads(media.tags_json), ["آرشیو"])
+            self.assertEqual(result["playlists_restored"], 1)
+            restored = (await db.execute(select(Playlist).where(Playlist.user_id == user.id, Playlist.name == "نسخه پشتیبان").options(selectinload(Playlist.items)))).scalar_one()
+            self.assertEqual([item.file_id for item in restored.items], [media.id])
 
     async def test_offline_manifest_keeps_owned_visible_files_in_selected_order(self):
         async with async_session() as db:

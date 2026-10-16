@@ -4,9 +4,11 @@ import hashlib
 import time
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response
 from passlib.context import CryptContext
 from pyrogram.enums import ChatMemberStatus, ChatType
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -15,12 +17,15 @@ from ..auth import create_vault_token, get_current_user, require_vault_access
 from ..config import get_settings
 from ..database import get_db
 from ..models import AuthSession, File, Folder, Playlist, PlaylistItem, ProcessingJob, SecurityEvent, TTSUsage, User, WorkspaceGrant
-from ..schemas import AccountPreferences, AdminHealthResponse, AdminStatsResponse, AdminUserCreate, AdminUserResponse, AdminUserUpdate, ServiceHealthItem, StorageChannelResponse, StorageChannelUpdate, StuckJobResponse, TagDefinitionResponse, TagSettingsResponse, TagSettingsUpdate, VaultPasswordRequest, VaultStatus, VaultTokenResponse, WorkspaceGrantCreate, WorkspaceResponse
+from ..schemas import AccountPreferences, AdminHealthResponse, AdminStatsResponse, AdminUserCreate, AdminUserResponse, AdminUserUpdate, SavedFilter, SavedFiltersUpdate, ServiceHealthItem, StorageChannelResponse, StorageChannelUpdate, StuckJobResponse, TagDefinitionResponse, TagSettingsResponse, TagSettingsUpdate, VaultPasswordRequest, VaultStatus, VaultTokenResponse, WorkspaceGrantCreate, WorkspaceResponse
 from .. import telegram
+from ..audit import add_security_event
+from ..services import sanitize_filename
 
 router = APIRouter(tags=["Accounts"])
 settings = get_settings()
 vault_password_context = CryptContext(schemes=["pbkdf2_sha256"], pbkdf2_sha256__default_rounds=600_000, deprecated="auto")
+limiter = Limiter(key_func=get_remote_address)
 
 
 @router.get("/accounts/security-events")
@@ -78,6 +83,7 @@ async def export_account_data(
             "show_file_tags": current_user.show_file_tags,
             "file_tag_limit": current_user.file_tag_limit,
             "tag_settings": parsed(current_user.tag_settings_json, []),
+            "saved_filters": parsed(current_user.saved_filters_json, []),
             "tts_settings": parsed(current_user.tts_settings_json, {}),
         },
         "folders": [{
@@ -104,6 +110,159 @@ async def export_account_data(
         content=content, media_type="application/json; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="komod-backup-{current_user.telegram_id}.json"'},
     )
+
+
+@router.post("/accounts/import")
+@limiter.limit("5/hour")
+async def import_account_data(
+    request: Request,
+    payload: dict = Body(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Safely merge settings and metadata from a Komod export into the current account."""
+    if payload.get("format") != "komod-account-export" or payload.get("version") != 1:
+        raise HTTPException(status_code=422, detail="این فایل نسخهٔ پشتیبان معتبر کمد نیست.")
+    raw_folders = payload.get("folders") if isinstance(payload.get("folders"), list) else []
+    raw_files = payload.get("files") if isinstance(payload.get("files"), list) else []
+    raw_playlists = payload.get("playlists") if isinstance(payload.get("playlists"), list) else []
+    if len(raw_folders) > 5_000 or len(raw_files) > 100_000 or len(raw_playlists) > 2_000:
+        raise HTTPException(status_code=413, detail="نسخهٔ پشتیبان بیش از حد بزرگ است.")
+
+    preferences = payload.get("preferences") if isinstance(payload.get("preferences"), dict) else {}
+    if "delete_storage_files" in preferences:
+        current_user.delete_storage_files = bool(preferences["delete_storage_files"])
+    current_user.show_file_tags = bool(preferences.get("show_file_tags", current_user.show_file_tags))
+    current_user.file_tag_limit = max(1, min(int(preferences.get("file_tag_limit", current_user.file_tag_limit) or 2), 6))
+    tag_settings = preferences.get("tag_settings")
+    if isinstance(tag_settings, list):
+        current_user.tag_settings_json = json.dumps(clean_tag_definitions(tag_settings), ensure_ascii=False)
+    saved_filters = preferences.get("saved_filters")
+    if isinstance(saved_filters, list):
+        current_user.saved_filters_json = json.dumps(clean_saved_filters(saved_filters), ensure_ascii=False)
+    tts_settings = preferences.get("tts_settings")
+    if isinstance(tts_settings, dict):
+        # Preferences contain no API keys; unknown values remain bounded by JSON size.
+        encoded_tts = json.dumps(tts_settings, ensure_ascii=False)
+        if len(encoded_tts) <= 50_000:
+            current_user.tts_settings_json = encoded_tts
+
+    folders = (await db.execute(select(Folder).where(Folder.user_id == current_user.id))).scalars().all()
+    folder_by_key = {(item.parent_id, item.name.casefold()): item for item in folders}
+    folder_map: dict[int, int] = {}
+    pending = [item for item in raw_folders if isinstance(item, dict) and str(item.get("id", "")).isdigit()]
+    created_folders = 0
+    for _ in range(len(pending) + 1):
+        progressed = False
+        for item in list(pending):
+            old_id = int(item["id"])
+            old_parent = item.get("parent_id")
+            if old_parent is not None and str(old_parent).isdigit() and int(old_parent) not in folder_map:
+                continue
+            parent_id = folder_map.get(int(old_parent)) if old_parent is not None and str(old_parent).isdigit() else None
+            name = str(item.get("name") or "کشوی بازیابی‌شده").strip()[:255]
+            key = (parent_id, name.casefold())
+            folder = folder_by_key.get(key)
+            if folder is None:
+                folder = Folder(user_id=current_user.id, parent_id=parent_id, name=name)
+                db.add(folder); await db.flush()
+                folder_by_key[key] = folder
+                created_folders += 1
+            folder.description = str(item.get("description") or "").strip()[:2_000] or None
+            color = str(item.get("color") or "")
+            folder.color = color.lower() if len(color) == 7 and color.startswith("#") and all(char in "0123456789abcdefABCDEF" for char in color[1:]) else None
+            folder.icon = str(item.get("icon") or "").strip()[:16] or None
+            folder.is_favorite = bool(item.get("is_favorite"))
+            folder.is_pinned = bool(item.get("is_pinned"))
+            folder.is_hidden = bool(item.get("is_hidden")) and bool(current_user.vault_password_hash)
+            folder_map[old_id] = folder.id
+            pending.remove(item); progressed = True
+        if not pending or not progressed:
+            break
+
+    files = (await db.execute(select(File).where(File.user_id == current_user.id))).scalars().all()
+    files_by_unique = {item.file_unique_id: item for item in files}
+    restored_files = 0
+    for item in raw_files:
+        if not isinstance(item, dict):
+            continue
+        file = files_by_unique.get(str(item.get("file_unique_id") or ""))
+        if file is None:
+            continue
+        file.file_name = sanitize_filename(str(item.get("file_name") or file.file_name))
+        file.description = str(item.get("description") or "").strip()[:10_000] or None
+        tags = []
+        for value in item.get("tags", []) if isinstance(item.get("tags"), list) else []:
+            tag = " ".join(str(value).strip().lstrip("#").split())[:40]
+            if tag and tag.casefold() not in {current.casefold() for current in tags}:
+                tags.append(tag)
+            if len(tags) >= 20:
+                break
+        file.tags_json = json.dumps(tags, ensure_ascii=False)
+        old_folder = item.get("folder_id")
+        if old_folder is None:
+            file.folder_id = None
+        elif str(old_folder).isdigit() and int(old_folder) in folder_map:
+            file.folder_id = folder_map[int(old_folder)]
+        file.is_favorite = bool(item.get("is_favorite"))
+        file.is_pinned = bool(item.get("is_pinned"))
+        file.is_hidden = bool(item.get("is_hidden")) and bool(current_user.vault_password_hash)
+        restored_files += 1
+
+    playlists = (await db.execute(select(Playlist).where(Playlist.user_id == current_user.id))).scalars().all()
+    playlist_by_name = {item.name.casefold(): item for item in playlists}
+    playlist_entries: dict[int, list[PlaylistItem]] = {item.id: [] for item in playlists}
+    if playlists:
+        entries = (await db.execute(select(PlaylistItem).where(
+            PlaylistItem.playlist_id.in_([item.id for item in playlists]),
+        ).order_by(PlaylistItem.position))).scalars().all()
+        for entry in entries:
+            playlist_entries.setdefault(entry.playlist_id, []).append(entry)
+    restored_playlists = 0
+    for raw in raw_playlists:
+        if not isinstance(raw, dict):
+            continue
+        name = str(raw.get("name") or "").strip()[:255]
+        if not name:
+            continue
+        playlist = playlist_by_name.get(name.casefold())
+        if playlist is None:
+            playlist = Playlist(user_id=current_user.id, name=name, position=len(playlist_by_name))
+            db.add(playlist); await db.flush()
+            playlist_by_name[name.casefold()] = playlist
+            playlist_entries[playlist.id] = []
+        playlist.description = str(raw.get("description") or "").strip()[:2_000] or None
+        existing_counts: dict[int, int] = {}
+        current_entries = playlist_entries.get(playlist.id, [])
+        for entry in current_entries:
+            existing_counts[entry.file_id] = existing_counts.get(entry.file_id, 0) + 1
+        desired_counts: dict[int, int] = {}
+        position = max((entry.position for entry in current_entries), default=-1) + 1
+        for unique_id in raw.get("items", []) if isinstance(raw.get("items"), list) else []:
+            file = files_by_unique.get(str(unique_id))
+            if file is None or file.file_type not in {"audio", "video"}:
+                continue
+            desired_counts[file.id] = desired_counts.get(file.id, 0) + 1
+            if desired_counts[file.id] <= existing_counts.get(file.id, 0):
+                continue
+            entry = PlaylistItem(playlist_id=playlist.id, file_id=file.id, position=position)
+            db.add(entry)
+            current_entries.append(entry)
+            position += 1
+        restored_playlists += 1
+
+    add_security_event(
+        db, "account_backup_restored", user_id=current_user.id, request=request,
+        target_type="account", target_id=current_user.id,
+        details={"folders_created": created_folders, "files_restored": restored_files, "playlists": restored_playlists},
+    )
+    await db.commit()
+    return {
+        "folders_created": created_folders,
+        "folders_skipped": len(pending),
+        "files_restored": restored_files,
+        "playlists_restored": restored_playlists,
+    }
 
 
 def user_name(user: User) -> str:
@@ -227,6 +386,48 @@ async def list_workspaces(current_user: User = Depends(get_current_user), db: As
     return result
 
 
+def clean_saved_filters(raw_filters) -> list[dict]:
+    result: list[dict] = []
+    seen: set[str] = set()
+    for raw in raw_filters if isinstance(raw_filters, list) else []:
+        if not isinstance(raw, dict):
+            continue
+        try:
+            item = SavedFilter.model_validate(raw).model_dump()
+        except ValueError:
+            continue
+        if item["id"] in seen:
+            continue
+        seen.add(item["id"])
+        item["name"] = " ".join(item["name"].split())
+        item["file_types"] = list(dict.fromkeys(item["file_types"]))
+        result.append(item)
+        if len(result) >= 20:
+            break
+    return result
+
+
+@router.get("/accounts/saved-filters", response_model=list[SavedFilter])
+async def get_saved_filters(current_user: User = Depends(get_current_user)):
+    try:
+        raw = json.loads(current_user.saved_filters_json or "[]")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        raw = []
+    return clean_saved_filters(raw)
+
+
+@router.put("/accounts/saved-filters", response_model=list[SavedFilter])
+async def update_saved_filters(
+    payload: SavedFiltersUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    filters = clean_saved_filters([item.model_dump() for item in payload.filters])
+    current_user.saved_filters_json = json.dumps(filters, ensure_ascii=False)
+    await db.commit()
+    return filters
+
+
 @router.get("/accounts/grants", response_model=list[WorkspaceResponse])
 async def list_grants(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     rows = (await db.execute(select(WorkspaceGrant, User).join(User, User.id == WorkspaceGrant.member_user_id).where(
@@ -236,7 +437,8 @@ async def list_grants(current_user: User = Depends(get_current_user), db: AsyncS
 
 
 @router.post("/accounts/grants", response_model=WorkspaceResponse)
-async def grant_workspace(payload: WorkspaceGrantCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+@limiter.limit("20/hour")
+async def grant_workspace(request: Request, payload: WorkspaceGrantCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     identifier = (payload.identifier or "").strip().lstrip("@")
     if payload.telegram_id is not None:
         member_query = select(User).where(User.telegram_id == payload.telegram_id)
@@ -269,18 +471,20 @@ async def grant_workspace(payload: WorkspaceGrantCreate, current_user: User = De
     else:
         grant.permission = payload.permission
     grant.scope_json = scope_json
+    add_security_event(db, "workspace_grant_updated", user_id=current_user.id, request=request, target_type="user", target_id=member.id, details={"permission":payload.permission,"folders":len(folder_ids),"files":len(file_ids)})
     await db.commit()
     return workspace_response(member, grant.permission, grant)
 
 
 @router.delete("/accounts/grants/{member_user_id}", status_code=204)
-async def revoke_workspace(member_user_id: int, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def revoke_workspace(member_user_id: int, request: Request, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     grant = (await db.execute(select(WorkspaceGrant).where(
         WorkspaceGrant.owner_user_id == current_user.id, WorkspaceGrant.member_user_id == member_user_id
     ))).scalar_one_or_none()
     if grant is None:
         raise HTTPException(status_code=404, detail="دسترسی پیدا نشد")
     await db.delete(grant)
+    add_security_event(db, "workspace_grant_revoked", user_id=current_user.id, request=request, target_type="user", target_id=member_user_id)
     await db.commit()
     return Response(status_code=204)
 
@@ -359,6 +563,7 @@ async def get_vault_status(current_user: User = Depends(get_current_user)):
 
 
 @router.put("/accounts/vault", response_model=VaultTokenResponse)
+@limiter.limit("10/hour")
 async def set_vault_password(
     payload: VaultPasswordRequest,
     request: Request,
@@ -368,13 +573,18 @@ async def set_vault_password(
     if current_user.vault_password_hash:
         require_vault_access(request, current_user)
     current_user.vault_password_hash = vault_password_context.hash(payload.password)
+    add_security_event(db, "vault_password_updated", user_id=current_user.id, request=request, target_type="account", target_id=current_user.id)
     await db.commit()
     return VaultTokenResponse(token=create_vault_token(current_user.telegram_id, current_user.auth_version))
 
 
 @router.post("/accounts/vault/unlock", response_model=VaultTokenResponse)
-async def unlock_vault(payload: VaultPasswordRequest, current_user: User = Depends(get_current_user)):
-    if not current_user.vault_password_hash or not vault_password_context.verify(payload.password, current_user.vault_password_hash):
+@limiter.limit("10/minute")
+async def unlock_vault(request: Request, payload: VaultPasswordRequest, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    valid = bool(current_user.vault_password_hash) and vault_password_context.verify(payload.password, current_user.vault_password_hash)
+    add_security_event(db, "vault_unlocked" if valid else "vault_unlock_failed", user_id=current_user.id, request=request, success=valid, suspicious=not valid, target_type="account", target_id=current_user.id)
+    await db.commit()
+    if not valid:
         raise HTTPException(status_code=401, detail="رمز گاوصندوق درست نیست")
     return VaultTokenResponse(token=create_vault_token(current_user.telegram_id, current_user.auth_version))
 

@@ -46,6 +46,14 @@ export interface AdminErrorLog { id:number; error_id:string; method:string; path
 export interface AccountPreferences { delete_storage_files: boolean; }
 export interface TagDefinition { name: string; color: string; file_count?: number; }
 export interface TagSettings { tags: TagDefinition[]; show_file_tags: boolean; display_limit: number; }
+export interface SavedFilter {
+    id: string;
+    name: string;
+    query: string;
+    file_types: Array<'video'|'audio'|'image'|'document'|'text'>;
+    favorite_only: boolean;
+    sort: string;
+}
 export interface VaultStatus { configured: boolean; }
 export interface StorageChannel { configured: boolean; channel_id?: number | null; title?: string | null; }
 export interface TTSVoice { value: string; label: string; description: string; gender: 'female'|'male'; pitch: 'low'|'medium'|'high'; }
@@ -994,6 +1002,19 @@ export const useTagSettings = () => useQuery<TagSettings>({
     queryKey: ['tag-settings'],
     queryFn: async () => cacheTagSettings((await api.get<TagSettings>('/accounts/tags')).data),
 });
+
+export const useSavedFilters = () => useQuery<SavedFilter[]>({
+    queryKey: ['saved-filters'],
+    queryFn: async () => (await api.get<SavedFilter[]>('/accounts/saved-filters')).data,
+});
+
+export const useUpdateSavedFilters = () => {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async (filters: SavedFilter[]) => (await api.put<SavedFilter[]>('/accounts/saved-filters', {filters})).data,
+        onSuccess: data => queryClient.setQueryData(['saved-filters'], data),
+    });
+};
 
 export const useUpdateTagSettings = () => {
     const queryClient = useQueryClient();

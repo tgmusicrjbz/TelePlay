@@ -2,6 +2,7 @@
 Authentication API endpoints.
 """
 from datetime import datetime, timedelta
+import asyncio
 import uuid
 import hashlib
 import hmac
@@ -118,13 +119,45 @@ def _new_session(request: Request, user: User) -> AuthSession:
     )
 
 
-async def _session_for_device(db: AsyncSession, request: Request, user: User) -> AuthSession:
-    """Reuse one revocable session per browser installation instead of per reconnect."""
+def _stable_device_session_id(request: Request, user: User) -> str | None:
     device_id = request.headers.get("x-komod-device-id", "").strip()[:128]
     if not device_id:
-        return _new_session(request, user)
+        return None
+    return f"device-{hashlib.sha256(f'komod:{user.id}:{device_id}'.encode()).hexdigest()[:57]}"
 
-    session_id = f"device-{hashlib.sha256(f'komod:{user.id}:{device_id}'.encode()).hexdigest()[:57]}"
+
+async def _is_new_device(db: AsyncSession, request: Request, user: User) -> bool:
+    session_id = _stable_device_session_id(request, user)
+    if session_id is None:
+        return True
+    session = await db.get(AuthSession, session_id)
+    return session is None or session.revoked_at is not None
+
+
+async def _notify_new_device(user: User, request: Request) -> None:
+    """Best-effort Telegram warning; authentication never depends on delivery."""
+    if not any(getattr(client, "is_connected", False) for client in telegram.clients):
+        return
+    forwarded = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+    ip_address = forwarded or (request.client.host if request.client else "نامشخص")
+    message = (
+        "🔐 ورود تازه به کمد\n\n"
+        f"دستگاه: {_device_name(request.headers.get('user-agent', ''))}\n"
+        f"آی‌پی: {ip_address}\n"
+        "اگر خودت نبودی، از تنظیمات ← مدیریت نشست‌ها، دسترسی آن دستگاه را قطع کن."
+    )
+    try:
+        await asyncio.wait_for(telegram.tg_client.send_message(user.telegram_id, message), timeout=5)
+    except Exception:
+        # Telegram can be temporarily unreachable or the user may not have opened the bot.
+        pass
+
+
+async def _session_for_device(db: AsyncSession, request: Request, user: User) -> AuthSession:
+    """Reuse one revocable session per browser installation instead of per reconnect."""
+    session_id = _stable_device_session_id(request, user)
+    if session_id is None:
+        return _new_session(request, user)
     session = await db.get(AuthSession, session_id)
     now = datetime.utcnow()
     user_agent = request.headers.get("user-agent")
@@ -215,10 +248,13 @@ async def password_login(
     user.failed_login_attempts = 0
     user.login_locked_until = None
     user.last_active = now
+    new_device = await _is_new_device(db, request, user)
     session = await _session_for_device(db, request, user)
     db.add(session)
-    add_security_event(db, "login_success", user_id=user.id, request=request, target_type="session", target_id=session.id)
+    add_security_event(db, "login_success", user_id=user.id, request=request, suspicious=new_device, target_type="session", target_id=session.id, details={"new_device": new_device})
     await db.commit()
+    if new_device:
+        await _notify_new_device(user, request)
     return _auth_response(user, session)
 
 
@@ -410,6 +446,7 @@ async def get_current_user_info(
 
 
 @router.post("/session", response_model=AuthResponse)
+@limiter.limit("20/minute")
 async def register_current_session(
     request: Request,
     current_user: User = Depends(get_current_user),
@@ -433,6 +470,7 @@ async def register_current_session(
 
 
 @router.post("/telegram-webapp", response_model=AuthResponse)
+@limiter.limit("20/minute")
 async def login_from_telegram_webapp(
     request: Request,
     payload: TelegramWebAppRequest,
@@ -459,9 +497,13 @@ async def login_from_telegram_webapp(
         user.last_name = tg_user.get("last_name")
     if not user.is_active:
         raise HTTPException(status_code=403, detail="User account is inactive")
+    new_device = await _is_new_device(db, request, user)
     session = await _session_for_device(db, request, user)
     db.add(session)
+    add_security_event(db, "login_success", user_id=user.id, request=request, suspicious=new_device, target_type="session", target_id=session.id, details={"source":"telegram_webapp","new_device":new_device})
     await db.commit()
+    if new_device:
+        await _notify_new_device(user, request)
     return AuthResponse(
         access_token=create_access_token(user.telegram_id, user.auth_version, session.id),
         refresh_token=create_refresh_token(user.telegram_id, user.auth_version, session.id),
