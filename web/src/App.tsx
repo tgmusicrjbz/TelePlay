@@ -15,6 +15,7 @@ const MediaPlayer = lazy(() => import('./components/MediaPlayer'));
 const ContentPreview = lazy(() => import('./components/ContentPreview'));
 const AddToPlaylistDialog = lazy(() => import('./components/AddToPlaylistDialog'));
 const FileDetailsSheet = lazy(() => import('./components/FileDetailsSheet'));
+const PublicSharePage = lazy(() => import('./components/PublicSharePage'));
 
 function DeferredOverlays() {
     const previewFile = useAppStore(state => state.previewFile);
@@ -507,6 +508,7 @@ function App() {
             <Routes>
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/auth" element={<AuthCallback />} />
+                <Route path="/s/:publicHash" element={<Suspense fallback={null}><PublicSharePage /></Suspense>} />
                 <Route
                     path="/*"
                     element={

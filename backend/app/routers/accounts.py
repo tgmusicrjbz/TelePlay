@@ -9,17 +9,101 @@ from passlib.context import CryptContext
 from pyrogram.enums import ChatMemberStatus, ChatType
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from ..auth import create_vault_token, get_current_user, require_vault_access
 from ..config import get_settings
 from ..database import get_db
-from ..models import AuthSession, File, Folder, ProcessingJob, TTSUsage, User, WorkspaceGrant
+from ..models import AuthSession, File, Folder, Playlist, PlaylistItem, ProcessingJob, SecurityEvent, TTSUsage, User, WorkspaceGrant
 from ..schemas import AccountPreferences, AdminHealthResponse, AdminStatsResponse, AdminUserCreate, AdminUserResponse, AdminUserUpdate, ServiceHealthItem, StorageChannelResponse, StorageChannelUpdate, StuckJobResponse, TagDefinitionResponse, TagSettingsResponse, TagSettingsUpdate, VaultPasswordRequest, VaultStatus, VaultTokenResponse, WorkspaceGrantCreate, WorkspaceResponse
 from .. import telegram
 
 router = APIRouter(tags=["Accounts"])
 settings = get_settings()
 vault_password_context = CryptContext(schemes=["pbkdf2_sha256"], pbkdf2_sha256__default_rounds=600_000, deprecated="auto")
+
+
+@router.get("/accounts/security-events")
+async def security_events(
+    limit: int = 30,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return a compact, user-owned audit trail without exposing stored secrets."""
+    safe_limit = max(1, min(limit, 100))
+    events = (await db.execute(select(SecurityEvent).where(
+        SecurityEvent.user_id == current_user.id,
+    ).order_by(SecurityEvent.created_at.desc()).limit(safe_limit))).scalars().all()
+    return [{
+        "id": item.id,
+        "event_type": item.event_type,
+        "success": item.success,
+        "suspicious": item.suspicious,
+        "target_type": item.target_type,
+        "ip_address": item.ip_address,
+        "device": item.user_agent,
+        "created_at": item.created_at,
+    } for item in events]
+
+
+@router.get("/accounts/export")
+async def export_account_data(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Download a portable metadata backup. Passwords, tokens and API keys are excluded."""
+    folders = (await db.execute(select(Folder).where(Folder.user_id == current_user.id).order_by(Folder.id))).scalars().all()
+    files = (await db.execute(select(File).where(File.user_id == current_user.id).order_by(File.id))).scalars().all()
+    playlists = (await db.execute(select(Playlist).where(
+        Playlist.user_id == current_user.id,
+    ).options(selectinload(Playlist.items).selectinload(PlaylistItem.file)).order_by(Playlist.position, Playlist.id))).scalars().all()
+
+    def parsed(value: str | None, fallback):
+        try:
+            return json.loads(value or "")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return fallback
+
+    payload = {
+        "format": "komod-account-export",
+        "version": 1,
+        "exported_at": datetime.utcnow().isoformat() + "Z",
+        "account": {
+            "telegram_id": current_user.telegram_id,
+            "username": current_user.username,
+            "display_name": current_user.display_name,
+        },
+        "preferences": {
+            "delete_storage_files": current_user.delete_storage_files,
+            "show_file_tags": current_user.show_file_tags,
+            "file_tag_limit": current_user.file_tag_limit,
+            "tag_settings": parsed(current_user.tag_settings_json, []),
+            "tts_settings": parsed(current_user.tts_settings_json, {}),
+        },
+        "folders": [{
+            "id": item.id, "parent_id": item.parent_id, "name": item.name,
+            "description": item.description, "color": item.color, "icon": item.icon,
+            "is_favorite": item.is_favorite, "is_pinned": item.is_pinned,
+            "is_hidden": item.is_hidden, "is_default": item.is_default,
+        } for item in folders],
+        "files": [{
+            "file_unique_id": item.file_unique_id, "folder_id": item.folder_id,
+            "file_name": item.file_name, "description": item.description,
+            "tags": parsed(item.tags_json, []), "file_type": item.file_type,
+            "file_size": item.file_size, "duration": item.duration,
+            "is_favorite": item.is_favorite, "is_pinned": item.is_pinned,
+            "is_hidden": item.is_hidden, "created_at": item.created_at.isoformat(),
+        } for item in files],
+        "playlists": [{
+            "name": item.name, "description": item.description, "position": item.position,
+            "items": [entry.file.file_unique_id for entry in item.items if entry.file],
+        } for item in playlists],
+    }
+    content = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+    return Response(
+        content=content, media_type="application/json; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="komod-backup-{current_user.telegram_id}.json"'},
+    )
 
 
 def user_name(user: User) -> str:

@@ -13,8 +13,14 @@ export default function GlobalContextMenu() {
     const [copiedId, setCopiedId] = useState<string | null>(null);
     const [showMore, setShowMore] = useState(false);
     const [showFolderAppearance, setShowFolderAppearance] = useState(false);
+    const [showShareSettings, setShowShareSettings] = useState(false);
+    const [shareExpiry, setShareExpiry] = useState<number | null>(168);
+    const [sharePassword, setSharePassword] = useState('');
+    const [shareAllowDownload, setShareAllowDownload] = useState(true);
+    const [shareViewLimit, setShareViewLimit] = useState('');
+    const [sharing, setSharing] = useState(false);
 
-    useEffect(() => { setShowMore(false); setShowFolderAppearance(false); }, [activeContextMenu?.type, activeContextMenu?.item.id]);
+    useEffect(() => { setShowMore(false); setShowFolderAppearance(false); setShowShareSettings(false); }, [activeContextMenu?.type, activeContextMenu?.item.id]);
 
     // Close menu on escape
     useEffect(() => {
@@ -79,16 +85,29 @@ export default function GlobalContextMenu() {
         setPreviewFile(file);
     };
 
+    const publicPageUrl = (file: TelegramFile) => file.public_hash
+        ? `${window.location.origin}/s/${file.public_hash}`
+        : '';
+
     const handleShare = async (file: TelegramFile) => {
-        setActiveContextMenu(null);
-        addToast('در حال ساخت پیوند…', 'info');
+        setSharing(true);
         try {
-            await api.post<TelegramFile>(`/files/${file.id}/share`);
+            const limit = Number.parseInt(shareViewLimit, 10);
+            const { data } = await api.post<TelegramFile>(`/files/${file.id}/share`, {
+                expires_in_hours: shareExpiry,
+                password: sharePassword.trim() || null,
+                allow_download: shareAllowDownload,
+                view_limit: Number.isFinite(limit) && limit > 0 ? limit : null,
+            });
+            if (activeContextMenu?.type === 'file') setActiveContextMenu({ ...activeContextMenu, item: data });
+            setShowShareSettings(false);
+            const url = publicPageUrl(data);
+            if (url) await navigator.clipboard.writeText(url).catch(() => undefined);
             addToast('پیوند عمومی ساخته شد.');
         } catch (error) {
             console.error('Failed to share file:', error);
             addToast('ساخت پیوند انجام نشد.', 'error');
-        }
+        } finally { setSharing(false); }
     };
 
     const handleRevokeShare = async (file: TelegramFile) => {
@@ -222,10 +241,18 @@ export default function GlobalContextMenu() {
                                 <ActionTile icon={<Link/>} label={copiedId==='stream'?'کپی شد':'پیوند پخش'} onClick={async()=>{setActiveContextMenu(null);addToast('در حال آماده‌سازی پیوند…','info');handleCopy(await ensurePublicLink(file),'stream');}}/>
                                 <ActionTile icon={<HardDriveDownload/>} label={copiedId==='download'?'کپی شد':'پیوند دانلود'} onClick={async()=>{setActiveContextMenu(null);addToast('در حال آماده‌سازی پیوند…','info');const url=await ensurePublicLink(file);handleCopy(url+(url.includes('?')?'&':'?')+'download=1','download');}}/>
                                 {file.public_stream_url?<>
-                                    <ActionTile icon={<Globe className="text-emerald-400"/>} label="پیوند عمومی" onClick={()=>handleCopy(`${window.location.protocol}//${window.location.host}${file.public_stream_url}`,'public')}/>
+                                    <ActionTile icon={<Globe className="text-emerald-400"/>} label="پیوند عمومی" onClick={()=>handleCopy(publicPageUrl(file),'public')}/>
                                     <ActionTile icon={<ShieldOff/>} label="لغو پیوند عمومی" onClick={()=>handleRevokeShare(file)}/>
-                                </>:<ActionTile icon={<Globe/>} label="ساخت پیوند عمومی" onClick={()=>handleShare(file)}/>}
+                                    <ActionTile icon={<ShieldOff className="text-primary-300"/>} label="تنظیم دوباره" onClick={()=>setShowShareSettings(true)}/>
+                                </>:<ActionTile icon={<Globe/>} label="ساخت پیوند عمومی" onClick={()=>setShowShareSettings(true)}/>}
                             </div>
+                            {showShareSettings&&<div className="mt-3 rounded-2xl border border-primary-400/15 bg-primary-500/[.06] p-3">
+                                <p className="mb-2 text-xs font-bold text-primary-100">تنظیم پیوند امن</p>
+                                <div className="grid grid-cols-4 gap-1.5">{[[24,'۱ روز'],[168,'۱ هفته'],[720,'۱ ماه'],[null,'همیشگی']].map(([hours,label])=><button key={String(hours)} onClick={()=>setShareExpiry(hours as number|null)} className={`rounded-xl px-1 py-2 text-[10px] ${shareExpiry===hours?'bg-primary-500 text-white':'bg-dark-800 text-dark-300'}`}>{label}</button>)}</div>
+                                <div className="mt-2 grid grid-cols-2 gap-2"><input value={sharePassword} onChange={event=>setSharePassword(event.target.value)} className="input min-w-0 text-right text-xs" placeholder="رمز (اختیاری)"/><input inputMode="numeric" value={shareViewLimit} onChange={event=>setShareViewLimit(event.target.value.replace(/\D/g,''))} className="input min-w-0 text-right text-xs" placeholder="سقف مشاهده"/></div>
+                                <label className="mt-2 flex cursor-pointer items-center gap-2 rounded-xl bg-dark-800/70 px-3 py-2 text-xs"><input type="checkbox" checked={shareAllowDownload} onChange={event=>setShareAllowDownload(event.target.checked)} className="accent-primary-500"/><span>اجازه دانلود فایل</span></label>
+                                <div className="mt-3 grid grid-cols-2 gap-2"><button onClick={()=>setShowShareSettings(false)} className="btn-secondary min-h-10 text-xs">انصراف</button><button disabled={sharing} onClick={()=>void handleShare(file)} className="btn-primary min-h-10 text-xs disabled:opacity-50">{sharing?'در حال ساخت…':'ساخت و کپی'}</button></div>
+                            </div>}
                             </div>
                             <button className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-red-500/10 text-sm text-red-300 hover:bg-red-500/15" onClick={()=>handleAction(()=>setDeleteConfirm({type:'file',items:[file]}))}><Trash2 className="h-4 w-4"/>حذف فایل</button>
                             </>}

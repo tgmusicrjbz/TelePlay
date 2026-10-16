@@ -95,6 +95,12 @@ export interface TelegramFile {
     last_pos?: number;
     public_hash?: string;
     public_stream_url?: string;
+    public_expires_at?: string | null;
+    public_allow_download?: boolean;
+    public_view_limit?: number | null;
+    public_view_count?: number;
+    public_password_protected?: boolean;
+    _queueEntryId?: string;
     is_favorite?: boolean;
     is_pinned?: boolean;
     is_hidden?: boolean;
@@ -1017,6 +1023,20 @@ export const useDeleteTag = () => {
 };
 
 export const useSessions = () => useQuery({ queryKey: ['sessions'], queryFn: async () => (await api.get<AuthSession[]>('/auth/sessions')).data });
+export interface SecurityEvent {
+    id: number;
+    event_type: string;
+    success: boolean;
+    suspicious: boolean;
+    target_type?: string | null;
+    ip_address?: string | null;
+    device?: string | null;
+    created_at: string;
+}
+export const useSecurityEvents = () => useQuery({
+    queryKey: ['security-events'],
+    queryFn: async () => (await api.get<SecurityEvent[]>('/accounts/security-events?limit=30')).data,
+});
 export const useRevokeSession = () => {
     const queryClient = useQueryClient();
     return useMutation({ mutationFn: async (id: string) => api.delete(`/auth/sessions/${id}`), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['sessions'] }) });

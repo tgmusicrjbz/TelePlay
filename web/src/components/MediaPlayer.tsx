@@ -43,9 +43,14 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [streamRetry, setStreamRetry] = useState(0);
-    // Include the occurrence index so repeated instances of the same file never
-    // share a dnd-kit identifier. IDs only need to remain stable for one drag.
-    const queueRows = useMemo(() => playQueue.map((item, index) => ({ item, index, id: `queue-${item.id}-${index}` })), [playQueue]);
+    // Every queue occurrence receives a persistent id in the store. Deriving the
+    // dnd id from its array index made dnd-kit see a new item after every move,
+    // which visually snapped the row back to its old position.
+    const queueRows = useMemo(() => playQueue.map((item, index) => ({
+        item,
+        index,
+        id: (item as TelegramFile & { _queueEntryId?: string })._queueEntryId || `queue-${item.id}-${index}`,
+    })), [playQueue]);
     const hideControlsTimeout = useRef<ReturnType<typeof setTimeout>>();
     const singleTapTimeout = useRef<ReturnType<typeof setTimeout>>();
     const feedbackTimeout = useRef<ReturnType<typeof setTimeout>>();

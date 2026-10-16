@@ -19,6 +19,7 @@ from slowapi.util import get_remote_address
 
 from ..database import get_db
 from ..models import AuthSession, User, LoginCode
+from ..audit import add_security_event
 from ..schemas import (
     Token, 
     UserResponse, 
@@ -200,6 +201,10 @@ async def password_login(
     if not user or not user.password_hash or not valid:
         if user:
             user.failed_login_attempts = int(user.failed_login_attempts or 0) + 1
+            add_security_event(
+                db, "login_failed", user_id=user.id, request=request,
+                success=False, suspicious=user.failed_login_attempts >= 3,
+            )
             if user.failed_login_attempts >= 5:
                 user.login_locked_until = now + timedelta(minutes=15)
                 user.failed_login_attempts = 0
@@ -212,6 +217,7 @@ async def password_login(
     user.last_active = now
     session = await _session_for_device(db, request, user)
     db.add(session)
+    add_security_event(db, "login_success", user_id=user.id, request=request, target_type="session", target_id=session.id)
     await db.commit()
     return _auth_response(user, session)
 
@@ -263,6 +269,11 @@ async def update_credentials(
         for item in sessions:
             if item.id != session.id:
                 item.revoked_at = datetime.utcnow()
+    add_security_event(
+        db, "credentials_updated", user_id=current_user.id, request=request,
+        target_type="account", target_id=current_user.id,
+        details={"password_changed": password_changed, "username_changed": True},
+    )
     try:
         await db.commit()
     except IntegrityError:
@@ -317,6 +328,7 @@ async def refresh_token(
 
 @router.post("/logout-all")
 async def logout_all(
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -326,6 +338,7 @@ async def logout_all(
     for session in sessions:
         session.revoked_at = datetime.utcnow()
     db.add(current_user)
+    add_security_event(db, "sessions_revoked_all", user_id=current_user.id, request=request, target_type="session", details={"count": len(sessions)})
     await db.commit()
     return {"message": "All sessions have been invalidated"}
 
@@ -350,6 +363,7 @@ async def logout_other_sessions(
     now = datetime.utcnow()
     for session in sessions:
         session.revoked_at = now
+    add_security_event(db, "sessions_revoked_others", user_id=current_user.id, request=request, target_type="session", details={"count": len(sessions)})
     await db.commit()
     return {"revoked": len(sessions)}
 
@@ -366,11 +380,12 @@ async def list_sessions(request: Request, current_user: User = Depends(get_curre
 
 
 @router.delete("/sessions/{session_id}", status_code=204)
-async def revoke_session(session_id: str, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def revoke_session(session_id: str, request: Request, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     session = (await db.execute(select(AuthSession).where(AuthSession.id == session_id, AuthSession.user_id == current_user.id))).scalar_one_or_none()
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     session.revoked_at = datetime.utcnow()
+    add_security_event(db, "session_revoked", user_id=current_user.id, request=request, target_type="session", target_id=session.id)
     await db.commit()
     return None
 

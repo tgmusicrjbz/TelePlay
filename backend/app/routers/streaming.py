@@ -108,7 +108,7 @@ async def stored_message_response(file: File, message, range_header: str | None,
     )
 
 
-@router.post("/{file_id}/audio-variant")
+@router.post("/{file_id:int}/audio-variant")
 async def prepare_audio_variant(
     file_id: int, request: Request, db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -169,7 +169,7 @@ async def prepare_audio_variant(
         return {"stream_url": f"/api/stream/{file.id}/audio", "size": file.audio_variant_size, "cached": False}
 
 
-@router.get("/{file_id}/audio")
+@router.get("/{file_id:int}/audio")
 async def stream_audio_variant(
     file_id: int, request: Request, db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -199,7 +199,7 @@ async def stream_audio_variant(
     return StreamingResponse(audio_streamer(), status_code=206 if request.headers.get("range") else 200, media_type="audio/mp4", headers=headers)
 
 
-@router.get("/{file_id}")
+@router.get("/{file_id:int}")
 async def stream_file(
     file_id: int,
     request: Request,
@@ -271,7 +271,7 @@ async def stream_file(
     )
 
 
-@router.get("/{file_id}/thumbnail")
+@router.get("/{file_id:int}/thumbnail")
 async def get_thumbnail(
     file_id: int,
     request: Request,

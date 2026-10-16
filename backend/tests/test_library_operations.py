@@ -26,9 +26,9 @@ from starlette.requests import Request
 from sqlalchemy import select
 
 from app.database import Base, async_session, engine
-from app.models import AuthSession, BotUserState, ErrorLog, File, Folder, Playlist, PlaylistItem, ProcessingJob, TTSUsage, User, WatchProgress
+from app.models import AuthSession, BotUserState, ErrorLog, File, Folder, Playlist, PlaylistItem, ProcessingJob, SecurityEvent, TTSUsage, User, WatchProgress
 from app.routers.auth import _session_for_device, password_login, update_credentials
-from app.routers.accounts import admin_error_logs, admin_health, delete_tag_definition, get_tag_settings, resolve_admin_error, update_tag_settings
+from app.routers.accounts import admin_error_logs, admin_health, delete_tag_definition, export_account_data, get_tag_settings, resolve_admin_error, update_tag_settings
 from app.stt import consume_stt_quota
 from app.routers.files import (
     batch_update_files,
@@ -40,6 +40,7 @@ from app.routers.files import (
     playback_recommendations,
     save_player_state,
     save_offline_manifest,
+    share_file,
     get_storage_stats,
     get_text_preview,
     list_files,
@@ -50,9 +51,9 @@ from app.routers.files import (
     OfflineManifestUpdate,
 )
 from app.routers.folders import delete_folder_contents, list_folders, update_folder
-from app.routers.streaming import stored_message_response
+from app.routers.streaming import public_share_info, stored_message_response, unlock_public_share
 from app.routers.playlists import add_playlist_items, create_playlist, reorder_playlist, shuffle_playlist
-from app.schemas import BatchFileUpdate, CredentialsUpdate, FileUpdate, FolderUpdate, PasswordLoginRequest, PlayerStateUpdate, PlaylistAddItems, PlaylistCreate, PlaylistReorder, TagDefinition, TagSettingsUpdate
+from app.schemas import BatchFileUpdate, CredentialsUpdate, FileUpdate, FolderUpdate, PasswordLoginRequest, PlayerStateUpdate, PlaylistAddItems, PlaylistCreate, PlaylistReorder, PublicShareCreate, PublicShareUnlock, TagDefinition, TagSettingsUpdate
 from app.telegram import configure_main_client, start_one_client
 from app import telegram
 
@@ -561,6 +562,46 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             restored = await get_player_state(db, user)
             self.assertEqual([item.id for item in restored.files], [second.id, first.id])
             self.assertEqual((restored.current_index, restored.repeat_mode, restored.position), (1, "all", 42))
+
+    async def test_public_share_security_settings_are_persisted_and_unlockable(self):
+        async with async_session() as db:
+            item = self.make_file(self.user_id, None, 919); item.file_type = "audio"
+            db.add(item); await db.commit()
+            user = await db.get(User, self.user_id)
+            request = Request({"type":"http","method":"POST","path":f"/api/files/{item.id}/share","headers":[(b"user-agent",b"Komod Test")],"client":("127.0.0.1",1234)})
+            response = await share_file(item.id, request, PublicShareCreate(
+                expires_in_hours=24, password="secret12", allow_download=False, view_limit=3,
+            ), db, user)
+            self.assertTrue(response.public_hash)
+            self.assertTrue(response.public_password_protected)
+            self.assertFalse(response.public_allow_download)
+            self.assertEqual(response.public_view_limit, 3)
+            stored = await db.get(File, item.id)
+            self.assertNotEqual(stored.public_password_hash, "secret12")
+            info_request = Request({"type":"http","method":"GET","path":f"/api/stream/s/{stored.public_hash}/info","headers":[],"client":("127.0.0.1",1234)})
+            info = await public_share_info(stored.public_hash, info_request, db)
+            self.assertTrue(info["password_required"])
+            self.assertFalse(info["allow_download"])
+            unlocked = await unlock_public_share(stored.public_hash, PublicShareUnlock(password="secret12"), info_request, db)
+            self.assertTrue(unlocked["access_token"])
+            events = (await db.execute(select(SecurityEvent).where(SecurityEvent.user_id == user.id))).scalars().all()
+            self.assertIn("public_link_created", {event.event_type for event in events})
+            self.assertIn("public_link_unlocked", {event.event_type for event in events})
+
+    async def test_account_export_excludes_secrets_and_keeps_library_metadata(self):
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            user.password_hash = "must-not-leak"
+            user.gemini_api_keys_encrypted = "also-secret"
+            await db.commit()
+            response = await export_account_data(user, db)
+            payload = json.loads(response.body.decode("utf-8"))
+            self.assertEqual(payload["format"], "komod-account-export")
+            self.assertTrue(payload["folders"])
+            self.assertTrue(payload["files"])
+            serialized = response.body.decode("utf-8")
+            self.assertNotIn("must-not-leak", serialized)
+            self.assertNotIn("also-secret", serialized)
 
     async def test_offline_manifest_keeps_owned_visible_files_in_selected_order(self):
         async with async_session() as db:

@@ -4,6 +4,19 @@
 import { create } from 'zustand';
 import { TelegramFile, Folder } from './api';
 
+type QueueFile = TelegramFile & { _queueEntryId?: string };
+
+let queueEntrySequence = 0;
+function createQueueEntry(file: TelegramFile): QueueFile {
+    const queueEntryId = globalThis.crypto?.randomUUID?.()
+        || `${Date.now().toString(36)}-${(++queueEntrySequence).toString(36)}`;
+    return { ...file, _queueEntryId: queueEntryId };
+}
+
+function normalizeQueueEntries(files: TelegramFile[]): QueueFile[] {
+    return files.map((file) => file._queueEntryId ? file as QueueFile : createQueueEntry(file));
+}
+
 type SavedPlayerState = {
     version: 1;
     queue: TelegramFile[];
@@ -33,10 +46,12 @@ function loadPlayerState(): SavedPlayerState {
     try {
         const raw = JSON.parse(localStorage.getItem(playerStorageKey()) || 'null') as Partial<SavedPlayerState> | null;
         if (!raw || raw.version !== 1) return empty;
-        const queue = Array.isArray(raw.queue) ? raw.queue.filter(restorableMedia).slice(0, 250) : [];
+        const queue = Array.isArray(raw.queue) ? normalizeQueueEntries(raw.queue.filter(restorableMedia).slice(0, 250)) : [];
         const requestedIndex = Number(raw.queueIndex);
         const queueIndex = queue.length ? Math.min(Math.max(Number.isInteger(requestedIndex) ? requestedIndex : 0, 0), queue.length - 1) : -1;
-        const current = restorableMedia(raw.current) ? raw.current : queue[queueIndex] || null;
+        // The current file must be the exact queue occurrence. This matters when
+        // the same track appears more than once and one occurrence is reordered.
+        const current = queue[queueIndex] || (restorableMedia(raw.current) ? createQueueEntry(raw.current) : null);
         const repeatMode = ['off', 'all', 'one'].includes(String(raw.repeatMode)) ? raw.repeatMode as SavedPlayerState['repeatMode'] : 'off';
         return { version: 1, queue, queueIndex, current, repeatMode };
     } catch {
@@ -254,7 +269,11 @@ export const useAppStore = create<AppState>((set) => ({
     playQueue: restoredPlayer.queue,
     queueIndex: restoredPlayer.queueIndex,
     repeatMode: restoredPlayer.repeatMode,
-    startQueue: (files, index = 0) => set({ playQueue: files, queueIndex: index, previewFile: files[index] || null, isPlayerMinimized: false }),
+    startQueue: (files, index = 0) => set(() => {
+        const queue = normalizeQueueEntries(files);
+        const safeIndex = queue.length ? Math.min(Math.max(index, 0), queue.length - 1) : -1;
+        return { playQueue: queue, queueIndex: safeIndex, previewFile: queue[safeIndex] || null, isPlayerMinimized: false };
+    }),
     playQueueItem: (index) => set((state) => ({ queueIndex: index, previewFile: state.playQueue[index] || state.previewFile })),
     playNext: () => {
         let changed = false;
@@ -313,7 +332,7 @@ export const useAppStore = create<AppState>((set) => ({
     appendQueueItems: (files) => set((state) => {
         const existing = new Set(state.playQueue.map(item => item.id));
         const additions = files.filter(item => !existing.has(item.id) && ['audio','video'].includes(item.file_type));
-        return additions.length ? {playQueue:[...state.playQueue,...additions]} : state;
+        return additions.length ? {playQueue:[...state.playQueue,...additions.map(createQueueEntry)]} : state;
     }),
     setRepeatMode: (repeatMode) => set({ repeatMode }),
     clearQueue: () => set({ playQueue: [], queueIndex: -1 }),
