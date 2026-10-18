@@ -275,6 +275,58 @@ class PlaylistResponse(PlaylistSummary):
     items: List[PlaylistItemResponse] = Field(default_factory=list)
 
 
+# ============== Pack Schemas ==============
+
+class PackCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    description: Optional[str] = Field(default=None, max_length=2048)
+    parent_folder_id: Optional[int] = None
+    file_ids: List[int] = Field(default_factory=list, max_length=500)
+
+
+class PackUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    description: Optional[str] = Field(default=None, max_length=2048)
+    parent_folder_id: Optional[int] = None
+    cover_file_id: Optional[int] = None
+
+
+class PackAddItems(BaseModel):
+    file_ids: List[int] = Field(min_length=1, max_length=500)
+
+
+class PackReorder(BaseModel):
+    item_ids: List[int] = Field(min_length=1, max_length=500)
+
+
+class PackItemResponse(BaseModel):
+    id: int
+    position: int
+    caption: Optional[str] = None
+    added_at: datetime
+    file: FileResponse
+
+
+class PackSummary(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+    parent_folder_id: Optional[int] = None
+    item_count: int = 0
+    cover_file_id: Optional[int] = None
+    cover_url: Optional[str] = None
+    cover_urls: List[str] = Field(default_factory=list)
+    preview_names: List[str] = Field(default_factory=list)
+    type_counts: dict[str, int] = Field(default_factory=dict)
+    position: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+class PackResponse(PackSummary):
+    items: List[PackItemResponse] = Field(default_factory=list)
+
+
 # ============== Watch Progress Schemas ==============
 
 class WatchProgressBase(BaseModel):

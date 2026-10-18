@@ -16,7 +16,7 @@ from sqlalchemy.orm import selectinload
 from ..auth import create_vault_token, get_current_user, require_vault_access
 from ..config import get_settings
 from ..database import get_db
-from ..models import AuthSession, File, Folder, Playlist, PlaylistItem, ProcessingJob, SecurityEvent, TTSUsage, User, WorkspaceGrant
+from ..models import AuthSession, File, Folder, Pack, PackItem, Playlist, PlaylistItem, ProcessingJob, SecurityEvent, TTSUsage, User, WorkspaceGrant
 from ..schemas import AccountPreferences, AdminHealthResponse, AdminStatsResponse, AdminUserCreate, AdminUserResponse, AdminUserUpdate, SavedFilter, SavedFiltersUpdate, ServiceHealthItem, StorageChannelItem, StorageChannelResponse, StorageChannelUpdate, StuckJobResponse, TagDefinitionResponse, TagSettingsResponse, TagSettingsUpdate, VaultPasswordRequest, VaultStatus, VaultTokenResponse, WorkspaceGrantCreate, WorkspaceResponse
 from .. import telegram
 from ..audit import add_security_event
@@ -62,6 +62,9 @@ async def export_account_data(
     playlists = (await db.execute(select(Playlist).where(
         Playlist.user_id == current_user.id,
     ).options(selectinload(Playlist.items).selectinload(PlaylistItem.file)).order_by(Playlist.position, Playlist.id))).scalars().all()
+    packs = (await db.execute(select(Pack).where(
+        Pack.user_id == current_user.id,
+    ).options(selectinload(Pack.items).selectinload(PackItem.file), selectinload(Pack.cover_file)).order_by(Pack.position, Pack.id))).scalars().all()
 
     def parsed(value: str | None, fallback):
         try:
@@ -104,6 +107,12 @@ async def export_account_data(
             "name": item.name, "description": item.description, "position": item.position,
             "items": [entry.file.file_unique_id for entry in item.items if entry.file],
         } for item in playlists],
+        "packs": [{
+            "name": item.name, "description": item.description, "position": item.position,
+            "parent_folder_id": item.parent_folder_id,
+            "cover_file_unique_id": item.cover_file.file_unique_id if item.cover_file else None,
+            "items": [entry.file.file_unique_id for entry in item.items if entry.file],
+        } for item in packs],
     }
     content = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
     return Response(
@@ -126,7 +135,8 @@ async def import_account_data(
     raw_folders = payload.get("folders") if isinstance(payload.get("folders"), list) else []
     raw_files = payload.get("files") if isinstance(payload.get("files"), list) else []
     raw_playlists = payload.get("playlists") if isinstance(payload.get("playlists"), list) else []
-    if len(raw_folders) > 5_000 or len(raw_files) > 100_000 or len(raw_playlists) > 2_000:
+    raw_packs = payload.get("packs") if isinstance(payload.get("packs"), list) else []
+    if len(raw_folders) > 5_000 or len(raw_files) > 100_000 or len(raw_playlists) > 2_000 or len(raw_packs) > 2_000:
         raise HTTPException(status_code=413, detail="نسخهٔ پشتیبان بیش از حد بزرگ است.")
 
     preferences = payload.get("preferences") if isinstance(payload.get("preferences"), dict) else {}
@@ -251,10 +261,40 @@ async def import_account_data(
             position += 1
         restored_playlists += 1
 
+    packs = (await db.execute(select(Pack).where(Pack.user_id == current_user.id))).scalars().all()
+    pack_by_key = {(item.parent_folder_id, item.name.casefold()): item for item in packs}
+    restored_packs = 0
+    for raw in raw_packs:
+        if not isinstance(raw, dict):
+            continue
+        name = str(raw.get("name") or "").strip()[:255]
+        if not name:
+            continue
+        old_parent = raw.get("parent_folder_id")
+        parent_id = folder_map.get(int(old_parent)) if str(old_parent).isdigit() else None
+        key = (parent_id, name.casefold())
+        pack = pack_by_key.get(key)
+        if pack is None:
+            pack = Pack(user_id=current_user.id, parent_folder_id=parent_id, name=name, position=len(pack_by_key))
+            db.add(pack); await db.flush(); pack_by_key[key] = pack
+        pack.description = str(raw.get("description") or "").strip()[:2_000] or None
+        cover = files_by_unique.get(str(raw.get("cover_file_unique_id") or ""))
+        pack.cover_file_id = cover.id if cover and cover.file_type == "image" else None
+        current_items = (await db.execute(select(PackItem).where(PackItem.pack_id == pack.id))).scalars().all()
+        existing_ids = {entry.file_id for entry in current_items}
+        position = max((entry.position for entry in current_items), default=-1) + 1
+        for unique_id in raw.get("items", []) if isinstance(raw.get("items"), list) else []:
+            file = files_by_unique.get(str(unique_id))
+            if file is None or file.id in existing_ids:
+                continue
+            db.add(PackItem(pack_id=pack.id, file_id=file.id, position=position))
+            existing_ids.add(file.id); position += 1
+        restored_packs += 1
+
     add_security_event(
         db, "account_backup_restored", user_id=current_user.id, request=request,
         target_type="account", target_id=current_user.id,
-        details={"folders_created": created_folders, "files_restored": restored_files, "playlists": restored_playlists},
+        details={"folders_created": created_folders, "files_restored": restored_files, "playlists": restored_playlists, "packs": restored_packs},
     )
     await db.commit()
     return {
@@ -262,6 +302,7 @@ async def import_account_data(
         "folders_skipped": len(pending),
         "files_restored": restored_files,
         "playlists_restored": restored_playlists,
+        "packs_restored": restored_packs,
     }
 
 

@@ -45,6 +45,7 @@ class User(Base):
     files: Mapped[List["File"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     watch_progress: Mapped[List["WatchProgress"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     playlists: Mapped[List["Playlist"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    packs: Mapped[List["Pack"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class AuthSession(Base):
@@ -317,6 +318,53 @@ class PlaylistItem(Base):
 
     __table_args__ = (
         Index("idx_playlist_position", playlist_id, position),
+    )
+
+
+class Pack(Base):
+    """A named, ordered collection of mixed files shown beside folders."""
+    __tablename__ = "packs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    parent_folder_id: Mapped[Optional[int]] = mapped_column(ForeignKey("folders.id", ondelete="SET NULL"), index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    cover_file_id: Mapped[Optional[int]] = mapped_column(ForeignKey("files.id", ondelete="SET NULL"))
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user: Mapped["User"] = relationship(back_populates="packs")
+    parent_folder: Mapped[Optional["Folder"]] = relationship(foreign_keys=[parent_folder_id])
+    cover_file: Mapped[Optional["File"]] = relationship(foreign_keys=[cover_file_id])
+    items: Mapped[List["PackItem"]] = relationship(
+        back_populates="pack", cascade="all, delete-orphan", order_by="PackItem.position"
+    )
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "parent_folder_id", "name", name="uq_pack_user_folder_name"),
+        Index("idx_pack_user_parent_position", user_id, parent_folder_id, position),
+    )
+
+
+class PackItem(Base):
+    """One file and its visual order inside a pack."""
+    __tablename__ = "pack_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    pack_id: Mapped[int] = mapped_column(ForeignKey("packs.id", ondelete="CASCADE"), nullable=False)
+    file_id: Mapped[int] = mapped_column(ForeignKey("files.id", ondelete="CASCADE"), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    caption: Mapped[Optional[str]] = mapped_column(Text)
+    added_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    pack: Mapped["Pack"] = relationship(back_populates="items")
+    file: Mapped["File"] = relationship()
+
+    __table_args__ = (
+        UniqueConstraint("pack_id", "file_id", name="uq_pack_file"),
+        Index("idx_pack_item_position", pack_id, position),
     )
 
 

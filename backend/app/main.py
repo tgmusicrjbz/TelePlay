@@ -26,7 +26,7 @@ from .telegram import start_telegram_client, stop_telegram_client
 from .downloader import link_importer
 from .tts import tts_queue
 from .stt import stt_queue
-from .routers import files_router, folders_router, streaming_router, auth_router, tv_router, playlists_router, accounts_router, tts_router, stt_router
+from .routers import files_router, folders_router, streaming_router, auth_router, tv_router, playlists_router, accounts_router, tts_router, stt_router, packs_router
 
 settings = get_settings()
 
@@ -208,6 +208,7 @@ app.include_router(playlists_router, prefix="/api")
 app.include_router(accounts_router, prefix="/api")
 app.include_router(tts_router, prefix="/api")
 app.include_router(stt_router, prefix="/api")
+app.include_router(packs_router, prefix="/api")
 
 
 

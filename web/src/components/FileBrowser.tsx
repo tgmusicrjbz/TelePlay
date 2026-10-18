@@ -4,7 +4,7 @@
 import { lazy, Suspense, useEffect, useCallback, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { FolderPlus, Folder as FolderIcon, Grid, LayoutGrid, List, Search, ChevronRight, Home, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, StickyNote, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ChevronUp, Plus, CheckSquare, Square, ListChecks, ListPlus, Upload, Star, RefreshCw, Link2, DownloadCloud, Download, Send, Eye, EyeOff, Minus, Pause, Play, Tags, Cloud, CloudOff, AudioLines, FileAudio, Sparkles, BookmarkPlus } from 'lucide-react';
-import { api, useFiles, useFolders, useFolderTree, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useActivityFeed, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile, useImportLink, useTagSettings, useUnlockVault, useWorkspaces, sendFilesToTelegram, useTTSJobs, useSTTJobs, SavedFilter, useSavedFilters, useUpdateSavedFilters } from '../lib/api';
+import { api, useFiles, useFolders, useFolderTree, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useActivityFeed, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile, useImportLink, useTagSettings, useUnlockVault, useWorkspaces, sendFilesToTelegram, useTTSJobs, useSTTJobs, SavedFilter, useSavedFilters, useUpdateSavedFilters, usePacks } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { cacheAllTextNotes, queueOfflineText, saveFileOffline } from '../lib/offline';
 import FileCard from './FileCard';
@@ -22,6 +22,8 @@ import { applyTheme, getStoredTheme } from '../lib/theme';
 import { publishLocalTransfer } from '../lib/transfers';
 import PlaylistBrowser from './PlaylistBrowser';
 import DownloadsPage from './DownloadsPage';
+import PackCard from './PackCard';
+import { CreatePackModal, PackViewer } from './PackModal';
 
 // Settings is still loaded on demand. The two screens that must remain usable
 // after connectivity changes are bundled into the app shell.
@@ -100,6 +102,8 @@ export default function FileBrowser() {
     const [showSort, setShowSort] = useState(false);
     const [showFilters, setShowFilters] = useState(false);
     const [showBatchEdit, setShowBatchEdit] = useState(false);
+    const [showCreatePack, setShowCreatePack] = useState(false);
+    const [openPackId, setOpenPackId] = useState<number|null>(null);
     const [selectionMode, setSelectionMode] = useState(false);
     const [pullDistance, setPullDistance] = useState(0);
     const pullStartY = useRef<number | null>(null);
@@ -306,6 +310,7 @@ export default function FileBrowser() {
 
     // Folder and file visibility is controlled from one shared content switcher.
     const { data: folders, isLoading: foldersLoading, error: foldersError, refetch: refetchFolders } = useFolders(currentFolderId, folderSortValue, favoriteOnly, showHidden);
+    const { data: packs = [], refetch: refetchPacks } = usePacks(currentFolderId);
     const visibleFolders = (hiddenOnly ? hiddenFolderRoots : folders)?.filter(folder => {
         if (hiddenOnly && !folder.is_hidden) return false;
         if (currentFolderId === null && rootFilesMode === 'files' && folder.is_default) return false;
@@ -316,6 +321,10 @@ export default function FileBrowser() {
     });
     const showFolders = activeSection === 'files' && contentScope !== 'files';
     const showFiles = activeSection !== 'files' || contentScope !== 'folders';
+    const visiblePacks = hiddenOnly || favoriteOnly ? [] : packs.filter(pack => {
+        const query = searchQuery.trim().toLocaleLowerCase('fa');
+        return !query || `${pack.name} ${pack.description || ''} ${pack.preview_names.join(' ')}`.toLocaleLowerCase('fa').includes(query);
+    });
 
     // Combined loading state
     isLoading = isLoading || (activeSection === 'files' && (foldersLoading || (hiddenOnly && folderTreeLoading)));
@@ -407,12 +416,13 @@ export default function FileBrowser() {
         if (activeSection === 'files') {
             refetchFiles();
             refetchFolders();
+            refetchPacks();
         } else if (activeSection === 'activity') {
             refetchActivity();
         } else {
             window.location.reload();
         }
-    }, [activeSection, refetchFiles, refetchFolders, refetchActivity]);
+    }, [activeSection, refetchFiles, refetchFolders, refetchPacks, refetchActivity]);
 
     const pullEnabled = !(window as Window & { Telegram?: { WebApp?: { initData?: string } } }).Telegram?.WebApp?.initData;
     const handlePullStart = (event: React.TouchEvent<HTMLDivElement>) => {
@@ -907,6 +917,7 @@ export default function FileBrowser() {
     const selectedItems = [...selectedFilesForActions, ...selectedFoldersForActions];
     const sectionTitle = activeSection === 'activity' ? 'فعالیت' : (breadcrumbs[breadcrumbs.length - 1]?.name || 'کمد من');
     const shownFolderCount = showFolders ? visibleFolders?.length || 0 : 0;
+    const shownPackCount = showFolders ? visiblePacks.length : 0;
     const shownFileCount = showFiles ? displayFiles?.length || 0 : 0;
     const selectScope = (scope: 'all' | 'files' | 'folders') => {
         setActiveSavedFilterId(null);
@@ -1174,6 +1185,7 @@ export default function FileBrowser() {
                             <span className="shrink-0 px-2 text-xs font-semibold text-primary-200">{selectedItems.length ? `${selectedItems.length.toLocaleString('fa-IR')} انتخاب` : 'یک کارت را لمس کن'}</span>
                             {selectedItems.length === 1 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-200 hover:bg-white/10" aria-label="تغییر نام" title="تغییر نام" onClick={() => selectedFilesForActions[0] ? setRenameFile(selectedFilesForActions[0]) : setRenameFolder(selectedFoldersForActions[0])}><Pencil className="h-5 w-5" /></button>}
                             {selectedFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-200 hover:bg-white/10" aria-label="تگ‌ها و ویرایش گروهی" title="افزودن، حذف یا جایگزینی تگ‌ها" onClick={() => setShowBatchEdit(true)}><Tags className="h-5 w-5" /></button>}
+                            {selectedFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-violet-200 hover:bg-violet-500/10" aria-label="ساخت پک" title="قرار دادن فایل‌های انتخابی در یک پک" onClick={() => setShowCreatePack(true)}><Boxes className="h-5 w-5" /></button>}
                             {selectedPlayableFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-emerald-300 hover:bg-emerald-500/10" aria-label="ساخت صف پخش موقت" title="پخش پشت‌سرهم فایل‌های انتخاب‌شده" onClick={() => { startQueue(selectedPlayableFilesForActions,0); cancelSelection(); addToast('صف پخش موقت ساخته شد.'); }}><Play className="h-5 w-5" /></button>}
                             {selectedPlayableFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-500/10 text-primary-200 hover:bg-primary-500/20" aria-label="افزودن به پلی‌لیست" title="افزودن فایل‌های صدا و ویدیو به پلی‌لیست" onClick={() => setPlaylistFiles(selectedPlayableFilesForActions)}><ListPlus className="h-5 w-5" /></button>}
                             {selectedFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-primary-200 hover:bg-primary-500/10" aria-label="ذخیره آفلاین" title="افزودن همه به صف ذخیره آفلاین" onClick={() => { selectedFilesForActions.forEach(file => void saveFileOffline(file)); addToast(`${selectedFilesForActions.length.toLocaleString('fa-IR')} فایل به صف ذخیره آفلاین اضافه شد.`); }}><DownloadCloud className="h-5 w-5" /></button>}
@@ -1189,13 +1201,14 @@ export default function FileBrowser() {
                     <div className="max-w-7xl mx-auto mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div className="flex min-w-0 items-center gap-3">
                             <h1 className="truncate text-2xl font-bold tracking-tight text-white sm:text-3xl">{sectionTitle}</h1>
-                            {activeSection !== 'activity' && <span className="shrink-0 rounded-full border border-white/[0.07] bg-dark-800/70 px-2.5 py-1 text-xs text-dark-300">{(shownFolderCount + shownFileCount).toLocaleString('fa-IR')} مورد</span>}
+                            {activeSection !== 'activity' && <span className="shrink-0 rounded-full border border-white/[0.07] bg-dark-800/70 px-2.5 py-1 text-xs text-dark-300">{(shownFolderCount + shownPackCount + shownFileCount).toLocaleString('fa-IR')} مورد</span>}
                         </div>
                         {selectedItems.length > 0 ? (
                             <div className="fixed left-6 right-6 top-20 z-40 mx-auto hidden max-w-7xl flex-wrap items-center gap-1.5 rounded-2xl border border-primary-500/20 bg-dark-900/95 p-1.5 shadow-2xl backdrop-blur-xl sm:flex md:right-32 lg:left-8">
                                 <span className="text-sm font-medium text-primary-200 px-2">{selectedItems.length.toLocaleString('fa-IR')} مورد انتخاب شده</span>
                                 {selectedItems.length === 1 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => selectedFilesForActions[0] ? setRenameFile(selectedFilesForActions[0]) : setRenameFolder(selectedFoldersForActions[0])}><Pencil className="w-4 h-4" /> تغییر نام</button>}
                                 {selectedFilesForActions.length > 0 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => setShowBatchEdit(true)}><Tags className="w-4 h-4" /> تگ‌ها و ویرایش</button>}
+                                {selectedFilesForActions.length > 0 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2 text-violet-200" onClick={() => setShowCreatePack(true)}><Boxes className="w-4 h-4" /> ساخت پک</button>}
                                 {selectedPlayableFilesForActions.length > 0 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2 text-emerald-200" onClick={() => { startQueue(selectedPlayableFilesForActions,0); cancelSelection(); addToast('صف پخش موقت ساخته شد.'); }}><Play className="w-4 h-4" /> پخش پشت‌سرهم</button>}
                                 {selectedPlayableFilesForActions.length > 0 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => setPlaylistFiles(selectedPlayableFilesForActions)}><ListPlus className="w-4 h-4" /> افزودن به پلی‌لیست</button>}
                                 {selectedFilesForActions.length > 0 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => { selectedFilesForActions.forEach(file => void saveFileOffline(file)); addToast(`${selectedFilesForActions.length.toLocaleString('fa-IR')} فایل به صف ذخیره آفلاین اضافه شد.`); }}><DownloadCloud className="w-4 h-4" /> ذخیره آفلاین</button>}
@@ -1365,7 +1378,7 @@ export default function FileBrowser() {
                     ) : (
                         <>
                              {/* Unified View */}
-                             {shownFolderCount + shownFileCount > 0 ? (
+                             {shownFolderCount + shownPackCount + shownFileCount > 0 ? (
                                 <div className={viewMode === 'list' ? 'max-w-7xl mx-auto flex flex-col gap-2 pb-20' : viewMode === 'dense' ? 'max-w-7xl mx-auto grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2 pb-20' : 'max-w-7xl mx-auto grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4 pb-20'}>
                                     {/* Folders */}
                                     {showFolders && visibleFolders?.map((folder) => (
@@ -1380,6 +1393,9 @@ export default function FileBrowser() {
                                             onFileDrop={handleFileDrop}
                                         />
                                     ))}
+
+                                    {/* Mixed-media packs live beside folders. */}
+                                    {showFolders && visiblePacks.map(pack => <PackCard key={`pack-${pack.id}`} pack={pack} viewMode={viewMode} onOpen={()=>setOpenPackId(pack.id)}/>)}
                                     
                                     {/* Files */}
                                     {showFiles && displayFiles?.map((file) => (
@@ -1501,6 +1517,8 @@ export default function FileBrowser() {
                 onClose={() => setShowBatchEdit(false)}
                 onSave={handleBatchEdit}
             />
+            {showCreatePack && <CreatePackModal fileIds={selectedFilesForActions.map(file=>file.id)} parentFolderId={currentFolderId} packs={packs} onClose={()=>setShowCreatePack(false)} onCreated={pack=>{setShowCreatePack(false);cancelSelection();setOpenPackId(pack.id);addToast('پک به‌روز شد 📦','success')}}/>}
+            {openPackId!==null&&<PackViewer packId={openPackId} onClose={()=>setOpenPackId(null)} onOpenFile={file=>{setOpenPackId(null);handleFileOpen(file)}}/>}
             {showVaultPrompt && <div className="fixed inset-0 z-[190] flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-4" onClick={()=>setShowVaultPrompt(false)}><div className="w-full max-w-sm rounded-t-3xl border border-white/10 bg-dark-900 p-5 sm:rounded-3xl" onClick={event=>event.stopPropagation()}><div className="flex items-center gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary-500/15 text-primary-200"><EyeOff className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h2 className="font-bold">گاوصندوق</h2><p className="text-xs text-dark-400">موارد مخفی را کنار بقیهٔ فایل‌ها ببین.</p></div><button className="btn-icon" onClick={()=>setShowVaultPrompt(false)}><X className="h-5 w-5"/></button></div>{!sessionStorage.getItem('komod-vault-token')&&<input autoFocus type="password" value={vaultPassword} onChange={event=>setVaultPassword(event.target.value)} className="input mt-4 w-full" placeholder="رمز گاوصندوق"/>}<div className="mt-4 grid gap-2"><button disabled={unlockVault.isPending||(!sessionStorage.getItem('komod-vault-token')&&!vaultPassword)} onClick={()=>void showVaultItems()} className="btn-primary min-h-11 disabled:opacity-40">نمایش موارد مخفی</button>{showHidden&&<button onClick={closeVaultItems} className="min-h-10 rounded-xl text-sm text-red-300 hover:bg-red-500/10">بستن گاوصندوق</button>}</div></div></div>}
             {showAddMenu && createPortal(<div className="fixed inset-0 z-[260] flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-5" onClick={() => setShowAddMenu(false)}><div className="max-h-[min(86vh,42rem)] w-full max-w-md overflow-y-auto rounded-t-3xl border border-white/10 bg-dark-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl sm:rounded-3xl" onClick={event => event.stopPropagation()}><div className="mx-auto mb-4 h-1 w-12 rounded-full bg-white/20 sm:hidden"/><div className="flex items-center justify-between"><div><h2 className="font-bold">افزودن به کمد</h2><p className="mt-1 text-xs text-dark-500">چه چیزی می‌خواهی اضافه کنی؟</p></div><button className="btn-icon" onClick={() => setShowAddMenu(false)}><X className="h-5 w-5"/></button></div><div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-1">{[{label:'آپلود فایل',icon:<Upload className="h-5 w-5"/>,action:()=>uploadInputRef.current?.click()},{label:'یادداشت متنی',icon:<StickyNote className="h-5 w-5"/>,action:()=>{setTextFolder(incomingFolderId);setShowTextComposer(true)}},{label:'ساخت کشو',icon:<FolderPlus className="h-5 w-5"/>,action:()=>setShowNewFolder(true)},{label:'ذخیره از لینک',icon:<Link2 className="h-5 w-5"/>,action:openImportLink},{label:'ساخت صدا از متن',icon:<AudioLines className="h-5 w-5"/>,action:()=>openSpeechTools('tts')},{label:'استخراج متن از صدا',icon:<FileAudio className="h-5 w-5"/>,action:()=>openSpeechTools('stt')}].map(item=><button key={item.label} className="flex min-h-16 items-center gap-3 rounded-2xl border border-white/[.07] bg-dark-800/60 px-3 text-right text-sm transition hover:border-primary-400/20 hover:bg-primary-500/[.07] sm:min-h-14" onClick={()=>{setShowAddMenu(false);item.action()}}><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-500/10 text-primary-300">{item.icon}</span><span>{item.label}</span></button>)}</div></div></div>, document.body)}
             {uploadProgress&&uploadPanelMode!=='hidden'&&(uploadPanelMode==='collapsed'?<button onClick={()=>setUploadPanelMode('open')} className="fixed bottom-24 left-3 z-[175] flex h-12 items-center gap-2 rounded-full border border-primary-500/25 bg-dark-900/95 px-3 text-xs shadow-2xl backdrop-blur-xl" title="نمایش جزئیات آپلود"><Upload className="h-4 w-4 animate-pulse text-primary-300"/><span>{uploadProgress.index.toLocaleString('fa-IR')}/{uploadProgress.total.toLocaleString('fa-IR')}</span><span dir="ltr" className="font-bold text-primary-200">{uploadProgress.phase==="processing"?"…":uploadProgress.percent+"%"}</span><ChevronUp className="h-3.5 w-3.5"/></button>:<div className="fixed bottom-24 left-4 right-4 z-[175] mx-auto max-w-md rounded-2xl border border-primary-500/25 bg-dark-900/95 p-3 shadow-2xl backdrop-blur-xl"><div className="flex items-center gap-3"><Upload className="h-5 w-5 text-primary-300"/><div className="min-w-0 flex-1"><div className="flex justify-between gap-2 text-xs"><span className="truncate">{uploadProgress.name}</span><span dir="ltr">{uploadProgress.index}/{uploadProgress.total} · {uploadProgress.phase==="processing"?"…":uploadProgress.percent+"%"}</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-dark-700"><div className="h-full rounded-full bg-primary-500 transition-[width]" style={{width:`${uploadProgress.percent}%`}}/></div><p className="mt-1 text-[10px] text-dark-500">{uploadProgress.phase==="processing"?"ارسال تمام شد؛ در حال ذخیره نهایی…":"در حال ارسال فایل جاری"}</p></div><button className="btn-icon h-8 w-8" onClick={()=>setUploadPanelMode('collapsed')} title="نمایش خیلی کوچک"><Minus className="h-4 w-4"/></button><button className="btn-icon h-8 w-8" onClick={()=>setUploadPanelMode('hidden')} title="بستن وضعیت"><Eye className="h-4 w-4"/></button><button onClick={() => uploadAbortRef.current?.abort()} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-red-500/10 text-red-300 hover:bg-red-500/20" title="لغو آپلود"><X className="h-4 w-4"/></button></div></div>)}

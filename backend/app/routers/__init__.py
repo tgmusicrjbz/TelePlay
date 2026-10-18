@@ -10,6 +10,7 @@ from .playlists import router as playlists_router
 from .accounts import router as accounts_router
 from .tts import router as tts_router
 from .stt import router as stt_router
+from .packs import router as packs_router
 
-__all__ = ["files_router", "folders_router", "streaming_router", "auth_router", "tv_router", "playlists_router", "accounts_router", "tts_router", "stt_router"]
+__all__ = ["files_router", "folders_router", "streaming_router", "auth_router", "tv_router", "playlists_router", "accounts_router", "tts_router", "stt_router", "packs_router"]
 

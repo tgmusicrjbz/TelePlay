@@ -27,7 +27,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.database import Base, async_session, engine
-from app.models import AuthSession, BotUserState, ErrorLog, File, Folder, Playlist, PlaylistItem, ProcessingJob, SecurityEvent, TTSUsage, User, WatchProgress
+from app.models import AuthSession, BotUserState, ErrorLog, File, Folder, Pack, PackItem, Playlist, PlaylistItem, ProcessingJob, SecurityEvent, TTSUsage, User, WatchProgress
 from app.routers.auth import _session_for_device, password_login, update_credentials
 from app.routers.accounts import admin_error_logs, admin_health, delete_tag_definition, export_account_data, get_saved_filters, get_tag_settings, import_account_data, resolve_admin_error, update_saved_filters, update_tag_settings
 from app.stt import consume_stt_quota
@@ -54,12 +54,30 @@ from app.routers.files import (
 from app.routers.folders import delete_folder_contents, list_folders, update_folder
 from app.routers.streaming import public_share_info, stored_message_response, unlock_public_share
 from app.routers.playlists import add_playlist_items, create_playlist, reorder_playlist, shuffle_playlist
-from app.schemas import BatchFileUpdate, CredentialsUpdate, FileUpdate, FolderUpdate, PasswordLoginRequest, PlayerStateUpdate, PlaylistAddItems, PlaylistCreate, PlaylistReorder, PublicShareCreate, PublicShareUnlock, SavedFilter, SavedFiltersUpdate, TagDefinition, TagSettingsUpdate
+from app.routers.packs import create_pack, get_pack, reorder_pack
+from app.schemas import BatchFileUpdate, CredentialsUpdate, FileUpdate, FolderUpdate, PackCreate, PackReorder, PasswordLoginRequest, PlayerStateUpdate, PlaylistAddItems, PlaylistCreate, PlaylistReorder, PublicShareCreate, PublicShareUnlock, SavedFilter, SavedFiltersUpdate, TagDefinition, TagSettingsUpdate
 from app.telegram import configure_main_client, start_one_client
 from app import telegram
 
 
 class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_mixed_pack_is_created_inside_folder_and_reordered(self):
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            image = self.make_file(user.id, self.folder_id, 901)
+            image.file_type = "image"; image.mime_type = "image/jpeg"; image.file_name = "cover.jpg"
+            text_file = self.make_file(user.id, self.folder_id, 902)
+            text_file.file_type = "text"; text_file.mime_type = "text/markdown"; text_file.file_name = "note.md"
+            db.add_all([image, text_file]); await db.commit(); await db.refresh(image); await db.refresh(text_file)
+            created = await create_pack(PackCreate(name="موضوع سفر", parent_folder_id=self.folder_id, file_ids=[image.id, text_file.id]), db, user)
+            self.assertEqual(created.parent_folder_id, self.folder_id)
+            self.assertEqual(created.item_count, 2)
+            self.assertEqual(created.type_counts, {"image": 1, "text": 1})
+            reordered = await reorder_pack(created.id, PackReorder(item_ids=[created.items[1].id, created.items[0].id]), db, user)
+            self.assertEqual([item.file.id for item in reordered.items], [text_file.id, image.id])
+            fetched = await get_pack(created.id, db, user)
+            self.assertEqual([item.file.id for item in fetched.items], [text_file.id, image.id])
+
     async def test_caption_directives_are_parsed_and_removed_from_description(self):
         from app.caption_metadata import parse_file_caption
 

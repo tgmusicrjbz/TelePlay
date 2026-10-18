@@ -163,6 +163,32 @@ export interface Playlist extends PlaylistSummary {
     items: PlaylistItem[];
 }
 
+export interface PackItem {
+    id: number;
+    position: number;
+    caption: string | null;
+    added_at: string;
+    file: TelegramFile;
+}
+
+export interface PackSummary {
+    id: number;
+    name: string;
+    description: string | null;
+    parent_folder_id: number | null;
+    item_count: number;
+    cover_file_id: number | null;
+    cover_url: string | null;
+    cover_urls: string[];
+    preview_names: string[];
+    type_counts: Record<string, number>;
+    position: number;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface Pack extends PackSummary { items: PackItem[]; }
+
 export type SortField = 'name' | 'type' | 'size' | 'duration' | 'created' | 'updated' | 'count';
 export type SortDirection = 'asc' | 'desc';
 export interface SortCriterion { field: SortField; direction: SortDirection; }
@@ -764,6 +790,51 @@ export const useUploadFile = () => {
             queryClient.invalidateQueries({ queryKey: ['folders'] });
             queryClient.invalidateQueries({ queryKey: ['storage'] });
             queryClient.invalidateQueries({ queryKey: ['activity'] });
+        },
+    });
+};
+
+// ============== Mixed-media Pack Hooks ==============
+
+export const usePacks = (parentFolderId: number | null) => useQuery<PackSummary[]>({
+    queryKey: ['packs', parentFolderId],
+    queryFn: async () => (await api.get<PackSummary[]>('/packs', { params: { parent_folder_id: parentFolderId ?? undefined } })).data,
+});
+
+export const usePack = (id: number | null) => useQuery<Pack>({
+    queryKey: ['packs', 'detail', id],
+    queryFn: async () => (await api.get<Pack>(`/packs/${id}`)).data,
+    enabled: id !== null,
+});
+
+const usePackMutation = <TVariables>(request: (variables: TVariables) => Promise<Pack>) => {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: request,
+        onSuccess: (pack: Pack) => {
+            queryClient.setQueryData(['packs', 'detail', pack.id], pack);
+            queryClient.invalidateQueries({ queryKey: ['packs'] });
+        },
+    });
+};
+
+export const useCreatePack = () => usePackMutation(async (payload: { name: string; description?: string; parent_folder_id: number | null; file_ids: number[] }) =>
+    (await api.post<Pack>('/packs', payload)).data);
+export const useUpdatePack = () => usePackMutation(async ({ id, ...payload }: { id: number; name?: string; description?: string; parent_folder_id?: number | null; cover_file_id?: number | null }) =>
+    (await api.patch<Pack>(`/packs/${id}`, payload)).data);
+export const useAddPackItems = () => usePackMutation(async ({ id, fileIds }: { id: number; fileIds: number[] }) =>
+    (await api.post<Pack>(`/packs/${id}/items`, { file_ids: fileIds })).data);
+export const useRemovePackItem = () => usePackMutation(async ({ id, itemId }: { id: number; itemId: number }) =>
+    (await api.delete<Pack>(`/packs/${id}/items/${itemId}`)).data);
+export const useReorderPack = () => usePackMutation(async ({ id, itemIds }: { id: number; itemIds: number[] }) =>
+    (await api.put<Pack>(`/packs/${id}/reorder`, { item_ids: itemIds })).data);
+export const useDeletePack = () => {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async (id: number) => { await api.delete(`/packs/${id}`); return id; },
+        onSuccess: id => {
+            queryClient.removeQueries({ queryKey: ['packs', 'detail', id] });
+            queryClient.invalidateQueries({ queryKey: ['packs'] });
         },
     });
 };
