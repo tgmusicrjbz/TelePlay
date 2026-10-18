@@ -281,6 +281,7 @@ class PackCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     description: Optional[str] = Field(default=None, max_length=2048)
     parent_folder_id: Optional[int] = None
+    hide_member_files: bool = False
     file_ids: List[int] = Field(default_factory=list, max_length=500)
 
 
@@ -289,6 +290,7 @@ class PackUpdate(BaseModel):
     description: Optional[str] = Field(default=None, max_length=2048)
     parent_folder_id: Optional[int] = None
     cover_file_id: Optional[int] = None
+    hide_member_files: Optional[bool] = None
 
 
 class PackAddItems(BaseModel):
@@ -314,6 +316,7 @@ class PackSummary(BaseModel):
     parent_folder_id: Optional[int] = None
     item_count: int = 0
     cover_file_id: Optional[int] = None
+    hide_member_files: bool = False
     cover_url: Optional[str] = None
     cover_urls: List[str] = Field(default_factory=list)
     preview_names: List[str] = Field(default_factory=list)

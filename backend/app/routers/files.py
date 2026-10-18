@@ -25,7 +25,7 @@ from slowapi.util import get_remote_address
 from urllib.parse import urlparse
 
 from ..database import get_db
-from ..models import File, User, WatchProgress, Folder, Playlist
+from ..models import File, User, WatchProgress, Folder, Playlist, Pack, PackItem
 from ..schemas import ActivityResponse, BatchFileUpdate, FileResponse, FileListResponse, FileUpdate, PlayerStateResponse, PlayerStateUpdate, PublicShareCreate, WatchProgressUpdate
 from ..auth import get_current_user, has_vault_access, require_scoped_folder, require_vault_access, workspace_scope
 from ..telegram import delete_from_storage_channel, get_message_from_channel
@@ -755,13 +755,28 @@ async def list_files(
     
     
     # Apply filters
+    browsing_parent_id: int | None = None
+    is_folder_browse = False
     if folder_id is not None:
         query = query.where(File.folder_id == folder_id)
+        browsing_parent_id = folder_id
+        is_folder_browse = not search
     elif scope and (scope["folder_ids"] or scope["file_ids"]) and not search and not file_type and not favorite_only:
         query = query.where(File.id.in_(scope["file_ids"]) if scope["file_ids"] else false())
     elif not hidden_only and not search and not file_type and not favorite_only and not (scope and (scope["folder_ids"] or scope["file_ids"])):
         # If simply browsing (no search/filter), only show files in root (folder_id is NULL)
         query = query.where(File.folder_id.is_(None))
+        is_folder_browse = True
+
+    if is_folder_browse:
+        pack_parent = Pack.parent_folder_id.is_(None) if browsing_parent_id is None else Pack.parent_folder_id == browsing_parent_id
+        query = query.where(~exists().where(
+            PackItem.file_id == File.id,
+            PackItem.pack_id == Pack.id,
+            Pack.user_id == current_user.id,
+            Pack.hide_member_files.is_(True),
+            pack_parent,
+        ))
         
     if file_type:
         file_types = [item.strip() for item in file_type.split(",") if item.strip()]

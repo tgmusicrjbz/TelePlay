@@ -178,6 +178,7 @@ export interface PackSummary {
     parent_folder_id: number | null;
     item_count: number;
     cover_file_id: number | null;
+    hide_member_files: boolean;
     cover_url: string | null;
     cover_urls: string[];
     preview_names: string[];
@@ -814,13 +815,14 @@ const usePackMutation = <TVariables>(request: (variables: TVariables) => Promise
         onSuccess: (pack: Pack) => {
             queryClient.setQueryData(['packs', 'detail', pack.id], pack);
             queryClient.invalidateQueries({ queryKey: ['packs'] });
+            queryClient.invalidateQueries({ queryKey: ['files'] });
         },
     });
 };
 
-export const useCreatePack = () => usePackMutation(async (payload: { name: string; description?: string; parent_folder_id: number | null; file_ids: number[] }) =>
+export const useCreatePack = () => usePackMutation(async (payload: { name: string; description?: string; parent_folder_id: number | null; hide_member_files?: boolean; file_ids: number[] }) =>
     (await api.post<Pack>('/packs', payload)).data);
-export const useUpdatePack = () => usePackMutation(async ({ id, ...payload }: { id: number; name?: string; description?: string; parent_folder_id?: number | null; cover_file_id?: number | null }) =>
+export const useUpdatePack = () => usePackMutation(async ({ id, ...payload }: { id: number; name?: string; description?: string; parent_folder_id?: number | null; cover_file_id?: number | null; hide_member_files?: boolean }) =>
     (await api.patch<Pack>(`/packs/${id}`, payload)).data);
 export const useAddPackItems = () => usePackMutation(async ({ id, fileIds }: { id: number; fileIds: number[] }) =>
     (await api.post<Pack>(`/packs/${id}/items`, { file_ids: fileIds })).data);

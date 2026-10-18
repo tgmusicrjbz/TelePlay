@@ -69,14 +69,17 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             text_file = self.make_file(user.id, self.folder_id, 902)
             text_file.file_type = "text"; text_file.mime_type = "text/markdown"; text_file.file_name = "note.md"
             db.add_all([image, text_file]); await db.commit(); await db.refresh(image); await db.refresh(text_file)
-            created = await create_pack(PackCreate(name="موضوع سفر", parent_folder_id=self.folder_id, file_ids=[image.id, text_file.id]), db, user)
+            created = await create_pack(PackCreate(name="موضوع سفر", parent_folder_id=self.folder_id, hide_member_files=True, file_ids=[image.id, text_file.id]), db, user)
             self.assertEqual(created.parent_folder_id, self.folder_id)
+            self.assertTrue(created.hide_member_files)
             self.assertEqual(created.item_count, 2)
             self.assertEqual(created.type_counts, {"image": 1, "text": 1})
             reordered = await reorder_pack(created.id, PackReorder(item_ids=[created.items[1].id, created.items[0].id]), db, user)
             self.assertEqual([item.file.id for item in reordered.items], [text_file.id, image.id])
             fetched = await get_pack(created.id, db, user)
             self.assertEqual([item.file.id for item in fetched.items], [text_file.id, image.id])
+            folder_listing = await list_files(folder_id=self.folder_id, file_type=None, search=None, page=1, per_page=20, db=db, current_user=user)
+            self.assertTrue({image.id, text_file.id}.isdisjoint({item.id for item in folder_listing.files}))
 
     async def test_caption_directives_are_parsed_and_removed_from_description(self):
         from app.caption_metadata import parse_file_caption

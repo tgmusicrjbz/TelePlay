@@ -196,6 +196,13 @@ async def init_db():
             await conn.execute(text("ALTER TABLE playlists ADD COLUMN position INTEGER NOT NULL DEFAULT 0"))
         if url.drivername.startswith("postgresql"):
             await conn.execute(text("ALTER TABLE playlist_items DROP CONSTRAINT IF EXISTS uq_playlist_file"))
+        pack_columns = await conn.run_sync(
+            lambda sync_conn: {column["name"] for column in inspect(sync_conn).get_columns("packs")}
+        )
+        if "hide_member_files" not in pack_columns:
+            pack_bool_type = "BOOLEAN" if url.drivername.startswith("postgresql") else "INTEGER"
+            pack_bool_default = "FALSE" if url.drivername.startswith("postgresql") else "0"
+            await conn.execute(text(f"ALTER TABLE packs ADD COLUMN hide_member_files {pack_bool_type} NOT NULL DEFAULT {pack_bool_default}"))
         folder_columns = await conn.run_sync(
             lambda sync_conn: {column["name"] for column in inspect(sync_conn).get_columns("folders")}
         )

@@ -110,6 +110,7 @@ async def export_account_data(
         "packs": [{
             "name": item.name, "description": item.description, "position": item.position,
             "parent_folder_id": item.parent_folder_id,
+            "hide_member_files": item.hide_member_files,
             "cover_file_unique_id": item.cover_file.file_unique_id if item.cover_file else None,
             "items": [entry.file.file_unique_id for entry in item.items if entry.file],
         } for item in packs],
@@ -278,6 +279,7 @@ async def import_account_data(
             pack = Pack(user_id=current_user.id, parent_folder_id=parent_id, name=name, position=len(pack_by_key))
             db.add(pack); await db.flush(); pack_by_key[key] = pack
         pack.description = str(raw.get("description") or "").strip()[:2_000] or None
+        pack.hide_member_files = bool(raw.get("hide_member_files", False))
         cover = files_by_unique.get(str(raw.get("cover_file_unique_id") or ""))
         pack.cover_file_id = cover.id if cover and cover.file_type == "image" else None
         current_items = (await db.execute(select(PackItem).where(PackItem.pack_id == pack.id))).scalars().all()

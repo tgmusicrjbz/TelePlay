@@ -38,7 +38,7 @@ def _pack_response(pack: Pack) -> PackResponse:
     return PackResponse(
         id=pack.id, name=pack.name, description=pack.description,
         parent_folder_id=pack.parent_folder_id, item_count=len(ordered),
-        cover_file_id=custom_cover_id, cover_url=cover_url,
+        cover_file_id=custom_cover_id, hide_member_files=pack.hide_member_files, cover_url=cover_url,
         cover_urls=([cover_url] + previews)[:4] if cover_url else previews,
         preview_names=[item.file.file_name for item in ordered[:2]],
         type_counts=counts, position=pack.position,
@@ -116,7 +116,8 @@ async def create_pack(payload: PackCreate, db: AsyncSession = Depends(get_db), c
         Pack.parent_folder_id == payload.parent_folder_id if payload.parent_folder_id is not None else Pack.parent_folder_id.is_(None),
     ))).scalar_one()
     pack = Pack(user_id=current_user.id, parent_folder_id=payload.parent_folder_id, name=name,
-                description=(payload.description or "").strip() or None, position=last_position + 1)
+                description=(payload.description or "").strip() or None,
+                hide_member_files=payload.hide_member_files, position=last_position + 1)
     db.add(pack); await db.flush()
     for position, file in enumerate(files):
         db.add(PackItem(pack_id=pack.id, file_id=file.id, position=position))
@@ -138,6 +139,7 @@ async def update_pack(pack_id: int, payload: PackUpdate, db: AsyncSession = Depe
         if not name: raise HTTPException(status_code=400, detail="نام پک را وارد کن")
         pack.name = name
     if "description" in changes: pack.description = (changes["description"] or "").strip() or None
+    if "hide_member_files" in changes: pack.hide_member_files = bool(changes["hide_member_files"])
     if "parent_folder_id" in changes:
         await _validate_folder(db, current_user.id, changes["parent_folder_id"])
         pack.parent_folder_id = changes["parent_folder_id"]
