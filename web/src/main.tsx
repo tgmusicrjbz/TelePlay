@@ -5,6 +5,7 @@ import { BrowserRouter } from 'react-router-dom'
 import App from './App'
 import './index.css'
 import { applyAppearanceMode, applyTheme, getStoredAppearanceMode, getStoredTheme } from './lib/theme'
+import AppErrorBoundary from './components/AppErrorBoundary'
 
 applyAppearanceMode(getStoredAppearanceMode())
 applyTheme(getStoredTheme())
@@ -21,9 +22,11 @@ const queryClient = new QueryClient({
 ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
         <QueryClientProvider client={queryClient}>
-            <BrowserRouter>
-                <App />
-            </BrowserRouter>
+            <AppErrorBoundary>
+                <BrowserRouter>
+                    <App />
+                </BrowserRouter>
+            </AppErrorBoundary>
         </QueryClientProvider>
     </React.StrictMode>,
 )

@@ -748,6 +748,26 @@ def file_detail_text(file: File) -> str:
 
 
 def file_detail_keyboard(file: File, back_callback: str = "files:0") -> InlineKeyboardMarkup:
+    preview_label = {
+        "audio": "▶️ پخش",
+        "video": "▶️ پخش",
+        "image": "🖼 نمایش",
+        "text": "📖 باز کردن",
+    }.get(file.file_type, "👁 پیش‌نمایش")
+    rows = [[InlineKeyboardButton(preview_label, callback_data=f"preview:{file.id}")]]
+    if file.file_type in ("audio", "video"):
+        rows.append([
+            InlineKeyboardButton("📝 استخراج متن", callback_data=f"filestt:{file.id}"),
+            InlineKeyboardButton("🎧 پلی‌لیست", callback_data=f"fileplaylist:{file.id}:0"),
+        ])
+    rows.extend([
+        [InlineKeyboardButton("••• کارهای بیشتر", callback_data=f"filemore:{file.id}")],
+        [InlineKeyboardButton("↩️ نتایج جست‌وجو" if back_callback.startswith("search:") else "↩️ بازگشت", callback_data=back_callback)],
+    ])
+    return InlineKeyboardMarkup(rows)
+
+
+def file_more_keyboard(file: File, back_callback: str = "files:0") -> InlineKeyboardMarkup:
     share_button = InlineKeyboardButton(
         "🔒 لغو لینک عمومی" if file.public_hash else "🔗 ساخت لینک عمومی",
         callback_data=f"unsharefile:{file.id}" if file.public_hash else f"sharefile:{file.id}",
@@ -759,15 +779,13 @@ def file_detail_keyboard(file: File, back_callback: str = "files:0") -> InlineKe
     if file.description:
         description_row.append(InlineKeyboardButton("🧹 حذف توضیحات", callback_data=f"clearfiledesc:{file.id}"))
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("👁 نمایش در تلگرام", callback_data=f"preview:{file.id}")],
-        *([[InlineKeyboardButton("🎧 افزودن به پلی‌لیست", callback_data=f"fileplaylist:{file.id}:0")]] if file.file_type in ("audio", "video") else []),
         [InlineKeyboardButton("✏️ تغییر نام", callback_data=f"renamefile:{file.id}"),
          InlineKeyboardButton("🗃️ انتقال", callback_data=f"move:{file.id}")],
         description_row,
         [share_button],
-        [InlineKeyboardButton("🗑️ حذف", callback_data=f"delfile:{file.id}"),
-         InlineKeyboardButton("↩️ نتایج جست‌وجو" if back_callback.startswith("search:") else "↩️ بازگشت", callback_data=back_callback)],
-        [InlineKeyboardButton("🚪 منوی اصلی", callback_data="home")],
+        [InlineKeyboardButton("🗑️ حذف فایل", callback_data=f"delfile:{file.id}")],
+        [InlineKeyboardButton("↩️ کارهای اصلی", callback_data=f"openfile:{file.id}"),
+         InlineKeyboardButton("🚪 منوی اصلی", callback_data="home")],
     ])
 
 
@@ -1555,7 +1573,7 @@ async def _handle_file_impl(client, message: Message, status_msg: Message):
                 await db.refresh(shortcut)
                 destination_warning = f"\n⚠️ کشوی «{escape_markdown(requested_folder)}» پیدا نشد." if unresolved_folder else ""
                 await status_msg.edit(
-                    f"🔗 فایل تکراری بود؛ میانبر «{display_filename(shortcut.file_name)}» ساخته شد.{destination_warning}",
+                    f"✅ **رفت توی کمد**\n🔗 {display_filename(shortcut.file_name)}\nنسخهٔ اصلی از قبل بود؛ این یکی به همون فایل وصله.{destination_warning}",
                     reply_markup=post_upload_keyboard(shortcut, message.from_user.id),
                 )
                 return
@@ -1614,7 +1632,7 @@ async def _handle_file_impl(client, message: Message, status_msg: Message):
         # Build response
         emoji = {"video": "🎬", "audio": "🎵", "document": "📄", "image": "🖼"}.get(file_type, "📎")
         
-        response = f"✅ ذخیره شد\n{emoji} **{display_filename(file_info['file_name'])}**"
+        response = f"✅ **رفت توی کمد**\n{emoji} {display_filename(file_info['file_name'])}"
         if active_drawer_id:
             async with async_session() as db:
                 drawer = await db.get(Folder, active_drawer_id)
@@ -1823,7 +1841,7 @@ async def handle_text_note(client, message: Message):
             await db.refresh(note)
         detail_back_targets[message.from_user.id] = "files:0"
         management_message = await message.reply(
-            f"📝 در کمد ذخیره شد: {title}",
+            f"✅ **رفت توی کمد**\n📝 {escape_markdown(title)}",
             reply_markup=post_upload_keyboard(note, message.from_user.id),
         )
         asyncio.create_task(delete_preview_later(client, management_message.chat.id, management_message.id, 30))
@@ -2857,6 +2875,54 @@ async def handle_callback(client, callback: CallbackQuery):
             return
         await callback.message.edit(file_detail_text(file), reply_markup=file_detail_keyboard_for_user(file, callback.from_user.id))
         await callback.answer()
+
+    elif data.startswith("filemore:"):
+        file_id = int(data.split(":")[1])
+        async with async_session() as db:
+            file = (await db.execute(owned_file(file_id, callback.from_user.id))).scalar_one_or_none()
+        if file is None:
+            await callback.answer("فایل پیدا نشد.", show_alert=True)
+            return
+        await callback.message.edit(
+            file_detail_text(file),
+            reply_markup=file_more_keyboard(file, detail_back_targets.get(callback.from_user.id, "files:0")),
+        )
+        await callback.answer()
+
+    elif data.startswith("filestt:"):
+        file_id = int(data.split(":")[1])
+        async with async_session() as db:
+            file = (await db.execute(owned_file(file_id, callback.from_user.id))).scalar_one_or_none()
+            if file is None:
+                await callback.answer("فایل پیدا نشد.", show_alert=True)
+                return
+            if file.file_type not in ("audio", "video"):
+                await callback.answer("استخراج متن فقط برای صدا و ویدیو در دسترسه.", show_alert=True)
+                return
+            user = await db.get(User, file.user_id)
+            personal_keys = decrypt_user_keys(user.gemini_api_keys_encrypted) if user else []
+            if not stt_queue.available and not personal_keys:
+                await callback.answer("استخراج متن هنوز روی سرور فعال نشده.", show_alert=True)
+                return
+            try:
+                await consume_stt_quota(db, file.user_id, int(file.duration or 0))
+            except ValueError as error:
+                await callback.answer(str(error), show_alert=True)
+                return
+            source_name = Path(file.file_name).stem.strip() or "صدا"
+            job = STTJob(
+                user_id=file.user_id,
+                source_file_id=file.id,
+                title=f"📝 متن {source_name}"[:180],
+                folder_id=file.folder_id,
+                output_mode="save",
+                telegram_id=callback.from_user.id,
+                api_keys=personal_keys,
+            )
+        position = await stt_queue.enqueue(job)
+        queue_note = f" · نوبت {to_persian_digits(str(position))}" if position > 1 else ""
+        await callback.answer("استخراج متن شروع شد ✨")
+        await callback.message.reply(f"📝 **دارم متن رو آماده می‌کنم**{queue_note}\nوقتی آماده بشه همین‌جا می‌فرستم.")
 
     elif data.startswith("filedesc:"):
         file_id = int(data.split(":")[1])

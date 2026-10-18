@@ -1089,7 +1089,7 @@ class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
 
         from app.telegram import build_clients
         build_clients()
-        from app.bot import file_detail_keyboard, file_detail_text, format_duration, format_jalali, format_size, help_keyboard, main_menu_keyboard, pagination_row, search_type_keyboard, sort_keyboard, sort_drafts, truncate_description, type_filter_keyboard
+        from app.bot import file_detail_keyboard, file_detail_text, file_more_keyboard, format_duration, format_jalali, format_size, help_keyboard, main_menu_keyboard, pagination_row, search_type_keyboard, sort_keyboard, sort_drafts, truncate_description, type_filter_keyboard
         file = SimpleNamespace(
             file_type="video", file_name="clip.mp4", file_size=10,
             duration=5, description="توضیح همراه رسانه",
@@ -1101,6 +1101,12 @@ class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("۱۴۰۴/۰۱/۰۱", format_jalali(file.created_at))
         detail_callbacks = [button.callback_data for row in file_detail_keyboard(file, "search:2").inline_keyboard for button in row]
         self.assertIn("search:2", detail_callbacks)
+        self.assertIn("filestt:99", detail_callbacks)
+        self.assertIn("filemore:99", detail_callbacks)
+        self.assertNotIn("delfile:99", detail_callbacks)
+        more_callbacks = [button.callback_data for row in file_more_keyboard(file, "search:2").inline_keyboard for button in row]
+        self.assertIn("delfile:99", more_callbacks)
+        self.assertIn("openfile:99", more_callbacks)
         self.assertTrue(all(len(button.callback_data or "") <= 64 for button in pagination_row("folders:123", 1, 30)))
         search_callbacks = [button.callback_data for row in search_type_keyboard().inline_keyboard for button in row]
         self.assertIn("search_filter_toggle:folder", search_callbacks)

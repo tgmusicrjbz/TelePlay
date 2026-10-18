@@ -770,9 +770,48 @@ export const useUploadFile = () => {
 
 // ============== Playlist Hooks ==============
 
+const playlistCacheScope = () => {
+    const owner = localStorage.getItem('komod-active-workspace') || cachedCurrentUser()?.id || 'guest';
+    return String(owner);
+};
+const playlistCatalogCacheKey = () => `komod-playlists:${playlistCacheScope()}`;
+const playlistDetailCacheKey = (id: number) => `komod-playlist:${playlistCacheScope()}:${id}`;
+const readJsonCache = <T>(key: string): T | undefined => {
+    try {
+        const raw = localStorage.getItem(key);
+        return raw ? JSON.parse(raw) as T : undefined;
+    } catch { return undefined; }
+};
+const writeJsonCache = (key: string, value: unknown) => {
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* Storage may be full or disabled. */ }
+};
+const cachePlaylistCatalog = (playlists: PlaylistSummary[]) => writeJsonCache(playlistCatalogCacheKey(), playlists);
+const cachePlaylist = (playlist: Playlist) => {
+    writeJsonCache(playlistDetailCacheKey(playlist.id), playlist);
+    const catalog = readJsonCache<PlaylistSummary[]>(playlistCatalogCacheKey()) || [];
+    const summary: PlaylistSummary = playlist;
+    cachePlaylistCatalog(catalog.some(item => item.id === playlist.id)
+        ? catalog.map(item => item.id === playlist.id ? summary : item)
+        : [summary, ...catalog]);
+};
+const offlineRequested = () => !navigator.onLine || localStorage.getItem('komod-force-offline') === '1';
+
 export const usePlaylists = () => useQuery<PlaylistSummary[]>({
     queryKey: ['playlists'],
-    queryFn: async () => (await api.get<PlaylistSummary[]>('/playlists')).data,
+    queryFn: async () => {
+        const cached = readJsonCache<PlaylistSummary[]>(playlistCatalogCacheKey());
+        if (offlineRequested()) return cached || [];
+        try {
+            const data = (await api.get<PlaylistSummary[]>('/playlists')).data;
+            cachePlaylistCatalog(data);
+            return data;
+        } catch (error) {
+            if (cached) return cached;
+            throw error;
+        }
+    },
+    initialData: () => readJsonCache<PlaylistSummary[]>(playlistCatalogCacheKey()),
+    initialDataUpdatedAt: 0,
 });
 
 export const useReorderPlaylistCatalog = () => {
@@ -797,7 +836,7 @@ export const useReorderPlaylistCatalog = () => {
         onError: (_error, _ids, context) => {
             if (context?.previous) queryClient.setQueryData(['playlists'], context.previous);
         },
-        onSuccess: data => queryClient.setQueryData(['playlists'], data),
+        onSuccess: data => { queryClient.setQueryData(['playlists'], data); cachePlaylistCatalog(data); },
     });
 };
 
@@ -837,8 +876,25 @@ export const useImportLink = () => useMutation({
 
 export const usePlaylist = (id: number | null) => useQuery<Playlist>({
     queryKey: ['playlists', id],
-    queryFn: async () => (await api.get<Playlist>(`/playlists/${id}`)).data,
+    queryFn: async () => {
+        if (id === null) throw new Error('پلی‌لیست انتخاب نشده است.');
+        const cached = readJsonCache<Playlist>(playlistDetailCacheKey(id));
+        if (offlineRequested()) {
+            if (cached) return cached;
+            throw new Error('این پلی‌لیست هنوز برای استفاده آفلاین آماده نشده است.');
+        }
+        try {
+            const data = (await api.get<Playlist>(`/playlists/${id}`)).data;
+            cachePlaylist(data);
+            return data;
+        } catch (error) {
+            if (cached) return cached;
+            throw error;
+        }
+    },
     enabled: id !== null,
+    initialData: () => id === null ? undefined : readJsonCache<Playlist>(playlistDetailCacheKey(id)),
+    initialDataUpdatedAt: 0,
 });
 
 const usePlaylistMutation = <TVariables>(request: (variables: TVariables) => Promise<Playlist>, queued:(variables:TVariables,current?:Playlist)=>Parameters<typeof queueOfflineMutation>[0], fallback:(variables:TVariables,current?:Playlist)=>Playlist) => {
@@ -849,6 +905,7 @@ const usePlaylistMutation = <TVariables>(request: (variables: TVariables) => Pro
             return runOrQueueMetadataMutation(()=>request(variables),queued(variables,current),()=>fallback(variables,current));
         },
         onSuccess: (playlist: Playlist) => {
+            cachePlaylist(playlist);
             queryClient.setQueryData(['playlists', playlist.id], playlist);
             queryClient.setQueryData<PlaylistSummary[]>(['playlists'],current=>current?.some(item=>item.id===playlist.id)?current.map(item=>item.id===playlist.id?playlist:item):[playlist,...(current||[])]);
             queryClient.invalidateQueries({ queryKey: ['playlists'] });
