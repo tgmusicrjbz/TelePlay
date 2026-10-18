@@ -17,7 +17,7 @@ from ..auth import create_vault_token, get_current_user, require_vault_access
 from ..config import get_settings
 from ..database import get_db
 from ..models import AuthSession, File, Folder, Playlist, PlaylistItem, ProcessingJob, SecurityEvent, TTSUsage, User, WorkspaceGrant
-from ..schemas import AccountPreferences, AdminHealthResponse, AdminStatsResponse, AdminUserCreate, AdminUserResponse, AdminUserUpdate, SavedFilter, SavedFiltersUpdate, ServiceHealthItem, StorageChannelResponse, StorageChannelUpdate, StuckJobResponse, TagDefinitionResponse, TagSettingsResponse, TagSettingsUpdate, VaultPasswordRequest, VaultStatus, VaultTokenResponse, WorkspaceGrantCreate, WorkspaceResponse
+from ..schemas import AccountPreferences, AdminHealthResponse, AdminStatsResponse, AdminUserCreate, AdminUserResponse, AdminUserUpdate, SavedFilter, SavedFiltersUpdate, ServiceHealthItem, StorageChannelItem, StorageChannelResponse, StorageChannelUpdate, StuckJobResponse, TagDefinitionResponse, TagSettingsResponse, TagSettingsUpdate, VaultPasswordRequest, VaultStatus, VaultTokenResponse, WorkspaceGrantCreate, WorkspaceResponse
 from .. import telegram
 from ..audit import add_security_event
 from ..services import sanitize_filename
@@ -291,9 +291,10 @@ def clean_tag_definitions(raw_tags) -> list[dict[str, str]]:
     for item in raw_tags:
         name = str(item.name if hasattr(item, "name") else item.get("name", "")).strip().lstrip("#")[:40]
         color = str(item.color if hasattr(item, "color") else item.get("color", "#a855f7")).lower()
+        category = str(item.category if hasattr(item, "category") else item.get("category", "")).strip()[:40]
         key = name.casefold()
         if name and key not in seen:
-            result.append({"name": name, "color": color})
+            result.append({"name": name, "color": color, "category": category})
             seen.add(key)
     return result[:100]
 
@@ -331,7 +332,7 @@ async def get_tag_settings(current_user: User = Depends(get_current_user), db: A
     configured = {item["name"].casefold() for item in definitions}
     for key, name in sorted(discovered.items(), key=lambda item: item[1].casefold()):
         if key not in configured and len(definitions) < 100:
-            definitions.append({"name": name, "color": automatic_tag_color(name)})
+            definitions.append({"name": name, "color": automatic_tag_color(name), "category": ""})
             configured.add(key)
     return TagSettingsResponse(
         tags=[TagDefinitionResponse(**item, file_count=counts.get(item["name"].casefold(), 0)) for item in definitions],
@@ -495,15 +496,46 @@ def require_admin(current_user: User = Depends(get_current_user)) -> User:
     return current_user
 
 
+def _storage_channel_ids(user: User) -> list[int]:
+    try:
+        values = json.loads(user.storage_channels_json or "[]")
+    except (TypeError, ValueError):
+        values = []
+    channel_ids: list[int] = []
+    for value in values:
+        try:
+            channel_id = int(value)
+        except (TypeError, ValueError):
+            continue
+        if channel_id not in channel_ids:
+            channel_ids.append(channel_id)
+    if user.storage_channel_id is not None and user.storage_channel_id not in channel_ids:
+        channel_ids.insert(0, user.storage_channel_id)
+    return channel_ids
+
+
+async def _storage_channel_response(user: User) -> StorageChannelResponse:
+    channel_ids = _storage_channel_ids(user)
+    channels: list[StorageChannelItem] = []
+    for channel_id in channel_ids:
+        try:
+            chat = await telegram.tg_client.get_chat(channel_id)
+            title = chat.title
+        except Exception:
+            title = "کانال تنظیم‌شده"
+        channels.append(StorageChannelItem(channel_id=channel_id, title=title, active=channel_id == user.storage_channel_id))
+    active = next((item for item in channels if item.active), None)
+    return StorageChannelResponse(
+        configured=bool(channels),
+        channel_id=active.channel_id if active else None,
+        title=active.title if active else None,
+        channels=channels,
+    )
+
+
 @router.get("/accounts/storage-channel", response_model=StorageChannelResponse)
 async def get_storage_channel(current_user: User = Depends(get_current_user)):
-    if current_user.storage_channel_id is None:
-        return StorageChannelResponse(configured=False)
-    try:
-        chat = await telegram.tg_client.get_chat(current_user.storage_channel_id)
-        return StorageChannelResponse(configured=True, channel_id=current_user.storage_channel_id, title=chat.title)
-    except Exception:
-        return StorageChannelResponse(configured=True, channel_id=current_user.storage_channel_id, title="کانال تنظیم‌شده")
+    return await _storage_channel_response(current_user)
 
 
 @router.put("/accounts/storage-channel", response_model=StorageChannelResponse)
@@ -529,14 +561,29 @@ async def set_storage_channel(payload: StorageChannelUpdate, current_user: User 
         raise
     except Exception as error:
         raise HTTPException(status_code=400, detail="کانال در دسترس نیست؛ عضویت و دسترسی مدیریتی ربات را بررسی کن.") from error
+    channel_ids = _storage_channel_ids(current_user)
+    if channel_id not in channel_ids:
+        channel_ids.append(channel_id)
+    current_user.storage_channels_json = json.dumps(channel_ids)
     current_user.storage_channel_id = channel_id
     await db.commit()
-    return StorageChannelResponse(configured=True, channel_id=channel_id, title=chat.title)
+    return await _storage_channel_response(current_user)
 
 
 @router.delete("/accounts/storage-channel", status_code=204)
 async def reset_storage_channel(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     current_user.storage_channel_id = None
+    current_user.storage_channels_json = "[]"
+    await db.commit()
+    return Response(status_code=204)
+
+
+@router.delete("/accounts/storage-channel/{channel_id}", status_code=204)
+async def remove_storage_channel(channel_id: int, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    channel_ids = [item for item in _storage_channel_ids(current_user) if item != channel_id]
+    current_user.storage_channels_json = json.dumps(channel_ids)
+    if current_user.storage_channel_id == channel_id:
+        current_user.storage_channel_id = channel_ids[0] if channel_ids else None
     await db.commit()
     return Response(status_code=204)
 

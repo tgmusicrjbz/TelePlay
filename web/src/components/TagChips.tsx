@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 
 const palette = ['#a855f7','#0ea5e9','#14b8a6','#22c55e','#eab308','#f97316','#ef4444','#ec4899'];
-type CachedTagSettings = { tags:Array<{name:string;color:string}>; show_file_tags:boolean; display_limit:number };
+type CachedTagSettings = { tags:Array<{name:string;color:string;category?:string}>; show_file_tags:boolean; display_limit:number };
 
 function settings(): CachedTagSettings {
     try { return JSON.parse(localStorage.getItem('komod-tag-settings') || '{"tags":[],"show_file_tags":false,"display_limit":2}'); }

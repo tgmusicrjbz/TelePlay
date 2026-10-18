@@ -12,7 +12,7 @@ import { CSS } from '@dnd-kit/utilities';
 
 export default function MediaPlayer() {
     const { previewFile: file, setPreviewFile, isPlayerMinimized, setPlayerMinimized, clearQueue } = useAppStore();
-    
+
     if (!file || (file.file_type !== 'video' && file.file_type !== 'audio')) return null;
 
     return <MediaPlayerContent file={file} onClose={() => { setPreviewFile(null); clearQueue(); }} isMinimized={isPlayerMinimized} setMinimized={setPlayerMinimized} />;
@@ -84,7 +84,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     const addPlaylistItems = useAddPlaylistItems();
     const [showVideoMoreMenu, setShowVideoMoreMenu] = useState(false);
     const videoMoreButtonRef = useRef<HTMLButtonElement>(null);
-    const [videoMenuPosition, setVideoMenuPosition] = useState({ top: 116, right: 12, width: 224, maxHeight: 360 });
+    const [videoMenuPosition, setVideoMenuPosition] = useState({ top: 116, right: 12, width: 244, maxHeight: 360 });
     const [activeQueueId, setActiveQueueId] = useState<string | null>(null);
     const queueDropTargetRef = useRef<string | null>(null);
     const queueSensors = useSensors(
@@ -96,7 +96,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
         const rect = videoMoreButtonRef.current?.getBoundingClientRect();
         if (!rect) return;
         const edge = 12;
-        const width = Math.min(224, window.innerWidth - edge * 2);
+        const width = Math.min(244, window.innerWidth - edge * 2);
         const right = Math.min(Math.max(edge, window.innerWidth - rect.right), window.innerWidth - width - edge);
         const top = Math.min(rect.bottom + 8, window.innerHeight - 172);
         setVideoMenuPosition({ top, right, width, maxHeight: Math.max(152, window.innerHeight - top - edge) });
@@ -527,7 +527,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                         document.exitFullscreen();
                     } else if (!isMinimized) {
                         // If full screen mode (not minimized), esc minimizes? or closes?
-                        // Standard behavior: ESC closes modal. 
+                        // Standard behavior: ESC closes modal.
                         // But for music we might want minimize.
                         // Let's stick to close on ESC for now, user can minimize via button.
                         onClose();
@@ -748,7 +748,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
         <div
             ref={containerRef}
             className={`${isMinimized ? 'mini-player' : 'video-player'} fixed z-[120] transition-all duration-300 ease-in-out ${
-                isMinimized 
+                isMinimized
                     ? 'bottom-[calc(5rem+env(safe-area-inset-bottom))] left-0 right-0 h-20 max-h-[25vh] border-t border-white/10 bg-dark-900 shadow-2xl md:bottom-0'
                 : 'inset-0 bg-black flex items-center justify-center font-sans'
             }`}
@@ -805,9 +805,9 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                             <div className="absolute inset-x-4 top-16 bottom-44 z-10 flex flex-col items-center justify-center text-center animate-scale-in">
                                 {authorizedThumbnailUrl && !audioOnly && !thumbnailFailed ? (
                                     <div className="mb-6 h-60 w-60 overflow-hidden rounded-3xl bg-dark-800 shadow-[0_12px_30px_rgba(0,0,0,.35)] sm:h-72 sm:w-72 lg:h-80 lg:w-80">
-                                         <img 
-                                            src={authorizedThumbnailUrl} 
-                                            alt={file.file_name} 
+                                         <img
+                                            src={authorizedThumbnailUrl}
+                                            alt={file.file_name}
                                             className="h-full w-full object-cover"
                                             onError={() => setThumbnailFailed(true)}
                                          />
@@ -824,7 +824,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                                 <p className="text-primary-400 font-medium" dir="ltr">{formatPersianMetaTime(safeCurrentTime)} / {formatPersianMetaTime(safeDuration)}</p>
                             </div>
                         )}
-                        
+
                         {MediaElement}
 
                         {/* Loading Spinner */}
@@ -865,7 +865,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                         <button disabled={!hasQueue} onClick={(e) => { e.stopPropagation(); playPrevious(); }} className="p-2 text-dark-300 hover:text-white disabled:opacity-30" title="ترک قبلی">
                             <SkipBack className="w-5 h-5" />
                         </button>
-                        <button 
+                        <button
                             onClick={(e) => { e.stopPropagation(); togglePlay(); }}
                             className="p-2 bg-primary-600 rounded-full text-white hover:bg-primary-500 shadow-lg shadow-primary-500/20"
                         >
@@ -884,7 +884,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                             <X className="w-5 h-5" />
                         </button>
                     </div>
-                    
+
                     {/* Progress bar line at top */}
                     <div className="absolute top-0 left-0 right-0 h-0.5 bg-dark-800">
                         <div className="h-full bg-primary-500" style={{ width: `${progressPercent}%` }}></div>
@@ -944,16 +944,18 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                                     onClick={() => { setShowVideoMoreMenu(false); setShowSleepMenu(false); }}
                                     aria-label="بستن گزینه‌های ویدیو"
                                 />
-                                <div role="menu" aria-label="گزینه‌های بیشتر ویدیو" dir="rtl" onPointerDown={event=>event.stopPropagation()} onClick={event=>event.stopPropagation()} className="fixed z-[301] box-border overflow-y-auto overscroll-contain rounded-xl border border-white/10 bg-dark-900/98 p-1 text-right shadow-2xl backdrop-blur-xl" style={videoMenuPosition}>
-                                <button className="context-menu-item min-h-9 w-full px-2.5 py-2 text-xs" onClick={()=>{setVideoHidden(value=>{if(!value&&audioOnly)setAudioOnly(false);return !value});setShowVideoMoreMenu(false)}}><EyeOff className="h-4 w-4"/><span>{videoHidden?'روشن کردن تصویر':'خاموش کردن تصویر'}</span></button>
-                                <button disabled={preparingAudio} className="context-menu-item min-h-9 w-full px-2.5 py-2 text-xs disabled:opacity-50" onClick={()=>void toggleAudioOnly()}><Headphones className="h-4 w-4"/><span>{preparingAudio?'آماده‌سازی صدا…':audioOnly ? 'بازگشت به ویدیو' : 'فقط صدا (کم‌حجم)'}</span></button>
-                                <button className="context-menu-item min-h-9 w-full px-2.5 py-2 text-xs" onClick={() => setRepeatMode(repeatMode === 'off' ? (hasQueue ? 'all' : 'one') : repeatMode === 'all' ? 'one' : 'off')}><Repeat2 className="h-4 w-4"/><span className="min-w-0 flex-1">{repeatMode === 'off' ? 'تکرار خاموش' : repeatMode === 'all' ? 'تکرار صف' : 'تکرار ویدیو'}</span>{repeatMode === 'one'&&<strong className="text-primary-200">۱</strong>}</button>
-                                <button className="context-menu-item min-h-9 w-full px-2.5 py-2 text-xs" onClick={() => setShowSleepMenu(open => !open)}><Clock3 className="h-4 w-4"/><span className="min-w-0 flex-1">تایمر خواب</span>{sleepMode !== 'off'&&<span className="h-2 w-2 rounded-full bg-primary-400"/>}</button>
-                                {showSleepMenu && <div className="mx-1 mb-1 grid grid-cols-2 gap-1 rounded-xl bg-black/25 p-1">
+                                <div role="menu" aria-label="گزینه‌های بیشتر ویدیو" dir="rtl" onPointerDown={event=>event.stopPropagation()} onClick={event=>event.stopPropagation()} className="fixed z-[301] box-border overflow-y-auto overscroll-contain rounded-2xl border border-white/10 bg-dark-900/95 p-2 text-right shadow-2xl backdrop-blur-2xl" style={videoMenuPosition}>
+                                <div className="grid grid-cols-2 gap-1.5">
+                                <button className={`flex min-h-16 flex-col items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-[11px] transition ${videoHidden?'bg-primary-500/20 text-primary-200':'bg-white/[.045] text-dark-200 hover:bg-white/[.08]'}`} onClick={()=>{setVideoHidden(value=>{if(!value&&audioOnly)setAudioOnly(false);return !value});setShowVideoMoreMenu(false)}}><EyeOff className="h-5 w-5"/><span>{videoHidden?'تصویر روشن':'خاموشی تصویر'}</span></button>
+                                <button disabled={preparingAudio} className={`flex min-h-16 flex-col items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-[11px] transition disabled:opacity-50 ${audioOnly?'bg-primary-500/20 text-primary-200':'bg-white/[.045] text-dark-200 hover:bg-white/[.08]'}`} onClick={()=>void toggleAudioOnly()}><Headphones className="h-5 w-5"/><span>{preparingAudio?'آماده‌سازی…':audioOnly ? 'بازگشت به ویدیو' : 'فقط صدا'}</span></button>
+                                <button className={`flex min-h-14 items-center justify-center gap-2 rounded-xl px-2 py-2 text-[11px] transition ${repeatMode!=='off'?'bg-primary-500/20 text-primary-200':'bg-white/[.045] text-dark-200 hover:bg-white/[.08]'}`} onClick={() => setRepeatMode(repeatMode === 'off' ? (hasQueue ? 'all' : 'one') : repeatMode === 'all' ? 'one' : 'off')}><Repeat2 className="h-4 w-4"/><span>{repeatMode === 'off' ? 'تکرار' : repeatMode === 'all' ? 'تکرار صف' : 'تکرار همین'}</span></button>
+                                <button className={`flex min-h-14 items-center justify-center gap-2 rounded-xl px-2 py-2 text-[11px] transition ${sleepMode!=='off'?'bg-primary-500/20 text-primary-200':'bg-white/[.045] text-dark-200 hover:bg-white/[.08]'}`} onClick={() => setShowSleepMenu(open => !open)}><Clock3 className="h-4 w-4"/><span>تایمر</span></button>
+                                {showSleepMenu && <div className="col-span-2 grid grid-cols-2 gap-1 rounded-xl bg-black/20 p-1">
                                     {([['15','۱۵ دقیقه'],['30','۳۰ دقیقه'],['45','۴۵ دقیقه'],['60','۱ ساعت'],['track','پایان ویدیو'],['end','پایان صف']] as const).map(([mode,label])=><button key={mode} onClick={()=>setSleepTimer(mode)} className={`rounded-lg px-2 py-2 text-[11px] ${sleepMode===mode?'bg-primary-500/25 text-primary-200':'text-dark-300 hover:bg-white/[.05]'}`}>{label}</button>)}
                                     {sleepMode !== 'off'&&<button onClick={()=>setSleepTimer('off')} className="col-span-2 rounded-lg px-2 py-2 text-[11px] text-red-300 hover:bg-red-500/10">لغو تایمر</button>}
                                 </div>}
-                                {document.pictureInPictureEnabled && <button className="context-menu-item min-h-9 w-full px-2.5 py-2 text-xs" onClick={togglePiP}><PictureInPicture2 className="h-4 w-4"/><span>{isPiP ? 'خروج از تصویر کوچک' : 'تصویر کوچک'}</span></button>}
+                                {document.pictureInPictureEnabled && <button className="col-span-2 flex min-h-10 items-center justify-center gap-2 rounded-xl bg-white/[.045] px-3 text-[11px] text-dark-200 hover:bg-white/[.08]" onClick={togglePiP}><PictureInPicture2 className="h-4 w-4"/><span>{isPiP ? 'خروج از تصویر کوچک' : 'تصویر در تصویر'}</span></button>}
+                                </div>
                                 </div>
                             </>, document.body)}
                         </div>}
@@ -994,17 +996,17 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                     </div>
 
                     {/* Bottom controls */}
-                    <div data-player-controls data-player-bottom className="absolute bottom-0 left-0 right-0 z-30 bg-gradient-to-t from-black via-black/90 to-transparent px-4 pb-4 pt-7 shadow-[0_-12px_30px_rgba(0,0,0,.22)] backdrop-blur-[2px] sm:px-6 sm:pb-5 sm:pt-8">
+                    <div data-player-controls data-player-bottom className="absolute bottom-3 left-3 right-3 z-30 rounded-2xl border border-white/[.08] bg-black/35 px-3 py-3 shadow-[0_10px_35px_rgba(0,0,0,.28)] backdrop-blur-xl sm:bottom-4 sm:left-5 sm:right-5 sm:px-4 sm:py-3.5">
                         {/* Progress bar */}
                         <div className="group/progress mb-4 flex items-center gap-2.5 sm:gap-4">
-                            <span dir="ltr" className="font-player min-w-[46px] rounded-lg bg-black/25 px-1.5 py-1 text-center text-xs font-semibold tabular-nums text-white/90">{formatPlayerTime(safeCurrentTime)}</span>
-                            <div className="relative h-2.5 flex-1 cursor-pointer rounded-full bg-white/20 shadow-inner">
+                            <span dir="ltr" className="font-player min-w-[42px] text-center text-[11px] font-semibold tracking-wide text-white/85">{formatPlayerTime(safeCurrentTime)}</span>
+                            <div className={`relative h-2 flex-1 cursor-pointer overflow-visible rounded-full bg-white/15 ${safeDuration<=0?'animate-pulse':''}`}>
                                 {/* Buffered progress can be added here */}
                                 <div
                                     className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-primary-600 via-primary-500 to-primary-300 shadow-lg shadow-primary-500/30 transition-all"
                                     style={{ width: `${progressPercent}%` }}
                                 />
-                                <span className="pointer-events-none absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-primary-400 shadow-lg shadow-black/40" style={{ left: `${progressPercent}%` }}/>
+                                {safeDuration>0&&<span className="pointer-events-none absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-md shadow-black/40" style={{ left: `clamp(6px, ${progressPercent}%, calc(100% - 6px))` }}/>}
                                 <input
                                     type="range"
                                     min={0}
@@ -1014,7 +1016,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                                     className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                                 />
                             </div>
-                            <span dir="ltr" className="font-player min-w-[46px] rounded-lg bg-black/25 px-1.5 py-1 text-center text-xs font-semibold tabular-nums text-white/90">{formatPlayerTime(safeDuration)}</span>
+                            <span dir="ltr" className="font-player min-w-[42px] text-center text-[11px] font-semibold tracking-wide text-white/85">{formatPlayerTime(safeDuration)}</span>
                         </div>
 
                         {/* Control buttons */}

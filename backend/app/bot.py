@@ -1050,7 +1050,7 @@ async def tts_command(client, message: Message):
         api_keys=personal_keys,
     )
     position = await tts_queue.enqueue(job)
-    await message.reply(f"🎙️ متن رفت توی صف ساخت صدا · جایگاه {to_persian_digits(str(position))}\nوقتی آماده بشه همین‌جا می‌فرستمش.")
+    await message.reply(f"🎙️ ساخت صدا شروع شد\nجایگاه در صف: {to_persian_digits(str(position))}")
 
 
 @tg_client.on_message(filters.command("stt") & filters.private)
@@ -1090,7 +1090,7 @@ async def stt_command(client, message: Message):
         api_keys=personal_keys,
     )
     position = await stt_queue.enqueue(job)
-    await message.reply(f"📝 استخراج متن شروع شد · جایگاه {to_persian_digits(str(position))}")
+    await message.reply(f"📝 استخراج متن شروع شد\nجایگاه در صف: {to_persian_digits(str(position))}")
 
 
 def tts_bot_settings_view(preferences: dict) -> dict:
@@ -1536,21 +1536,34 @@ async def import_personal_channel_post(message: Message) -> None:
         ))).scalar_one_or_none()
         if duplicate is not None:
             return
-        owners = (await db.execute(select(User).where(User.storage_channel_id == channel_id, User.is_active.is_(True)))).scalars().all()
+        candidates = (await db.execute(select(User).where(User.is_active.is_(True)))).scalars().all()
+        owners = []
+        for candidate in candidates:
+            try:
+                configured_channels = [int(value) for value in json.loads(candidate.storage_channels_json or "[]")]
+            except (TypeError, ValueError):
+                configured_channels = []
+            if candidate.storage_channel_id == channel_id or channel_id in configured_channels:
+                owners.append(candidate)
         if len(owners) != 1:
             return
         user = owners[0]
-        folder = await ensure_default_folder(db, user.id)
+        caption_meta = parse_file_caption(getattr(message, "caption", None) or getattr(message, "text", None))
+        requested_folder = str(caption_meta.get("folder") or "").strip()
+        folder = await resolve_caption_folder(user.id, requested_folder) if requested_folder else None
+        if folder is None:
+            folder = await ensure_default_folder(db, user.id)
         if message.text and not any(getattr(message, field, None) for field in ("video", "audio", "voice", "animation", "video_note", "document", "photo")):
             content = message.text.strip()
             if not content:
                 return
-            title = sanitize_filename(next((line.strip() for line in content.splitlines() if line.strip()), "یادداشت")[:80])
+            clean_content = str(caption_meta.get("clean_caption") or content).strip()
+            title = sanitize_filename(str(caption_meta.get("title") or next((line.strip() for line in clean_content.splitlines() if line.strip()), "یادداشت"))[:80])
             record = File(
                 user_id=user.id, folder_id=folder.id, channel_message_id=message.id, storage_channel_id=channel_id,
                 file_id=f"text:{message.id}", file_unique_id=f"channel:{channel_id}:text:{message.id}",
-                file_name=title, description=content[:1024], file_size=len(content.encode("utf-8")),
-                search_text=content, mime_type="text/plain; charset=utf-8", file_type="text",
+                file_name=title, description=caption_meta.get("description"), file_size=len(clean_content.encode("utf-8")),
+                search_text=clean_content, tags_json=json.dumps(caption_meta.get("tags") or [], ensure_ascii=False), mime_type="text/plain; charset=utf-8", file_type="text",
             )
         else:
             media = next((getattr(message, field, None) for field in ("video", "audio", "voice", "animation", "video_note", "document") if getattr(message, field, None)), None)
@@ -1562,11 +1575,15 @@ async def import_personal_channel_post(message: Message) -> None:
             mime = getattr(media, "mime_type", None) or ("image/jpeg" if is_photo else "audio/ogg" if getattr(message, "voice", None) else None)
             file_type = "video" if any(getattr(message, field, None) for field in ("video", "animation", "video_note")) else "audio" if any(getattr(message, field, None) for field in ("audio", "voice")) else "image" if is_photo or (mime or "").startswith("image/") else "document"
             raw_name = getattr(media, "file_name", None) or f"{file_type}_{message.id}{'.jpg' if is_photo else '.ogg' if file_type == 'audio' else '.mp4' if file_type == 'video' else ''}"
+            explicit_title = str(caption_meta.get("title") or "").strip()
+            if explicit_title:
+                extension = Path(raw_name).suffix
+                raw_name = explicit_title if not extension or explicit_title.lower().endswith(extension.lower()) else f"{explicit_title}{extension}"
             record = File(
                 user_id=user.id, folder_id=folder.id, channel_message_id=message.id, storage_channel_id=channel_id,
                 file_id=media.file_id, file_unique_id=media.file_unique_id, file_name=sanitize_filename(raw_name),
-                description=(message.caption or "").strip()[:1024] or None,
-                tags_json=json.dumps(extract_tags_from_caption(message.caption or ""), ensure_ascii=False),
+                description=caption_meta.get("description"),
+                tags_json=json.dumps(caption_meta.get("tags") or [], ensure_ascii=False),
                 file_size=getattr(media, "file_size", 0) or 0, mime_type=mime, file_type=file_type,
                 duration=getattr(media, "duration", None), width=getattr(media, "width", None), height=getattr(media, "height", None),
                 thumbnail_file_id=media.file_id if is_photo else (select_best_thumbnail(getattr(media, "thumbs", None)).file_id if select_best_thumbnail(getattr(media, "thumbs", None)) else None),
@@ -1600,12 +1617,11 @@ async def handle_import_link(client, message: Message):
     if not matches:
         return
     try:
-        positions = []
         for raw_url in matches:
             url = raw_url.rstrip(".,;!?)]}>'\"")
-            positions.append(await link_importer.enqueue(ImportJob(url=url, user_id=user.id, telegram_id=user.telegram_id, folder_id=None, notify=True, default_folder=True)))
+            await link_importer.enqueue(ImportJob(url=url, user_id=user.id, telegram_id=user.telegram_id, folder_id=None, notify=True, default_folder=True))
         count = to_persian_digits(str(len(matches)))
-        reply = await message.reply(f"⏳ {count} لینک در صف است؛ پس از آماده‌شدن خبرت می‌کنم.")
+        reply = await message.reply(f"🔗 {count} لینک ثبت شد\nبعد از آماده‌شدن خبرت می‌کنم.")
         asyncio.create_task(delete_preview_later(client, reply.chat.id, reply.id, 30))
     except Exception as error:
         logger.exception("Could not enqueue link import: %s", error)

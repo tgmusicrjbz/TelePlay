@@ -877,7 +877,8 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
         channel_id = -1009876543210
         async with async_session() as db:
             user = await db.get(User, self.user_id)
-            user.storage_channel_id = channel_id
+            user.storage_channel_id = -1001111111111
+            user.storage_channels_json = json.dumps([-1001111111111, channel_id])
             await db.commit()
 
         message = SimpleNamespace(

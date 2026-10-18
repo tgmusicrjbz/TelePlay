@@ -24,6 +24,7 @@ class User(Base):
     failed_login_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     login_locked_until: Mapped[Optional[datetime]] = mapped_column(DateTime)
     storage_channel_id: Mapped[Optional[int]] = mapped_column(BigInteger)
+    storage_channels_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
     delete_storage_files: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     tag_settings_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
     saved_filters_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)

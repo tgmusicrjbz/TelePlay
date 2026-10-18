@@ -44,7 +44,7 @@ export interface StuckJob { id:string; kind:string; title:string; state:string; 
 export interface AdminHealth { checked_at:string; overall:'healthy'|'warning'|'error'; services:ServiceHealthItem[]; stuck_jobs:StuckJob[]; }
 export interface AdminErrorLog { id:number; error_id:string; method:string; path:string; message:string; resolved:boolean; created_at:string; }
 export interface AccountPreferences { delete_storage_files: boolean; }
-export interface TagDefinition { name: string; color: string; file_count?: number; }
+export interface TagDefinition { name: string; color: string; category?: string; file_count?: number; }
 export interface TagSettings { tags: TagDefinition[]; show_file_tags: boolean; display_limit: number; }
 export interface SavedFilter {
     id: string;
@@ -55,7 +55,8 @@ export interface SavedFilter {
     sort: string;
 }
 export interface VaultStatus { configured: boolean; }
-export interface StorageChannel { configured: boolean; channel_id?: number | null; title?: string | null; }
+export interface StorageChannelItem { channel_id:number; title?:string|null; active:boolean; }
+export interface StorageChannel { configured: boolean; channel_id?: number | null; title?: string | null; channels:StorageChannelItem[]; }
 export interface TTSVoice { value: string; label: string; description: string; gender: 'female'|'male'; pitch: 'low'|'medium'|'high'; }
 export interface TTSSettings { voice: string; style: string; speed: number; model: string; auto_expression: boolean; gender: 'all'|'female'|'male'; pitch: 'all'|'low'|'medium'|'high'; use_case: 'general'|'audiobook'|'podcast'|'story'|'education'|'news'|'advertising'|'accessibility'; folder_id: number|null; available: boolean; personal_key_count?: number; voices: TTSVoice[]; }
 export interface GeminiKeySummary { count:number; masked:string[]; }
@@ -1104,6 +1105,7 @@ export const useUpdateAccountPreferences = () => {
 export const useStorageChannel = () => useQuery({ queryKey: ['storageChannel'], queryFn: async () => (await api.get<StorageChannel>('/accounts/storage-channel')).data });
 export const useSetStorageChannel = () => { const queryClient=useQueryClient(); return useMutation({ mutationFn: async (channel_id:number)=>(await api.put<StorageChannel>('/accounts/storage-channel',{channel_id})).data, onSuccess:()=>queryClient.invalidateQueries({queryKey:['storageChannel']}) }); };
 export const useResetStorageChannel = () => { const queryClient=useQueryClient(); return useMutation({ mutationFn: async()=>api.delete('/accounts/storage-channel'), onSuccess:()=>queryClient.invalidateQueries({queryKey:['storageChannel']}) }); };
+export const useRemoveStorageChannel = () => { const queryClient=useQueryClient(); return useMutation({ mutationFn: async(channel_id:number)=>api.delete(`/accounts/storage-channel/${channel_id}`), onSuccess:()=>queryClient.invalidateQueries({queryKey:['storageChannel']}) }); };
 export const useUpdateAdminUser = () => {
     const queryClient = useQueryClient();
     return useMutation({ mutationFn: async ({ id, ...payload }: { id: number; display_name?: string|null; is_active?: boolean; tts_daily_limit?:number; tts_max_chars?:number; stt_daily_limit?:number; stt_max_seconds?:number }) => (await api.patch<AdminUser>(`/admin/users/${id}`, payload)).data, onSuccess: (updated) => { queryClient.setQueryData<AdminUser[]>(['adminUsers'], current=>current?.map(item=>item.id===updated.id?updated:item)); queryClient.invalidateQueries({ queryKey: ['adminUsers'] }); queryClient.invalidateQueries({queryKey:['adminStats']}); } });

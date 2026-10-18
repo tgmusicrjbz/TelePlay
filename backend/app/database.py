@@ -88,6 +88,8 @@ async def init_db():
             await conn.execute(text("ALTER TABLE users ADD COLUMN display_name VARCHAR(255)"))
         if "storage_channel_id" not in user_columns:
             await conn.execute(text("ALTER TABLE users ADD COLUMN storage_channel_id BIGINT"))
+        if "storage_channels_json" not in user_columns:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN storage_channels_json TEXT NOT NULL DEFAULT '[]'"))
         if "delete_storage_files" not in user_columns:
             delete_default = "TRUE" if url.drivername.startswith("postgresql") else "1"
             delete_type = "BOOLEAN" if url.drivername.startswith("postgresql") else "INTEGER"

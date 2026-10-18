@@ -127,6 +127,7 @@ class BatchFileUpdate(BaseModel):
 class TagDefinition(BaseModel):
     name: str = Field(min_length=1, max_length=40)
     color: str = Field(pattern=r"^#[0-9a-fA-F]{6}$")
+    category: str = Field(default="", max_length=40)
 
 
 class TagSettingsUpdate(BaseModel):
@@ -462,10 +463,17 @@ class StorageChannelUpdate(BaseModel):
     channel_id: int
 
 
+class StorageChannelItem(BaseModel):
+    channel_id: int
+    title: Optional[str] = None
+    active: bool = False
+
+
 class StorageChannelResponse(BaseModel):
     configured: bool
     channel_id: Optional[int] = None
     title: Optional[str] = None
+    channels: list[StorageChannelItem] = Field(default_factory=list)
 
 
 class AccountPreferences(BaseModel):
