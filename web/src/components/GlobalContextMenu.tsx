@@ -14,13 +14,20 @@ export default function GlobalContextMenu() {
     const [showMore, setShowMore] = useState(false);
     const [showFolderAppearance, setShowFolderAppearance] = useState(false);
     const [showShareSettings, setShowShareSettings] = useState(false);
-    const [shareExpiry, setShareExpiry] = useState<number | null>(168);
+    const savedShareDefaults = (() => {
+        try { return JSON.parse(localStorage.getItem('komod-public-share-defaults') || '{}') as { expiry?: number | null; allowDownload?: boolean; viewLimit?: string }; }
+        catch { return {}; }
+    })();
+    const [shareExpiry, setShareExpiry] = useState<number | null>(savedShareDefaults.expiry === undefined ? 168 : savedShareDefaults.expiry);
     const [sharePassword, setSharePassword] = useState('');
-    const [shareAllowDownload, setShareAllowDownload] = useState(true);
-    const [shareViewLimit, setShareViewLimit] = useState('');
+    const [shareAllowDownload, setShareAllowDownload] = useState(savedShareDefaults.allowDownload ?? true);
+    const [shareViewLimit, setShareViewLimit] = useState(savedShareDefaults.viewLimit || '');
     const [sharing, setSharing] = useState(false);
 
     useEffect(() => { setShowMore(false); setShowFolderAppearance(false); setShowShareSettings(false); }, [activeContextMenu?.type, activeContextMenu?.item.id]);
+    useEffect(() => {
+        localStorage.setItem('komod-public-share-defaults', JSON.stringify({ expiry: shareExpiry, allowDownload: shareAllowDownload, viewLimit: shareViewLimit }));
+    }, [shareAllowDownload, shareExpiry, shareViewLimit]);
 
     // Close menu on escape
     useEffect(() => {

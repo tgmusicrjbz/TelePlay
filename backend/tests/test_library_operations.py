@@ -60,6 +60,23 @@ from app import telegram
 
 
 class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_caption_directives_are_parsed_and_removed_from_description(self):
+        from app.caption_metadata import parse_file_caption
+
+        metadata = parse_file_caption(
+            "[کشو: موسیقی/اجرای زنده]\n"
+            "[نام: شب تهران]\n"
+            "[تگ‌ها: فارسی، زنده]\n"
+            "[توضیح: اجرای کامل کنسرت]\n"
+            "#محبوب"
+        )
+
+        self.assertEqual(metadata["folder"], "موسیقی/اجرای زنده")
+        self.assertEqual(metadata["title"], "شب تهران")
+        self.assertEqual(metadata["description"], "اجرای کامل کنسرت")
+        self.assertEqual(metadata["tags"], ["فارسی", "زنده", "محبوب"])
+        self.assertNotIn("[کشو:", str(metadata["description"]))
+
     async def asyncSetUp(self):
         async with engine.begin() as connection:
             await connection.run_sync(Base.metadata.drop_all)
@@ -829,7 +846,7 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
     async def test_telegram_upload_uses_selected_upload_drawer(self):
         from app.telegram import build_clients
         build_clients()
-        from app.bot import handle_file, set_upload_drawer
+        from app.bot import handle_file, set_upload_drawer, upload_message_queues
         await set_upload_drawer(111, self.folder_id)
         media = SimpleNamespace(
             file_id="telegram-current", file_unique_id="telegram-current-unique",
@@ -845,6 +862,7 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
         forwarded = SimpleNamespace(id=902, video=media, audio=None, document=None, photo=None)
         with patch("app.bot.forward_to_storage_channel", new_callable=AsyncMock, return_value=forwarded):
             await handle_file(None, message)
+            await upload_message_queues[111].join()
         async with async_session() as db:
             saved = (await db.execute(select(File).where(File.channel_message_id == 902))).scalar_one()
             self.assertEqual(saved.folder_id, self.folder_id)

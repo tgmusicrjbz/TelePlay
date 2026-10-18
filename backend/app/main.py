@@ -66,7 +66,7 @@ async def lifespan(app: FastAPI):
             await asyncio.sleep(delay)
     logger.info("Database initialized")
     try:
-        from .bot import extract_tags_from_caption
+        from .caption_metadata import extract_tags_from_caption
         from .models import File
         from .database import async_session
         from sqlalchemy import select, or_

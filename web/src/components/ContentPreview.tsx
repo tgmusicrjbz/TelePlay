@@ -1,5 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, Check, Code2, Copy, Download, Heading1, Image as ImageIcon, Italic, Link, List, ListChecks, ListOrdered, Maximize2, Minimize2, Minus, Moon, Pencil, Plus, Quote, Strikethrough, Sun, Table2, Underline, WrapText, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, Braces, Check, Code2, Copy, Download, Heading1, Image as ImageIcon, Italic, Link, List, ListChecks, ListOrdered, Maximize2, Minimize2, Minus, Moon, MoveHorizontal, Pencil, Plus, Quote, Sigma, Strikethrough, Sun, Table2, Underline, WrapText, X, ZoomIn, ZoomOut } from 'lucide-react';
+import katex from 'katex';
+import 'katex/dist/katex.min.css';
 import { api, canPreviewText } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { cacheTextFile, getOfflineText, updateOfflineTextDraft } from '../lib/offline';
@@ -21,6 +23,7 @@ export default function ContentPreview() {
     const [readerLineHeight, setReaderLineHeight] = useState(() => Number(localStorage.getItem('komod-reader-line-height')) || 2);
     const [readerTone, setReaderTone] = useState<'dark' | 'warm'>(() => localStorage.getItem('komod-reader-tone') === 'warm' ? 'warm' : 'dark');
     const [readerWrap, setReaderWrap] = useState(() => localStorage.getItem('komod-reader-wrap') !== 'off');
+    const [readerWide, setReaderWide] = useState(() => localStorage.getItem('komod-reader-wide') === 'on');
     const [readerAlign, setReaderAlign] = useState<'right' | 'left' | 'center' | 'justify'>(() => (localStorage.getItem('komod-reader-align') as 'right' | 'left' | 'center' | 'justify') || 'right');
     const previewRef = useRef<HTMLElement>(null);
     const editorRef = useRef<HTMLTextAreaElement>(null);
@@ -33,8 +36,9 @@ export default function ContentPreview() {
         localStorage.setItem('komod-reader-line-height', String(readerLineHeight));
         localStorage.setItem('komod-reader-tone', readerTone);
         localStorage.setItem('komod-reader-wrap', readerWrap ? 'on' : 'off');
+        localStorage.setItem('komod-reader-wide', readerWide ? 'on' : 'off');
         localStorage.setItem('komod-reader-align', readerAlign);
-    }, [readerFontSize, readerLineHeight, readerTone, readerWrap, readerAlign]);
+    }, [readerFontSize, readerLineHeight, readerTone, readerWrap, readerWide, readerAlign]);
 
     useEffect(() => {
         const syncFullscreen = () => {
@@ -179,11 +183,12 @@ export default function ContentPreview() {
                                 </div>
                                 <label className="flex h-10 items-center gap-2 rounded-xl border border-white/[.07] bg-dark-800/70 px-2" title="فاصله بین خط‌ها"><span className="hidden text-[10px] text-dark-400 sm:inline">فاصله</span><input type="range" min="1.4" max="2.8" step="0.1" value={readerLineHeight} onChange={event=>setReaderLineHeight(Number(event.target.value))} className="w-16 accent-primary-500"/><span dir="ltr" className="w-6 text-[10px] text-dark-300">{readerLineHeight.toFixed(1)}</span></label>
                                 <button onClick={() => setReaderWrap(value => !value)} className={`btn-icon h-10 w-10 ${readerWrap ? 'text-primary-200' : ''}`} title={readerWrap ? 'خاموش‌کردن شکستن خط‌ها' : 'شکستن خودکار خط‌ها'}><WrapText className="h-4 w-4"/></button>
+                                <button onClick={() => setReaderWide(value => !value)} className={`btn-icon h-10 w-10 ${readerWide ? 'text-primary-200' : ''}`} title={readerWide ? 'عرض معمولی متن' : 'استفاده از تمام عرض'}><MoveHorizontal className="h-4 w-4"/></button>
                                 <button onClick={() => setReaderTone(tone => tone === 'dark' ? 'warm' : 'dark')} className="btn-icon h-10 w-10" title={readerTone === 'dark' ? 'پس‌زمینه گرم' : 'پس‌زمینه معمولی'}>{readerTone === 'dark' ? <Sun className="h-4 w-4"/> : <Moon className="h-4 w-4"/>}</button>
                             </div>
                         </div>
                         <div className={`markdown-reader-surface min-h-0 flex-1 overflow-auto p-4 transition-colors sm:p-8 ${readerTone === 'warm' ? 'markdown-reader-surface--warm' : ''}`}>
-                            {loading ? <p className="text-dark-400">در حال بارگذاری متن…</p> : error ? <p className="text-red-400">{error}</p> : editing ? <div className="mx-auto max-w-5xl"><div className="markdown-editor-toolbar mb-2 flex flex-wrap gap-1 rounded-2xl border p-1.5"><EditorTool title="سرتیتر" onClick={()=>insertMarkdown('# ','','عنوان',true)}><Heading1/></EditorTool><EditorTool title="بولد" onClick={()=>insertMarkdown('**','**')}><Bold/></EditorTool><EditorTool title="ایتالیک" onClick={()=>insertMarkdown('*','*')}><Italic/></EditorTool><EditorTool title="زیرخط" onClick={()=>insertMarkdown('<u>','</u>')}><Underline/></EditorTool><EditorTool title="خط‌خورده" onClick={()=>insertMarkdown('~~','~~')}><Strikethrough/></EditorTool><EditorTool title="کد کوتاه" onClick={()=>insertMarkdown('`','`','code')}><Code2/></EditorTool><EditorTool title="کدبلاک" onClick={()=>insertMarkdown('```\n','\n```','code',true)}><Code2/></EditorTool><EditorTool title="لینک" onClick={()=>insertMarkdown('[','](https://)','عنوان لینک')}><Link/></EditorTool><EditorTool title="تصویر" onClick={()=>insertMarkdown('![','](https://)','توضیح تصویر')}><ImageIcon/></EditorTool><EditorTool title="نقل‌قول" onClick={()=>insertMarkdown('> ','','متن نقل‌قول',true)}><Quote/></EditorTool><EditorTool title="فهرست" onClick={()=>insertMarkdown('- ','','مورد',true)}><List/></EditorTool><EditorTool title="فهرست شماره‌ای" onClick={()=>insertMarkdown('1. ','','مورد',true)}><ListOrdered/></EditorTool><EditorTool title="چک‌لیست" onClick={()=>insertMarkdown('- [ ] ','','کار',true)}><ListChecks/></EditorTool><EditorTool title="خط جداکننده" onClick={()=>insertTemplate('---\n')}><Minus/></EditorTool><EditorTool title="جدول" onClick={()=>insertTemplate('| ستون ۱ | ستون ۲ |\n| --- | --- |\n| مقدار ۱ | مقدار ۲ |\n')}><Table2/></EditorTool></div><textarea ref={editorRef} dir="auto" value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='b'){event.preventDefault();insertMarkdown('**','**')}if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='i'){event.preventDefault();insertMarkdown('*','*')}}} className="markdown-editor min-h-[65vh] w-full resize-y rounded-2xl border p-4 font-mono caret-primary-300 outline-none selection:bg-primary-500/30 focus:border-primary-400" style={{ fontSize: readerFontSize, lineHeight: readerLineHeight }}/><div className="mt-3 flex justify-end gap-2"><button className="btn-secondary" onClick={() => { setDraft(content); setEditing(false); }}>لغو</button><button disabled={saving} className="btn-primary flex items-center gap-2" onClick={() => void saveText()}><Check className="h-4 w-4"/> {saving ? 'در حال ذخیره…' : 'ذخیره متن'}</button></div></div> : <MarkdownContent content={content} fontSize={readerFontSize} lineHeight={readerLineHeight} warm={readerTone === 'warm'} wrap={readerWrap} align={readerAlign} />}
+                            {loading ? <p className="text-dark-400">در حال بارگذاری متن…</p> : error ? <p className="text-red-400">{error}</p> : editing ? <div className={`mx-auto ${readerWide?'max-w-none':'max-w-5xl'}`}><div className="markdown-editor-toolbar mb-2 flex flex-nowrap gap-1 overflow-x-auto rounded-2xl border p-1.5"><EditorTool title="سرتیتر" onClick={()=>insertMarkdown('# ','','عنوان',true)}><Heading1/></EditorTool><EditorTool title="بولد" onClick={()=>insertMarkdown('**','**')}><Bold/></EditorTool><EditorTool title="ایتالیک" onClick={()=>insertMarkdown('*','*')}><Italic/></EditorTool><EditorTool title="زیرخط" onClick={()=>insertMarkdown('<u>','</u>')}><Underline/></EditorTool><EditorTool title="خط‌خورده" onClick={()=>insertMarkdown('~~','~~')}><Strikethrough/></EditorTool><EditorTool title="کد کوتاه" onClick={()=>insertMarkdown('`','`','code')}><Code2/></EditorTool><EditorTool title="کدبلاک" onClick={()=>insertMarkdown('```\n','\n```','code',true)}><Code2/></EditorTool><EditorTool title="فرمول ریاضی" onClick={()=>insertMarkdown('$','$','x^2 + y^2')}><Sigma/></EditorTool><EditorTool title="متغیر" onClick={()=>insertMarkdown('{{','}}','نام_متغیر')}><Braces/></EditorTool><EditorTool title="لینک" onClick={()=>insertMarkdown('[','](https://)','عنوان لینک')}><Link/></EditorTool><EditorTool title="تصویر" onClick={()=>insertMarkdown('![','](https://)','توضیح تصویر')}><ImageIcon/></EditorTool><EditorTool title="نقل‌قول" onClick={()=>insertMarkdown('> ','','متن نقل‌قول',true)}><Quote/></EditorTool><EditorTool title="فهرست" onClick={()=>insertMarkdown('- ','','مورد',true)}><List/></EditorTool><EditorTool title="فهرست شماره‌ای" onClick={()=>insertMarkdown('1. ','','مورد',true)}><ListOrdered/></EditorTool><EditorTool title="چک‌لیست" onClick={()=>insertMarkdown('- [ ] ','','کار',true)}><ListChecks/></EditorTool><EditorTool title="خط جداکننده" onClick={()=>insertTemplate('---\n')}><Minus/></EditorTool><EditorTool title="جدول" onClick={()=>insertTemplate('| ستون ۱ | ستون ۲ |\n| --- | --- |\n| مقدار ۱ | مقدار ۲ |\n')}><Table2/></EditorTool></div><textarea ref={editorRef} dir="auto" value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='b'){event.preventDefault();insertMarkdown('**','**')}if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='i'){event.preventDefault();insertMarkdown('*','*')}}} className="markdown-editor min-h-[65vh] w-full resize-y rounded-2xl border p-4 font-mono caret-primary-300 outline-none selection:bg-primary-500/30 focus:border-primary-400" style={{ fontSize: readerFontSize, lineHeight: readerLineHeight }}/><div className="mt-3 flex justify-end gap-2"><button className="btn-secondary" onClick={() => { setDraft(content); setEditing(false); }}>لغو</button><button disabled={saving} className="btn-primary flex items-center gap-2" onClick={() => void saveText()}><Check className="h-4 w-4"/> {saving ? 'در حال ذخیره…' : 'ذخیره متن'}</button></div></div> : <MarkdownContent content={content} fontSize={readerFontSize} lineHeight={readerLineHeight} warm={readerTone === 'warm'} wrap={readerWrap} wide={readerWide} align={readerAlign} />}
                         </div>
                     </>
                 )}
@@ -191,22 +196,28 @@ export default function ContentPreview() {
         </div>
     );
 }
-
 function EditorTool({ title, onClick, children }: { title: string; onClick: () => void; children: React.ReactNode }) {
-    return <button type="button" title={title} aria-label={title} onClick={onClick} className="flex h-9 w-9 items-center justify-center rounded-xl text-slate-400 transition hover:bg-white/[.07] hover:text-primary-200 [&>svg]:h-4 [&>svg]:w-4">{children}</button>;
+    return <button type="button" title={title} aria-label={title} onClick={onClick} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-slate-400 transition hover:bg-white/[.07] hover:text-primary-200 [&>svg]:h-4 [&>svg]:w-4">{children}</button>;
 }
 
 function inlineMarkdown(text: string) {
-    return text.split(/(!\[[^\]]*\]\([^)]+\)|\[[^\]]+\]\([^)]+\)|\*\*[^*]+\*\*|__[^_]+__|<u>.*?<\/u>|~~[^~]+~~|`[^`]+`|\*[^*]+\*)/g).map((part, index) => {
+    return text.split(/(!\[[^\]]*\]\([^)]+\)|\[[^\]]+\]\([^)]+\)|\{\{[^{}]+\}\}|\$[^$\n]+\$|\*\*[^*]+\*\*|__[^_]+__|<u>.*?<\/u>|~~[^~]+~~|`[^`]+`|\*[^*]+\*)/g).map((part, index) => {
         const image = part.match(/^!\[([^\]]*)\]\(([^)]+)\)$/); if (image) return <img key={index} src={image[2]} alt={image[1]} loading="lazy" className="my-4 max-h-[70vh] max-w-full rounded-2xl border border-white/[.07] object-contain shadow-xl"/>;
         const link = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/); if (link) return <a key={index} href={link[2]} target="_blank" rel="noreferrer" className="break-all font-medium text-sky-300 underline decoration-sky-500/40 underline-offset-4 transition hover:text-sky-200">{link[1]}</a>;
         if (part.startsWith('**') || part.startsWith('__')) return <strong key={index} className="font-extrabold text-amber-200">{part.slice(2, -2)}</strong>;
         if (part.startsWith('~~')) return <del key={index} className="text-rose-300/70 decoration-rose-400/70">{part.slice(2, -2)}</del>;
         if (part.startsWith('<u>')) return <u key={index} className="decoration-primary-400/70 decoration-2 underline-offset-4">{part.slice(3, -4)}</u>;
         if (part.startsWith('`')) return <code key={index} dir="ltr" className="mx-0.5 break-all rounded-md border border-cyan-400/15 bg-cyan-400/10 px-1.5 py-0.5 font-mono text-[.9em] text-cyan-200">{part.slice(1, -1)}</code>;
+        if (part.startsWith('{{')) return <span key={index} dir="ltr" className="mx-1 inline-flex rounded-md border border-fuchsia-400/20 bg-fuchsia-400/10 px-1.5 py-0.5 font-mono text-[.9em] text-fuchsia-200">{part.slice(2, -2)}</span>;
+        if (part.startsWith('$')) return <MathFormula key={index} source={part.slice(1, -1)}/>;
         if (part.startsWith('*')) return <em key={index} className="text-violet-200">{part.slice(1, -1)}</em>;
         return <Fragment key={index}>{part}</Fragment>;
     });
+}
+
+function MathFormula({source,displayMode=false}:{source:string;displayMode?:boolean}) {
+    const html = useMemo(() => katex.renderToString(source, { displayMode, throwOnError: false, strict: 'warn', trust: false }), [displayMode, source]);
+    return <span dir="ltr" className={displayMode?'my-5 block max-w-full overflow-x-auto rounded-xl bg-white/[.025] p-4 text-center':'inline-block max-w-full overflow-x-auto align-middle'} dangerouslySetInnerHTML={{__html:html}}/>;
 }
 
 function MarkdownCodeBlock({ code, language }: { code: string; language?: string }) {
@@ -228,7 +239,7 @@ function MarkdownCodeBlock({ code, language }: { code: string; language?: string
     </div>;
 }
 
-function MarkdownContent({ content, fontSize = 15, lineHeight = 2, warm = false, wrap = true, align = 'right' }: { content: string; fontSize?: number; lineHeight?: number; warm?: boolean; wrap?: boolean; align?: 'right' | 'left' | 'center' | 'justify' }) {
+function MarkdownContent({ content, fontSize = 15, lineHeight = 2, warm = false, wrap = true, wide = false, align = 'right' }: { content: string; fontSize?: number; lineHeight?: number; warm?: boolean; wrap?: boolean; wide?: boolean; align?: 'right' | 'left' | 'center' | 'justify' }) {
     const blocks = useMemo(() => {
         const result: JSX.Element[] = []; let code = false; let codeLines: string[] = []; let language = '';
         const lines = content.split(/\r?\n/);
@@ -236,6 +247,22 @@ function MarkdownContent({ content, fontSize = 15, lineHeight = 2, warm = false,
             const line = lines[index];
             if (line.trim().startsWith('```')) { if (code) { result.push(<MarkdownCodeBlock key={`code-${index}`} code={codeLines.join('\n')} language={language}/>); codeLines = []; language = ''; } else language = line.trim().slice(3).trim(); code = !code; continue; }
             if (code) { codeLines.push(line); continue; }
+            if (line.trim().startsWith('$$')) {
+                const formula: string[] = [];
+                const first = line.trim().slice(2);
+                if (first.endsWith('$$')) formula.push(first.slice(0, -2));
+                else {
+                    if (first) formula.push(first);
+                    while (index + 1 < lines.length) {
+                        index += 1;
+                        const formulaLine = lines[index];
+                        if (formulaLine.trim().endsWith('$$')) { formula.push(formulaLine.trim().slice(0, -2)); break; }
+                        formula.push(formulaLine);
+                    }
+                }
+                result.push(<MathFormula key={`math-${index}`} source={formula.join('\n')} displayMode/>);
+                continue;
+            }
             if (!line.trim()) { result.push(<div key={`space-${index}`} className="h-3"/>); continue; }
             if (/^\s*(---+|___+|\*\*\*+)\s*$/.test(line)) { result.push(<div key={index} className="my-7 h-px bg-gradient-to-r from-transparent via-primary-400/45 to-transparent"/>); continue; }
             const nextIsSeparator = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(lines[index + 1] || '');
@@ -260,5 +287,5 @@ function MarkdownContent({ content, fontSize = 15, lineHeight = 2, warm = false,
         if (codeLines.length) result.push(<MarkdownCodeBlock key="code-final" code={codeLines.join('\n')} language={language}/>);
         return result;
     }, [content]);
-    return <article dir="auto" className={`markdown-article mx-auto max-w-3xl overflow-hidden rounded-2xl border p-4 shadow-inner transition-colors sm:p-6 ${warm ? 'markdown-article--warm' : ''} ${wrap ? 'break-words' : 'overflow-x-auto whitespace-pre'}`} style={{ fontSize, lineHeight, textAlign: align }}>{blocks}</article>;
+    return <article dir="auto" className={`markdown-article mx-auto ${wide?'max-w-none':'max-w-3xl'} overflow-hidden rounded-2xl border p-4 shadow-inner transition-colors sm:p-6 ${warm ? 'markdown-article--warm' : ''} ${wrap ? 'break-words' : 'overflow-x-auto whitespace-pre'}`} style={{ fontSize, lineHeight, textAlign: align }}>{blocks}</article>;
 }

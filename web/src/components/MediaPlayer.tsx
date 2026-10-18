@@ -3,7 +3,7 @@
  */
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipBack, SkipForward, Download, AlertTriangle, Copy, PictureInPicture2, Gauge, ChevronDown, ChevronUp, Repeat2, Shuffle, Headphones, RotateCcw, RotateCw, Clock3, ListPlus, ListMusic, GripVertical, Trash2, RectangleHorizontal, Smartphone, MonitorSmartphone, Film, LockKeyhole, UnlockKeyhole, MoreHorizontal, Save, History } from 'lucide-react';
+import { X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipBack, SkipForward, Download, AlertTriangle, Copy, PictureInPicture2, Gauge, ChevronDown, ChevronUp, Repeat2, Shuffle, Headphones, RotateCcw, RotateCw, Clock3, ListPlus, ListMusic, GripVertical, Trash2, RectangleHorizontal, Smartphone, MonitorSmartphone, Film, LockKeyhole, UnlockKeyhole, MoreHorizontal, Save, History, EyeOff } from 'lucide-react';
 import { TelegramFile, useUpdateProgress, useFile, api, useCreatePlaylist, useAddPlaylistItems } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { closestCenter, DndContext, DragEndEvent, DragOverlay, KeyboardSensor, MouseSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core';
@@ -64,6 +64,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     const [sleepMode, setSleepMode] = useState<'off' | '15' | '30' | '45' | '60' | 'track' | 'end'>('off');
     const sleepTimeout = useRef<ReturnType<typeof setTimeout>>();
     const [audioOnly, setAudioOnly] = useState(false);
+    const [videoHidden, setVideoHidden] = useState(false);
     const [audioVariantUrl, setAudioVariantUrl] = useState<string|null>(file.audio_stream_url || null);
     const [preparingAudio, setPreparingAudio] = useState(false);
     const audioSwitchPosition = useRef<number|null>(null);
@@ -78,12 +79,12 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     const [showQueueSave, setShowQueueSave] = useState(false);
     const [recommendations, setRecommendations] = useState<TelegramFile[]>([]);
     const [showRecommendations, setShowRecommendations] = useState(false);
-    const [crossfadeSeconds, setCrossfadeSeconds] = useState(()=>Math.max(0,Math.min(6,Number(localStorage.getItem('komod-crossfade-seconds')||0))));
+    const crossfadeSeconds = useMemo(()=>Math.max(0,Math.min(6,Number(localStorage.getItem('komod-crossfade-seconds')||0))),[]);
     const createPlaylist = useCreatePlaylist();
     const addPlaylistItems = useAddPlaylistItems();
     const [showVideoMoreMenu, setShowVideoMoreMenu] = useState(false);
     const videoMoreButtonRef = useRef<HTMLButtonElement>(null);
-    const [videoMenuPosition, setVideoMenuPosition] = useState({ top: 116, right: 12, width: 288, maxHeight: 360 });
+    const [videoMenuPosition, setVideoMenuPosition] = useState({ top: 116, right: 12, width: 224, maxHeight: 360 });
     const [activeQueueId, setActiveQueueId] = useState<string | null>(null);
     const queueDropTargetRef = useRef<string | null>(null);
     const queueSensors = useSensors(
@@ -95,7 +96,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
         const rect = videoMoreButtonRef.current?.getBoundingClientRect();
         if (!rect) return;
         const edge = 12;
-        const width = Math.min(288, window.innerWidth - edge * 2);
+        const width = Math.min(224, window.innerWidth - edge * 2);
         const right = Math.min(Math.max(edge, window.innerWidth - rect.right), window.innerWidth - width - edge);
         const top = Math.min(rect.bottom + 8, window.innerHeight - 172);
         setVideoMenuPosition({ top, right, width, maxHeight: Math.max(152, window.innerHeight - top - edge) });
@@ -123,7 +124,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     const formatPersianMetaTime = (seconds: number) => formatPlayerTime(seconds).replace(/\d/g, digit => '۰۱۲۳۴۵۶۷۸۹'[Number(digit)]);
 
     useEffect(() => setThumbnailFailed(false), [file.id]);
-    useEffect(()=>{setAudioOnly(false);setAudioVariantUrl(file.audio_stream_url||null);},[file.id,file.audio_stream_url]);
+    useEffect(()=>{setAudioOnly(false);setVideoHidden(false);setAudioVariantUrl(file.audio_stream_url||null);},[file.id,file.audio_stream_url]);
 
     // Fetch fresh file details to get latest progress
     const { data: extendedFile } = useFile(file.id);
@@ -134,16 +135,16 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     const toggleAudioOnly = async () => {
         if (preparingAudio) return;
         audioSwitchPosition.current = videoRef.current?.currentTime || 0;
-        if (audioOnly) { setAudioOnly(false); return; }
-        if (audioVariantUrl) { setAudioOnly(true); return; }
+        if (audioOnly) { setAudioOnly(false); setVideoHidden(false); return; }
+        if (audioVariantUrl) { setAudioOnly(true); setVideoHidden(false); return; }
         setPreparingAudio(true);
-        addToast('نسخه کم‌حجم صدا در حال آماده‌شدن است…');
+        setVideoHidden(true);
         try {
             const {data}=await api.post(`/stream/${file.id}/audio-variant`);
-            setAudioVariantUrl(data.stream_url); setAudioOnly(true);
-            addToast('نسخه کم‌حجم صدا آماده شد 🎧');
+            setAudioVariantUrl(data.stream_url); setAudioOnly(true); setVideoHidden(false);
         } catch(error:any) {
             audioSwitchPosition.current=null;
+            setVideoHidden(false);
             addToast(error?.response?.data?.detail||'ساخت نسخه صوتی انجام نشد.','error');
         } finally { setPreparingAudio(false); }
     };
@@ -474,7 +475,6 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
         };
     }, [file.id]);
 
-    useEffect(()=>{localStorage.setItem('komod-crossfade-seconds',String(crossfadeSeconds));},[crossfadeSeconds]);
 
     const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (videoRef.current) {
@@ -715,7 +715,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
             key={file.id}
             ref={videoRef}
             src={authorizedStreamUrl}
-            className={`max-w-full max-h-full w-full h-full object-contain ${isMinimized ? 'hidden' : ''} ${audioOnly ? 'invisible' : 'visible'}`}
+            className={`max-w-full max-h-full w-full h-full object-contain ${isMinimized ? 'hidden' : ''} ${audioOnly || videoHidden ? 'invisible' : 'visible'}`}
             onTimeUpdate={handleTimeUpdate}
             onLoadedMetadata={handleLoadedMetadata}
             onWaiting={handleWaiting}
@@ -801,7 +801,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                 ) : (
                     <>
                         {/* Audio Visualization / Thumbnail for non-video files in Fullscreen */}
-                        {(!isVideo || audioOnly) && !isMinimized && (
+                        {(!isVideo || audioOnly || videoHidden) && !isMinimized && (
                             <div className="absolute inset-x-4 top-16 bottom-44 z-10 flex flex-col items-center justify-center text-center animate-scale-in">
                                 {authorizedThumbnailUrl && !audioOnly && !thumbnailFailed ? (
                                     <div className="mb-6 h-60 w-60 overflow-hidden rounded-3xl bg-dark-800 shadow-[0_12px_30px_rgba(0,0,0,.35)] sm:h-72 sm:w-72 lg:h-80 lg:w-80">
@@ -815,11 +815,12 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                                 ) : (
                                     <div className="relative mb-6 flex h-60 w-60 items-center justify-center overflow-hidden rounded-3xl bg-gradient-to-br from-primary-500/20 to-pink-500/20 shadow-[0_12px_30px_rgba(0,0,0,.35)] sm:h-72 sm:w-72 lg:h-80 lg:w-80">
                                          <div className="absolute inset-0 bg-gradient-to-tr from-primary-500/10 to-transparent animate-pulse"></div>
-                                        {audioOnly ? <Headphones className="h-24 w-24 text-primary-300 drop-shadow-lg" /> : isVideo ? <Film className="h-24 w-24 text-primary-300 drop-shadow-lg" /> : <span className="text-8xl transform transition-transform duration-500 group-hover:scale-125 drop-shadow-lg">🎵</span>}
+                                        {audioOnly ? <Headphones className="h-24 w-24 text-primary-300 drop-shadow-lg" /> : videoHidden ? <EyeOff className="h-24 w-24 text-primary-300 drop-shadow-lg" /> : isVideo ? <Film className="h-24 w-24 text-primary-300 drop-shadow-lg" /> : <span className="text-8xl transform transition-transform duration-500 group-hover:scale-125 drop-shadow-lg">🎵</span>}
                                     </div>
                                 )}
                                 <p dir="auto" className="max-w-[80vw] truncate text-2xl font-bold text-white drop-shadow-md">{cleanFileName}</p>
                                 {audioOnly && <p className="mb-2 text-sm text-dark-300">حالت فقط صدا فعاله</p>}
+                                {videoHidden && !audioOnly && <p className="mb-2 text-sm text-dark-300">تصویر خاموشه؛ صدای همین ویدیو پخش می‌شه</p>}
                                 <p className="text-primary-400 font-medium" dir="ltr">{formatPersianMetaTime(safeCurrentTime)} / {formatPersianMetaTime(safeDuration)}</p>
                             </div>
                         )}
@@ -943,15 +944,16 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                                     onClick={() => { setShowVideoMoreMenu(false); setShowSleepMenu(false); }}
                                     aria-label="بستن گزینه‌های ویدیو"
                                 />
-                                <div role="menu" aria-label="گزینه‌های بیشتر ویدیو" dir="rtl" onPointerDown={event=>event.stopPropagation()} onClick={event=>event.stopPropagation()} className="fixed z-[301] box-border overflow-y-auto overscroll-contain rounded-2xl border border-white/10 bg-dark-900/98 p-1.5 text-right shadow-2xl backdrop-blur-xl" style={videoMenuPosition}>
-                                <button disabled={preparingAudio} className="context-menu-item w-full disabled:opacity-50" onClick={()=>void toggleAudioOnly()}><Headphones className="h-4 w-4"/><span>{preparingAudio?'در حال آماده‌سازی…':audioOnly ? 'بازگشت به تصویر' : 'پخش فقط صدا'}</span></button>
-                                <button className="context-menu-item w-full" onClick={() => setRepeatMode(repeatMode === 'off' ? (hasQueue ? 'all' : 'one') : repeatMode === 'all' ? 'one' : 'off')}><Repeat2 className="h-4 w-4"/><span className="min-w-0 flex-1">{repeatMode === 'off' ? 'تکرار خاموش' : repeatMode === 'all' ? 'تکرار همه ویدیوها' : 'تکرار همین ویدیو'}</span>{repeatMode === 'one'&&<strong className="text-primary-200">۱</strong>}</button>
-                                <button className="context-menu-item w-full" onClick={() => setShowSleepMenu(open => !open)}><Clock3 className="h-4 w-4"/><span className="min-w-0 flex-1">تایمر خواب</span>{sleepMode !== 'off'&&<span className="h-2 w-2 rounded-full bg-primary-400"/>}</button>
+                                <div role="menu" aria-label="گزینه‌های بیشتر ویدیو" dir="rtl" onPointerDown={event=>event.stopPropagation()} onClick={event=>event.stopPropagation()} className="fixed z-[301] box-border overflow-y-auto overscroll-contain rounded-xl border border-white/10 bg-dark-900/98 p-1 text-right shadow-2xl backdrop-blur-xl" style={videoMenuPosition}>
+                                <button className="context-menu-item min-h-9 w-full px-2.5 py-2 text-xs" onClick={()=>{setVideoHidden(value=>{if(!value&&audioOnly)setAudioOnly(false);return !value});setShowVideoMoreMenu(false)}}><EyeOff className="h-4 w-4"/><span>{videoHidden?'روشن کردن تصویر':'خاموش کردن تصویر'}</span></button>
+                                <button disabled={preparingAudio} className="context-menu-item min-h-9 w-full px-2.5 py-2 text-xs disabled:opacity-50" onClick={()=>void toggleAudioOnly()}><Headphones className="h-4 w-4"/><span>{preparingAudio?'آماده‌سازی صدا…':audioOnly ? 'بازگشت به ویدیو' : 'فقط صدا (کم‌حجم)'}</span></button>
+                                <button className="context-menu-item min-h-9 w-full px-2.5 py-2 text-xs" onClick={() => setRepeatMode(repeatMode === 'off' ? (hasQueue ? 'all' : 'one') : repeatMode === 'all' ? 'one' : 'off')}><Repeat2 className="h-4 w-4"/><span className="min-w-0 flex-1">{repeatMode === 'off' ? 'تکرار خاموش' : repeatMode === 'all' ? 'تکرار صف' : 'تکرار ویدیو'}</span>{repeatMode === 'one'&&<strong className="text-primary-200">۱</strong>}</button>
+                                <button className="context-menu-item min-h-9 w-full px-2.5 py-2 text-xs" onClick={() => setShowSleepMenu(open => !open)}><Clock3 className="h-4 w-4"/><span className="min-w-0 flex-1">تایمر خواب</span>{sleepMode !== 'off'&&<span className="h-2 w-2 rounded-full bg-primary-400"/>}</button>
                                 {showSleepMenu && <div className="mx-1 mb-1 grid grid-cols-2 gap-1 rounded-xl bg-black/25 p-1">
                                     {([['15','۱۵ دقیقه'],['30','۳۰ دقیقه'],['45','۴۵ دقیقه'],['60','۱ ساعت'],['track','پایان ویدیو'],['end','پایان صف']] as const).map(([mode,label])=><button key={mode} onClick={()=>setSleepTimer(mode)} className={`rounded-lg px-2 py-2 text-[11px] ${sleepMode===mode?'bg-primary-500/25 text-primary-200':'text-dark-300 hover:bg-white/[.05]'}`}>{label}</button>)}
                                     {sleepMode !== 'off'&&<button onClick={()=>setSleepTimer('off')} className="col-span-2 rounded-lg px-2 py-2 text-[11px] text-red-300 hover:bg-red-500/10">لغو تایمر</button>}
                                 </div>}
-                                {document.pictureInPictureEnabled && <button className="context-menu-item w-full" onClick={togglePiP}><PictureInPicture2 className="h-4 w-4"/><span>{isPiP ? 'خروج از تصویر در تصویر' : 'تصویر در تصویر'}</span></button>}
+                                {document.pictureInPictureEnabled && <button className="context-menu-item min-h-9 w-full px-2.5 py-2 text-xs" onClick={togglePiP}><PictureInPicture2 className="h-4 w-4"/><span>{isPiP ? 'خروج از تصویر کوچک' : 'تصویر کوچک'}</span></button>}
                                 </div>
                             </>, document.body)}
                         </div>}
@@ -983,7 +985,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                     </div>
 
                     {/* Transport controls: queue navigation for music, seeking for video. */}
-                    <div data-player-controls dir="ltr" className={`absolute left-1/2 z-30 flex -translate-x-1/2 items-center ${isVideo && !audioOnly ? 'top-1/2 -translate-y-1/2 gap-2 sm:gap-5' : 'bottom-32 gap-2 sm:gap-5'}`}>
+                    <div data-player-controls dir="ltr" className={`absolute left-1/2 z-30 flex -translate-x-1/2 items-center ${isVideo && !audioOnly && !videoHidden ? 'top-1/2 -translate-y-1/2 gap-2 sm:gap-5' : 'bottom-32 gap-2 sm:gap-5'}`}>
                         {isVideo && <button disabled={!hasQueue} onClick={(e) => { e.stopPropagation(); playPrevious(); }} className="rounded-full p-2 text-white/65 transition hover:bg-white/10 hover:text-white disabled:opacity-30" title="ویدیوی قبلی"><SkipBack className="h-5 w-5"/></button>}
                         <button disabled={!isVideo && !hasQueue} onClick={(e) => { e.stopPropagation(); isVideo ? handleSkip(-10) : playPrevious(); }} className="rounded-full p-3 text-white/70 transition hover:bg-white/10 hover:text-white disabled:opacity-30" title={isVideo ? '۱۰ ثانیه عقب' : 'ترک قبلی'}>{isVideo ? <RotateCcw className="h-6 w-6"/> : <SkipBack className="h-7 w-7"/>}</button>
                         {isVideo ? <button onClick={(e) => { e.stopPropagation(); togglePlay(e); }} className="flex h-20 w-20 items-center justify-center rounded-full bg-primary-500 text-white shadow-2xl shadow-primary-500/35 transition duration-200 hover:scale-105 hover:bg-primary-400 active:scale-95" aria-label={isPlaying ? 'توقف' : 'پخش'}>{isPlaying ? <Pause className="h-9 w-9"/> : <Play className="ml-1 h-9 w-9"/>}</button> : <button onClick={(e) => { e.stopPropagation(); togglePlay(e); }} className="flex h-20 w-20 items-center justify-center rounded-full bg-primary-500 text-white shadow-xl shadow-primary-500/30 transition hover:scale-105 hover:bg-primary-400">{isPlaying ? <Pause className="h-9 w-9"/> : <Play className="ml-1 h-9 w-9"/>}</button>}
@@ -992,16 +994,17 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                     </div>
 
                     {/* Bottom controls */}
-                    <div data-player-controls data-player-bottom className="absolute bottom-0 left-0 right-0 z-30 border-t border-white/[.06] bg-gradient-to-t from-black via-black/85 to-black/20 p-4 shadow-[0_-14px_35px_rgba(0,0,0,.3)] backdrop-blur-sm sm:px-6 sm:py-5">
+                    <div data-player-controls data-player-bottom className="absolute bottom-0 left-0 right-0 z-30 bg-gradient-to-t from-black via-black/90 to-transparent px-4 pb-4 pt-7 shadow-[0_-12px_30px_rgba(0,0,0,.22)] backdrop-blur-[2px] sm:px-6 sm:pb-5 sm:pt-8">
                         {/* Progress bar */}
-                        <div className="mb-5 flex items-center gap-3 group/progress sm:gap-4">
-                            <span dir="ltr" className="font-player min-w-[50px] text-sm font-medium text-white/90">{formatPlayerTime(safeCurrentTime)}</span>
-                            <div className="relative h-2 flex-1 cursor-pointer rounded-full bg-white/20 shadow-inner transition-all group-hover/progress:h-2.5">
+                        <div className="group/progress mb-4 flex items-center gap-2.5 sm:gap-4">
+                            <span dir="ltr" className="font-player min-w-[46px] rounded-lg bg-black/25 px-1.5 py-1 text-center text-xs font-semibold tabular-nums text-white/90">{formatPlayerTime(safeCurrentTime)}</span>
+                            <div className="relative h-2.5 flex-1 cursor-pointer rounded-full bg-white/20 shadow-inner">
                                 {/* Buffered progress can be added here */}
                                 <div
                                     className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-primary-600 via-primary-500 to-primary-300 shadow-lg shadow-primary-500/30 transition-all"
                                     style={{ width: `${progressPercent}%` }}
                                 />
+                                <span className="pointer-events-none absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-primary-400 shadow-lg shadow-black/40" style={{ left: `${progressPercent}%` }}/>
                                 <input
                                     type="range"
                                     min={0}
@@ -1011,7 +1014,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                                     className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                                 />
                             </div>
-                            <span dir="ltr" className="font-player min-w-[50px] text-right text-sm font-medium text-white/90">{formatPlayerTime(safeDuration)}</span>
+                            <span dir="ltr" className="font-player min-w-[46px] rounded-lg bg-black/25 px-1.5 py-1 text-center text-xs font-semibold tabular-nums text-white/90">{formatPlayerTime(safeDuration)}</span>
                         </div>
 
                         {/* Control buttons */}
@@ -1120,9 +1123,8 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                 <div className="absolute inset-0 z-[100] flex items-end justify-center bg-black/55 backdrop-blur-sm sm:items-center sm:p-5" onPointerUp={event=>event.stopPropagation()} onClick={() => setShowQueue(false)}>
                     <section dir="rtl" className="flex max-h-[78dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-[2rem] border border-white/10 bg-dark-900/98 shadow-2xl sm:rounded-3xl" onClick={event => event.stopPropagation()}>
                         <header className="flex items-center gap-2 border-b border-white/[.07] px-3 py-3"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary-500/12 text-primary-200"><ListMusic className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h2 className="font-bold">{showHistory?'تاریخچه پخش':showRecommendations?'پیشنهاد بعدی':'صف پخش'}</h2><p className="mt-0.5 text-[11px] text-dark-400">{showHistory?`${historyItems.length.toLocaleString('fa-IR')} مورد اخیر`:showRecommendations?`${recommendations.length.toLocaleString('fa-IR')} پیشنهاد`:`${Math.max(0, playQueue.length-queueIndex-1).toLocaleString('fa-IR')} مورد در ادامه`}</p></div><button className={`btn-icon ${showRecommendations?'text-primary-300':''}`} onClick={()=>{setShowHistory(false);void loadRecommendations()}} title="پیشنهادها"><ListPlus className="h-4 w-4"/></button><button className={`btn-icon ${showHistory?'text-primary-300':''}`} onClick={()=>{setShowRecommendations(false);void loadHistory()}} title="تاریخچه"><History className="h-4 w-4"/></button><button className="btn-icon" onClick={()=>setShowQueueSave(value=>!value)} title="ذخیره صف"><Save className="h-4 w-4"/></button><button className="btn-icon" onClick={() => setShowQueue(false)} aria-label="بستن صف"><X className="h-5 w-5"/></button></header>
-                        {!showHistory&&!showRecommendations&&<div className="flex items-center gap-2 overflow-x-auto border-b border-white/[.07] px-3 py-2"><span className="ml-auto shrink-0 text-[11px] text-dark-400">گذار نرم</span>{[0,2,4,6].map(seconds=><button key={seconds} onClick={()=>setCrossfadeSeconds(seconds)} className={`shrink-0 rounded-lg px-2.5 py-1 text-[10px] ${crossfadeSeconds===seconds?'bg-primary-500 text-white':'bg-white/[.05] text-dark-300'}`}>{seconds?`${seconds.toLocaleString('fa-IR')} ثانیه`:'بدون فاصله'}</button>)}</div>}
                         {showQueueSave&&<div className="flex gap-2 border-b border-white/[.07] p-3"><input autoFocus value={queueName} onChange={event=>setQueueName(event.target.value)} onKeyDown={event=>{if(event.key==='Enter')void saveNamedQueue()}} className="input min-w-0 flex-1 text-sm" placeholder="نام این صف"/><button disabled={!queueName.trim()||createPlaylist.isPending||addPlaylistItems.isPending} onClick={()=>void saveNamedQueue()} className="btn-primary shrink-0 px-4 text-xs disabled:opacity-40">ذخیره</button></div>}
-                        {showHistory?<div className="min-h-0 overflow-y-auto p-3">{historyItems.map((item,index)=><button key={item.id} onClick={()=>{useAppStore.getState().startQueue(historyItems,index);setShowHistory(false)}} className="mb-1.5 flex w-full items-center gap-3 rounded-2xl bg-white/[.025] p-3 text-right hover:bg-white/[.06]"><History className="h-4 w-4 shrink-0 text-dark-500"/><span dir="auto" className="min-w-0 flex-1 truncate text-sm">{item.file_name.replace(/\.[^.]+$/,'')}</span><span className="text-[10px] text-dark-500">{item.last_pos?`${Math.floor(item.last_pos/60).toLocaleString('fa-IR')} دقیقه`:''}</span></button>)}</div>:showRecommendations?<div className="min-h-0 overflow-y-auto p-3">{recommendations.map(item=><div key={item.id} className="mb-1.5 flex items-center gap-2 rounded-2xl bg-white/[.025] p-2"><button onClick={()=>useAppStore.getState().startQueue([item],0)} dir="auto" className="min-w-0 flex-1 truncate p-1 text-right text-sm">{item.file_name.replace(/\.[^.]+$/,'')}</button><button onClick={()=>{appendQueueItems([item]);setRecommendations(items=>items.filter(value=>value.id!==item.id))}} className="btn-icon h-9 w-9" title="افزودن به صف"><ListPlus className="h-4 w-4"/></button></div>)}</div>:<DndContext sensors={queueSensors} collisionDetection={closestCenter} onDragStart={({active})=>{const id=String(active.id);setActiveQueueId(id);queueDropTargetRef.current=id}} onDragOver={({over})=>{if(over)queueDropTargetRef.current=String(over.id)}} onDragCancel={()=>{setActiveQueueId(null);queueDropTargetRef.current=null}} onDragEnd={({active,over}:DragEndEvent)=>{setActiveQueueId(null);const activeId=String(active.id);const directTarget=over?String(over.id):null;const targetId=directTarget&&directTarget!==activeId?directTarget:queueDropTargetRef.current;queueDropTargetRef.current=null;if(!targetId||activeId===targetId)return;const from=queueRows.findIndex(row=>row.id===activeId);const to=queueRows.findIndex(row=>row.id===targetId);if(from<0||to<0)return;moveQueueItem(from,to)}}>
+                        {showHistory?<div className="min-h-0 overflow-y-auto p-3">{historyItems.map((item,index)=><button key={item.id} onClick={()=>{useAppStore.getState().startQueue(historyItems,index);setShowHistory(false)}} className="mb-1.5 flex w-full items-center gap-3 rounded-2xl bg-white/[.025] p-3 text-right hover:bg-white/[.06]"><History className="h-4 w-4 shrink-0 text-dark-500"/><span dir="auto" className="min-w-0 flex-1 truncate text-sm">{item.file_name.replace(/\.[^.]+$/,'')}</span><span className="text-[10px] text-dark-500">{item.last_pos?`${Math.floor(item.last_pos/60).toLocaleString('fa-IR')} دقیقه`:''}</span></button>)}</div>:showRecommendations?<div className="min-h-0 overflow-y-auto p-3">{recommendations.map(item=><div key={item.id} className="mb-1.5 flex items-center gap-2 rounded-2xl bg-white/[.025] p-2"><button onClick={()=>useAppStore.getState().startQueue([item],0)} dir="auto" className="min-w-0 flex-1 truncate p-1 text-right text-sm">{item.file_name.replace(/\.[^.]+$/,'')}</button><button onClick={()=>{appendQueueItems([item]);setRecommendations(items=>items.filter(value=>value.id!==item.id))}} className="btn-icon h-9 w-9" title="افزودن به صف"><ListPlus className="h-4 w-4"/></button></div>)}</div>:<DndContext sensors={queueSensors} collisionDetection={closestCenter} onDragStart={({active})=>{const id=String(active.id);setActiveQueueId(id);queueDropTargetRef.current=id}} onDragOver={({active,over})=>{if(!over)return;const activeId=String(active.id);const targetId=String(over.id);if(activeId===targetId||queueDropTargetRef.current===targetId)return;const from=queueRows.findIndex(row=>row.id===activeId);const to=queueRows.findIndex(row=>row.id===targetId);if(from<0||to<0)return;queueDropTargetRef.current=targetId;moveQueueItem(from,to)}} onDragCancel={()=>{setActiveQueueId(null);queueDropTargetRef.current=null}} onDragEnd={(_:DragEndEvent)=>{setActiveQueueId(null);queueDropTargetRef.current=null}}>
                             <SortableContext items={queueRows.map(row=>row.id)} strategy={verticalListSortingStrategy}>
                                 <div className="min-h-0 overflow-y-auto p-3">{queueRows.map(({item,index,id})=><SortableQueueRow key={id} sortableId={id} item={item} index={index} currentIndex={queueIndex} onPlay={()=>{useAppStore.getState().playQueueItem(index);setShowQueue(false)}} onRemove={()=>removeQueueItem(index)}/>)}</div>
                             </SortableContext>
@@ -1140,7 +1142,7 @@ function SortableQueueRow({sortableId,item,index,currentIndex,onPlay,onRemove}:{
     const current=index===currentIndex;
     return <article ref={sortable.setNodeRef} style={{transform:CSS.Transform.toString(sortable.transform),transition:sortable.transition}} className={`mb-1.5 flex items-center gap-2 rounded-2xl p-2 ${current?'bg-primary-500/12 ring-1 ring-primary-400/20':'bg-white/[.025]'} ${sortable.isDragging?'z-20 opacity-70 shadow-2xl':''}`}>
         <button {...sortable.attributes} {...sortable.listeners} className="flex h-9 w-8 shrink-0 touch-none items-center justify-center rounded-xl text-dark-400 hover:bg-white/[.06] hover:text-white" aria-label="جابه‌جایی در صف"><GripVertical className="h-4 w-4"/></button>
-        <button onClick={onPlay} className="min-w-0 flex-1 text-right"><span dir="auto" className="block truncate text-sm font-medium">{item.file_name.replace(/\.[^.]+$/,'')}</span><span className="mt-0.5 block text-[10px] text-dark-500">{current?'در حال پخش':index<currentIndex?'پخش‌شده':`نوبت ${(index-currentIndex).toLocaleString('fa-IR')}`}</span></button>
+        <button onClick={onPlay} className="min-w-0 flex-1 text-right"><span dir="auto" className="block truncate text-sm font-medium">{item.file_name.replace(/\.[^.]+$/,'')}</span>{current&&<span className="mt-0.5 block text-[10px] text-primary-300">در حال پخش</span>}</button>
         {!current&&<button onClick={onRemove} className="btn-icon h-8 w-8 shrink-0 text-red-300" title="حذف موقت از صف"><Trash2 className="h-3.5 w-3.5"/></button>}
     </article>;
 }

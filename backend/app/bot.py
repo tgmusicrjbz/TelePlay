@@ -27,6 +27,7 @@ from .models import User, File, Folder, LoginCode, Playlist, PlaylistItem, BotUs
 from .config import get_settings
 from .auth import create_access_token
 from .services import escape_like, select_best_thumbnail, unreferenced_audio_variant_messages, unreferenced_storage_messages
+from .caption_metadata import extract_tags_from_caption, parse_file_caption
 from .downloader import ImportJob, link_importer
 from .tts import TTSJob, VOICE_OPTIONS, consume_tts_quota, load_tts_settings, tts_queue
 from .stt import STTJob, consume_stt_quota, stt_queue
@@ -42,6 +43,8 @@ filter_return_targets: dict[int, str] = {}
 filter_previous: dict[tuple[int, str], set[str]] = {}
 search_filter_returns: dict[int, str] = {}
 input_action_queues: dict[int, asyncio.Queue[str]] = {}
+upload_message_queues: dict[int, asyncio.Queue[tuple[object, Message, Message]]] = {}
+upload_workers: dict[int, asyncio.Task] = {}
 detail_back_targets: dict[int, str] = {}
 sort_preferences: dict[int, list[tuple[str, str]]] = {}
 sort_drafts: dict[int, list[tuple[str, str]]] = {}
@@ -59,36 +62,24 @@ TYPE_LABELS = {"all": "همه", "video": "فیلم", "audio": "آهنگ", "image
 SORT_LABELS = {"name": "نام", "type": "نوع", "size": "حجم", "duration": "مدت", "created": "تاریخ آپلود", "updated": "تاریخ ویرایش"}
 
 
-def extract_tags_from_caption(caption: str | None) -> list[str]:
-    """
-    Extracts tags from a media caption or description.
-    Supports:
-    - Hashtags: #tag, #آموزش, #film_2024
-    - Explicit prefix lines: 'تگ‌ها: ...', 'تگ:', 'Tags:', 'برچسب:'
-    """
-    if not caption:
-        return []
-    cleaned: list[str] = []
-    seen: set[str] = set()
-
-    hashtag_pattern = r"""#([^\s#.,;:!?'"()\[\]{}<>/\\+=*&^%$@~`|]+)"""
-    for tag_match in re.findall(hashtag_pattern, caption):
-        tag = tag_match.strip()[:40]
-        key = tag.casefold()
-        if tag and key not in seen:
-            cleaned.append(tag)
-            seen.add(key)
-
-    prefix_pattern = r"(?:^|\n)\s*(?:تگ[‌\s]*ها?|برچسب[‌\s]*ها?|tags?)\s*[:：]\s*(.+?)(?=\n|$)"
-    for line_match in re.findall(prefix_pattern, caption, flags=re.IGNORECASE):
-        for part in re.split(r"[,،;؛\s]+", line_match):
-            tag = part.strip().lstrip("#")[:40]
-            key = tag.casefold()
-            if tag and key not in seen:
-                cleaned.append(tag)
-                seen.add(key)
-
-    return cleaned[:20]
+async def resolve_caption_folder(user_id: int, path: str | None) -> Folder | None:
+    """Resolve an exact folder path such as ``موسیقی/جدید`` for caption routing."""
+    parts = [part.strip() for part in re.split(r"[/\\>]", path or "") if part.strip()]
+    if not parts:
+        return None
+    parent_id: int | None = None
+    async with async_session() as db:
+        current: Folder | None = None
+        for part in parts:
+            candidates = (await db.execute(select(Folder).where(
+                Folder.user_id == user_id,
+                Folder.parent_id.is_(None) if parent_id is None else Folder.parent_id == parent_id,
+            ).order_by(Folder.id.asc()))).scalars().all()
+            current = next((folder for folder in candidates if folder.name.casefold() == part.casefold()), None)
+            if current is None:
+                return None
+            parent_id = current.id
+        return current
 
 
 def _sort_value(kind: str, item, field: str):
@@ -1333,6 +1324,15 @@ async def _handle_file_impl(client, message: Message, status_msg: Message):
         message.from_user.last_name,
     )
     active_drawer_id = await get_active_drawer_id(message.from_user.id)
+    caption_meta = parse_file_caption(message.caption)
+    requested_folder = str(caption_meta.get("folder") or "").strip()
+    unresolved_folder = False
+    if requested_folder:
+        destination = await resolve_caption_folder(user.id, requested_folder)
+        if destination is not None:
+            active_drawer_id = destination.id
+        else:
+            unresolved_folder = True
     
     # Determine file type and extract metadata
     if getattr(message, "video", None):
@@ -1377,15 +1377,19 @@ async def _handle_file_impl(client, message: Message, status_msg: Message):
                     else f"video_note_{message.id}.mp4" if getattr(message, "video_note", None)
                     else f"{file_type}_{message.id}"
                 )
+                explicit_title = str(caption_meta.get("title") or "").strip()
+                if explicit_title:
+                    extension = Path(incoming_name).suffix
+                    incoming_name = explicit_title if not extension or explicit_title.lower().endswith(extension.lower()) else f"{explicit_title}{extension}"
                 shortcut = File(
                     user_id=user.id, folder_id=active_drawer_id,
                     file_id=duplicate.file_id, file_unique_id=duplicate.file_unique_id,
                     channel_message_id=duplicate.channel_message_id,
                     storage_channel_id=duplicate.storage_channel_id,
                     file_name=sanitize_filename(incoming_name),
-                    description=message.caption.strip()[:1024] if message.caption else None,
+                    description=caption_meta["description"],
                     search_text=duplicate.search_text, content_hash=duplicate.content_hash,
-                    tags_json=json.dumps(extract_tags_from_caption(message.caption or ""), ensure_ascii=False),
+                    tags_json=json.dumps(caption_meta["tags"], ensure_ascii=False),
                     is_shortcut=True, file_size=duplicate.file_size,
                     mime_type=duplicate.mime_type, file_type=duplicate.file_type,
                     duration=duplicate.duration, width=duplicate.width, height=duplicate.height,
@@ -1399,8 +1403,9 @@ async def _handle_file_impl(client, message: Message, status_msg: Message):
                 db.add(shortcut)
                 await db.commit()
                 await db.refresh(shortcut)
+                destination_warning = f"\n⚠️ کشوی «{escape_markdown(requested_folder)}» پیدا نشد." if unresolved_folder else ""
                 await status_msg.edit(
-                    f"🔗 این فایل از قبل توی کمد بود؛ میانبر «{display_filename(shortcut.file_name)}» ساخته شد.",
+                    f"🔗 فایل تکراری بود؛ میانبر «{display_filename(shortcut.file_name)}» ساخته شد.{destination_warning}",
                     reply_markup=file_detail_keyboard(shortcut),
                 )
                 return
@@ -1416,8 +1421,12 @@ async def _handle_file_impl(client, message: Message, status_msg: Message):
         
         # Extract file info
         raw_filename = getattr(media, "file_name", None) or (f"photo_{message.id}.jpg" if getattr(message, "photo", None) else f"voice_{message.id}.ogg" if getattr(message, "voice", None) else f"video_note_{message.id}.mp4" if getattr(message, "video_note", None) else f"{file_type}_{message.id}")
-        if getattr(message, "video", None) and message.caption:
-            caption_title = next((line.strip() for line in message.caption.splitlines() if line.strip()), "")
+        explicit_title = str(caption_meta.get("title") or "").strip()
+        if explicit_title:
+            extension = Path(raw_filename).suffix
+            raw_filename = explicit_title if not extension or explicit_title.lower().endswith(extension.lower()) else f"{explicit_title}{extension}"
+        elif getattr(message, "video", None) and caption_meta.get("clean_caption"):
+            caption_title = next((line.strip() for line in str(caption_meta["clean_caption"]).splitlines() if line.strip()), "")
             if caption_title:
                 extension = Path(raw_filename).suffix or ".mp4"
                 clean_title = caption_title[:240]
@@ -1432,8 +1441,8 @@ async def _handle_file_impl(client, message: Message, status_msg: Message):
             "width": getattr(media, "width", None),
             "height": getattr(media, "height", None),
             "thumbnail_file_id": media.file_id if getattr(message, "photo", None) else (select_best_thumbnail(getattr(media, "thumbs", None)).file_id if select_best_thumbnail(getattr(media, "thumbs", None)) else None),
-            "description": message.caption.strip()[:1024] if message.caption else None,
-            "tags_json": json.dumps(extract_tags_from_caption(message.caption.strip()[:1024]) if message.caption else [], ensure_ascii=False),
+            "description": caption_meta["description"],
+            "tags_json": json.dumps(caption_meta["tags"], ensure_ascii=False),
         }
         
         # Save to database
@@ -1461,6 +1470,8 @@ async def _handle_file_impl(client, message: Message, status_msg: Message):
                 drawer = await db.get(Folder, active_drawer_id)
             if drawer:
                 response += f"\n🗃️ در کشوی «{escape_markdown(drawer.name)}»"
+        if unresolved_folder:
+            response += f"\n⚠️ کشوی «{escape_markdown(requested_folder)}» پیدا نشد؛ مقصد فعلی استفاده شد."
         detail_back_targets[message.from_user.id] = "files:0"
         await status_msg.edit(response, reply_markup=file_detail_keyboard(file))
         chat_id = getattr(getattr(status_msg, "chat", None), "id", None) or getattr(getattr(message, "chat", None), "id", message.from_user.id)
@@ -1475,20 +1486,44 @@ async def _handle_file_impl(client, message: Message, status_msg: Message):
 
 @tg_client.on_message(filters.private & (filters.video | filters.audio | filters.voice | filters.document | filters.photo | filters.animation | filters.video_note), group=-1)
 async def handle_file(client, message: Message):
-    """Keep upload failures visible even when they happen before the progress message."""
-    status_msg = None
+    """Queue bursts per user so every forwarded message is processed in order."""
+    user_id = message.from_user.id
+    queue = upload_message_queues.setdefault(user_id, asyncio.Queue())
+    position = queue.qsize() + (1 if user_id in upload_workers else 0)
+    status_msg = await message.reply("⏳ در صف ذخیره…" if position else "⏳ در حال ذخیره…")
+    await queue.put((client, message, status_msg))
+    worker = upload_workers.get(user_id)
+    if worker is None or worker.done():
+        upload_workers[user_id] = asyncio.create_task(_process_upload_queue(user_id))
+
+
+async def _process_upload_queue(user_id: int) -> None:
+    queue = upload_message_queues[user_id]
     try:
-        logger.info("Incoming Telegram media user=%s message=%s", message.from_user.id, message.id)
-        status_msg = await message.reply("⏳ در حال ذخیره…")
-        await _handle_file_impl(client, message, status_msg)
-    except Exception as error:
-        user_id = getattr(getattr(message, "from_user", None), "id", "unknown")
-        logger.exception("Telegram upload handler failed before processing for user %s: %s", user_id, error)
-        with contextlib.suppress(Exception):
-            if status_msg is not None:
-                await status_msg.edit("❌ نتونستم فایل رو پردازش کنم. چند لحظه دیگه دوباره امتحان کن.")
-            else:
-                await message.reply("❌ نتونستم فایل رو پردازش کنم. چند لحظه دیگه دوباره امتحان کن.")
+        while True:
+            try:
+                client, message, status_msg = await asyncio.wait_for(queue.get(), timeout=20)
+            except asyncio.TimeoutError:
+                if queue.empty():
+                    break
+                continue
+            try:
+                logger.info("Processing queued Telegram media user=%s message=%s remaining=%s", user_id, message.id, queue.qsize())
+                with contextlib.suppress(Exception):
+                    await status_msg.edit("⏳ در حال ذخیره…")
+                await _handle_file_impl(client, message, status_msg)
+            except Exception as error:
+                logger.exception("Telegram upload queue failed for user %s: %s", user_id, error)
+                with contextlib.suppress(Exception):
+                    await status_msg.edit("❌ ذخیره نشد؛ دوباره بفرست.")
+            finally:
+                queue.task_done()
+    finally:
+        upload_workers.pop(user_id, None)
+        if queue.empty():
+            upload_message_queues.pop(user_id, None)
+        else:
+            upload_workers[user_id] = asyncio.create_task(_process_upload_queue(user_id))
 
 
 async def import_personal_channel_post(message: Message) -> None:
