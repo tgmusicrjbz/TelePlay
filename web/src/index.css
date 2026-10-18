@@ -4,8 +4,23 @@
 
 .markdown-reader-surface { background: rgb(2 6 23 / .58); }
 .markdown-reader-surface--warm { background: #19160f; }
+.markdown-reader-surface--ocean { background: #071a24; }
+.markdown-reader-surface--forest { background: #0c1b15; }
+.markdown-reader-surface--paper { background: #e8e1d2; }
 .markdown-article { border-color: rgb(51 65 85 / .45); background: #111620; color: #f1f5f9; }
 .markdown-article--warm { border-color: rgb(254 243 199 / .1); background: #211d14; color: rgb(255 251 235 / .95); }
+.markdown-article--ocean { border-color: rgb(56 189 248 / .2); background: #0a2430; color: #e0f2fe; }
+.markdown-article--forest { border-color: rgb(52 211 153 / .18); background: #10251c; color: #ecfdf5; }
+.markdown-article--paper { border-color: #cabd9f; background: #fffaf0; color: #342f28; box-shadow: 0 12px 35px rgb(70 52 30 / .15); }
+.markdown-article--ocean :is(h1,h2,h3,h4,h5,h6,strong,a,.katex) { color: #7dd3fc !important; }
+.markdown-article--forest :is(h1,h2,h3,h4,h5,h6,strong,a,.katex) { color: #6ee7b7 !important; }
+.markdown-article--paper :is(h1,h2,h3,h4,h5,h6,strong,a,.katex) { color: #8b5e34 !important; }
+.markdown-article--paper :is(pre,code) { color: #292524 !important; }
+.markdown-font--vazir { font-family: "Vazirmatn", system-ui, sans-serif !important; }
+.markdown-font--yekan { font-family: "IRANYekan", "Yekan Bakh", "B Yekan", "Vazirmatn", sans-serif !important; }
+.markdown-font--tahoma { font-family: Tahoma, Arial, sans-serif !important; }
+.markdown-font--serif { font-family: "Noto Naskh Arabic", "Traditional Arabic", serif !important; }
+.markdown-font--mono { font-family: "JetBrains Mono", Consolas, monospace !important; }
 .markdown-editor-toolbar { border-color: rgb(255 255 255 / .08); background: #121722; }
 .markdown-editor { border-color: rgb(255 255 255 / .1); background: #0f131c; color: #f1f5f9; }
 

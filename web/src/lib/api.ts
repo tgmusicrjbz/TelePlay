@@ -797,9 +797,9 @@ export const useUploadFile = () => {
 
 // ============== Mixed-media Pack Hooks ==============
 
-export const usePacks = (parentFolderId: number | null) => useQuery<PackSummary[]>({
-    queryKey: ['packs', parentFolderId],
-    queryFn: async () => (await api.get<PackSummary[]>('/packs', { params: { parent_folder_id: parentFolderId ?? undefined } })).data,
+export const usePacks = (parentFolderId: number | null, allFolders = false) => useQuery<PackSummary[]>({
+    queryKey: ['packs', allFolders ? 'all' : parentFolderId],
+    queryFn: async () => (await api.get<PackSummary[]>('/packs', { params: { parent_folder_id: parentFolderId ?? undefined, all_folders: allFolders || undefined } })).data,
 });
 
 export const usePack = (id: number | null) => useQuery<Pack>({
@@ -1180,6 +1180,17 @@ export const useDeleteTag = () => {
             {entity:'tag',method:'delete',url:`/accounts/tags/${encodeURIComponent(name)}`},
             ()=>cacheTagSettings({...current,tags:current.tags.filter(item=>item.name.toLocaleLowerCase('fa')!==name.toLocaleLowerCase('fa'))}),
         )},
+        onSuccess: data => {
+            queryClient.setQueryData(['tag-settings'], data);
+            queryClient.invalidateQueries({ queryKey: ['files'] });
+        },
+    });
+};
+
+export const useDeleteTags = () => {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async (names: string[]) => cacheTagSettings((await api.post<TagSettings>('/accounts/tags/delete-batch', {names})).data),
         onSuccess: data => {
             queryClient.setQueryData(['tag-settings'], data);
             queryClient.invalidateQueries({ queryKey: ['files'] });

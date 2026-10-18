@@ -767,7 +767,7 @@ def file_detail_keyboard(file: File, back_callback: str = "files:0") -> InlineKe
     return InlineKeyboardMarkup(rows)
 
 
-def file_more_keyboard(file: File, back_callback: str = "files:0") -> InlineKeyboardMarkup:
+def file_more_keyboard(file: File, telegram_id: int, back_callback: str = "files:0") -> InlineKeyboardMarkup:
     share_button = InlineKeyboardButton(
         "🔒 لغو لینک عمومی" if file.public_hash else "🔗 ساخت لینک عمومی",
         callback_data=f"unsharefile:{file.id}" if file.public_hash else f"sharefile:{file.id}",
@@ -778,11 +778,16 @@ def file_more_keyboard(file: File, back_callback: str = "files:0") -> InlineKeyb
     )]
     if file.description:
         description_row.append(InlineKeyboardButton("🧹 حذف توضیحات", callback_data=f"clearfiledesc:{file.id}"))
+    mode = link_delivery_modes.get(telegram_id, "both")
+    mode_label = {"both": "تلگرام و کمد", "library": "فقط کمد", "telegram": "فقط تلگرام"}.get(mode, "تلگرام و کمد")
+    actions = show_file_actions.get(telegram_id, True)
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✏️ تغییر نام", callback_data=f"renamefile:{file.id}"),
          InlineKeyboardButton("🗃️ انتقال", callback_data=f"move:{file.id}")],
         description_row,
         [share_button],
+        [InlineKeyboardButton(f"🔗 خروجی لینک: {mode_label}", callback_data="bot_cycle_link_delivery")],
+        [InlineKeyboardButton(f"🎛 دکمه‌های فایل: {'روشن' if actions else 'خاموش'}", callback_data="bot_toggle_file_actions")],
         [InlineKeyboardButton("🗑️ حذف فایل", callback_data=f"delfile:{file.id}")],
         [InlineKeyboardButton("↩️ کارهای اصلی", callback_data=f"openfile:{file.id}"),
          InlineKeyboardButton("🚪 منوی اصلی", callback_data="home")],
@@ -801,7 +806,7 @@ def post_upload_keyboard(file: File, telegram_id: int) -> InlineKeyboardMarkup |
 
 HELP_TEXT = (
     "💡 **راهنمای کمد**\n\n"
-    "فایل یا متن بفرست تا ذخیره شود. از منوی زیر هم می‌توانی کشوها، جست‌وجو و پلی‌لیست‌ها را باز کنی."
+    "فایل، متن یا لینک بفرست؛ بقیه‌اش با کمد."
 )
 
 
@@ -809,12 +814,9 @@ def main_menu_keyboard(telegram_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🗄️ کشوهای من", callback_data="folders:0:0"),
          InlineKeyboardButton("📦 همه‌ی فایل‌ها", callback_data="files:0")],
-        [InlineKeyboardButton("➕ کشوی تازه", callback_data="create_folder"),
-         InlineKeyboardButton("🔍 بگرد تو کمد", callback_data="search_choose")],
-        [InlineKeyboardButton("🎧 پلی‌لیست‌ها", callback_data="playlists:0"),
-         get_web_app_button(telegram_id, "🌐 باز کردن کمد")],
-        [InlineKeyboardButton("📥 محل ذخیرهٔ فایل‌های بعدی", callback_data="storage_target:0")],
-        [InlineKeyboardButton("⚙️ تنظیمات ربات", callback_data="bot_settings")],
+        [InlineKeyboardButton("🎙 ساخت صدا", callback_data="tts_menu:home"),
+         InlineKeyboardButton("📥 مقصد فایل‌های بعدی", callback_data="storage_target:0")],
+        [InlineKeyboardButton("⚙️ تنظیم فایل و لینک", callback_data="bot_settings")],
     ])
 
 
@@ -825,7 +827,7 @@ async def render_bot_settings(message: Message, telegram_id: int) -> None:
     mode_label = {"both": "تلگرام و کمد", "library": "فقط کمد", "telegram": "فقط تلگرام"}[mode]
     await safe_edit(
         message,
-        "⚙️ **تنظیمات ربات**\nرفتار پیام‌های بعد از ذخیره و لینک‌ها را همین‌جا عوض کن.",
+        "⚙️ **تنظیم فایل و لینک**\nرفتار فایل‌های ذخیره‌شده و لینک‌ها.",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton(f"دکمه‌های مدیریت فایل: {'روشن' if actions else 'خاموش'}", callback_data="bot_toggle_file_actions")],
             [InlineKeyboardButton(f"خروجی لینک: {mode_label}", callback_data="bot_cycle_link_delivery")],
@@ -2885,7 +2887,7 @@ async def handle_callback(client, callback: CallbackQuery):
             return
         await callback.message.edit(
             file_detail_text(file),
-            reply_markup=file_more_keyboard(file, detail_back_targets.get(callback.from_user.id, "files:0")),
+            reply_markup=file_more_keyboard(file, callback.from_user.id, detail_back_targets.get(callback.from_user.id, "files:0")),
         )
         await callback.answer()
 

@@ -29,7 +29,7 @@ from sqlalchemy.orm import selectinload
 from app.database import Base, async_session, engine
 from app.models import AuthSession, BotUserState, ErrorLog, File, Folder, Pack, PackItem, Playlist, PlaylistItem, ProcessingJob, SecurityEvent, TTSUsage, User, WatchProgress
 from app.routers.auth import _session_for_device, password_login, update_credentials
-from app.routers.accounts import admin_error_logs, admin_health, delete_tag_definition, export_account_data, get_saved_filters, get_tag_settings, import_account_data, resolve_admin_error, update_saved_filters, update_tag_settings
+from app.routers.accounts import admin_error_logs, admin_health, delete_tag_definition, delete_tag_definitions_batch, export_account_data, get_saved_filters, get_tag_settings, import_account_data, resolve_admin_error, update_saved_filters, update_tag_settings
 from app.stt import consume_stt_quota
 from app.routers.files import (
     batch_update_files,
@@ -55,7 +55,7 @@ from app.routers.folders import delete_folder_contents, list_folders, update_fol
 from app.routers.streaming import public_share_info, stored_message_response, unlock_public_share
 from app.routers.playlists import add_playlist_items, create_playlist, reorder_playlist, shuffle_playlist
 from app.routers.packs import create_pack, get_pack, reorder_pack
-from app.schemas import BatchFileUpdate, CredentialsUpdate, FileUpdate, FolderUpdate, PackCreate, PackReorder, PasswordLoginRequest, PlayerStateUpdate, PlaylistAddItems, PlaylistCreate, PlaylistReorder, PublicShareCreate, PublicShareUnlock, SavedFilter, SavedFiltersUpdate, TagDefinition, TagSettingsUpdate
+from app.schemas import BatchFileUpdate, CredentialsUpdate, FileUpdate, FolderUpdate, PackCreate, PackReorder, PasswordLoginRequest, PlayerStateUpdate, PlaylistAddItems, PlaylistCreate, PlaylistReorder, PublicShareCreate, PublicShareUnlock, SavedFilter, SavedFiltersUpdate, TagBatchDelete, TagDefinition, TagSettingsUpdate
 from app.telegram import configure_main_client, start_one_client
 from app import telegram
 
@@ -234,6 +234,21 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             await db.refresh(direct)
             self.assertNotIn("پروژه", [tag.name for tag in result.tags])
             self.assertEqual(json.loads(direct.tags_json), ["نگه‌دار"])
+
+    async def test_deleting_multiple_tags_removes_them_in_one_pass(self):
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            direct = self.make_file(user.id, self.folder_id, 930)
+            direct.tags_json = json.dumps(["اول", "دوم", "باقی"], ensure_ascii=False)
+            db.add(direct); await db.commit()
+            await update_tag_settings(TagSettingsUpdate(
+                tags=[TagDefinition(name="اول", color="#14b8a6"), TagDefinition(name="دوم", color="#2563eb"), TagDefinition(name="باقی", color="#a855f7")],
+                show_file_tags=True, display_limit=3,
+            ), user, db)
+            result = await delete_tag_definitions_batch(TagBatchDelete(names=["اول", "#دوم"]), user, db)
+            await db.refresh(direct)
+            self.assertEqual([tag.name for tag in result.tags], ["باقی"])
+            self.assertEqual(json.loads(direct.tags_json), ["باقی"])
 
     async def test_stt_duration_limit_rejects_long_input(self):
         async with async_session() as db:
@@ -1125,9 +1140,11 @@ class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("filestt:99", detail_callbacks)
         self.assertIn("filemore:99", detail_callbacks)
         self.assertNotIn("delfile:99", detail_callbacks)
-        more_callbacks = [button.callback_data for row in file_more_keyboard(file, "search:2").inline_keyboard for button in row]
+        more_callbacks = [button.callback_data for row in file_more_keyboard(file, 111, "search:2").inline_keyboard for button in row]
         self.assertIn("delfile:99", more_callbacks)
         self.assertIn("openfile:99", more_callbacks)
+        self.assertIn("bot_cycle_link_delivery", more_callbacks)
+        self.assertIn("bot_toggle_file_actions", more_callbacks)
         self.assertTrue(all(len(button.callback_data or "") <= 64 for button in pagination_row("folders:123", 1, 30)))
         search_callbacks = [button.callback_data for row in search_type_keyboard().inline_keyboard for button in row]
         self.assertIn("search_filter_toggle:folder", search_callbacks)
@@ -1146,7 +1163,9 @@ class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
         menu_labels = [button.text for row in main_menu_keyboard(111).inline_keyboard for button in row]
         self.assertIn("📦 همه‌ی فایل‌ها", menu_labels)
         self.assertIn("🗄️ کشوهای من", menu_labels)
-        self.assertIn("🔍 بگرد تو کمد", menu_labels)
+        self.assertNotIn("🔍 بگرد تو کمد", menu_labels)
+        self.assertNotIn("🌐 باز کردن کمد", menu_labels)
+        self.assertIn("⚙️ تنظیم فایل و لینک", menu_labels)
         self.assertEqual(
             [button.text for row in help_keyboard(111).inline_keyboard for button in row],
             ["✨ ورود به نسخهٔ وب", "🚪 بازگشت به منوی اصلی"],

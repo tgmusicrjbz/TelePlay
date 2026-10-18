@@ -17,7 +17,7 @@ from ..auth import create_vault_token, get_current_user, require_vault_access
 from ..config import get_settings
 from ..database import get_db
 from ..models import AuthSession, File, Folder, Pack, PackItem, Playlist, PlaylistItem, ProcessingJob, SecurityEvent, TTSUsage, User, WorkspaceGrant
-from ..schemas import AccountPreferences, AdminHealthResponse, AdminStatsResponse, AdminUserCreate, AdminUserResponse, AdminUserUpdate, SavedFilter, SavedFiltersUpdate, ServiceHealthItem, StorageChannelItem, StorageChannelResponse, StorageChannelUpdate, StuckJobResponse, TagDefinitionResponse, TagSettingsResponse, TagSettingsUpdate, VaultPasswordRequest, VaultStatus, VaultTokenResponse, WorkspaceGrantCreate, WorkspaceResponse
+from ..schemas import AccountPreferences, AdminHealthResponse, AdminStatsResponse, AdminUserCreate, AdminUserResponse, AdminUserUpdate, SavedFilter, SavedFiltersUpdate, ServiceHealthItem, StorageChannelItem, StorageChannelResponse, StorageChannelUpdate, StuckJobResponse, TagBatchDelete, TagDefinitionResponse, TagSettingsResponse, TagSettingsUpdate, VaultPasswordRequest, VaultStatus, VaultTokenResponse, WorkspaceGrantCreate, WorkspaceResponse
 from .. import telegram
 from ..audit import add_security_event
 from ..services import sanitize_filename
@@ -412,18 +412,17 @@ async def update_tag_settings(payload: TagSettingsUpdate, current_user: User = D
     return await get_tag_settings(current_user, db)
 
 
-@router.delete("/accounts/tags/{tag_name}", response_model=TagSettingsResponse)
-async def delete_tag_definition(tag_name: str, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    """Delete a tag definition and remove that tag from every file owned by the user."""
-    normalized = " ".join(tag_name.strip().lstrip("#").split())[:40]
-    if not normalized:
-        raise HTTPException(status_code=400, detail="نام تگ معتبر نیست.")
-    key = normalized.casefold()
+async def _delete_tag_definitions(names: list[str], current_user: User, db: AsyncSession) -> TagSettingsResponse:
+    """Delete tag definitions and remove them from every owned file in one pass."""
+    keys = {" ".join(name.strip().lstrip("#").split())[:40].casefold() for name in names}
+    keys.discard("")
+    if not keys:
+        raise HTTPException(status_code=400, detail="حداقل یک تگ معتبر انتخاب کن.")
     try:
         stored = json.loads(current_user.tag_settings_json or "[]")
     except (TypeError, ValueError, json.JSONDecodeError):
         stored = []
-    definitions = [item for item in clean_tag_definitions(stored if isinstance(stored, list) else []) if item["name"].casefold() != key]
+    definitions = [item for item in clean_tag_definitions(stored if isinstance(stored, list) else []) if item["name"].casefold() not in keys]
     current_user.tag_settings_json = json.dumps(definitions, ensure_ascii=False)
     files = (await db.execute(select(File).where(File.user_id == current_user.id))).scalars().all()
     for file in files:
@@ -431,11 +430,21 @@ async def delete_tag_definition(tag_name: str, current_user: User = Depends(get_
             tags = json.loads(file.tags_json or "[]")
         except (TypeError, ValueError, json.JSONDecodeError):
             tags = []
-        cleaned = [tag for tag in tags if str(tag).strip().lstrip("#").casefold() != key]
+        cleaned = [tag for tag in tags if str(tag).strip().lstrip("#").casefold() not in keys]
         if cleaned != tags:
             file.tags_json = json.dumps(cleaned, ensure_ascii=False)
     await db.commit()
     return await get_tag_settings(current_user, db)
+
+
+@router.delete("/accounts/tags/{tag_name}", response_model=TagSettingsResponse)
+async def delete_tag_definition(tag_name: str, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    return await _delete_tag_definitions([tag_name], current_user, db)
+
+
+@router.post("/accounts/tags/delete-batch", response_model=TagSettingsResponse)
+async def delete_tag_definitions_batch(payload: TagBatchDelete, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    return await _delete_tag_definitions(payload.names, current_user, db)
 
 
 @router.get("/accounts/workspaces", response_model=list[WorkspaceResponse])

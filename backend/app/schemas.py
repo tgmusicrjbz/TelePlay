@@ -137,6 +137,10 @@ class TagSettingsUpdate(BaseModel):
     display_limit: int = Field(default=2, ge=1, le=6)
 
 
+class TagBatchDelete(BaseModel):
+    names: List[str] = Field(min_length=1, max_length=100)
+
+
 class TagDefinitionResponse(TagDefinition):
     file_count: int = 0
 

@@ -85,9 +85,10 @@ async def _owned_files(db: AsyncSession, user_id: int, file_ids: list[int]) -> l
 @router.get("", response_model=list[PackSummary])
 async def list_packs(
     parent_folder_id: int | None = Query(default=None),
+    all_folders: bool = Query(default=False),
     db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
-    condition = Pack.parent_folder_id.is_(None) if parent_folder_id is None else Pack.parent_folder_id == parent_folder_id
+    condition = True if all_folders else (Pack.parent_folder_id.is_(None) if parent_folder_id is None else Pack.parent_folder_id == parent_folder_id)
     packs = (await db.execute(
         select(Pack).where(Pack.user_id == current_user.id, condition).options(
             selectinload(Pack.items).selectinload(PackItem.file).selectinload(File.watch_progress),
