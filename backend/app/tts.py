@@ -524,6 +524,7 @@ class TTSQueue:
             self.task = self.tasks[0]
         else:
             await self.start()
+        position = 1 + sum(1 for status in self.statuses.values() if status.get("state") not in {"done", "error", "cancelled"})
         job.id = job.id or uuid.uuid4().hex
         chunks = split_long_text(job.text)
         self.statuses[job.id] = {
@@ -543,7 +544,7 @@ class TTSQueue:
         )
         self.durable_job_ids.add(job.id)
         await self.queue.put(job)
-        return self.queue.qsize()
+        return position
 
     async def _persist_status(self, job_id: str) -> None:
         if job_id in self.durable_job_ids and job_id in self.statuses:

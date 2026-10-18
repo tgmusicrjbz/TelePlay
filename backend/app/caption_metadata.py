@@ -2,16 +2,17 @@
 import re
 
 
-def extract_tags_from_caption(caption: str | None) -> list[str]:
+def extract_tags_from_caption(caption: str | None, excluded_tags: list[str] | None = None) -> list[str]:
     if not caption:
         return []
+    excluded = {str(tag).strip().lstrip("#").casefold() for tag in (excluded_tags or []) if str(tag).strip()}
     cleaned: list[str] = []
     seen: set[str] = set()
     hashtag_pattern = r"""#([^\s#.,;:!?'"()\[\]{}<>/\\+=*&^%$@~`|]+)"""
     for tag_match in re.findall(hashtag_pattern, caption):
         tag = tag_match.strip()[:40]
         key = tag.casefold()
-        if tag and key not in seen:
+        if tag and key not in seen and key not in excluded:
             cleaned.append(tag)
             seen.add(key)
     prefix_pattern = r"(?:^|\n)\s*(?:تگ[‌\s]*ها?|برچسب[‌\s]*ها?|tags?)\s*[:：]\s*(.+?)(?=\n|$)"
@@ -19,7 +20,7 @@ def extract_tags_from_caption(caption: str | None) -> list[str]:
         for part in re.split(r"[,،;؛\s]+", line_match):
             tag = part.strip().lstrip("#")[:40]
             key = tag.casefold()
-            if tag and key not in seen:
+            if tag and key not in seen and key not in excluded:
                 cleaned.append(tag)
                 seen.add(key)
     return cleaned[:20]
@@ -31,7 +32,7 @@ CAPTION_DIRECTIVE_RE = re.compile(
 )
 
 
-def parse_file_caption(caption: str | None) -> dict[str, object]:
+def parse_file_caption(caption: str | None, excluded_tags: list[str] | None = None) -> dict[str, object]:
     """Parse upload directives and return clean user-facing metadata."""
     values: dict[str, object] = {"folder": None, "title": None, "description": None, "tags": []}
     remaining: list[str] = []
@@ -57,7 +58,7 @@ def parse_file_caption(caption: str | None) -> dict[str, object]:
     description = "\n".join(explicit_description).strip() if explicit_description else clean_caption
     tags: list[str] = []
     seen: set[str] = set()
-    for tag in [*explicit_tags, *extract_tags_from_caption(clean_caption)]:
+    for tag in [*explicit_tags, *extract_tags_from_caption(clean_caption, excluded_tags)]:
         clean_tag = tag.strip()[:40]
         key = clean_tag.casefold()
         if clean_tag and key not in seen:

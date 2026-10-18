@@ -306,6 +306,18 @@ def automatic_tag_color(name: str) -> str:
     return palette[digest[0] % len(palette)]
 
 
+def clean_tag_exclusions(raw_tags) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in raw_tags if isinstance(raw_tags, list) else []:
+        name = " ".join(str(value).strip().lstrip("#").split())[:40]
+        key = name.casefold()
+        if name and key not in seen:
+            result.append(name)
+            seen.add(key)
+    return result[:100]
+
+
 @router.get("/accounts/tags", response_model=TagSettingsResponse)
 async def get_tag_settings(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     try:
@@ -313,6 +325,10 @@ async def get_tag_settings(current_user: User = Depends(get_current_user), db: A
         definitions = clean_tag_definitions(stored if isinstance(stored, list) else [])
     except (TypeError, ValueError, json.JSONDecodeError):
         definitions = []
+    try:
+        excluded_tags = clean_tag_exclusions(json.loads(current_user.tag_exclusions_json or "[]"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        excluded_tags = []
     counts = {item["name"].casefold(): 0 for item in definitions}
     discovered: dict[str, str] = {}
     rows = (await db.execute(select(File.tags_json).where(File.user_id == current_user.id))).scalars().all()
@@ -336,6 +352,7 @@ async def get_tag_settings(current_user: User = Depends(get_current_user), db: A
             configured.add(key)
     return TagSettingsResponse(
         tags=[TagDefinitionResponse(**item, file_count=counts.get(item["name"].casefold(), 0)) for item in definitions],
+        excluded_tags=excluded_tags,
         show_file_tags=current_user.show_file_tags,
         display_limit=max(1, min(current_user.file_tag_limit or 2, 6)),
     )
@@ -345,6 +362,7 @@ async def get_tag_settings(current_user: User = Depends(get_current_user), db: A
 async def update_tag_settings(payload: TagSettingsUpdate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     definitions = clean_tag_definitions(payload.tags)
     current_user.tag_settings_json = json.dumps(definitions, ensure_ascii=False)
+    current_user.tag_exclusions_json = json.dumps(clean_tag_exclusions(payload.excluded_tags), ensure_ascii=False)
     current_user.show_file_tags = payload.show_file_tags
     current_user.file_tag_limit = payload.display_limit
     await db.commit()

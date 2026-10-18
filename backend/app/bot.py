@@ -53,6 +53,9 @@ batch_selections: dict[int, set[int]] = {}
 batch_return_targets: dict[int, str] = {}
 current_drawers: dict[int, int | None] = {}
 upload_drawers: dict[int, int | None] = {}
+show_file_actions: dict[int, bool] = {}
+link_delivery_modes: dict[int, str] = {}
+pending_stt_modes: dict[int, str] = {}
 loaded_ui_state_users: set[int] = set()
 PAGE_SIZE = 8
 PREVIEW_TTL_SECONDS = 300
@@ -285,6 +288,10 @@ def _json_list(value: str | None, default: list) -> list:
         return list(default)
 
 
+def user_tag_exclusions(user: User) -> list[str]:
+    return [str(value) for value in _json_list(user.tag_exclusions_json, []) if str(value).strip()]
+
+
 async def load_user_ui_state(telegram_id: int, *, force: bool = False) -> None:
     """Hydrate volatile bot dictionaries from the persistent DB state."""
     if telegram_id in loaded_ui_state_users and not force:
@@ -300,6 +307,8 @@ async def load_user_ui_state(telegram_id: int, *, force: bool = False) -> None:
             await db.commit()
         current_drawers[telegram_id] = state.current_drawer_id
         upload_drawers[telegram_id] = state.upload_drawer_id
+        show_file_actions[telegram_id] = bool(state.show_file_actions)
+        link_delivery_modes[telegram_id] = state.link_delivery_mode if state.link_delivery_mode in {"both", "library", "telegram"} else "both"
         library_filters[telegram_id] = set(_json_list(state.library_filters_json, []))
         search_filters[telegram_id] = set(_json_list(state.search_filters_json, []))
         if state.search_query:
@@ -335,6 +344,8 @@ async def persist_user_ui_state(telegram_id: int) -> None:
             db.add(state)
         state.current_drawer_id = current_drawers.get(telegram_id)
         state.upload_drawer_id = upload_drawers.get(telegram_id)
+        state.show_file_actions = show_file_actions.get(telegram_id, True)
+        state.link_delivery_mode = link_delivery_modes.get(telegram_id, "both")
         state.library_filters_json = json.dumps(sorted(library_filters.get(telegram_id, set())))
         state.search_filters_json = json.dumps(sorted(search_filters.get(telegram_id, set())))
         state.search_query = search_queries.get(telegram_id)
@@ -764,6 +775,12 @@ def file_detail_keyboard_for_user(file: File, telegram_id: int) -> InlineKeyboar
     return file_detail_keyboard(file, detail_back_targets.get(telegram_id, "files:0"))
 
 
+def post_upload_keyboard(file: File, telegram_id: int) -> InlineKeyboardMarkup | None:
+    if not show_file_actions.get(telegram_id, True):
+        return None
+    return file_detail_keyboard_for_user(file, telegram_id)
+
+
 HELP_TEXT = (
     "💡 **راهنمای کمد**\n\n"
     "فایل یا متن بفرست تا ذخیره شود. از منوی زیر هم می‌توانی کشوها، جست‌وجو و پلی‌لیست‌ها را باز کنی."
@@ -779,10 +796,27 @@ def main_menu_keyboard(telegram_id: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🎧 پلی‌لیست‌ها", callback_data="playlists:0"),
          get_web_app_button(telegram_id, "🌐 باز کردن کمد")],
         [InlineKeyboardButton("📥 محل ذخیرهٔ فایل‌های بعدی", callback_data="storage_target:0")],
+        [InlineKeyboardButton("⚙️ تنظیمات ربات", callback_data="bot_settings")],
     ])
 
 
-async def render_storage_target(message: Message, telegram_id: int, page: int = 0) -> None:
+async def render_bot_settings(message: Message, telegram_id: int) -> None:
+    await load_user_ui_state(telegram_id)
+    actions = show_file_actions.get(telegram_id, True)
+    mode = link_delivery_modes.get(telegram_id, "both")
+    mode_label = {"both": "تلگرام و کمد", "library": "فقط کمد", "telegram": "فقط تلگرام"}[mode]
+    await safe_edit(
+        message,
+        "⚙️ **تنظیمات ربات**\nرفتار پیام‌های بعد از ذخیره و لینک‌ها را همین‌جا عوض کن.",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"دکمه‌های مدیریت فایل: {'روشن' if actions else 'خاموش'}", callback_data="bot_toggle_file_actions")],
+            [InlineKeyboardButton(f"خروجی لینک: {mode_label}", callback_data="bot_cycle_link_delivery")],
+            [InlineKeyboardButton("↩️ منوی اصلی", callback_data="home")],
+        ]),
+    )
+
+
+async def render_storage_target(message: Message, telegram_id: int, parent_id: int | None = None, page: int = 0) -> None:
     """Choose the drawer used for subsequent Telegram uploads."""
     await load_user_ui_state(telegram_id)
     async with async_session() as db:
@@ -796,35 +830,50 @@ async def render_storage_target(message: Message, telegram_id: int, page: int = 
             select(Folder).where(Folder.user_id == user.id, Folder.is_hidden.is_(False)).order_by(Folder.name, Folder.id)
         )).scalars().all()
         folder_map = {folder.id: folder for folder in folders}
+        parent = folder_map.get(parent_id) if parent_id else None
+        if parent_id and parent is None:
+            parent_id = None
+        children = [folder for folder in folders if folder.parent_id == parent_id]
+        child_parent_ids = {folder.parent_id for folder in folders if folder.parent_id is not None}
 
-        def label_for(folder: Folder) -> str:
-            names = [folder.name]
-            parent_id = folder.parent_id
-            visited = {folder.id}
-            while parent_id and parent_id in folder_map and parent_id not in visited:
-                visited.add(parent_id)
-                parent = folder_map[parent_id]
-                names.append(parent.name)
-                parent_id = parent.parent_id
+        def path_for(folder: Folder | None) -> str:
+            if folder is None:
+                return "ریشهٔ کمد"
+            names, visited = [folder.name], {folder.id}
+            cursor = folder.parent_id
+            while cursor and cursor in folder_map and cursor not in visited:
+                visited.add(cursor)
+                item = folder_map[cursor]
+                names.append(item.name)
+                cursor = item.parent_id
             return " / ".join(reversed(names))
 
-        choices = [(folder.id, label_for(folder), folder.is_default) for folder in folders]
-
     current_id = upload_drawers.get(telegram_id)
-    page = min(max(page, 0), max(0, (len(choices) - 1) // PAGE_SIZE))
-    shown = choices[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
-    buttons = [[InlineKeyboardButton(
-        f"{'✅' if folder_id == current_id else '🗃️'} {name[:48]}{' · پیش‌فرض' if is_default else ''}",
-        callback_data=f"storage_set:{folder_id}",
-    )] for folder_id, name, is_default in shown]
-    if len(choices) > PAGE_SIZE:
-        buttons.append(pagination_row("storage_target", page, len(choices)))
+    page = min(max(page, 0), max(0, (len(children) - 1) // PAGE_SIZE))
+    shown = children[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
+    buttons: list[list[InlineKeyboardButton]] = []
+    if parent is not None:
+        buttons.append([InlineKeyboardButton(
+            f"{'✅ ' if parent.id == current_id else ''}انتخاب همین کشو",
+            callback_data=f"storage_set:{parent.id}",
+        )])
+    for folder in shown:
+        marker = "📂" if folder.id in child_parent_ids else "📁"
+        suffix = " · پیش‌فرض" if folder.is_default else ""
+        buttons.append([InlineKeyboardButton(
+            f"{marker} {folder.name[:42]}{suffix}",
+            callback_data=f"storage_target:{folder.id}:0",
+        )])
+    if len(children) > PAGE_SIZE:
+        buttons.append(pagination_row(f"storage_target:{parent_id or 0}", page, len(children)))
+    if parent is not None:
+        buttons.append([InlineKeyboardButton("⬆️ یک سطح بالاتر", callback_data=f"storage_target:{parent.parent_id or 0}:0")])
     buttons.append([InlineKeyboardButton("➕ ساخت کشوی تازه", callback_data="create_folder")])
     buttons.append([InlineKeyboardButton("↩️ منوی اصلی", callback_data="home")])
-    current_name = next((name for folder_id, name, _ in choices if folder_id == current_id), "کشوی پیش‌فرض")
+    current_name = path_for(folder_map.get(current_id)) if current_id else "کشوی پیش‌فرض"
     await safe_edit(
         message,
-        f"📥 **محل ذخیرهٔ فایل‌های بعدی**\nالان: **{escape_markdown(current_name)}**\n\nیک کشو انتخاب کن؛ هر فایلی که بعدش بفرستی همون‌جا می‌ره.",
+        f"📥 **محل ذخیرهٔ فایل‌های بعدی**\nالان: **{escape_markdown(current_name)}**\nمسیر باز: **{escape_markdown(path_for(parent))}**\n\nکشویی را باز کن و «انتخاب همین کشو» را بزن.",
         reply_markup=InlineKeyboardMarkup(buttons),
     )
 
@@ -1050,12 +1099,13 @@ async def tts_command(client, message: Message):
         api_keys=personal_keys,
     )
     position = await tts_queue.enqueue(job)
-    await message.reply(f"🎙️ ساخت صدا شروع شد\nجایگاه در صف: {to_persian_digits(str(position))}")
+    queue_note = f"\nنوبت {to_persian_digits(str(position))} در صف" if position > 1 else ""
+    await message.reply(f"🎙️ درخواست ساخت صدا ثبت شد.{queue_note}")
 
 
 @tg_client.on_message(filters.command("stt") & filters.private)
 async def stt_command(client, message: Message):
-    """Transcribe an audio/video file by replying to its Telegram message."""
+    """Transcribe a replied audio/video, whether or not it is already stored."""
     user = await get_or_create_user(
         message.from_user.id, message.from_user.username,
         message.from_user.first_name, message.from_user.last_name,
@@ -1065,32 +1115,132 @@ async def stt_command(client, message: Message):
         await message.reply("استخراج متن هنوز روی سرور فعال نشده.")
         return
     replied = message.reply_to_message
+    option = message.text.split(maxsplit=1)[1].strip().lower() if message.text and len(message.text.split(maxsplit=1)) > 1 else ""
+    output_mode = "temporary" if option in {"temp", "temporary", "موقت"} else "save"
+    if replied is None:
+        pending_stt_modes[message.from_user.id] = output_mode
+        await message.reply("🎙️ فایل بعدی را بفرست؛ مستقیم متنش را استخراج می‌کنم و خود فایل در کمد ذخیره نمی‌شود.")
+        return
     media = next((getattr(replied, name, None) for name in ("audio", "voice", "video", "video_note", "document") if replied and getattr(replied, name, None)), None)
     if media is None:
-        await message.reply("روی یک فایل صوتی یا ویدیویی ریپلای کن و `/stt` را بفرست.")
+        await message.reply("روی صدا یا ویدیو ریپلای کن و `/stt` را بفرست. برای خروجی موقت هم `/stt temp` بزن.")
         return
+    cleanup_source = False
     async with async_session() as db:
         source = (await db.execute(select(File).where(
             File.user_id == user.id, File.file_unique_id == media.file_unique_id,
             File.file_type.in_(("audio", "video")),
         ).order_by(File.id.desc()))).scalars().first()
         if source is None:
-            await message.reply("اول فایل را برای ربات بفرست تا در کمد ذخیره شود؛ بعد روی همان پیام `/stt` بزن.")
-            return
+            mime = getattr(media, "mime_type", None) or ("audio/ogg" if replied.voice else "video/mp4" if replied.video or replied.video_note else "application/octet-stream")
+            if not (mime.startswith("audio/") or mime.startswith("video/") or replied.audio or replied.voice or replied.video or replied.video_note):
+                await message.reply("این فایل صوتی یا ویدیویی نیست.")
+                return
+            target_channel = user.storage_channel_id or settings.telegram_storage_channel_id
+            temporary_message = await forward_to_storage_channel(replied, target_channel)
+            stored_media = next((getattr(temporary_message, field, None) for field in ("audio", "voice", "video", "video_note", "document") if getattr(temporary_message, field, None)), None)
+            if stored_media is None:
+                await message.reply("فایل برای استخراج متن آماده نشد؛ دوباره تلاش کن.")
+                return
+            default_folder = await ensure_default_folder(db, user.id)
+            source = File(
+                user_id=user.id, folder_id=default_folder.id, channel_message_id=temporary_message.id,
+                storage_channel_id=target_channel, file_id=stored_media.file_id,
+                file_unique_id=stored_media.file_unique_id,
+                file_name=sanitize_filename(getattr(stored_media, "file_name", None) or f"stt-source-{replied.id}"),
+                file_size=getattr(stored_media, "file_size", 0) or 0, mime_type=mime,
+                file_type="video" if mime.startswith("video/") or replied.video or replied.video_note else "audio",
+                duration=getattr(stored_media, "duration", None) or getattr(media, "duration", None),
+                is_hidden=True,
+            )
+            db.add(source)
+            await db.flush()
+            cleanup_source = True
+            await db.commit()
+            await db.refresh(source)
         try:
             await consume_stt_quota(db, user.id, int(source.duration or getattr(media, "duration", 0) or 0))
         except ValueError as error:
+            if cleanup_source:
+                channel_id, message_id = source.storage_channel_id, source.channel_message_id
+                await db.delete(source)
+                await db.commit()
+                try:
+                    await tg_client.delete_messages(channel_id or settings.telegram_storage_channel_id, message_id)
+                except Exception:
+                    logger.warning("Could not remove rejected temporary STT source %s", message_id, exc_info=True)
             await message.reply(f"⛔ {error}")
             return
     folder_id = await get_active_drawer_id(message.from_user.id)
     source_name = Path(source.file_name).stem.strip() or "صدا"
     job = STTJob(
         user_id=user.id, source_file_id=source.id, title=f"📝 متن {source_name}"[:180],
-        folder_id=folder_id, output_mode="save", telegram_id=message.from_user.id,
-        api_keys=personal_keys,
+        folder_id=folder_id, output_mode=output_mode, telegram_id=message.from_user.id,
+        api_keys=personal_keys, cleanup_source=cleanup_source,
     )
     position = await stt_queue.enqueue(job)
-    await message.reply(f"📝 استخراج متن شروع شد\nجایگاه در صف: {to_persian_digits(str(position))}")
+    queue_note = f"\nنوبت {to_persian_digits(str(position))} در صف" if position > 1 else ""
+    await message.reply(f"📝 درخواست استخراج متن ثبت شد.{queue_note}")
+
+
+@tg_client.on_message(filters.private & (filters.video | filters.audio | filters.voice | filters.document | filters.video_note), group=-2)
+async def handle_pending_stt_media(client, message: Message):
+    """Consume the next media as a temporary STT source without adding it to the library."""
+    output_mode = pending_stt_modes.pop(message.from_user.id, None)
+    if output_mode is None:
+        return
+    message.stop_propagation()
+    user = await get_or_create_user(
+        message.from_user.id, message.from_user.username,
+        message.from_user.first_name, message.from_user.last_name,
+    )
+    personal_keys = decrypt_user_keys(user.gemini_api_keys_encrypted)
+    if not stt_queue.available and not personal_keys:
+        await message.reply("استخراج متن هنوز روی سرور فعال نشده.")
+        return
+    media = next((getattr(message, name, None) for name in ("audio", "voice", "video", "video_note", "document") if getattr(message, name, None)), None)
+    mime = getattr(media, "mime_type", None) or ("audio/ogg" if message.voice else "video/mp4" if message.video or message.video_note else "application/octet-stream")
+    if media is None or not (mime.startswith("audio/") or mime.startswith("video/") or message.audio or message.voice or message.video or message.video_note):
+        await message.reply("این فایل صوتی یا ویدیویی نیست. دوباره `/stt` را بزن.")
+        return
+    target_channel = user.storage_channel_id or settings.telegram_storage_channel_id
+    temporary_message = await forward_to_storage_channel(message, target_channel)
+    stored_media = next((getattr(temporary_message, field, None) for field in ("audio", "voice", "video", "video_note", "document") if getattr(temporary_message, field, None)), None)
+    if stored_media is None:
+        await message.reply("فایل برای استخراج متن آماده نشد.")
+        return
+    async with async_session() as db:
+        default_folder = await ensure_default_folder(db, user.id)
+        source = File(
+            user_id=user.id, folder_id=default_folder.id, channel_message_id=temporary_message.id,
+            storage_channel_id=target_channel, file_id=stored_media.file_id,
+            file_unique_id=stored_media.file_unique_id,
+            file_name=sanitize_filename(getattr(stored_media, "file_name", None) or f"stt-source-{message.id}"),
+            file_size=getattr(stored_media, "file_size", 0) or 0, mime_type=mime,
+            file_type="video" if mime.startswith("video/") or message.video or message.video_note else "audio",
+            duration=getattr(stored_media, "duration", None) or getattr(media, "duration", None),
+            is_hidden=True,
+        )
+        db.add(source)
+        await db.commit()
+        await db.refresh(source)
+        try:
+            await consume_stt_quota(db, user.id, int(source.duration or 0))
+        except ValueError as error:
+            await db.delete(source)
+            await db.commit()
+            await tg_client.delete_messages(target_channel, temporary_message.id)
+            await message.reply(f"⛔ {error}")
+            return
+    folder_id = await get_active_drawer_id(message.from_user.id)
+    source_name = Path(source.file_name).stem.strip() or "صدا"
+    position = await stt_queue.enqueue(STTJob(
+        user_id=user.id, source_file_id=source.id, title=f"📝 متن {source_name}"[:180],
+        folder_id=folder_id, output_mode=output_mode, telegram_id=message.from_user.id,
+        api_keys=personal_keys, cleanup_source=True,
+    ))
+    queue_note = f"\nنوبت {to_persian_digits(str(position))} در صف" if position > 1 else ""
+    await message.reply(f"📝 درخواست استخراج متن ثبت شد.{queue_note}")
 
 
 def tts_bot_settings_view(preferences: dict) -> dict:
@@ -1324,7 +1474,7 @@ async def _handle_file_impl(client, message: Message, status_msg: Message):
         message.from_user.last_name,
     )
     active_drawer_id = await get_active_drawer_id(message.from_user.id)
-    caption_meta = parse_file_caption(message.caption)
+    caption_meta = parse_file_caption(message.caption, user_tag_exclusions(user))
     requested_folder = str(caption_meta.get("folder") or "").strip()
     unresolved_folder = False
     if requested_folder:
@@ -1406,7 +1556,7 @@ async def _handle_file_impl(client, message: Message, status_msg: Message):
                 destination_warning = f"\n⚠️ کشوی «{escape_markdown(requested_folder)}» پیدا نشد." if unresolved_folder else ""
                 await status_msg.edit(
                     f"🔗 فایل تکراری بود؛ میانبر «{display_filename(shortcut.file_name)}» ساخته شد.{destination_warning}",
-                    reply_markup=file_detail_keyboard(shortcut),
+                    reply_markup=post_upload_keyboard(shortcut, message.from_user.id),
                 )
                 return
 
@@ -1473,7 +1623,7 @@ async def _handle_file_impl(client, message: Message, status_msg: Message):
         if unresolved_folder:
             response += f"\n⚠️ کشوی «{escape_markdown(requested_folder)}» پیدا نشد؛ مقصد فعلی استفاده شد."
         detail_back_targets[message.from_user.id] = "files:0"
-        await status_msg.edit(response, reply_markup=file_detail_keyboard(file))
+        await status_msg.edit(response, reply_markup=post_upload_keyboard(file, message.from_user.id))
         chat_id = getattr(getattr(status_msg, "chat", None), "id", None) or getattr(getattr(message, "chat", None), "id", message.from_user.id)
         status_message_id = getattr(status_msg, "id", None)
         if status_message_id is not None:
@@ -1548,7 +1698,10 @@ async def import_personal_channel_post(message: Message) -> None:
         if len(owners) != 1:
             return
         user = owners[0]
-        caption_meta = parse_file_caption(getattr(message, "caption", None) or getattr(message, "text", None))
+        caption_meta = parse_file_caption(
+            getattr(message, "caption", None) or getattr(message, "text", None),
+            user_tag_exclusions(user),
+        )
         requested_folder = str(caption_meta.get("folder") or "").strip()
         folder = await resolve_caption_folder(user.id, requested_folder) if requested_folder else None
         if folder is None:
@@ -1617,11 +1770,21 @@ async def handle_import_link(client, message: Message):
     if not matches:
         return
     try:
+        positions: list[int] = []
+        await load_user_ui_state(message.from_user.id)
+        delivery_mode = link_delivery_modes.get(message.from_user.id, "both")
         for raw_url in matches:
             url = raw_url.rstrip(".,;!?)]}>'\"")
-            await link_importer.enqueue(ImportJob(url=url, user_id=user.id, telegram_id=user.telegram_id, folder_id=None, notify=True, default_folder=True))
+            positions.append(await link_importer.enqueue(ImportJob(
+                url=url, user_id=user.id, telegram_id=user.telegram_id, folder_id=None,
+                notify=True, default_folder=True,
+                save_to_library=delivery_mode != "telegram",
+                send_to_telegram=delivery_mode != "library",
+            )))
         count = to_persian_digits(str(len(matches)))
-        reply = await message.reply(f"🔗 {count} لینک ثبت شد\nبعد از آماده‌شدن خبرت می‌کنم.")
+        first_position = min(positions) if positions else 1
+        queue_note = f" · شروع از نوبت {to_persian_digits(str(first_position))}" if first_position > 1 else ""
+        reply = await message.reply(f"🔗 {count} لینک به صف اضافه شد{queue_note}.\nوقتی آماده شود خبرت می‌کنم.")
         asyncio.create_task(delete_preview_later(client, reply.chat.id, reply.id, 30))
     except Exception as error:
         logger.exception("Could not enqueue link import: %s", error)
@@ -1661,7 +1824,7 @@ async def handle_text_note(client, message: Message):
         detail_back_targets[message.from_user.id] = "files:0"
         management_message = await message.reply(
             f"📝 در کمد ذخیره شد: {title}",
-            reply_markup=file_detail_keyboard(note),
+            reply_markup=post_upload_keyboard(note, message.from_user.id),
         )
         asyncio.create_task(delete_preview_later(client, management_message.chat.id, management_message.id, 30))
     except Exception as error:
@@ -1806,11 +1969,33 @@ async def handle_callback(client, callback: CallbackQuery):
         await callback.message.edit_text(**tts_bot_settings_view(preferences))
         await callback.answer(f"لحن {preset[2]} انتخاب شد.")
 
+    elif data == "bot_settings":
+        await render_bot_settings(callback.message, callback.from_user.id)
+        await callback.answer()
+
+    elif data == "bot_toggle_file_actions":
+        show_file_actions[callback.from_user.id] = not show_file_actions.get(callback.from_user.id, True)
+        await persist_user_ui_state(callback.from_user.id)
+        await render_bot_settings(callback.message, callback.from_user.id)
+        await callback.answer("ذخیره شد.")
+
+    elif data == "bot_cycle_link_delivery":
+        modes = ["both", "library", "telegram"]
+        current = link_delivery_modes.get(callback.from_user.id, "both")
+        link_delivery_modes[callback.from_user.id] = modes[(modes.index(current) + 1) % len(modes)] if current in modes else "both"
+        await persist_user_ui_state(callback.from_user.id)
+        await render_bot_settings(callback.message, callback.from_user.id)
+        await callback.answer("ذخیره شد.")
+
     elif data == "noop":
         await callback.answer()
 
     elif data.startswith("storage_target:"):
-        await render_storage_target(callback.message, callback.from_user.id, int(data.split(":", 1)[1]))
+        parts = data.split(":")
+        if len(parts) >= 3:
+            await render_storage_target(callback.message, callback.from_user.id, int(parts[1]) or None, int(parts[2]))
+        else:
+            await render_storage_target(callback.message, callback.from_user.id, None, int(parts[1]))
         await callback.answer()
 
     elif data.startswith("storage_set:"):
@@ -1821,7 +2006,7 @@ async def handle_callback(client, callback: CallbackQuery):
             await callback.answer("این کشو پیدا نشد.", show_alert=True)
             return
         await set_upload_drawer(callback.from_user.id, folder.id)
-        await render_storage_target(callback.message, callback.from_user.id, 0)
+        await render_storage_target(callback.message, callback.from_user.id, folder.parent_id, 0)
         await callback.answer(f"فایل‌های بعدی داخل «{folder.name[:32]}» ذخیره می‌شن.")
 
     elif data.startswith("playlists:"):
@@ -2703,9 +2888,10 @@ async def handle_callback(client, callback: CallbackQuery):
                 file = (await db.execute(owned_file(file_id, callback.from_user.id))).scalar_one_or_none()
                 if not file:
                     return
+                owner = await db.get(User, file.user_id)
                 file.description = description or None
                 if description:
-                    new_tags = extract_tags_from_caption(description)
+                    new_tags = extract_tags_from_caption(description, user_tag_exclusions(owner) if owner else [])
                     if new_tags:
                         try:
                             existing_tags = json.loads(file.tags_json or "[]")

@@ -27,6 +27,7 @@ class User(Base):
     storage_channels_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
     delete_storage_files: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     tag_settings_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    tag_exclusions_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
     saved_filters_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
     show_file_tags: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     file_tag_limit: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
@@ -89,6 +90,8 @@ class BotUserState(Base):
     sort_preferences_json: Mapped[str] = mapped_column(Text, default='[["created", "desc"]]', nullable=False)
     batch_selection_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
     batch_target: Mapped[Optional[str]] = mapped_column(String(255))
+    show_file_actions: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    link_delivery_mode: Mapped[str] = mapped_column(String(16), default="both", nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )

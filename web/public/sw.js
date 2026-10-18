@@ -1,4 +1,4 @@
-const CACHE_NAME = 'komod-shell-v16';
+const CACHE_NAME = 'komod-shell-v17';
 const COVER_CACHE = 'komod-covers-v3';
 const CORE_ASSETS = ['/', '/index.html', '/offline.html', '/manifest.webmanifest', '/komod.svg'];
 // Replaced with every emitted JS/CSS chunk by the Vite build plugin. Keeping
@@ -85,10 +85,29 @@ self.addEventListener('fetch', event => {
   if (url.pathname.startsWith('/api/')) return;
 
   if (request.mode === 'navigate') {
-    event.respondWith(
-      fetch(request, { cache: 'no-store' })
-        .catch(async () => (await caches.match('/index.html')) || (await caches.match('/offline.html')))
-    );
+    event.respondWith((async () => {
+      const cache = await caches.open(CACHE_NAME);
+      const cachedShell = (await cache.match('/index.html')) || (await cache.match('/'));
+      if (cachedShell) {
+        const refreshShell = fetch('/index.html', { cache: 'no-store' })
+          .then(response => {
+            if (!response.ok) return;
+            return Promise.all([cache.put('/index.html', response.clone()), cache.put('/', response.clone())]);
+          })
+          .catch(() => undefined);
+        event.waitUntil(refreshShell);
+        return cachedShell;
+      }
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3500);
+      try {
+        return await fetch(request, { cache: 'no-store', signal: controller.signal });
+      } catch {
+        return (await caches.match('/offline.html')) || new Response('Offline', { status: 503 });
+      } finally {
+        clearTimeout(timeout);
+      }
+    })());
     return;
   }
 

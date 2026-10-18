@@ -84,7 +84,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     const addPlaylistItems = useAddPlaylistItems();
     const [showVideoMoreMenu, setShowVideoMoreMenu] = useState(false);
     const videoMoreButtonRef = useRef<HTMLButtonElement>(null);
-    const [videoMenuPosition, setVideoMenuPosition] = useState({ top: 116, right: 12, width: 244, maxHeight: 360 });
+    const [videoMenuPosition, setVideoMenuPosition] = useState({ top: 116, right: 12, width: 196, maxHeight: 360 });
     const [activeQueueId, setActiveQueueId] = useState<string | null>(null);
     const queueDropTargetRef = useRef<string | null>(null);
     const queueSensors = useSensors(
@@ -96,7 +96,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
         const rect = videoMoreButtonRef.current?.getBoundingClientRect();
         if (!rect) return;
         const edge = 12;
-        const width = Math.min(244, window.innerWidth - edge * 2);
+        const width = Math.min(196, window.innerWidth - edge * 2);
         const right = Math.min(Math.max(edge, window.innerWidth - rect.right), window.innerWidth - width - edge);
         const top = Math.min(rect.bottom + 8, window.innerHeight - 172);
         setVideoMenuPosition({ top, right, width, maxHeight: Math.max(152, window.innerHeight - top - edge) });
@@ -944,17 +944,17 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                                     onClick={() => { setShowVideoMoreMenu(false); setShowSleepMenu(false); }}
                                     aria-label="بستن گزینه‌های ویدیو"
                                 />
-                                <div role="menu" aria-label="گزینه‌های بیشتر ویدیو" dir="rtl" onPointerDown={event=>event.stopPropagation()} onClick={event=>event.stopPropagation()} className="fixed z-[301] box-border overflow-y-auto overscroll-contain rounded-2xl border border-white/10 bg-dark-900/95 p-2 text-right shadow-2xl backdrop-blur-2xl" style={videoMenuPosition}>
-                                <div className="grid grid-cols-2 gap-1.5">
-                                <button className={`flex min-h-16 flex-col items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-[11px] transition ${videoHidden?'bg-primary-500/20 text-primary-200':'bg-white/[.045] text-dark-200 hover:bg-white/[.08]'}`} onClick={()=>{setVideoHidden(value=>{if(!value&&audioOnly)setAudioOnly(false);return !value});setShowVideoMoreMenu(false)}}><EyeOff className="h-5 w-5"/><span>{videoHidden?'تصویر روشن':'خاموشی تصویر'}</span></button>
-                                <button disabled={preparingAudio} className={`flex min-h-16 flex-col items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-[11px] transition disabled:opacity-50 ${audioOnly?'bg-primary-500/20 text-primary-200':'bg-white/[.045] text-dark-200 hover:bg-white/[.08]'}`} onClick={()=>void toggleAudioOnly()}><Headphones className="h-5 w-5"/><span>{preparingAudio?'آماده‌سازی…':audioOnly ? 'بازگشت به ویدیو' : 'فقط صدا'}</span></button>
-                                <button className={`flex min-h-14 items-center justify-center gap-2 rounded-xl px-2 py-2 text-[11px] transition ${repeatMode!=='off'?'bg-primary-500/20 text-primary-200':'bg-white/[.045] text-dark-200 hover:bg-white/[.08]'}`} onClick={() => setRepeatMode(repeatMode === 'off' ? (hasQueue ? 'all' : 'one') : repeatMode === 'all' ? 'one' : 'off')}><Repeat2 className="h-4 w-4"/><span>{repeatMode === 'off' ? 'تکرار' : repeatMode === 'all' ? 'تکرار صف' : 'تکرار همین'}</span></button>
-                                <button className={`flex min-h-14 items-center justify-center gap-2 rounded-xl px-2 py-2 text-[11px] transition ${sleepMode!=='off'?'bg-primary-500/20 text-primary-200':'bg-white/[.045] text-dark-200 hover:bg-white/[.08]'}`} onClick={() => setShowSleepMenu(open => !open)}><Clock3 className="h-4 w-4"/><span>تایمر</span></button>
-                                {showSleepMenu && <div className="col-span-2 grid grid-cols-2 gap-1 rounded-xl bg-black/20 p-1">
+                                <div role="menu" aria-label="گزینه‌های بیشتر ویدیو" dir="rtl" onPointerDown={event=>event.stopPropagation()} onClick={event=>event.stopPropagation()} className="fixed z-[301] box-border overflow-y-auto overscroll-contain rounded-xl border border-white/10 bg-dark-900/95 p-1.5 text-right shadow-2xl backdrop-blur-2xl" style={videoMenuPosition}>
+                                <div className="space-y-1">
+                                <button className={`flex min-h-10 w-full items-center gap-2 rounded-lg px-2.5 text-xs transition ${videoHidden?'bg-primary-500/20 text-primary-200':'text-dark-200 hover:bg-white/[.07]'}`} onClick={()=>{setVideoHidden(value=>{if(!value&&audioOnly)setAudioOnly(false);return !value});setShowVideoMoreMenu(false)}}><EyeOff className="h-4 w-4 shrink-0"/><span>{videoHidden?'روشن کردن تصویر':'خاموش کردن تصویر'}</span></button>
+                                <button disabled={preparingAudio} className={`flex min-h-10 w-full items-center gap-2 rounded-lg px-2.5 text-xs transition disabled:opacity-50 ${audioOnly?'bg-primary-500/20 text-primary-200':'text-dark-200 hover:bg-white/[.07]'}`} onClick={()=>void toggleAudioOnly()}><Headphones className="h-4 w-4 shrink-0"/><span>{preparingAudio?'آماده‌سازی…':audioOnly ? 'بازگشت به ویدیو' : 'فقط صدا'}</span></button>
+                                <button className={`flex min-h-10 w-full items-center gap-2 rounded-lg px-2.5 text-xs transition ${repeatMode!=='off'?'bg-primary-500/20 text-primary-200':'text-dark-200 hover:bg-white/[.07]'}`} onClick={() => setRepeatMode(repeatMode === 'off' ? (hasQueue ? 'all' : 'one') : repeatMode === 'all' ? 'one' : 'off')}><Repeat2 className="h-4 w-4 shrink-0"/><span>{repeatMode === 'off' ? 'تکرار خاموش' : repeatMode === 'all' ? 'تکرار صف' : 'تکرار همین ویدیو'}</span></button>
+                                <button className={`flex min-h-10 w-full items-center gap-2 rounded-lg px-2.5 text-xs transition ${sleepMode!=='off'?'bg-primary-500/20 text-primary-200':'text-dark-200 hover:bg-white/[.07]'}`} onClick={() => setShowSleepMenu(open => !open)}><Clock3 className="h-4 w-4 shrink-0"/><span>تایمر خواب</span><ChevronDown className={`mr-auto h-3.5 w-3.5 transition ${showSleepMenu?'rotate-180':''}`}/></button>
+                                {showSleepMenu && <div className="grid grid-cols-2 gap-1 rounded-lg bg-black/20 p-1">
                                     {([['15','۱۵ دقیقه'],['30','۳۰ دقیقه'],['45','۴۵ دقیقه'],['60','۱ ساعت'],['track','پایان ویدیو'],['end','پایان صف']] as const).map(([mode,label])=><button key={mode} onClick={()=>setSleepTimer(mode)} className={`rounded-lg px-2 py-2 text-[11px] ${sleepMode===mode?'bg-primary-500/25 text-primary-200':'text-dark-300 hover:bg-white/[.05]'}`}>{label}</button>)}
                                     {sleepMode !== 'off'&&<button onClick={()=>setSleepTimer('off')} className="col-span-2 rounded-lg px-2 py-2 text-[11px] text-red-300 hover:bg-red-500/10">لغو تایمر</button>}
                                 </div>}
-                                {document.pictureInPictureEnabled && <button className="col-span-2 flex min-h-10 items-center justify-center gap-2 rounded-xl bg-white/[.045] px-3 text-[11px] text-dark-200 hover:bg-white/[.08]" onClick={togglePiP}><PictureInPicture2 className="h-4 w-4"/><span>{isPiP ? 'خروج از تصویر کوچک' : 'تصویر در تصویر'}</span></button>}
+                                {document.pictureInPictureEnabled && <button className="flex min-h-10 w-full items-center gap-2 rounded-lg px-2.5 text-xs text-dark-200 hover:bg-white/[.07]" onClick={togglePiP}><PictureInPicture2 className="h-4 w-4 shrink-0"/><span>{isPiP ? 'خروج از تصویر کوچک' : 'تصویر در تصویر'}</span></button>}
                                 </div>
                                 </div>
                             </>, document.body)}

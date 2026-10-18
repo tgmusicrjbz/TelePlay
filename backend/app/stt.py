@@ -208,6 +208,7 @@ class STTJob:
     output_mode: str = "save"
     telegram_id: int | None = None
     api_keys: list[str] | None = None
+    cleanup_source: bool = False
     id: str = ""
 
 
@@ -254,7 +255,8 @@ class STTQueue:
                 user_id=user.id, source_file_id=int(payload["source_file_id"]),
                 title=str(payload.get("title") or "رونویسی صدا"), folder_id=payload.get("folder_id"),
                 prompt=str(payload.get("prompt") or ""), output_mode=str(payload.get("output_mode") or "save"),
-                telegram_id=payload.get("telegram_id"), api_keys=decrypt_user_keys(user.gemini_api_keys_encrypted), id=job_id,
+                telegram_id=payload.get("telegram_id"), api_keys=decrypt_user_keys(user.gemini_api_keys_encrypted),
+                cleanup_source=bool(payload.get("cleanup_source", False)), id=job_id,
             )
             status.update(state="queued", message="ادامه پس از راه‌اندازی دوباره", progress=0)
             self.statuses[job_id] = status
@@ -280,6 +282,7 @@ class STTQueue:
             self.task = self.tasks[0]
         else:
             await self.start()
+        position = 1 + sum(1 for status in self.statuses.values() if status.get("state") not in {"done", "error", "cancelled"})
         job.id = job.id or uuid.uuid4().hex
         self.statuses[job.id] = {"id": job.id, "user_id": job.user_id, "source_file_id": job.source_file_id, "title": job.title, "state": "queued", "message": "منتظر نوبت", "progress": 0, "created_at": datetime.utcnow().isoformat()}
         self.controls[job.id] = False
@@ -287,12 +290,13 @@ class STTQueue:
             job_id=job.id, user_id=job.user_id, kind="stt", title=job.title,
             payload={"id": job.id, "user_id": job.user_id, "source_file_id": job.source_file_id,
                      "title": job.title, "folder_id": job.folder_id, "prompt": job.prompt,
-                     "output_mode": job.output_mode, "telegram_id": job.telegram_id},
+                     "output_mode": job.output_mode, "telegram_id": job.telegram_id,
+                     "cleanup_source": job.cleanup_source},
             status=self.statuses[job.id],
         )
         self.durable_job_ids.add(job.id)
         await self.queue.put(job)
-        return self.queue.qsize()
+        return position
 
     async def _persist_status(self, job_id: str) -> None:
         if job_id in self.durable_job_ids and job_id in self.statuses:
@@ -347,7 +351,22 @@ class STTQueue:
                 self.statuses[job.id].update(state="error", message=str(error) or "تبدیل صدا به متن انجام نشد.", finished_at=datetime.utcnow().isoformat())
                 await self._persist_status(job.id)
             finally:
+                if job.cleanup_source:
+                    await self._cleanup_temporary_source(job)
                 self.queue.task_done()
+
+    async def _cleanup_temporary_source(self, job: STTJob) -> None:
+        async with async_session() as db:
+            source = await db.get(File, job.source_file_id)
+            if source is None or source.user_id != job.user_id or not source.is_hidden:
+                return
+            channel_id, message_id = source.storage_channel_id, source.channel_message_id
+            await db.delete(source)
+            await db.commit()
+        try:
+            await telegram.tg_client.delete_messages(channel_id or settings.telegram_storage_channel_id, message_id)
+        except Exception:
+            logger.warning("Could not remove temporary STT source %s", message_id, exc_info=True)
 
     async def _process(self, job: STTJob) -> None:
         provider = GeminiSTTProvider(list(dict.fromkeys((job.api_keys or []) + self.provider.api_keys))) if job.api_keys else self.provider
@@ -385,6 +404,11 @@ class STTQueue:
             if job.output_mode == "temporary":
                 self.statuses[job.id].update(state="done", message="متن آماده است", progress=100, content=markdown, finished_at=datetime.utcnow().isoformat())
                 await self._persist_status(job.id)
+                if job.telegram_id:
+                    with tempfile.TemporaryDirectory(prefix="komod-stt-preview-") as directory:
+                        path = Path(directory) / f"{sanitize_filename(job.title or 'متن')}.md"
+                        path.write_text(markdown, encoding="utf-8")
+                        await telegram.tg_client.send_document(job.telegram_id, str(path), caption="📝 متن آماده شد")
                 return
             self.statuses[job.id].update(state="saving", message="ذخیره Markdown", progress=85)
             await self._persist_status(job.id)

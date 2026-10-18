@@ -77,6 +77,16 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(metadata["tags"], ["فارسی", "زنده", "محبوب"])
         self.assertNotIn("[کشو:", str(metadata["description"]))
 
+    async def test_caption_tag_exclusions_only_block_automatic_tags(self):
+        from app.caption_metadata import parse_file_caption
+
+        metadata = parse_file_caption(
+            "[تگ‌ها: تبلیغ، دستی]\nاین توضیح #تبلیغ و #موسیقی دارد",
+            excluded_tags=["تبلیغ", "موسیقی"],
+        )
+
+        self.assertEqual(metadata["tags"], ["تبلیغ", "دستی"])
+
     async def asyncSetUp(self):
         async with engine.begin() as connection:
             await connection.run_sync(Base.metadata.drop_all)
@@ -175,10 +185,12 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             nested.description = "پروژه‌ای که فقط در توضیحات آمده"
             await db.commit()
             settings = await update_tag_settings(TagSettingsUpdate(
-                tags=[TagDefinition(name="پروژه", color="#14b8a6")],
-                show_file_tags=True, display_limit=3,
+                tags=[TagDefinition(name="پروژه", color="#14b8a6", category="کار")],
+                excluded_tags=["تبلیغ"], show_file_tags=True, display_limit=3,
             ), user, db)
             self.assertEqual(settings.tags[0].file_count, 1)
+            self.assertEqual(settings.tags[0].category, "کار")
+            self.assertEqual(settings.excluded_tags, ["تبلیغ"])
             result = await list_files(None, None, "#پروژه", 1, 20, db, user)
             self.assertEqual(result.total, 1)
             self.assertEqual(result.files[0].id, direct.id)

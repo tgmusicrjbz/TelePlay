@@ -44,6 +44,8 @@ class ImportJob:
     quality: str = "480"
     notify: bool = True
     default_folder: bool = False
+    save_to_library: bool = True
+    send_to_telegram: bool = False
     retry_count: int = 0
     id: str = ""
 
@@ -161,6 +163,8 @@ class LinkImportService:
                 telegram_id=int(payload["telegram_id"]), folder_id=payload.get("folder_id"),
                 quality=str(payload.get("quality") or "480"), notify=bool(payload.get("notify", True)),
                 default_folder=bool(payload.get("default_folder", False)),
+                save_to_library=bool(payload.get("save_to_library", True)),
+                send_to_telegram=bool(payload.get("send_to_telegram", False)),
                 retry_count=int(status.get("retry_count") or 0), id=job_id,
             )
             status.update(state="queued", message="ادامه پس از راه‌اندازی دوباره", progress=0)
@@ -184,6 +188,7 @@ class LinkImportService:
             raise RuntimeError("TELEGRAM_WORKER_SESSION is not configured")
         if self.client is None or self.task is None or self.task.done():
             await self.start()
+        position = 1 + sum(1 for status in self.statuses.values() if status.get("state") not in {"done", "error", "cancelled"})
         job.id = job.id or uuid.uuid4().hex
         self.statuses[job.id] = {"id": job.id, "user_id": job.user_id, "url": job.url, "quality": job.quality, "folder_id": job.folder_id, "state": "queued", "message": "در صف", "saved": 0, "progress": 0, "retry_count": job.retry_count, "created_at": datetime.utcnow().isoformat()}
         self.controls[job.id] = {"paused": False, "cancelled": False}
@@ -191,12 +196,13 @@ class LinkImportService:
             job_id=job.id, user_id=job.user_id, kind="link", title=job.url,
             payload={"id": job.id, "url": job.url, "user_id": job.user_id,
                      "telegram_id": job.telegram_id, "folder_id": job.folder_id,
-                     "quality": job.quality, "notify": job.notify, "default_folder": job.default_folder},
+                     "quality": job.quality, "notify": job.notify, "default_folder": job.default_folder,
+                     "save_to_library": job.save_to_library, "send_to_telegram": job.send_to_telegram},
             status=self.statuses[job.id],
         )
         self.durable_job_ids.add(job.id)
         await self.queue.put(job)
-        return self.queue.qsize()
+        return position
 
     async def _persist_status(self, job_id: str) -> None:
         if job_id in self.durable_job_ids and job_id in self.statuses:
@@ -321,9 +327,14 @@ class LinkImportService:
                 saved = await self._store(job, items)
                 if not saved:
                     raise RuntimeError("هیچ فایل قابل ذخیره‌ای در پاسخ پیدا نشد")
+                if job.send_to_telegram:
+                    await self._send_to_user(job, saved)
+                if not job.save_to_library:
+                    await self._discard_library_copies(saved)
                 if job.notify:
                     count = str(len(saved)).translate(str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹"))
-                    await self._notify(job, f"✅ {count} فایل به کمد اضافه شد.")
+                    destination = "در تلگرام فرستاده و در کمد ذخیره شد" if job.send_to_telegram and job.save_to_library else "در تلگرام فرستاده شد" if job.send_to_telegram else "به کمد اضافه شد"
+                    await self._notify(job, f"✅ {count} فایل {destination}.")
                 self.statuses[job.id].update(state="done", message="آماده شد", saved=len(saved), progress=100, finished_at=datetime.utcnow().isoformat())
                 await self._persist_status(job.id)
             except asyncio.CancelledError:
@@ -527,8 +538,8 @@ class LinkImportService:
             if user is None:
                 raise RuntimeError("کاربر پیدا نشد")
             target_channel_id = user.storage_channel_id or settings.telegram_storage_channel_id
-            folder_id = job.folder_id
-            if folder_id is None and job.default_folder:
+            folder_id = job.folder_id if job.save_to_library else None
+            if job.save_to_library and folder_id is None and job.default_folder:
                 default_name = "Youtube" if "youtu" in job.url.lower() else "Instagram"
                 folder = (await db.execute(select(Folder).where(Folder.user_id == user.id, Folder.parent_id.is_(None), Folder.name == default_name))).scalar_one_or_none()
                 if folder is None:
@@ -536,7 +547,7 @@ class LinkImportService:
                     db.add(folder)
                     await db.flush()
                 folder_id = folder.id
-            if len(items) > 1:
+            if job.save_to_library and len(items) > 1:
                 collection_name = sanitize_filename(
                     items[0].get("collection_title")
                     or (f"پست اینستاگرام {datetime.now().strftime('%Y-%m-%d %H-%M')}" if "instagram" in job.url.lower() else "مجموعه دانلودشده")
@@ -578,6 +589,32 @@ class LinkImportService:
                 saved.append(stored)
             await db.commit()
         return saved
+
+    async def _send_to_user(self, job: ImportJob, files: list[File]) -> None:
+        if telegram.tg_client is None:
+            raise RuntimeError("ربات برای ارسال فایل در دسترس نیست")
+        for file in files:
+            await telegram.tg_client.copy_message(
+                chat_id=job.telegram_id,
+                from_chat_id=file.storage_channel_id,
+                message_id=file.channel_message_id,
+            )
+
+    async def _discard_library_copies(self, files: list[File]) -> None:
+        """Remove temporary storage records after Telegram-only delivery."""
+        async with async_session() as db:
+            for file in files:
+                stored = await db.get(File, file.id)
+                if stored is not None:
+                    await db.delete(stored)
+            await db.commit()
+        if telegram.tg_client is None:
+            return
+        for file in files:
+            try:
+                await telegram.tg_client.delete_messages(file.storage_channel_id, file.channel_message_id)
+            except Exception:
+                logger.warning("Could not remove temporary link import message %s", file.channel_message_id, exc_info=True)
 
     async def _notify(self, job: ImportJob, text: str) -> None:
         if telegram.tg_client is None:

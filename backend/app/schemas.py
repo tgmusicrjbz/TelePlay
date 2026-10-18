@@ -132,6 +132,7 @@ class TagDefinition(BaseModel):
 
 class TagSettingsUpdate(BaseModel):
     tags: List[TagDefinition] = Field(default_factory=list, max_length=100)
+    excluded_tags: List[str] = Field(default_factory=list, max_length=100)
     show_file_tags: bool = False
     display_limit: int = Field(default=2, ge=1, le=6)
 
@@ -142,6 +143,7 @@ class TagDefinitionResponse(TagDefinition):
 
 class TagSettingsResponse(BaseModel):
     tags: List[TagDefinitionResponse] = Field(default_factory=list)
+    excluded_tags: List[str] = Field(default_factory=list)
     show_file_tags: bool = False
     display_limit: int = 2
 

@@ -67,17 +67,24 @@ async def lifespan(app: FastAPI):
     logger.info("Database initialized")
     try:
         from .caption_metadata import extract_tags_from_caption
-        from .models import File
+        from .models import File, User
         from .database import async_session
         from sqlalchemy import select, or_
         import json
         async with async_session() as db:
             files_to_sync = (await db.execute(
-                select(File).where(File.description.isnot(None), or_(File.tags_json.is_(None), File.tags_json == "[]", File.tags_json == ""))
-            )).scalars().all()
+                select(File, User).join(User, User.id == File.user_id).where(
+                    File.description.isnot(None),
+                    or_(File.tags_json.is_(None), File.tags_json == "[]", File.tags_json == ""),
+                )
+            )).all()
             changed = False
-            for f in files_to_sync:
-                tags = extract_tags_from_caption(f.description)
+            for f, owner in files_to_sync:
+                try:
+                    exclusions = json.loads(owner.tag_exclusions_json or "[]")
+                except (TypeError, ValueError):
+                    exclusions = []
+                tags = extract_tags_from_caption(f.description, exclusions)
                 if tags:
                     f.tags_json = json.dumps(tags, ensure_ascii=False)
                     changed = True

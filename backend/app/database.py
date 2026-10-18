@@ -96,6 +96,8 @@ async def init_db():
             await conn.execute(text(f"ALTER TABLE users ADD COLUMN delete_storage_files {delete_type} NOT NULL DEFAULT {delete_default}"))
         if "tag_settings_json" not in user_columns:
             await conn.execute(text("ALTER TABLE users ADD COLUMN tag_settings_json TEXT NOT NULL DEFAULT '[]'"))
+        if "tag_exclusions_json" not in user_columns:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN tag_exclusions_json TEXT NOT NULL DEFAULT '[]'"))
         if "saved_filters_json" not in user_columns:
             await conn.execute(text("ALTER TABLE users ADD COLUMN saved_filters_json TEXT NOT NULL DEFAULT '[]'"))
         if "show_file_tags" not in user_columns:
@@ -220,3 +222,8 @@ async def init_db():
         )
         if "upload_drawer_id" not in bot_state_columns:
             await conn.execute(text("ALTER TABLE bot_user_states ADD COLUMN upload_drawer_id INTEGER"))
+        if "show_file_actions" not in bot_state_columns:
+            true_default = "TRUE" if url.drivername.startswith("postgresql") else "1"
+            await conn.execute(text(f"ALTER TABLE bot_user_states ADD COLUMN show_file_actions {favorite_type} NOT NULL DEFAULT {true_default}"))
+        if "link_delivery_mode" not in bot_state_columns:
+            await conn.execute(text("ALTER TABLE bot_user_states ADD COLUMN link_delivery_mode VARCHAR(16) NOT NULL DEFAULT 'both'"))

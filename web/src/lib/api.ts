@@ -45,7 +45,7 @@ export interface AdminHealth { checked_at:string; overall:'healthy'|'warning'|'e
 export interface AdminErrorLog { id:number; error_id:string; method:string; path:string; message:string; resolved:boolean; created_at:string; }
 export interface AccountPreferences { delete_storage_files: boolean; }
 export interface TagDefinition { name: string; color: string; category?: string; file_count?: number; }
-export interface TagSettings { tags: TagDefinition[]; show_file_tags: boolean; display_limit: number; }
+export interface TagSettings { tags: TagDefinition[]; excluded_tags: string[]; show_file_tags: boolean; display_limit: number; }
 export interface SavedFilter {
     id: string;
     name: string;
@@ -993,6 +993,19 @@ export const getFileIcon = (fileType: string): string => {
     }
 };
 
+export const formatIranTime = (value: string): string => {
+    if (!value) return '—';
+    const normalized = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value) ? value : `${value}Z`;
+    const date = new Date(normalized);
+    if (Number.isNaN(date.getTime())) return '—';
+    return new Intl.DateTimeFormat('fa-IR', {
+        timeZone: 'Asia/Tehran',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+    }).format(date);
+};
+
 const cacheTagSettings = (settings: TagSettings) => {
     localStorage.setItem('komod-tag-settings', JSON.stringify(settings));
     window.dispatchEvent(new Event('komod-tag-settings-changed'));
@@ -1020,7 +1033,7 @@ export const useUpdateSavedFilters = () => {
 export const useUpdateTagSettings = () => {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (payload: Omit<TagSettings, 'tags'> & { tags: Array<{name:string;color:string}> }) => runOrQueueMetadataMutation(
+        mutationFn: async (payload: Omit<TagSettings, 'tags'> & { tags: Array<{name:string;color:string;category?:string}> }) => runOrQueueMetadataMutation(
             async()=>cacheTagSettings((await api.put<TagSettings>('/accounts/tags',payload)).data),
             {entity:'tag',method:'put',url:'/accounts/tags',payload},
             ()=>cacheTagSettings({...payload,tags:payload.tags.map(item=>({...item,file_count:0}))}),
@@ -1032,7 +1045,7 @@ export const useUpdateTagSettings = () => {
 export const useDeleteTag = () => {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (name: string) => {const current=queryClient.getQueryData<TagSettings>(['tag-settings'])||{tags:[],show_file_tags:false,display_limit:2};return runOrQueueMetadataMutation(
+        mutationFn: async (name: string) => {const current=queryClient.getQueryData<TagSettings>(['tag-settings'])||{tags:[],excluded_tags:[],show_file_tags:false,display_limit:2};return runOrQueueMetadataMutation(
             async()=>cacheTagSettings((await api.delete<TagSettings>(`/accounts/tags/${encodeURIComponent(name)}`)).data),
             {entity:'tag',method:'delete',url:`/accounts/tags/${encodeURIComponent(name)}`},
             ()=>cacheTagSettings({...current,tags:current.tags.filter(item=>item.name.toLocaleLowerCase('fa')!==name.toLocaleLowerCase('fa'))}),
