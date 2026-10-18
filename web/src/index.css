@@ -2,32 +2,42 @@
 @tailwind components;
 @tailwind utilities;
 
-.markdown-reader-surface { background: rgb(2 6 23 / .58); }
-.markdown-reader-surface--warm { background: #19160f; }
+.markdown-reader-surface { background: #05070b; }
+.markdown-reader-surface--gray { background: #242933; }
+.markdown-reader-surface--cream { background: #efe4ca; }
+.markdown-reader-surface--white { background: #fff; }
 .markdown-reader-surface--ocean { background: #071a24; }
 .markdown-reader-surface--forest { background: #0c1b15; }
-.markdown-reader-surface--paper { background: #e8e1d2; }
+.markdown-reader-surface--plum { background: #1d1124; }
+.markdown-reader-surface--sepia { background: #302219; }
 .markdown-article { border-color: rgb(51 65 85 / .45); background: #111620; color: #f1f5f9; }
-.markdown-article--warm { border-color: rgb(254 243 199 / .1); background: #211d14; color: rgb(255 251 235 / .95); }
+.markdown-article--gray { border-color: #4a5260; background: #2c323d; color: #f1f5f9; }
+.markdown-article--cream { border-color: #cabd9f; background: #fff7e4; color: #342f28; box-shadow: 0 12px 35px rgb(70 52 30 / .15); }
+.markdown-article--white { border-color: #d8dee8; background: #fff; color: #182033; box-shadow: 0 12px 35px rgb(15 23 42 / .08); }
 .markdown-article--ocean { border-color: rgb(56 189 248 / .2); background: #0a2430; color: #e0f2fe; }
 .markdown-article--forest { border-color: rgb(52 211 153 / .18); background: #10251c; color: #ecfdf5; }
-.markdown-article--paper { border-color: #cabd9f; background: #fffaf0; color: #342f28; box-shadow: 0 12px 35px rgb(70 52 30 / .15); }
+.markdown-article--plum { border-color: rgb(216 180 254 / .16); background: #291832; color: #fae8ff; }
+.markdown-article--sepia { border-color: #765a43; background: #3b2a1f; color: #f5e7d4; }
 .markdown-article--ocean :is(h1,h2,h3,h4,h5,h6,strong,a,.katex) { color: #7dd3fc !important; }
 .markdown-article--forest :is(h1,h2,h3,h4,h5,h6,strong,a,.katex) { color: #6ee7b7 !important; }
-.markdown-article--paper :is(h1,h2,h3,h4,h5,h6,strong,a,.katex) { color: #8b5e34 !important; }
-.markdown-article--paper :is(pre,code) { color: #292524 !important; }
+.markdown-article--plum :is(h1,h2,h3,h4,h5,h6,strong,a,.katex) { color: #e9a8ff !important; }
+.markdown-article--sepia :is(h1,h2,h3,h4,h5,h6,strong,a,.katex) { color: #f0bd79 !important; }
+.markdown-article--cream :is(h1,h2,h3,h4,h5,h6,strong,a,.katex), .markdown-article--white :is(h1,h2,h3,h4,h5,h6,strong,a,.katex) { color: #81552e !important; }
+.markdown-article--cream :is(pre,code), .markdown-article--white :is(pre,code) { color: #292524 !important; }
 .markdown-font--vazir { font-family: "Vazirmatn", system-ui, sans-serif !important; }
 .markdown-font--yekan { font-family: "IRANYekan", "Yekan Bakh", "B Yekan", "Vazirmatn", sans-serif !important; }
+.markdown-font--iransans { font-family: "IRANSans", "Iran Sans", "Vazirmatn", sans-serif !important; }
+.markdown-font--zar { font-family: "B Zar", "Zar", "Noto Naskh Arabic", serif !important; }
+.markdown-font--bnazanin { font-family: "B Nazanin", "BNazanin", "Noto Naskh Arabic", serif !important; }
 .markdown-font--tahoma { font-family: Tahoma, Arial, sans-serif !important; }
 .markdown-font--serif { font-family: "Noto Naskh Arabic", "Traditional Arabic", serif !important; }
+.markdown-font--inter { font-family: Inter, "Segoe UI Variable", Arial, sans-serif !important; }
+.markdown-font--georgia { font-family: Georgia, "Times New Roman", serif !important; }
+.markdown-font--merriweather { font-family: Merriweather, Georgia, serif !important; }
 .markdown-font--mono { font-family: "JetBrains Mono", Consolas, monospace !important; }
 .markdown-editor-toolbar { border-color: rgb(255 255 255 / .08); background: #121722; }
 .markdown-editor { border-color: rgb(255 255 255 / .1); background: #0f131c; color: #f1f5f9; }
 
-:root.light .markdown-reader-surface { background: #eef2f7; }
-:root.light .markdown-reader-surface--warm { background: #f3ecdc; }
-:root.light .markdown-article { border-color: rgb(148 163 184 / .35); background: #ffffff; color: #172033; }
-:root.light .markdown-article--warm { border-color: rgb(180 130 60 / .18); background: #fffaf0; color: #3d3324; }
 :root.light .markdown-editor-toolbar { border-color: rgb(148 163 184 / .3); background: #f8fafc; }
 :root.light .markdown-editor { border-color: rgb(148 163 184 / .35); background: #ffffff; color: #172033; }
 

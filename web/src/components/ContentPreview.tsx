@@ -1,10 +1,15 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, Braces, Check, ChevronLeft, ChevronRight, Code2, Copy, Download, Heading1, Image as ImageIcon, Italic, Link, List, ListChecks, ListOrdered, Maximize2, Minimize2, Minus, Moon, MoveHorizontal, Palette, Pencil, Plus, Quote, Sigma, Strikethrough, Sun, Table2, Type, Underline, WrapText, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, Braces, Check, ChevronLeft, ChevronRight, Code2, Copy, Download, Heading1, Image as ImageIcon, Italic, Link, List, ListChecks, ListOrdered, Maximize2, Minimize2, Minus, Moon, MoveHorizontal, Palette, Pencil, Plus, Quote, Sigma, Strikethrough, Sun, Table2, Underline, WrapText, X, ZoomIn, ZoomOut } from 'lucide-react';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
 import { api, canPreviewText, useFiles } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { cacheTextFile, getOfflineText, updateOfflineTextDraft } from '../lib/offline';
+import CustomSelect from './CustomSelect';
+
+type ReaderTone = 'dark'|'gray'|'cream'|'white'|'ocean'|'forest'|'plum'|'sepia';
+const readerFonts=[{value:'vazir',label:'وزیرمتن'},{value:'yekan',label:'یکان'},{value:'iransans',label:'ایران‌سنس'},{value:'zar',label:'زر'},{value:'bnazanin',label:'بی‌نازنین'},{value:'tahoma',label:'تاهوما'},{value:'serif',label:'نسخ'},{value:'inter',label:'Inter'},{value:'georgia',label:'Georgia'},{value:'merriweather',label:'Merriweather'},{value:'mono',label:'قلم کدنویسی'}];
+const readerTones:Array<{value:ReaderTone;color:string;title:string}>=[{value:'dark',color:'#05070b',title:'مشکی'},{value:'gray',color:'#242933',title:'خاکستری'},{value:'cream',color:'#efe4ca',title:'کاغذی'},{value:'white',color:'#ffffff',title:'روز'},{value:'ocean',color:'#082735',title:'اقیانوس'},{value:'forest',color:'#10291d',title:'جنگل'},{value:'plum',color:'#27172f',title:'آلویی'},{value:'sepia',color:'#3a2b20',title:'سپیا'}];
 
 export default function ContentPreview() {
     const { contentPreviewFile: file, setContentPreviewFile, addToast } = useAppStore();
@@ -21,7 +26,7 @@ export default function ContentPreview() {
     const [readerFullscreen, setReaderFullscreen] = useState(false);
     const [readerFontSize, setReaderFontSize] = useState(() => Number(localStorage.getItem('komod-reader-font-size')) || 16);
     const [readerLineHeight, setReaderLineHeight] = useState(() => Number(localStorage.getItem('komod-reader-line-height')) || 2);
-    const [readerTone, setReaderTone] = useState<'dark' | 'warm' | 'ocean' | 'forest' | 'paper'>(() => (localStorage.getItem('komod-reader-tone') as 'dark' | 'warm' | 'ocean' | 'forest' | 'paper') || 'dark');
+    const [readerTone, setReaderTone] = useState<ReaderTone>(() => {const saved=localStorage.getItem('komod-reader-tone');return saved==='warm'||saved==='paper'?'cream':(saved as ReaderTone)||'dark'});
     const [readerFont, setReaderFont] = useState(() => localStorage.getItem('komod-reader-font') || 'vazir');
     const [readerWrap, setReaderWrap] = useState(() => localStorage.getItem('komod-reader-wrap') !== 'off');
     const [readerWide, setReaderWide] = useState(() => localStorage.getItem('komod-reader-wide') === 'on');
@@ -177,8 +182,8 @@ export default function ContentPreview() {
                 ) : (
                     <>
                         <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-white/[.06] bg-dark-950/70 px-3 py-2 sm:px-5">
-                            <label className="flex h-10 min-w-32 items-center gap-2 rounded-xl border border-white/[.07] bg-dark-800/70 px-2 text-xs text-dark-300"><Type className="h-4 w-4 text-primary-300"/><select value={readerFont} onChange={event=>setReaderFont(event.target.value)} className="min-w-0 flex-1 bg-transparent outline-none"><option value="vazir">وزیرمتن</option><option value="yekan">یکان</option><option value="tahoma">تاهوما</option><option value="serif">نسخ</option><option value="mono">تک‌فاصله</option></select></label>
-                            <label className="flex h-10 min-w-32 items-center gap-2 rounded-xl border border-white/[.07] bg-dark-800/70 px-2 text-xs text-dark-300"><Palette className="h-4 w-4 text-primary-300"/><select value={readerTone} onChange={event=>setReaderTone(event.target.value as typeof readerTone)} className="min-w-0 flex-1 bg-transparent outline-none"><option value="dark">شب</option><option value="warm">گرم</option><option value="ocean">اقیانوس</option><option value="forest">جنگل</option><option value="paper">کاغذ</option></select></label>
+                            <div className="min-w-40"><CustomSelect value={readerFont} onChange={setReaderFont} options={readerFonts}/></div>
+                            <div className="flex h-10 items-center gap-1 rounded-xl border border-white/[.07] bg-dark-800/70 px-2"><Palette className="ml-1 h-4 w-4 shrink-0 text-primary-300"/>{readerTones.map(tone=><button key={tone.value} onClick={()=>setReaderTone(tone.value)} title={tone.title} aria-label={tone.title} className={`h-5 w-5 rounded-full border transition ${readerTone===tone.value?'scale-110 border-primary-300 ring-2 ring-primary-500/25':'border-white/20 hover:scale-105'}`} style={{backgroundColor:tone.color}}/>)}</div>
                             <div className="flex shrink-0 items-center rounded-xl border border-white/[.07] bg-dark-800/70 p-1">
                                 <button className="flex h-8 w-8 items-center justify-center rounded-lg text-dark-300 hover:bg-white/[.06] hover:text-white disabled:opacity-30" disabled={readerFontSize <= 13} onClick={() => setReaderFontSize(size => Math.max(13, size - 1))} title="کوچک‌تر کردن متن"><Minus className="h-4 w-4"/></button>
                                 <span dir="ltr" className="min-w-12 text-center text-xs text-dark-300">{readerFontSize}px</span>
@@ -192,7 +197,7 @@ export default function ContentPreview() {
                                 <label className="flex h-10 items-center gap-2 rounded-xl border border-white/[.07] bg-dark-800/70 px-2" title="فاصله بین خط‌ها"><span className="hidden text-[10px] text-dark-400 sm:inline">فاصله</span><input type="range" min="1.4" max="2.8" step="0.1" value={readerLineHeight} onChange={event=>setReaderLineHeight(Number(event.target.value))} className="w-16 accent-primary-500"/><span dir="ltr" className="w-6 text-[10px] text-dark-300">{readerLineHeight.toFixed(1)}</span></label>
                                 <button onClick={() => setReaderWrap(value => !value)} className={`btn-icon h-10 w-10 ${readerWrap ? 'text-primary-200' : ''}`} title={readerWrap ? 'خاموش‌کردن شکستن خط‌ها' : 'شکستن خودکار خط‌ها'}><WrapText className="h-4 w-4"/></button>
                                 <button onClick={() => setReaderWide(value => !value)} className={`btn-icon h-10 w-10 ${readerWide ? 'text-primary-200' : ''}`} title={readerWide ? 'عرض معمولی متن' : 'استفاده از تمام عرض'}><MoveHorizontal className="h-4 w-4"/></button>
-                                <button onClick={() => setReaderTone(tone => tone === 'dark' ? 'warm' : 'dark')} className="btn-icon h-10 w-10" title="جابجایی سریع تم شب و گرم">{readerTone === 'dark' ? <Sun className="h-4 w-4"/> : <Moon className="h-4 w-4"/>}</button>
+                                <button onClick={() => setReaderTone(tone => tone === 'dark' ? 'white' : 'dark')} className="btn-icon h-10 w-10" title="جابجایی سریع حالت شب و روز">{readerTone === 'dark' ? <Sun className="h-4 w-4"/> : <Moon className="h-4 w-4"/>}</button>
                             </div>
                         </div>
                         <div className={`markdown-reader-surface markdown-reader-surface--${readerTone} min-h-0 flex-1 overflow-auto p-4 transition-colors sm:p-8`}>
@@ -209,9 +214,11 @@ function EditorTool({ title, onClick, children }: { title: string; onClick: () =
 }
 
 function inlineMarkdown(text: string) {
-    return text.split(/(!\[[^\]]*\]\([^)]+\)|\[[^\]]+\]\([^)]+\)|\{\{[^{}]+\}\}|\$[^$\n]+\$|\*\*[^*]+\*\*|__[^_]+__|<u>.*?<\/u>|~~[^~]+~~|`[^`]+`|\*[^*]+\*)/g).map((part, index) => {
+    return text.split(/(!\[[^\]]*\]\([^)]+\)|\[[^\]]+\]\([^)]+\)|<a\s+href=["'][^"']+["'][^>]*>.*?<\/a>|https?:\/\/[^\s<]+|\{\{[^{}]+\}\}|\$[^$\n]+\$|\*\*[^*]+\*\*|__[^_]+__|<u>.*?<\/u>|~~[^~]+~~|`[^`]+`|\*[^*]+\*)/gi).map((part, index) => {
         const image = part.match(/^!\[([^\]]*)\]\(([^)]+)\)$/); if (image) return <img key={index} src={image[2]} alt={image[1]} loading="lazy" className="my-4 max-h-[70vh] max-w-full rounded-2xl border border-white/[.07] object-contain shadow-xl"/>;
         const link = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/); if (link) return <a key={index} href={link[2]} target="_blank" rel="noreferrer" className="break-all font-medium text-sky-300 underline decoration-sky-500/40 underline-offset-4 transition hover:text-sky-200">{link[1]}</a>;
+        const htmlLink=part.match(/^<a\s+href=["']([^"']+)["'][^>]*>(.*?)<\/a>$/i); if(htmlLink)return <a key={index} href={htmlLink[1]} target="_blank" rel="noreferrer" className="break-words font-medium text-sky-300 underline decoration-sky-500/40 underline-offset-4 transition hover:text-sky-200">{htmlLink[2]}</a>;
+        if(/^https?:\/\//i.test(part))return <a key={index} href={part} target="_blank" rel="noreferrer" className="break-all font-medium text-sky-300 underline decoration-sky-500/40 underline-offset-4 transition hover:text-sky-200">{part}</a>;
         if (part.startsWith('**') || part.startsWith('__')) return <strong key={index} className="font-extrabold text-amber-200">{part.slice(2, -2)}</strong>;
         if (part.startsWith('~~')) return <del key={index} className="text-rose-300/70 decoration-rose-400/70">{part.slice(2, -2)}</del>;
         if (part.startsWith('<u>')) return <u key={index} className="decoration-primary-400/70 decoration-2 underline-offset-4">{part.slice(3, -4)}</u>;
@@ -247,7 +254,7 @@ function MarkdownCodeBlock({ code, language }: { code: string; language?: string
     </div>;
 }
 
-function MarkdownContent({ content, fontSize = 15, lineHeight = 2, theme = 'dark', fontFamily = 'vazir', wrap = true, wide = false, align = 'right' }: { content: string; fontSize?: number; lineHeight?: number; theme?: 'dark'|'warm'|'ocean'|'forest'|'paper'; fontFamily?: string; wrap?: boolean; wide?: boolean; align?: 'right' | 'left' | 'center' | 'justify' }) {
+function MarkdownContent({ content, fontSize = 15, lineHeight = 2, theme = 'dark', fontFamily = 'vazir', wrap = true, wide = false, align = 'right' }: { content: string; fontSize?: number; lineHeight?: number; theme?: ReaderTone; fontFamily?: string; wrap?: boolean; wide?: boolean; align?: 'right' | 'left' | 'center' | 'justify' }) {
     const blocks = useMemo(() => {
         const result: JSX.Element[] = []; let code = false; let codeLines: string[] = []; let language = '';
         const lines = content.split(/\r?\n/);
@@ -287,10 +294,10 @@ function MarkdownContent({ content, fontSize = 15, lineHeight = 2, theme = 'dark
             }
             const heading = line.match(/^(#{1,6})\s+(.+)$/); if (heading) { const level = heading[1].length; const Tag = `h${level}` as keyof JSX.IntrinsicElements; const tone = level === 1 ? 'text-primary-200' : level === 2 ? 'text-sky-200' : level === 3 ? 'text-violet-200' : 'text-emerald-200'; result.push(<Tag key={index} className={`${level === 1 ? 'text-3xl' : level === 2 ? 'text-2xl' : level === 3 ? 'text-xl' : 'text-lg'} ${tone} mb-2 mt-7 break-words border-b border-white/[.05] pb-2 font-black leading-tight`}>{inlineMarkdown(heading[2])}</Tag>); continue; }
             const quote = line.match(/^>\s?(.+)$/); if (quote) { result.push(<blockquote key={index} className="my-3 rounded-l-xl border-r-4 border-violet-400/60 bg-violet-400/[.07] px-4 py-2 italic text-violet-100/90">{inlineMarkdown(quote[1])}</blockquote>); continue; }
-            const task = line.match(/^\s*[-*]\s+\[([ xX])\]\s+(.+)$/); if (task) { const checked = task[1].toLowerCase() === 'x'; result.push(<div key={index} className="flex items-start gap-2"><span className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border text-xs ${checked ? 'border-emerald-400/40 bg-emerald-400/15 text-emerald-300' : 'border-white/15 text-transparent'}`}>✓</span><span className={checked ? 'text-dark-400 line-through' : ''}>{inlineMarkdown(task[2])}</span></div>); continue; }
-            const bullet = line.match(/^\s*[-*]\s+(.+)$/); if (bullet) { result.push(<div key={index} className="flex items-start gap-2"><span className="mt-0.5 text-lg text-primary-300">•</span><span>{inlineMarkdown(bullet[1])}</span></div>); continue; }
-            const ordered = line.match(/^\s*(\d+)\.\s+(.+)$/); if (ordered) { result.push(<div key={index} className="flex items-start gap-2"><span className="mt-1 flex min-w-6 items-center justify-center rounded-md bg-primary-400/10 px-1 text-xs font-bold text-primary-200">{Number(ordered[1]).toLocaleString('fa-IR')}</span><span>{inlineMarkdown(ordered[2])}</span></div>); continue; }
-            result.push(<p key={index} className="whitespace-pre-wrap break-words text-dark-100">{inlineMarkdown(line)}</p>);
+            const task = line.match(/^(\s*)[-*]\s+\[([ xX])\]\s+(.+)$/); if (task) { const checked = task[2].toLowerCase() === 'x'; result.push(<div key={index} className="my-1 flex items-start gap-2" style={{paddingInlineStart:Math.min(48,Math.floor(task[1].length/2)*16)}}><span className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border text-xs ${checked ? 'border-emerald-400/40 bg-emerald-400/15 text-emerald-300' : 'border-white/15 text-transparent'}`}>✓</span><span className={`min-w-0 flex-1 break-words ${checked ? 'text-dark-400 line-through' : ''}`}>{inlineMarkdown(task[3])}</span></div>); continue; }
+            const bullet = line.match(/^(\s*)[-*]\s+(.+)$/); if (bullet) { result.push(<div key={index} className="my-1 flex items-start gap-2" style={{paddingInlineStart:Math.min(48,Math.floor(bullet[1].length/2)*16)}}><span className="mt-[.55em] h-1.5 w-1.5 shrink-0 rounded-full bg-primary-300 shadow-[0_0_0_3px_rgba(168,85,247,.12)]"/><span className="min-w-0 flex-1 break-words">{inlineMarkdown(bullet[2])}</span></div>); continue; }
+            const ordered = line.match(/^(\s*)(\d+)\.\s+(.+)$/); if (ordered) { result.push(<div key={index} className="my-1 flex items-start gap-2" style={{paddingInlineStart:Math.min(48,Math.floor(ordered[1].length/2)*16)}}><span className="mt-1 flex min-w-6 items-center justify-center rounded-md bg-primary-400/10 px-1 text-xs font-bold text-primary-200">{Number(ordered[2]).toLocaleString('fa-IR')}</span><span className="min-w-0 flex-1 break-words">{inlineMarkdown(ordered[3])}</span></div>); continue; }
+            result.push(<p key={index} className="whitespace-pre-wrap break-words">{inlineMarkdown(line)}</p>);
         }
         if (codeLines.length) result.push(<MarkdownCodeBlock key="code-final" code={codeLines.join('\n')} language={language}/>);
         return result;

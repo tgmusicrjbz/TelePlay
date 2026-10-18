@@ -25,7 +25,7 @@ from ..audit import add_security_event, request_ip
 from .. import telegram
 from ..telegram import get_message_from_channel
 from ..streaming import stream_file as stream_file_generator
-from ..services import select_best_thumbnail
+from ..services import select_best_thumbnail, telegram_text_with_links
 from ..media_metadata import extract_embedded_cover
 from ..config import get_settings
 
@@ -79,7 +79,7 @@ def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
 async def stored_message_response(file: File, message, range_header: str | None, download: int):
     """Serve text messages and Telegram photos, which have no document stream."""
     if file.file_type == "text" and message.document is None:
-        content = (message.text or "").encode("utf-8")
+        content = telegram_text_with_links(message.text).encode("utf-8")
     else:
         media = await telegram.tg_client.download_media(message, in_memory=True)
         if media is None:

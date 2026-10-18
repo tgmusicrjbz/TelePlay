@@ -26,7 +26,7 @@ from .database import async_session
 from .models import User, File, Folder, LoginCode, Playlist, PlaylistItem, BotUserState
 from .config import get_settings
 from .auth import create_access_token
-from .services import escape_like, select_best_thumbnail, unreferenced_audio_variant_messages, unreferenced_storage_messages
+from .services import escape_like, select_best_thumbnail, telegram_text_with_links, unreferenced_audio_variant_messages, unreferenced_storage_messages
 from .caption_metadata import extract_tags_from_caption, parse_file_caption
 from .downloader import ImportJob, link_importer
 from .tts import TTSJob, VOICE_OPTIONS, consume_tts_quota, load_tts_settings, tts_queue
@@ -1817,8 +1817,9 @@ async def handle_text_note(client, message: Message):
     """Save ordinary text messages as notes in the same library."""
     if message.chat.id in pending_input_chats:
         return
-    content = message.text
-    if not content.strip():
+    plain_content = str(message.text or "")
+    content = telegram_text_with_links(message.text)
+    if not plain_content.strip():
         return
     user = await get_or_create_user(
         message.from_user.id, message.from_user.username,
@@ -1828,7 +1829,7 @@ async def handle_text_note(client, message: Message):
     try:
         target_channel_id = user.storage_channel_id or settings.telegram_storage_channel_id
         stored = await forward_to_storage_channel(message, target_channel_id)
-        title = sanitize_filename(content.strip().splitlines()[0][:80])
+        title = sanitize_filename(plain_content.strip().splitlines()[0][:80])
         async with async_session() as db:
             if active_drawer_id is None:
                 active_drawer_id = (await ensure_default_folder(db, user.id)).id

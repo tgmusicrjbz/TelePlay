@@ -43,6 +43,7 @@ from ..services import (
     select_best_thumbnail,
     unreferenced_storage_messages,
     unreferenced_audio_variant_messages,
+    telegram_text_with_links,
 )
 from ..audit import add_security_event
 
@@ -632,7 +633,7 @@ async def get_text_preview(
     if message is None:
         raise HTTPException(status_code=404, detail="Message not found in storage")
     if file.file_type == "text" and getattr(message, "document", None) is None:
-        content = message.text or ""
+        content = telegram_text_with_links(message.text)
         if file.search_text != content:
             file.search_text = content
             await db.commit()

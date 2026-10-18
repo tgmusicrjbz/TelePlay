@@ -10,6 +10,18 @@ from sqlalchemy.orm import selectinload
 
 from .models import File, WatchProgress, Folder, Playlist
 
+def telegram_text_with_links(value) -> str:
+    """Return Telegram text as Markdown so hidden text links survive previews."""
+    if value is None:
+        return ""
+    markdown = getattr(value, "markdown", None)
+    if callable(markdown):
+        try:
+            markdown = markdown()
+        except Exception:
+            markdown = None
+    return str(markdown or value)
+
 def select_best_thumbnail(thumbnails):
     """Pick the largest Telegram thumbnail instead of relying on list order."""
     return max(
