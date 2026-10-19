@@ -30,4 +30,6 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         </QueryClientProvider>
     </React.StrictMode>,
 )
-window.dispatchEvent(new Event('komod-app-ready'))
+window.requestAnimationFrame(() => {
+    if (document.getElementById('root')?.childElementCount) window.dispatchEvent(new Event('komod-app-ready'))
+})

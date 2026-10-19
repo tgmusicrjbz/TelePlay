@@ -38,6 +38,20 @@
 .markdown-editor-toolbar { border-color: rgb(255 255 255 / .08); background: #121722; }
 .markdown-editor { border-color: rgb(255 255 255 / .1); background: #0f131c; color: #f1f5f9; }
 
+@keyframes pack-swipe-next {
+  from { opacity: .25; transform: translateX(-2.25rem) scale(.985); }
+  to { opacity: 1; transform: translateX(0) scale(1); }
+}
+@keyframes pack-swipe-previous {
+  from { opacity: .25; transform: translateX(2.25rem) scale(.985); }
+  to { opacity: 1; transform: translateX(0) scale(1); }
+}
+.animate-pack-swipe-next { animation: pack-swipe-next 280ms cubic-bezier(.22,.8,.25,1) both; }
+.animate-pack-swipe-previous { animation: pack-swipe-previous 280ms cubic-bezier(.22,.8,.25,1) both; }
+.playlist-typography, .playlist-typography :is(button,input,textarea,select) {
+  font-family: "Vazirmatn", system-ui, -apple-system, sans-serif;
+}
+
 :root.light .markdown-editor-toolbar { border-color: rgb(148 163 184 / .3); background: #f8fafc; }
 :root.light .markdown-editor { border-color: rgb(148 163 184 / .35); background: #ffffff; color: #172033; }
 

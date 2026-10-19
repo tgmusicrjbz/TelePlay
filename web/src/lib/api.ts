@@ -488,6 +488,8 @@ export const useVerifyLoginCode = () => {
 // ============== Files Hooks ==============
 
 export const useFiles = (folderId?: number | null, fileType?: string, search?: string, page = 1, sort = '', favoriteOnly = false, includePlaylistCovers = false, includeHidden = false, hiddenOnly = false) => {
+    const cacheKey = libraryFileCacheKey(folderId,fileType,search,page,sort,favoriteOnly,includePlaylistCovers,includeHidden,hiddenOnly);
+    const cacheable = page === 1 && !search;
     return useQuery({
         queryKey: ['files', folderId, fileType, search, page, sort, favoriteOnly, includePlaylistCovers, includeHidden, hiddenOnly],
         queryFn: async () => {
@@ -502,9 +504,13 @@ export const useFiles = (folderId?: number | null, fileType?: string, search?: s
             if (includePlaylistCovers) params.include_playlist_covers = true;
             if (includeHidden) params.include_hidden = true;
             if (hiddenOnly) params.hidden_only = true;
+            if(offlineRequested()) return (cacheable?readJsonCache<FileListResponse>(cacheKey):undefined) || {files:[],total:0,page,per_page:50,pages:0};
             const { data } = await api.get<FileListResponse>('/files', { params });
+            if(cacheable)writeJsonCache(cacheKey,data);
             return data;
         },
+        initialData: () => cacheable?readJsonCache<FileListResponse>(cacheKey):undefined,
+        initialDataUpdatedAt: 0,
         staleTime: 30000,
     });
 };
@@ -660,6 +666,7 @@ export const useMoveFolders = () => {
 };
 
 export const useFolders = (parentId?: number | null, sort = '', favoriteOnly = false, includeHidden = false) => {
+    const cacheKey=libraryFolderCacheKey(parentId,sort,favoriteOnly,includeHidden);
     return useQuery({
         queryKey: ['folders', parentId, sort, favoriteOnly, includeHidden],
         queryFn: async () => {
@@ -668,20 +675,29 @@ export const useFolders = (parentId?: number | null, sort = '', favoriteOnly = f
             if (sort) params.sort = sort;
             if (favoriteOnly) params.favorite_only = true;
             if (includeHidden) params.include_hidden = true;
+            if(offlineRequested()) return readJsonCache<Folder[]>(cacheKey)||[];
             const { data } = await api.get<Folder[]>('/folders', { params });
+            writeJsonCache(cacheKey,data);
             return data;
         },
+        initialData:()=>readJsonCache<Folder[]>(cacheKey),
+        initialDataUpdatedAt:0,
         staleTime: 60000,
     });
 };
 
 export const useFolderTree = (includeHidden = false) => {
+    const cacheKey=libraryFolderTreeCacheKey(includeHidden);
     return useQuery({
         queryKey: ['folderTree', includeHidden],
         queryFn: async () => {
+            if(offlineRequested()) return readJsonCache<Folder[]>(cacheKey)||[];
             const { data } = await api.get<Folder[]>('/folders/tree', { params: includeHidden ? { include_hidden: true } : undefined });
+            writeJsonCache(cacheKey,data);
             return data;
         },
+        initialData:()=>readJsonCache<Folder[]>(cacheKey),
+        initialDataUpdatedAt:0,
         staleTime: 60000,
     });
 };
@@ -847,6 +863,11 @@ const playlistCacheScope = () => {
     const owner = localStorage.getItem('komod-active-workspace') || cachedCurrentUser()?.id || 'guest';
     return String(owner);
 };
+const libraryFileCacheKey = (folderId?:number|null,fileType?:string,search?:string,page=1,sort='',favoriteOnly=false,includePlaylistCovers=false,includeHidden=false,hiddenOnly=false) =>
+    `komod-files:${playlistCacheScope()}:${folderId===undefined?'all':folderId===null?'root':folderId}:${fileType||'-'}:${search||'-'}:${page}:${sort||'-'}:${Number(favoriteOnly)}${Number(includePlaylistCovers)}${Number(includeHidden)}${Number(hiddenOnly)}`;
+const libraryFolderCacheKey = (parentId?:number|null,sort='',favoriteOnly=false,includeHidden=false) =>
+    `komod-folders:${playlistCacheScope()}:${parentId===undefined?'all':parentId===null?'root':parentId}:${sort||'-'}:${Number(favoriteOnly)}${Number(includeHidden)}`;
+const libraryFolderTreeCacheKey = (includeHidden=false) => `komod-folder-tree:${playlistCacheScope()}:${Number(includeHidden)}`;
 const playlistCatalogCacheKey = () => `komod-playlists:${playlistCacheScope()}`;
 const playlistDetailCacheKey = (id: number) => `komod-playlist:${playlistCacheScope()}:${id}`;
 const readJsonCache = <T>(key: string): T | undefined => {
@@ -1254,7 +1275,17 @@ export const useUnlockVault = () => useMutation({
 });
 export const useUpdateAccountPreferences = () => {
     const queryClient = useQueryClient();
-    return useMutation({ mutationFn: async (payload: AccountPreferences) => (await api.put<AccountPreferences>('/accounts/preferences', payload)).data, onSuccess: data => queryClient.setQueryData(['accountPreferences'], data) });
+    return useMutation({
+        mutationFn: async (payload: AccountPreferences) => (await api.put<AccountPreferences>('/accounts/preferences', payload)).data,
+        onMutate: async payload => {
+            await queryClient.cancelQueries({queryKey:['accountPreferences']});
+            const previous=queryClient.getQueryData<AccountPreferences>(['accountPreferences']);
+            queryClient.setQueryData<AccountPreferences>(['accountPreferences'],current=>({...current,...payload} as AccountPreferences));
+            return {previous};
+        },
+        onError: (_error,_payload,context) => { if(context?.previous) queryClient.setQueryData(['accountPreferences'],context.previous); },
+        onSuccess: data => queryClient.setQueryData(['accountPreferences'], data),
+    });
 };
 export const useStorageChannel = () => useQuery({ queryKey: ['storageChannel'], queryFn: async () => (await api.get<StorageChannel>('/accounts/storage-channel')).data });
 export const useSetStorageChannel = () => { const queryClient=useQueryClient(); return useMutation({ mutationFn: async (channel_id:number)=>(await api.put<StorageChannel>('/accounts/storage-channel',{channel_id})).data, onSuccess:()=>queryClient.invalidateQueries({queryKey:['storageChannel']}) }); };
