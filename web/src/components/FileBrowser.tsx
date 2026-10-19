@@ -324,7 +324,7 @@ export default function FileBrowser() {
         return folder.name.toLocaleLowerCase('fa').includes(query)
             || (folder.description || '').toLocaleLowerCase('fa').includes(query);
     });
-    const showFolders = activeSection === 'files' && contentScope !== 'files';
+    const showFolders = activeSection === 'files' && contentScope !== 'files' && fileTypeFilter.length === 0;
     const showPacks = activeSection === 'files' && (contentScope !== 'folders' || packFilterActive) && (fileTypeFilter.length === 0 || packFilterActive);
     const showFiles = (activeSection !== 'files' || contentScope !== 'folders') && !packOnlyFilter;
     const visiblePacks = hiddenOnly || favoriteOnly ? [] : packs.filter(pack => {
@@ -936,7 +936,7 @@ export default function FileBrowser() {
     };
     const toggleFileType = (type: string | null) => {
         setActiveSavedFilterId(null);
-        if (type !== null) setContentScope('files');
+        if (type !== null) setContentScope(type === 'pack' ? 'all' : 'files');
         setFileTypeFilter(type);
         clearSelection();
     };

@@ -39,15 +39,15 @@
 .markdown-editor { border-color: rgb(255 255 255 / .1); background: #0f131c; color: #f1f5f9; }
 
 @keyframes pack-swipe-next {
-  from { opacity: .25; transform: translateX(-2.25rem) scale(.985); }
+  from { opacity: 0; transform: translateX(-12%) scale(.975); filter: blur(2px); }
   to { opacity: 1; transform: translateX(0) scale(1); }
 }
 @keyframes pack-swipe-previous {
-  from { opacity: .25; transform: translateX(2.25rem) scale(.985); }
+  from { opacity: 0; transform: translateX(12%) scale(.975); filter: blur(2px); }
   to { opacity: 1; transform: translateX(0) scale(1); }
 }
-.animate-pack-swipe-next { animation: pack-swipe-next 280ms cubic-bezier(.22,.8,.25,1) both; }
-.animate-pack-swipe-previous { animation: pack-swipe-previous 280ms cubic-bezier(.22,.8,.25,1) both; }
+.animate-pack-swipe-next { animation: pack-swipe-next 420ms cubic-bezier(.16,1,.3,1) both; }
+.animate-pack-swipe-previous { animation: pack-swipe-previous 420ms cubic-bezier(.16,1,.3,1) both; }
 .playlist-typography, .playlist-typography :is(button,input,textarea,select) {
   font-family: "Vazirmatn", system-ui, -apple-system, sans-serif;
 }
@@ -294,6 +294,23 @@ input[dir="ltr"], textarea[dir="ltr"], select[dir="ltr"] {
 .video-player,
 .mini-player {
   direction: ltr !important;
+}
+
+/* The pack viewer reuses the real player, with denser controls for its inline frame. */
+.video-player[data-inline="true"] [data-player-tools] button {
+  min-height: 2rem;
+  padding: .35rem;
+}
+.video-player[data-inline="true"] [data-player-tools] svg,
+.video-player[data-inline="true"] [data-player-transport] svg {
+  width: 1rem;
+  height: 1rem;
+}
+.video-player[data-inline="true"] [data-player-transport] > button:not(:nth-child(3)) {
+  padding: .45rem;
+}
+.video-player[data-inline="true"] [data-player-bottom] > div:first-child {
+  margin-bottom: 0;
 }
 
 :root.light {
