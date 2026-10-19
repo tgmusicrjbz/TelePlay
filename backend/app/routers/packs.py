@@ -26,7 +26,7 @@ def _file_response(file: File) -> FileResponse:
     return FileResponse(**add_urls_to_file(file))
 
 
-def _pack_response(pack: Pack) -> PackResponse:
+def _pack_summary(pack: Pack) -> PackSummary:
     ordered = sorted((item for item in pack.items if not item.file.is_hidden), key=lambda item: (item.position, item.id))
     visual = [item.file for item in ordered if item.file.file_type in ("image", "video") and item.file.thumbnail_file_id]
     previews = [f"/api/stream/{file.id}/thumbnail?quality=best&workspace={pack.user_id}" for file in visual[:4]]
@@ -35,7 +35,7 @@ def _pack_response(pack: Pack) -> PackResponse:
     counts: dict[str, int] = {}
     for item in ordered:
         counts[item.file.file_type] = counts.get(item.file.file_type, 0) + 1
-    return PackResponse(
+    return PackSummary(
         id=pack.id, name=pack.name, description=pack.description,
         parent_folder_id=pack.parent_folder_id, item_count=len(ordered),
         cover_file_id=custom_cover_id, hide_member_files=pack.hide_member_files, cover_url=cover_url,
@@ -43,6 +43,13 @@ def _pack_response(pack: Pack) -> PackResponse:
         preview_names=[item.file.file_name for item in ordered[:2]],
         type_counts=counts, position=pack.position,
         created_at=pack.created_at, updated_at=pack.updated_at,
+    )
+
+
+def _pack_response(pack: Pack) -> PackResponse:
+    ordered = sorted((item for item in pack.items if not item.file.is_hidden), key=lambda item: (item.position, item.id))
+    return PackResponse(
+        **_pack_summary(pack).model_dump(),
         items=[PackItemResponse(
             id=item.id, position=index, caption=item.caption, added_at=item.added_at,
             file=_file_response(item.file),
@@ -91,11 +98,11 @@ async def list_packs(
     condition = True if all_folders else (Pack.parent_folder_id.is_(None) if parent_folder_id is None else Pack.parent_folder_id == parent_folder_id)
     packs = (await db.execute(
         select(Pack).where(Pack.user_id == current_user.id, condition).options(
-            selectinload(Pack.items).selectinload(PackItem.file).selectinload(File.watch_progress),
+            selectinload(Pack.items).selectinload(PackItem.file),
             selectinload(Pack.cover_file),
         ).order_by(Pack.position, Pack.updated_at.desc())
     )).scalars().unique().all()
-    return [PackSummary(**_pack_response(pack).model_dump(exclude={"items"})) for pack in packs]
+    return [_pack_summary(pack) for pack in packs]
 
 
 @router.post("", response_model=PackResponse, status_code=201)

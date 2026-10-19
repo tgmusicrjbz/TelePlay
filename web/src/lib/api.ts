@@ -813,10 +813,23 @@ export const useUploadFile = () => {
 
 // ============== Mixed-media Pack Hooks ==============
 
-export const usePacks = (parentFolderId: number | null, allFolders = false) => useQuery<PackSummary[]>({
-    queryKey: ['packs', allFolders ? 'all' : parentFolderId],
-    queryFn: async () => (await api.get<PackSummary[]>('/packs', { params: { parent_folder_id: parentFolderId ?? undefined, all_folders: allFolders || undefined } })).data,
-});
+const packCacheScope = () => localStorage.getItem('komod-active-workspace') || cachedCurrentUser()?.id || 'guest';
+const packCacheKey = (parentFolderId:number|null,allFolders:boolean) => `komod-packs:${packCacheScope()}:${allFolders?'all':parentFolderId??'root'}`;
+const readPackCache = (key:string):PackSummary[]|undefined => { try { const raw=localStorage.getItem(key); return raw?JSON.parse(raw) as PackSummary[]:undefined } catch { return undefined } };
+export const usePacks = (parentFolderId: number | null, allFolders = false) => {
+    const cacheKey=packCacheKey(parentFolderId,allFolders);
+    return useQuery<PackSummary[]>({
+        queryKey: ['packs', allFolders ? 'all' : parentFolderId],
+        initialData:()=>readPackCache(cacheKey),
+        staleTime:30_000,
+        queryFn: async () => {
+            const cached=readPackCache(cacheKey);
+            if(!navigator.onLine)return cached||[];
+            try { const data=(await api.get<PackSummary[]>('/packs',{params:{parent_folder_id:parentFolderId??undefined,all_folders:allFolders||undefined}})).data;try{localStorage.setItem(cacheKey,JSON.stringify(data))}catch{/* storage unavailable */}return data }
+            catch(error){if(cached)return cached;throw error}
+        },
+    });
+};
 
 export const usePack = (id: number | null) => useQuery<Pack>({
     queryKey: ['packs', 'detail', id],

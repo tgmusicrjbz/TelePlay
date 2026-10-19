@@ -1217,7 +1217,7 @@ async def stt_command(client, message: Message):
     await message.reply(f"📝 درخواست استخراج متن ثبت شد.{queue_note}")
 
 
-@tg_client.on_message(filters.private & (filters.video | filters.audio | filters.voice | filters.document | filters.video_note), group=-2)
+@tg_client.on_message(filters.private & (filters.video | filters.audio | filters.voice | filters.document | filters.video_note), group=-1)
 async def handle_pending_stt_media(client, message: Message):
     """Consume the next media as a temporary STT source without adding it to the library."""
     output_mode = pending_stt_modes.pop(message.from_user.id, None)
@@ -1668,16 +1668,10 @@ async def _handle_file_impl(client, message: Message, status_msg: Message):
         await status_msg.edit("❌ فایل ذخیره نشد؛ دوباره تلاش کن.")
 
 
-@tg_client.on_message(filters.private & (filters.video | filters.audio | filters.voice | filters.document | filters.photo | filters.animation | filters.video_note), group=-1)
+@tg_client.on_message(filters.private & (filters.video | filters.audio | filters.voice | filters.document | filters.photo | filters.animation | filters.video_note), group=0)
 async def handle_file(client, message: Message):
     """Queue bursts per user so every forwarded message is processed in order."""
     user_id = message.from_user.id
-    # A pending STT request owns the next audio/video message. Keep this guard
-    # here as well as the earlier handler so a future handler-order change can
-    # never accidentally add the source file to the user's cabinet.
-    if user_id in pending_stt_modes and any((message.video, message.audio, message.voice, message.document, message.video_note)):
-        await handle_pending_stt_media(client, message)
-        return
     queue = upload_message_queues.setdefault(user_id, asyncio.Queue())
     position = queue.qsize() + (1 if user_id in upload_workers else 0)
     status_msg = await message.reply("⏳ در صف ذخیره…" if position else "⏳ در حال ذخیره…")

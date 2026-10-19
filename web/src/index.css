@@ -312,6 +312,14 @@ input[dir="ltr"], textarea[dir="ltr"], select[dir="ltr"] {
 .video-player[data-inline="true"] [data-player-bottom] > div:first-child {
   margin-bottom: 0;
 }
+.video-player[data-inline="true"] [data-player-artwork] svg {
+  width: 3rem;
+  height: 3rem;
+}
+.video-player[data-embedded="true"]:fullscreen {
+  width: 100vw;
+  height: 100vh;
+}
 
 :root.light {
   color-scheme: light;

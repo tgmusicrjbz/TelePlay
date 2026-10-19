@@ -44,6 +44,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
     const [isMuted, setIsMuted] = useState(false);
     const [showControls, setShowControls] = useState(true);
     const [isFullscreen, setIsFullscreen] = useState(false);
+    const compactInline = inline && !isFullscreen;
     const [playbackSpeed, setPlaybackSpeed] = useState(1);
     const [isPiP, setIsPiP] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
@@ -108,6 +109,11 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
     const formatPersianMetaTime = (seconds: number) => formatPlayerTime(seconds).replace(/\d/g, digit => '۰۱۲۳۴۵۶۷۸۹'[Number(digit)]);
 
     useEffect(() => setThumbnailFailed(false), [file.id]);
+    useEffect(() => {
+        const syncFullscreen = () => setIsFullscreen(document.fullscreenElement === containerRef.current);
+        document.addEventListener('fullscreenchange', syncFullscreen);
+        return () => document.removeEventListener('fullscreenchange', syncFullscreen);
+    }, []);
     useEffect(()=>{setAudioOnly(false);setVideoHidden(false);setAudioVariantUrl(file.audio_stream_url||null);},[file.id,file.audio_stream_url]);
     useEffect(()=>{
         let disposed=false; let objectUrl:string|null=null;
@@ -745,7 +751,8 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
                 : 'inset-0 bg-black flex items-center justify-center font-sans'
             }`}
             data-media-kind={isVideo ? 'video' : 'audio'}
-            data-inline={inline ? 'true' : 'false'}
+            data-inline={compactInline ? 'true' : 'false'}
+            data-embedded={inline ? 'true' : 'false'}
             data-controls-locked={controlsLocked ? 'true' : 'false'}
             style={!isMinimized && !isVideo ? ({ backgroundImage: authorizedThumbnailUrl ? `linear-gradient(135deg, rgba(8,10,20,.96), rgba(38,12,54,.84)), url(${authorizedThumbnailUrl})` : 'linear-gradient(135deg, #080a14, #260c36)', backgroundPosition: 'center', backgroundSize: 'cover' }) : undefined}
             onMouseMove={undefined}
@@ -795,9 +802,9 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
                     <>
                         {/* Audio Visualization / Thumbnail for non-video files in Fullscreen */}
                         {(!isVideo || audioOnly || videoHidden) && !isMinimized && (
-                            <div className="absolute inset-x-4 top-16 bottom-44 z-10 flex flex-col items-center justify-center text-center animate-scale-in">
+                            <div data-player-artwork className={`absolute z-10 flex flex-col items-center justify-center text-center animate-scale-in ${compactInline?'inset-x-2 top-12 bottom-28':'inset-x-4 top-16 bottom-44'}`}>
                                 {authorizedThumbnailUrl && !audioOnly && !thumbnailFailed ? (
-                                    <div className="mb-6 h-60 w-60 overflow-hidden rounded-3xl bg-dark-800 shadow-[0_12px_30px_rgba(0,0,0,.35)] sm:h-72 sm:w-72 lg:h-80 lg:w-80">
+                                    <div className={`${compactInline?'mb-2 h-28 w-28 sm:h-36 sm:w-36':'mb-6 h-60 w-60 sm:h-72 sm:w-72 lg:h-80 lg:w-80'} overflow-hidden rounded-3xl bg-dark-800 shadow-[0_12px_30px_rgba(0,0,0,.35)]`}>
                                          <img
                                             src={authorizedThumbnailUrl}
                                             alt={file.file_name}
@@ -806,12 +813,12 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
                                          />
                                     </div>
                                 ) : (
-                                    <div className="relative mb-6 flex h-60 w-60 items-center justify-center overflow-hidden rounded-3xl bg-gradient-to-br from-primary-500/20 to-pink-500/20 shadow-[0_12px_30px_rgba(0,0,0,.35)] sm:h-72 sm:w-72 lg:h-80 lg:w-80">
+                                    <div className={`relative flex items-center justify-center overflow-hidden rounded-3xl bg-gradient-to-br from-primary-500/20 to-pink-500/20 shadow-[0_12px_30px_rgba(0,0,0,.35)] ${compactInline?'mb-2 h-28 w-28 sm:h-36 sm:w-36':'mb-6 h-60 w-60 sm:h-72 sm:w-72 lg:h-80 lg:w-80'}`}>
                                          <div className="absolute inset-0 bg-gradient-to-tr from-primary-500/10 to-transparent animate-pulse"></div>
                                         {audioOnly ? <Headphones className="h-24 w-24 text-primary-300 drop-shadow-lg" /> : videoHidden ? <EyeOff className="h-24 w-24 text-primary-300 drop-shadow-lg" /> : isVideo ? <Film className="h-24 w-24 text-primary-300 drop-shadow-lg" /> : <span className="text-8xl transform transition-transform duration-500 group-hover:scale-125 drop-shadow-lg">🎵</span>}
                                     </div>
                                 )}
-                                <p dir="auto" className="max-w-[80vw] truncate text-2xl font-bold text-white drop-shadow-md">{cleanFileName}</p>
+                                <p dir="auto" className={`max-w-[80vw] truncate font-bold text-white drop-shadow-md ${compactInline?'text-sm':'text-2xl'}`}>{cleanFileName}</p>
                                 {audioOnly && <p className="mb-2 text-sm text-dark-300">حالت فقط صدا فعاله</p>}
                                 {videoHidden && !audioOnly && <p className="mb-2 text-sm text-dark-300">تصویر خاموشه؛ صدای همین ویدیو پخش می‌شه</p>}
                                 <p className="text-primary-400 font-medium" dir="ltr">{formatPersianMetaTime(safeCurrentTime)} / {formatPersianMetaTime(safeDuration)}</p>
@@ -904,9 +911,9 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
                     onPointerDown={isVideo ? undefined : revealControls}
                 >
                     {/* Top bar */}
-                    <div data-player-controls className={`absolute inset-x-0 top-0 z-30 flex items-center justify-between gap-3 bg-gradient-to-b from-black/80 to-transparent ${inline?'p-2':'p-3 sm:p-4'} ${isVideo ? 'overflow-hidden' : ''}`}>
+                    <div data-player-controls className={`absolute inset-x-0 top-0 z-30 flex items-center justify-between gap-3 bg-gradient-to-b from-black/80 to-transparent ${compactInline?'p-2':'p-3 sm:p-4'} ${isVideo ? 'overflow-hidden' : ''}`}>
                         <div className="min-w-0 flex-1">
-                            {isVideo && <h3 dir="auto" className={`max-w-[min(52vw,28rem)] truncate font-medium text-white ${inline?'text-sm':'text-base sm:text-lg'}`} title={cleanFileName}>{cleanFileName}</h3>}
+                            {isVideo && <h3 dir="auto" className={`max-w-[min(52vw,28rem)] truncate font-medium text-white ${compactInline?'text-sm':'text-base sm:text-lg'}`} title={cleanFileName}>{cleanFileName}</h3>}
                         </div>
                         {hasQueue && <p data-track-counter dir="rtl" className="absolute left-1/2 top-16 z-50 -translate-x-1/2 whitespace-nowrap rounded-xl border border-white/15 bg-black/75 px-4 py-2 text-sm font-bold text-white shadow-xl backdrop-blur-md">ترک <span className="font-black text-primary-300">{queuePosition.toLocaleString('fa-IR')}</span> از <span className="font-black text-primary-300">{queueLength.toLocaleString('fa-IR')}</span></p>}
                         {!inline && <div className="flex shrink-0 items-center justify-end gap-1 sm:gap-2">
@@ -927,7 +934,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
                     </div>
 
                     {/* Secondary tools stay away from the transport controls. */}
-                    <div data-player-controls data-player-tools className={`absolute left-1/2 z-40 flex w-max max-w-[calc(100%-0.75rem)] -translate-x-1/2 flex-nowrap items-center justify-center gap-0.5 rounded-2xl border border-white/10 bg-black/45 shadow-xl backdrop-blur-md ${inline?'top-12 p-0.5':'top-28 p-1 sm:top-28 sm:gap-1 sm:p-1.5'}`}>
+                    <div data-player-controls data-player-tools className={`absolute left-1/2 z-40 flex w-max max-w-[calc(100%-0.75rem)] -translate-x-1/2 flex-nowrap items-center justify-center gap-0.5 rounded-2xl border border-white/10 bg-black/45 shadow-xl backdrop-blur-md ${compactInline?'top-12 p-0.5':'top-28 p-1 sm:top-28 sm:gap-1 sm:p-1.5'}`}>
                         {isVideo && <div className="relative">
                             <button onClick={() => { setShowVideoMoreMenu(open => !open); setShowSleepMenu(false); }} className={`rounded-lg p-2 transition-all ${showVideoMoreMenu || repeatMode !== 'off' || audioOnly || sleepMode !== 'off' ? 'bg-primary-500/25 text-primary-200' : 'text-white/80 hover:bg-white/10'}`} title="گزینه‌های بیشتر" aria-expanded={showVideoMoreMenu}><MoreHorizontal className="h-5 w-5"/></button>
                             {showVideoMoreMenu && <div role="menu" aria-label="گزینه‌های بیشتر ویدیو" dir="rtl" onPointerDown={event=>event.stopPropagation()} onClick={event=>event.stopPropagation()} className="absolute left-0 top-[calc(100%+.45rem)] z-[80] box-border max-h-[min(60dvh,22rem)] w-44 max-w-[calc(100vw-1.5rem)] overflow-y-auto overscroll-contain rounded-2xl border border-primary-400/25 bg-black/90 p-1.5 text-right shadow-2xl shadow-black/60 backdrop-blur-2xl">
@@ -972,16 +979,16 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
                     </div>
 
                     {/* Transport controls: queue navigation for music, seeking for video. */}
-                    <div data-player-controls data-player-transport dir="ltr" className={`absolute left-1/2 z-30 flex -translate-x-1/2 items-center ${isVideo && !audioOnly && !videoHidden ? `top-1/2 -translate-y-1/2 ${inline?'gap-0.5':'gap-2 sm:gap-5'}` : `${inline?'bottom-24 gap-0.5':'bottom-32 gap-2 sm:gap-5'}`}`}>
+                    <div data-player-controls data-player-transport dir="ltr" className={`absolute left-1/2 z-30 flex -translate-x-1/2 items-center ${isVideo && !audioOnly && !videoHidden ? `top-1/2 -translate-y-1/2 ${compactInline?'gap-0.5':'gap-2 sm:gap-5'}` : `${compactInline?'bottom-20 gap-0.5':'bottom-32 gap-2 sm:gap-5'}`}`}>
                         {isVideo && <button disabled={!hasQueue} onClick={(e) => { e.stopPropagation(); playPrevious(); }} className="rounded-full p-2 text-white/65 transition hover:bg-white/10 hover:text-white disabled:opacity-30" title="ویدیوی قبلی"><SkipBack className="h-5 w-5"/></button>}
                         <button disabled={!isVideo && !hasQueue} onClick={(e) => { e.stopPropagation(); isVideo ? handleSkip(-10) : playPrevious(); }} className="rounded-full p-3 text-white/70 transition hover:bg-white/10 hover:text-white disabled:opacity-30" title={isVideo ? '۱۰ ثانیه عقب' : 'ترک قبلی'}>{isVideo ? <RotateCcw className="h-6 w-6"/> : <SkipBack className="h-7 w-7"/>}</button>
-                        {isVideo ? <button onClick={(e) => { e.stopPropagation(); togglePlay(e); }} className={`flex items-center justify-center rounded-full bg-primary-500 text-white shadow-2xl shadow-primary-500/35 transition duration-200 hover:scale-105 hover:bg-primary-400 active:scale-95 ${inline?'h-14 w-14':'h-20 w-20'}`} aria-label={isPlaying ? 'توقف' : 'پخش'}>{isPlaying ? <Pause className={inline?'h-6 w-6':'h-9 w-9'}/> : <Play className={`${inline?'h-6 w-6':'h-9 w-9'} ml-1`}/>}</button> : <button onClick={(e) => { e.stopPropagation(); togglePlay(e); }} className={`flex items-center justify-center rounded-full bg-primary-500 text-white shadow-xl shadow-primary-500/30 transition hover:scale-105 hover:bg-primary-400 ${inline?'h-14 w-14':'h-20 w-20'}`}>{isPlaying ? <Pause className={inline?'h-6 w-6':'h-9 w-9'}/> : <Play className={`${inline?'h-6 w-6':'h-9 w-9'} ml-1`}/>}</button>}
+                        {isVideo ? <button onClick={(e) => { e.stopPropagation(); togglePlay(e); }} className={`flex items-center justify-center rounded-full bg-primary-500 text-white shadow-2xl shadow-primary-500/35 transition duration-200 hover:scale-105 hover:bg-primary-400 active:scale-95 ${compactInline?'h-14 w-14':'h-20 w-20'}`} aria-label={isPlaying ? 'توقف' : 'پخش'}>{isPlaying ? <Pause className={compactInline?'h-6 w-6':'h-9 w-9'}/> : <Play className={`${compactInline?'h-6 w-6':'h-9 w-9'} ml-1`}/>}</button> : <button onClick={(e) => { e.stopPropagation(); togglePlay(e); }} className={`flex items-center justify-center rounded-full bg-primary-500 text-white shadow-xl shadow-primary-500/30 transition hover:scale-105 hover:bg-primary-400 ${compactInline?'h-14 w-14':'h-20 w-20'}`}>{isPlaying ? <Pause className={compactInline?'h-6 w-6':'h-9 w-9'}/> : <Play className={`${compactInline?'h-6 w-6':'h-9 w-9'} ml-1`}/>}</button>}
                         <button disabled={!isVideo && !hasQueue} onClick={(e) => { e.stopPropagation(); isVideo ? handleSkip(10) : playNext(); }} className="rounded-full p-3 text-white/70 transition hover:bg-white/10 hover:text-white disabled:opacity-30" title={isVideo ? '۱۰ ثانیه جلو' : 'ترک بعدی'}>{isVideo ? <RotateCw className="h-6 w-6"/> : <SkipForward className="h-7 w-7"/>}</button>
                         {isVideo && <button disabled={!hasQueue} onClick={(e) => { e.stopPropagation(); playNext(); }} className="rounded-full p-2 text-white/65 transition hover:bg-white/10 hover:text-white disabled:opacity-30" title="ویدیوی بعدی"><SkipForward className="h-5 w-5"/></button>}
                     </div>
 
                     {/* Bottom controls */}
-                    <div data-player-controls data-player-bottom className={`absolute z-30 rounded-2xl border border-white/[.08] bg-black/35 shadow-[0_10px_35px_rgba(0,0,0,.28)] backdrop-blur-xl ${inline?'bottom-2 left-2 right-2 px-2 py-2':'bottom-3 left-3 right-3 px-3 py-3 sm:bottom-4 sm:left-5 sm:right-5 sm:px-4 sm:py-3.5'}`}>
+                    <div data-player-controls data-player-bottom className={`absolute z-30 rounded-2xl border border-white/[.08] bg-black/35 shadow-[0_10px_35px_rgba(0,0,0,.28)] backdrop-blur-xl ${compactInline?'bottom-2 left-2 right-2 px-2 py-2':'bottom-3 left-3 right-3 px-3 py-3 sm:bottom-4 sm:left-5 sm:right-5 sm:px-4 sm:py-3.5'}`}>
                         {/* Progress bar */}
                         <div className="group/progress mb-4 flex items-center gap-2.5 sm:gap-4">
                             <span dir="ltr" className="font-player min-w-[42px] text-center text-[11px] font-semibold tracking-wide text-white/85">{formatPlayerTime(safeCurrentTime)}</span>
