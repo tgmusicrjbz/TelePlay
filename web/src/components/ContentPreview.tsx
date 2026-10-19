@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, Braces, Check, ChevronLeft, ChevronRight, Code2, Copy, Download, Heading1, Image as ImageIcon, Italic, Link, List, ListChecks, ListOrdered, Maximize2, Minimize2, Minus, Moon, MoveHorizontal, Palette, Pencil, Plus, Quote, Sigma, Strikethrough, Sun, Table2, Underline, WrapText, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, BookOpen, Braces, Check, ChevronLeft, ChevronRight, Code2, Copy, Download, Heading1, Image as ImageIcon, Italic, Link, List, ListChecks, ListOrdered, Maximize2, Minimize2, Minus, Moon, MoveHorizontal, Pencil, Plus, Quote, Sigma, Strikethrough, Sun, Table2, Underline, WrapText, X, ZoomIn, ZoomOut } from 'lucide-react';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
 import { api, canPreviewText, useFiles } from '../lib/api';
@@ -9,7 +9,7 @@ import CustomSelect from './CustomSelect';
 
 type ReaderTone = 'dark'|'gray'|'cream'|'white'|'ocean'|'forest'|'plum'|'sepia';
 const readerFonts=[{value:'vazir',label:'وزیرمتن'},{value:'yekan',label:'یکان'},{value:'iransans',label:'ایران‌سنس'},{value:'zar',label:'زر'},{value:'bnazanin',label:'بی‌نازنین'},{value:'tahoma',label:'تاهوما'},{value:'serif',label:'نسخ'},{value:'inter',label:'Inter'},{value:'georgia',label:'Georgia'},{value:'merriweather',label:'Merriweather'},{value:'mono',label:'قلم کدنویسی'}];
-const readerTones:Array<{value:ReaderTone;color:string;title:string}>=[{value:'dark',color:'#05070b',title:'مشکی'},{value:'gray',color:'#242933',title:'خاکستری'},{value:'cream',color:'#efe4ca',title:'کاغذی'},{value:'white',color:'#ffffff',title:'روز'},{value:'ocean',color:'#082735',title:'اقیانوس'},{value:'forest',color:'#10291d',title:'جنگل'},{value:'plum',color:'#27172f',title:'آلویی'},{value:'sepia',color:'#3a2b20',title:'سپیا'}];
+const readerTones:Array<{value:ReaderTone;color:string;label:string}>=[{value:'dark',color:'#05070b',label:'مشکی'},{value:'gray',color:'#242933',label:'خاکستری'},{value:'cream',color:'#efe4ca',label:'کاغذی'},{value:'white',color:'#ffffff',label:'روز'},{value:'ocean',color:'#082735',label:'اقیانوس'},{value:'forest',color:'#10291d',label:'جنگل'},{value:'plum',color:'#27172f',label:'آلویی'},{value:'sepia',color:'#3a2b20',label:'سپیا'}];
 
 export default function ContentPreview() {
     const { contentPreviewFile: file, setContentPreviewFile, addToast } = useAppStore();
@@ -39,7 +39,13 @@ export default function ContentPreview() {
     const imageIndex=file?.file_type==='image'?imageItems.findIndex(item=>item.id===file.id):-1;
     const showImageAt=(index:number)=>{const next=imageItems[index];if(next)setContentPreviewFile(next)};
 
-    useEffect(() => { setImageFailed(false); setImageRetry(0); setImageScale(1); setImageDescriptionExpanded(false); setReaderFullscreen(false); }, [file?.id]);
+    useEffect(() => { setImageFailed(false); setImageRetry(0); setImageScale(1); setImageDescriptionExpanded(false); setReaderFullscreen(false); setEditing(false); }, [file?.id]);
+
+    useEffect(()=>{
+        const startEditing=(event:Event)=>{const requested=(event as CustomEvent<{fileId?:number}>).detail?.fileId;if(file&&canPreviewText(file)&&(!requested||requested===file.id))setEditing(true)};
+        window.addEventListener('komod-preview-edit',startEditing);
+        return()=>window.removeEventListener('komod-preview-edit',startEditing);
+    },[file]);
 
     useEffect(() => {
         localStorage.setItem('komod-reader-font-size', String(readerFontSize));
@@ -170,7 +176,7 @@ export default function ContentPreview() {
                         {file.file_type !== 'image' && file.description && <p dir="auto" className="mt-1 line-clamp-2 max-w-2xl whitespace-pre-wrap text-sm text-dark-400" title={file.description}>{file.description}</p>}
                     </div>
                     <div className="flex shrink-0 items-center gap-1">
-                        {file.file_type !== 'image' && <><button onClick={async () => { await navigator.clipboard.writeText(editing ? draft : content); addToast('متن کپی شد 📋'); }} className="btn-icon" title="کپی متن"><Copy className="h-5 w-5" /></button>{file.file_type === 'text' && <button onClick={() => setEditing(value => !value)} className="btn-secondary flex shrink-0 items-center gap-2 px-3 py-2 text-xs" title="ویرایش متن"><Pencil className="h-4 w-4" /><span className="hidden sm:inline">ویرایش</span></button>}<button onClick={() => void toggleReaderFullscreen()} className="btn-icon" title={readerFullscreen ? 'خروج از تمام‌صفحه' : 'مطالعه در تمام‌صفحه'}>{readerFullscreen ? <Minimize2 className="h-5 w-5"/> : <Maximize2 className="h-5 w-5"/>}</button></>}
+                        {file.file_type !== 'image' && <><button onClick={async () => { await navigator.clipboard.writeText(editing ? draft : content); addToast('متن کپی شد 📋'); }} className="btn-icon" title="کپی متن"><Copy className="h-5 w-5" /></button><button onClick={() => setEditing(value => !value)} className={`btn-secondary flex shrink-0 items-center gap-2 px-3 py-2 text-xs ${editing?'text-primary-200':''}`} title={editing?'حالت مطالعه':'ویرایش متن'}>{editing?<BookOpen className="h-4 w-4"/>:<Pencil className="h-4 w-4"/>}<span className="hidden sm:inline">{editing?'مطالعه':'ویرایش'}</span></button><button onClick={() => void toggleReaderFullscreen()} className="btn-icon" title={readerFullscreen ? 'خروج از تمام‌صفحه' : 'مطالعه در تمام‌صفحه'}>{readerFullscreen ? <Minimize2 className="h-5 w-5"/> : <Maximize2 className="h-5 w-5"/>}</button></>}
                         <button onClick={() => setContentPreviewFile(null)} className="btn-icon" title="بستن"><X className="w-5 h-5" /></button>
                     </div>
                 </header>
@@ -183,7 +189,7 @@ export default function ContentPreview() {
                     <>
                         <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-white/[.06] bg-dark-950/70 px-3 py-2 sm:px-5">
                             <div className="min-w-40"><CustomSelect value={readerFont} onChange={setReaderFont} options={readerFonts}/></div>
-                            <div className="flex h-10 items-center gap-1 rounded-xl border border-white/[.07] bg-dark-800/70 px-2"><Palette className="ml-1 h-4 w-4 shrink-0 text-primary-300"/>{readerTones.map(tone=><button key={tone.value} onClick={()=>setReaderTone(tone.value)} title={tone.title} aria-label={tone.title} className={`h-5 w-5 rounded-full border transition ${readerTone===tone.value?'scale-110 border-primary-300 ring-2 ring-primary-500/25':'border-white/20 hover:scale-105'}`} style={{backgroundColor:tone.color}}/>)}</div>
+                            <div className="min-w-36"><CustomSelect value={readerTone} onChange={setReaderTone} options={readerTones}/></div>
                             <div className="flex shrink-0 items-center rounded-xl border border-white/[.07] bg-dark-800/70 p-1">
                                 <button className="flex h-8 w-8 items-center justify-center rounded-lg text-dark-300 hover:bg-white/[.06] hover:text-white disabled:opacity-30" disabled={readerFontSize <= 13} onClick={() => setReaderFontSize(size => Math.max(13, size - 1))} title="کوچک‌تر کردن متن"><Minus className="h-4 w-4"/></button>
                                 <span dir="ltr" className="min-w-12 text-center text-xs text-dark-300">{readerFontSize}px</span>
@@ -194,7 +200,7 @@ export default function ContentPreview() {
                                 <div className="flex shrink-0 items-center rounded-xl border border-white/[.07] bg-dark-800/70 p-1">
                                     {([['right', AlignRight], ['center', AlignCenter], ['left', AlignLeft], ['justify', AlignJustify]] as const).map(([value, Icon]) => <button key={value} onClick={() => setReaderAlign(value)} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg p-0 leading-none ${readerAlign === value ? 'bg-primary-500/20 text-primary-200' : 'text-dark-400 hover:text-white'}`} title={value === 'right' ? 'راست‌چین' : value === 'left' ? 'چپ‌چین' : value === 'center' ? 'وسط‌چین' : 'تراز دوطرفه'}><Icon className="block h-4 w-4"/></button>)}
                                 </div>
-                                <label className="flex h-10 items-center gap-2 rounded-xl border border-white/[.07] bg-dark-800/70 px-2" title="فاصله بین خط‌ها"><span className="hidden text-[10px] text-dark-400 sm:inline">فاصله</span><input type="range" min="1.4" max="2.8" step="0.1" value={readerLineHeight} onChange={event=>setReaderLineHeight(Number(event.target.value))} className="w-16 accent-primary-500"/><span dir="ltr" className="w-6 text-[10px] text-dark-300">{readerLineHeight.toFixed(1)}</span></label>
+                                <div className="flex h-10 items-center rounded-xl border border-white/[.07] bg-dark-800/70 p-1" title="فاصله بین خط‌ها"><button className="flex h-8 w-8 items-center justify-center rounded-lg text-dark-300 hover:bg-white/[.06] disabled:opacity-30" disabled={readerLineHeight<=1.4} onClick={()=>setReaderLineHeight(value=>Math.max(1.4,Number((value-.1).toFixed(1))))}><Minus className="h-4 w-4"/></button><span dir="ltr" className="min-w-10 text-center text-[10px] text-dark-300">{readerLineHeight.toFixed(1)}</span><button className="flex h-8 w-8 items-center justify-center rounded-lg text-dark-300 hover:bg-white/[.06] disabled:opacity-30" disabled={readerLineHeight>=2.8} onClick={()=>setReaderLineHeight(value=>Math.min(2.8,Number((value+.1).toFixed(1))))}><Plus className="h-4 w-4"/></button></div>
                                 <button onClick={() => setReaderWrap(value => !value)} className={`btn-icon h-10 w-10 ${readerWrap ? 'text-primary-200' : ''}`} title={readerWrap ? 'خاموش‌کردن شکستن خط‌ها' : 'شکستن خودکار خط‌ها'}><WrapText className="h-4 w-4"/></button>
                                 <button onClick={() => setReaderWide(value => !value)} className={`btn-icon h-10 w-10 ${readerWide ? 'text-primary-200' : ''}`} title={readerWide ? 'عرض معمولی متن' : 'استفاده از تمام عرض'}><MoveHorizontal className="h-4 w-4"/></button>
                                 <button onClick={() => setReaderTone(tone => tone === 'dark' ? 'white' : 'dark')} className="btn-icon h-10 w-10" title="جابجایی سریع حالت شب و روز">{readerTone === 'dark' ? <Sun className="h-4 w-4"/> : <Moon className="h-4 w-4"/>}</button>

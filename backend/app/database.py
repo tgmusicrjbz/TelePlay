@@ -203,6 +203,10 @@ async def init_db():
             pack_bool_type = "BOOLEAN" if url.drivername.startswith("postgresql") else "INTEGER"
             pack_bool_default = "FALSE" if url.drivername.startswith("postgresql") else "0"
             await conn.execute(text(f"ALTER TABLE packs ADD COLUMN hide_member_files {pack_bool_type} NOT NULL DEFAULT {pack_bool_default}"))
+        # Pack names are labels rather than identifiers. Users may intentionally
+        # keep multiple packs with the same name in one drawer.
+        if url.drivername.startswith("postgresql"):
+            await conn.execute(text("ALTER TABLE packs DROP CONSTRAINT IF EXISTS uq_pack_user_folder_name"))
         folder_columns = await conn.run_sync(
             lambda sync_conn: {column["name"] for column in inspect(sync_conn).get_columns("folders")}
         )

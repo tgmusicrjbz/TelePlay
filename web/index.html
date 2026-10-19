@@ -26,6 +26,7 @@
   </head>
   <body class="bg-dark-950 text-white">
     <div id="root"></div>
+    <button id="komod-recovery" type="button" aria-label="بازکردن دوباره کمد" style="display:none;position:fixed;left:12px;bottom:12px;z-index:2147483647;border:1px solid #ffffff22;border-radius:14px;padding:10px 14px;background:#171b28ee;color:#fff;font:600 13px system-ui;box-shadow:0 12px 35px #0008">↻ بازکردن دوباره کمد</button>
     <script>
       // Loading Telegram synchronously can block the whole PWA while offline.
       // Load it independently and notify React if it becomes available later.
@@ -43,6 +44,24 @@
         };
         loadTelegram();
         window.addEventListener('online', loadTelegram);
+      })();
+      (() => {
+        const recovery = document.getElementById('komod-recovery');
+        let failed = false;
+        const show = () => { failed = true; if (recovery) recovery.style.display = 'block'; };
+        window.addEventListener('error', show);
+        window.addEventListener('unhandledrejection', show);
+        setTimeout(() => { if (!document.getElementById('root')?.childElementCount) show(); }, 7000);
+        recovery?.addEventListener('click', async () => {
+          recovery.textContent = 'در حال بازیابی…';
+          try {
+            const registration = await navigator.serviceWorker?.getRegistration();
+            registration?.active?.postMessage({ type: 'SKIP_WAITING' });
+          } catch {}
+          location.replace('/');
+          setTimeout(() => location.reload(), 250);
+        });
+        window.addEventListener('komod-app-ready', () => { if (!failed && recovery) recovery.style.display = 'none'; });
       })();
     </script>
     <script type="module" src="/src/main.tsx"></script>

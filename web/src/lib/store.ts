@@ -126,6 +126,7 @@ interface AppState {
     playNext: () => boolean;
     playPrevious: () => boolean;
     shuffleQueue: () => void;
+    reverseQueue: () => void;
     removeQueueItem: (index: number) => void;
     moveQueueItem: (from: number, to: number) => void;
     appendQueueItems: (files: TelegramFile[]) => void;
@@ -312,6 +313,10 @@ export const useAppStore = create<AppState>((set) => ({
             [rest[index], rest[randomIndex]] = [rest[randomIndex], rest[index]];
         }
         return { playQueue: [current, ...rest], queueIndex: 0 };
+    }),
+    reverseQueue: () => set((state) => {
+        if (state.playQueue.length < 2) return state;
+        return { playQueue: [...state.playQueue].reverse(), queueIndex: state.playQueue.length - 1 - state.queueIndex };
     }),
     removeQueueItem: (index) => set((state) => {
         if (index < 0 || index >= state.playQueue.length || index === state.queueIndex) return state;

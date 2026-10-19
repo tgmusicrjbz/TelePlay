@@ -30,3 +30,4 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         </QueryClientProvider>
     </React.StrictMode>,
 )
+window.dispatchEvent(new Event('komod-app-ready'))

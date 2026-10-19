@@ -411,8 +411,11 @@ class LinkImportService:
                 return "audio" if message.audio or message.voice or mime.startswith("audio/") else None
             if message.video or mime.startswith("video/"):
                 return "video"
+            # A video request may receive a preview/audio choice before the
+            # requested resolution. Accepting it here made 480p imports save
+            # the audio by mistake.
             if message.audio or message.voice or mime.startswith("audio/"):
-                return "audio"
+                return None
             # YouTube download bots commonly send the thumbnail first. It must
             # never be mistaken for the requested video. Instagram photos are
             # real carousel items and should be preserved.
@@ -422,6 +425,8 @@ class LinkImportService:
 
         started_at = time.monotonic()
         last_media_at: float | None = None
+        language_wait_started: float | None = None
+        language_retries = 0
         while time.monotonic() - started_at < 180:
             await asyncio.sleep(2)
             if not await self._checkpoint(job):
@@ -468,9 +473,23 @@ class LinkImportService:
                     or re.search(r"\b(english|en)\b", button.text, re.IGNORECASE)
                 )]
                 if language_buttons and not any(button_ready(button) for button in language_buttons):
-                    self.statuses[job.id].update(message="منتظر آماده‌شدن انتخاب زبان")
+                    language_wait_started = language_wait_started or time.monotonic()
+                    waited = int(time.monotonic() - language_wait_started)
+                    self.statuses[job.id].update(message=f"آماده‌سازی زبان ویدیو · {waited} ثانیه", progress=min(34, 8 + waited // 2))
                     await self._persist_status(job.id)
+                    # AllSaver occasionally leaves both language callbacks on
+                    # an hourglass forever. Re-sending creates a fresh job
+                    # instead of blocking Komod's entire FIFO queue.
+                    if waited >= 32 and language_retries < 2:
+                        sent = await self.client.send_message("allsaverbot", url)
+                        clicked.clear()
+                        language_retries += 1
+                        language_wait_started = time.monotonic()
+                        self.statuses[job.id].update(message="درخواست تازه برای دریافت ویدیو فرستاده شد")
+                        await self._persist_status(job.id)
                     continue
+                if language_buttons:
+                    language_wait_started = None
                 language_button = next((button for button in language_buttons if button_key(message, button) not in clicked and button_ready(button)), None)
                 if language_button and not re.search(r"\b(360|480|720|1080)p?\b", language_button.text, re.IGNORECASE):
                     if await click_button(message, language_button):

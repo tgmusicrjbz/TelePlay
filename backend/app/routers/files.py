@@ -279,6 +279,23 @@ async def cancel_import_link(job_id: str, current_user: User = Depends(get_curre
     return status
 
 
+@router.post("/import-link/status/{job_id}/retry", status_code=202)
+async def retry_import_link(job_id: str, current_user: User = Depends(get_current_user)):
+    previous = link_importer.status(job_id, current_user.id)
+    if previous is None:
+        raise HTTPException(status_code=404, detail="وضعیت این لینک پیدا نشد.")
+    if previous.get("state") not in {"error", "cancelled"}:
+        raise HTTPException(status_code=409, detail="این مورد هنوز در حال پردازش است.")
+    job = ImportJob(
+        url=str(previous.get("url") or ""), user_id=current_user.id,
+        telegram_id=current_user.telegram_id, folder_id=previous.get("folder_id"),
+        quality=str(previous.get("quality") or "480"), notify=True,
+        retry_count=int(previous.get("retry_count") or 0) + 1,
+    )
+    position = await link_importer.enqueue(job)
+    return {"message": "دوباره به صف اضافه شد.", "queue_position": position, "job_id": job.id, "status": link_importer.status(job.id, current_user.id)}
+
+
 @router.delete("/import-link/status")
 async def clear_finished_import_links(current_user: User = Depends(get_current_user)):
     removed = link_importer.clear_finished(current_user.id)

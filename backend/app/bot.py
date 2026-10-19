@@ -815,7 +815,8 @@ def main_menu_keyboard(telegram_id: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🗄️ کشوهای من", callback_data="folders:0:0"),
          InlineKeyboardButton("📦 همه‌ی فایل‌ها", callback_data="files:0")],
         [InlineKeyboardButton("🎙 ساخت صدا", callback_data="tts_menu:home"),
-         InlineKeyboardButton("📥 مقصد فایل‌های بعدی", callback_data="storage_target:0")],
+         InlineKeyboardButton("📝 استخراج متن", callback_data="stt_start")],
+        [InlineKeyboardButton("📥 مقصد فایل‌های بعدی", callback_data="storage_target:0")],
         [InlineKeyboardButton("⚙️ تنظیم فایل و لینک", callback_data="bot_settings")],
     ])
 
@@ -829,8 +830,10 @@ async def render_bot_settings(message: Message, telegram_id: int) -> None:
         message,
         "⚙️ **تنظیم فایل و لینک**\nرفتار فایل‌های ذخیره‌شده و لینک‌ها.",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton(f"دکمه‌های مدیریت فایل: {'روشن' if actions else 'خاموش'}", callback_data="bot_toggle_file_actions")],
-            [InlineKeyboardButton(f"خروجی لینک: {mode_label}", callback_data="bot_cycle_link_delivery")],
+            [InlineKeyboardButton(f"دکمه‌های فایل: {'روشن' if actions else 'خاموش'}", callback_data="bot_toggle_file_actions")],
+            [InlineKeyboardButton("هم کمد، هم تلگرام" + (" ✓" if mode == "both" else ""), callback_data="bot_link_delivery:both")],
+            [InlineKeyboardButton("فقط کمد" + (" ✓" if mode == "library" else ""), callback_data="bot_link_delivery:library"),
+             InlineKeyboardButton("فقط تلگرام" + (" ✓" if mode == "telegram" else ""), callback_data="bot_link_delivery:telegram")],
             [InlineKeyboardButton("↩️ منوی اصلی", callback_data="home")],
         ]),
     )
@@ -2007,6 +2010,33 @@ async def handle_callback(client, callback: CallbackQuery):
         await persist_user_ui_state(callback.from_user.id)
         await render_bot_settings(callback.message, callback.from_user.id)
         await callback.answer("ذخیره شد.")
+
+    elif data.startswith("bot_link_delivery:"):
+        mode = data.split(":", 1)[1]
+        if mode not in {"both", "library", "telegram"}:
+            await callback.answer("انتخاب معتبر نیست.", show_alert=True)
+        else:
+            link_delivery_modes[callback.from_user.id] = mode
+            await persist_user_ui_state(callback.from_user.id)
+            await render_bot_settings(callback.message, callback.from_user.id)
+            await callback.answer("ذخیره شد.")
+
+    elif data == "stt_start":
+        pending_stt_modes[callback.from_user.id] = "save"
+        await callback.message.edit_text(
+            "📝 **استخراج متن**\nصدا یا ویدیو را بفرست؛ متنش را آماده می‌کنم.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("خروجی موقت", callback_data="stt_mode:temporary"),
+                 InlineKeyboardButton("ذخیره در کمد ✓", callback_data="stt_mode:save")],
+                [InlineKeyboardButton("↩️ منوی اصلی", callback_data="home")],
+            ]),
+        )
+        await callback.answer()
+
+    elif data.startswith("stt_mode:"):
+        mode = data.split(":", 1)[1]
+        pending_stt_modes[callback.from_user.id] = "temporary" if mode == "temporary" else "save"
+        await callback.answer("حالت موقت" if mode == "temporary" else "در کمد ذخیره می‌شود")
 
     elif data == "noop":
         await callback.answer()

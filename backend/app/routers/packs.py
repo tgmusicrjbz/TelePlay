@@ -104,13 +104,6 @@ async def create_pack(payload: PackCreate, db: AsyncSession = Depends(get_db), c
     if not name:
         raise HTTPException(status_code=400, detail="نام پک را وارد کن")
     await _validate_folder(db, current_user.id, payload.parent_folder_id)
-    duplicate = (await db.execute(select(Pack.id).where(
-        Pack.user_id == current_user.id,
-        Pack.parent_folder_id == payload.parent_folder_id if payload.parent_folder_id is not None else Pack.parent_folder_id.is_(None),
-        func.lower(Pack.name) == name.lower(),
-    ))).scalar_one_or_none()
-    if duplicate:
-        raise HTTPException(status_code=409, detail="پکی با این نام در این کشو وجود دارد")
     files = await _owned_files(db, current_user.id, payload.file_ids)
     last_position = (await db.execute(select(func.coalesce(func.max(Pack.position), -1)).where(
         Pack.user_id == current_user.id,

@@ -344,7 +344,6 @@ class Pack(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("user_id", "parent_folder_id", "name", name="uq_pack_user_folder_name"),
         Index("idx_pack_user_parent_position", user_id, parent_folder_id, position),
     )
 

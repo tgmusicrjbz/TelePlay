@@ -112,6 +112,7 @@ export default function SettingsPage() {
         window.addEventListener('komod-open-tts', openTTS);
         return () => window.removeEventListener('komod-open-tts', openTTS);
     }, []);
+    useEffect(()=>{window.dispatchEvent(new CustomEvent('komod-settings-view',{detail:{view}}))},[view]);
     useEffect(() => {
         const frame = window.requestAnimationFrame(() => {
             document.querySelector<HTMLElement>('[data-main-scroll="true"]')?.scrollTo({ top: 0, behavior: 'auto' });

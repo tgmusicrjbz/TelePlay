@@ -78,6 +78,9 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual([item.file.id for item in reordered.items], [text_file.id, image.id])
             fetched = await get_pack(created.id, db, user)
             self.assertEqual([item.file.id for item in fetched.items], [text_file.id, image.id])
+            duplicate_name = await create_pack(PackCreate(name="موضوع سفر", parent_folder_id=self.folder_id, file_ids=[]), db, user)
+            self.assertNotEqual(duplicate_name.id, created.id)
+            self.assertEqual(duplicate_name.name, created.name)
             folder_listing = await list_files(folder_id=self.folder_id, file_type=None, search=None, page=1, per_page=20, db=db, current_user=user)
             self.assertTrue({image.id, text_file.id}.isdisjoint({item.id for item in folder_listing.files}))
 
