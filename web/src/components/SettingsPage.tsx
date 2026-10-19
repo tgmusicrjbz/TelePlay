@@ -109,8 +109,10 @@ export default function SettingsPage() {
     useEffect(() => { if (confirmation === 'others') void logoutOtherDevices(); }, [confirmation]);
     useEffect(() => {
         const openTTS = () => { localStorage.removeItem('komod-settings-target'); setView('tts'); };
+        const openHome = () => setView('home');
         window.addEventListener('komod-open-tts', openTTS);
-        return () => window.removeEventListener('komod-open-tts', openTTS);
+        window.addEventListener('komod-open-settings-home', openHome);
+        return () => { window.removeEventListener('komod-open-tts', openTTS); window.removeEventListener('komod-open-settings-home', openHome); };
     }, []);
     useEffect(()=>{window.dispatchEvent(new CustomEvent('komod-settings-view',{detail:{view}}))},[view]);
     useEffect(() => {

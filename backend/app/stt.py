@@ -258,7 +258,7 @@ class STTQueue:
                 telegram_id=payload.get("telegram_id"), api_keys=decrypt_user_keys(user.gemini_api_keys_encrypted),
                 cleanup_source=bool(payload.get("cleanup_source", False)), id=job_id,
             )
-            status.update(state="queued", message="ادامه پس از راه‌اندازی دوباره", progress=0)
+            status.update(state="queued", message="ادامه پس از راه‌اندازی دوباره", progress=0, output_mode=job.output_mode)
             self.statuses[job_id] = status
             self.controls[job_id] = False
             self.durable_job_ids.add(job_id)
@@ -284,7 +284,7 @@ class STTQueue:
             await self.start()
         position = 1 + sum(1 for status in self.statuses.values() if status.get("state") not in {"done", "error", "cancelled"})
         job.id = job.id or uuid.uuid4().hex
-        self.statuses[job.id] = {"id": job.id, "user_id": job.user_id, "source_file_id": job.source_file_id, "title": job.title, "state": "queued", "message": "منتظر نوبت", "progress": 0, "created_at": datetime.utcnow().isoformat()}
+        self.statuses[job.id] = {"id": job.id, "user_id": job.user_id, "source_file_id": job.source_file_id, "title": job.title, "output_mode": job.output_mode, "state": "queued", "message": "منتظر نوبت", "progress": 0, "created_at": datetime.utcnow().isoformat()}
         self.controls[job.id] = False
         await create_job(
             job_id=job.id, user_id=job.user_id, kind="stt", title=job.title,

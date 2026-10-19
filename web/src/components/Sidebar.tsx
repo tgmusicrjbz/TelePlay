@@ -26,10 +26,12 @@ export default function Sidebar() {
             window.dispatchEvent(new Event('komod-open-tts'));
             return;
         }
+        if (section === 'settings') localStorage.setItem('komod-settings-target', 'home');
         setActiveSection(section);
         const path = section === 'playlists' ? '/playlists' : section === 'downloads' ? '/downloads' : '/';
         if (window.location.pathname !== path) window.history.pushState({}, '', path);
         window.dispatchEvent(new PopStateEvent('popstate'));
+        if (section === 'settings') window.dispatchEvent(new Event('komod-open-settings-home'));
     };
     return <>
         <aside className="fixed inset-y-0 right-0 z-40 hidden w-24 flex-col items-center border-l border-white/[0.06] bg-dark-900/95 py-5 backdrop-blur-xl md:flex">
