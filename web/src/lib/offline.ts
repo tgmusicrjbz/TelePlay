@@ -1,4 +1,4 @@
-import { api, Playlist, TelegramFile } from './api';
+import { api, Pack, Playlist, TelegramFile } from './api';
 import { cachedCurrentUser } from './accounts';
 import { publishLocalTransfer } from './transfers';
 
@@ -290,6 +290,53 @@ export async function savePlaylistOffline(playlist: Playlist, onProgress?: (prog
     emitProgress({ id: jobId, kind: 'playlist', title: playlist.name, state: 'done', done, total: playable.length, failed, currentName: '', loaded: [...loadedByFile.values()].reduce((sum, value) => sum + value, 0), size: totalSize });
     playlistControls.delete(jobId);
     return record;
+}
+
+/** Save every member of a mixed-media pack and keep the results together. */
+export async function savePackOffline(pack: Pack, onProgress?: (progress: OfflineDownloadProgress) => void): Promise<OfflineFolder> {
+    const files = pack.items.map(item => item.file);
+    if (!files.length) throw new Error('این جعبه خالی است.');
+    const jobId = `playlist-pack-${pack.id}`;
+    const control = { paused: false, cancelled: false };
+    playlistControls.set(jobId, control);
+    const totalSize = files.reduce((sum, file) => sum + (file.file_size || 0), 0);
+    const loadedByFile = new Map<number, number>();
+    let done = 0; let failed = 0;
+    const report = (currentName: string, state: OfflineJobProgress['state'] = 'downloading') => {
+        const progress = { done, total: files.length, failed, currentName, loaded: [...loadedByFile.values()].reduce((sum, value) => sum + value, 0), size: totalSize };
+        onProgress?.(progress);
+        emitProgress({ id: jobId, kind: 'playlist', title: pack.name, state, ...progress });
+    };
+    const folderName = `جعبه · ${pack.name}`.slice(0, 80);
+    const existingFolder = (await listOfflineFolders()).find(folder => folder.name === folderName);
+    const folder = existingFolder || await createOfflineFolder(folderName);
+    try {
+        for (const file of files) {
+            while (control.paused && !control.cancelled) {
+                report('ذخیره جعبه موقتاً متوقف شده', 'paused');
+                await new Promise(resolve => window.setTimeout(resolve, 250));
+            }
+            if (control.cancelled) throw new DOMException('ذخیره جعبه لغو شد', 'AbortError');
+            report(file.file_name);
+            try {
+                await saveFileOffline(file, loaded => { loadedByFile.set(file.id, loaded); report(file.file_name); }, { silentProgress: true });
+                await assignOfflineFolder('media', file.id, folder.id);
+                loadedByFile.set(file.id, file.file_size || loadedByFile.get(file.id) || 0);
+            } catch (error) {
+                if (control.cancelled || (error instanceof DOMException && error.name === 'AbortError')) throw error;
+                failed += 1;
+            }
+            done += 1;
+        }
+        if (done === failed) throw new Error('هیچ‌کدام از فایل‌های جعبه ذخیره نشدند.');
+        report('', 'done');
+        return folder;
+    } catch (error) {
+        report('', error instanceof DOMException && error.name === 'AbortError' ? 'cancelled' : 'error');
+        throw error;
+    } finally {
+        playlistControls.delete(jobId);
+    }
 }
 
 export async function createOfflinePlaylist(name:string,fileIds:number[]=[],description=''):Promise<OfflinePlaylist>{

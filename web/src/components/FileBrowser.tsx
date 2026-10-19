@@ -270,7 +270,10 @@ export default function FileBrowser() {
     }, [searchQuery]);
 
     // Data Fetching
-    const { data: filesList, isLoading: filesLoading, isFetching: filesFetching, error: filesError, refetch: refetchFiles } = useFiles(hiddenOnly || debouncedSearchQuery || activeSavedFilterId ? undefined : effectiveFolderId, fileTypeFilter.join(',') || undefined, debouncedSearchQuery || undefined, page, sortValue, favoriteOnly, false, showHidden, hiddenOnly);
+    const packFilterActive = fileTypeFilter.includes('pack');
+    const apiFileTypeFilter = fileTypeFilter.filter(type => type !== 'pack');
+    const packOnlyFilter = packFilterActive && apiFileTypeFilter.length === 0;
+    const { data: filesList, isLoading: filesLoading, isFetching: filesFetching, error: filesError, refetch: refetchFiles } = useFiles(hiddenOnly || debouncedSearchQuery || activeSavedFilterId ? undefined : effectiveFolderId, apiFileTypeFilter.join(',') || undefined, debouncedSearchQuery || undefined, page, sortValue, favoriteOnly, false, showHidden, hiddenOnly);
     const { data: activityFeed, isLoading: activityLoading, isError: activityError, refetch: refetchActivity } = useActivityFeed(activeSection === 'activity', 50);
     
 
@@ -322,7 +325,8 @@ export default function FileBrowser() {
             || (folder.description || '').toLocaleLowerCase('fa').includes(query);
     });
     const showFolders = activeSection === 'files' && contentScope !== 'files';
-    const showFiles = activeSection !== 'files' || contentScope !== 'folders';
+    const showPacks = activeSection === 'files' && (contentScope !== 'folders' || packFilterActive) && (fileTypeFilter.length === 0 || packFilterActive);
+    const showFiles = (activeSection !== 'files' || contentScope !== 'folders') && !packOnlyFilter;
     const visiblePacks = hiddenOnly || favoriteOnly ? [] : packs.filter(pack => {
         const query = searchQuery.trim().toLocaleLowerCase('fa');
         return !query || `${pack.name} ${pack.description || ''} ${pack.preview_names.join(' ')}`.toLocaleLowerCase('fa').includes(query);
@@ -920,7 +924,7 @@ export default function FileBrowser() {
     const selectedItems = [...selectedFilesForActions, ...selectedFoldersForActions];
     const sectionTitle = activeSection === 'activity' ? 'فعالیت' : (breadcrumbs[breadcrumbs.length - 1]?.name || 'کمد من');
     const shownFolderCount = showFolders ? visibleFolders?.length || 0 : 0;
-    const shownPackCount = showFolders ? visiblePacks.length : 0;
+    const shownPackCount = showPacks ? visiblePacks.length : 0;
     const shownFileCount = showFiles ? displayFiles?.length || 0 : 0;
     const selectScope = (scope: 'all' | 'files' | 'folders') => {
         setActiveSavedFilterId(null);
@@ -1278,10 +1282,10 @@ export default function FileBrowser() {
                             </div>
                             {showFilters && contentScope !== 'folders' && (
                                 <div className="mt-3 border-t border-white/[0.06] pt-3">
-                                    <div className="grid grid-cols-5 overflow-hidden rounded-xl border border-white/[.07] bg-dark-950/60 p-1">
+                                    <div className="grid grid-cols-6 overflow-hidden rounded-xl border border-white/[.07] bg-dark-950/60 p-1">
                                         {([
                                             ['ویدیو', 'video', Film], ['موسیقی و صدا', 'audio', Music],
-                                            ['عکس', 'image', ImageIcon], ['سند', 'document', FileText], ['متن و یادداشت', 'text', StickyNote],
+                                            ['عکس', 'image', ImageIcon], ['سند', 'document', FileText], ['متن و یادداشت', 'text', StickyNote], ['جعبه', 'pack', Boxes],
                                         ] as const).map(([label, type, Icon]) => (
                                             <button key={type} title={label} aria-label={label} onClick={() => toggleFileType(type)} className={`flex h-9 min-w-0 items-center justify-center rounded-lg transition-colors ${fileTypeFilter.includes(type) ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:bg-white/[.05] hover:text-white'}`}>
                                                 <Icon className="h-4 w-4" />
@@ -1398,7 +1402,7 @@ export default function FileBrowser() {
                                     ))}
 
                                     {/* Mixed-media packs live beside folders. */}
-                                    {showFolders && visiblePacks.map(pack => <PackCard key={`pack-${pack.id}`} pack={pack} viewMode={viewMode} onOpen={()=>setOpenPackId(pack.id)}/>)}
+                                    {showPacks && visiblePacks.map(pack => <PackCard key={`pack-${pack.id}`} pack={pack} viewMode={viewMode} onOpen={()=>setOpenPackId(pack.id)}/>)}
                                     
                                     {/* Files */}
                                     {showFiles && displayFiles?.map((file) => (

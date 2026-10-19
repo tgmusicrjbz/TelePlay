@@ -1141,8 +1141,19 @@ async def stt_command(client, message: Message):
     option = message.text.split(maxsplit=1)[1].strip().lower() if message.text and len(message.text.split(maxsplit=1)) > 1 else ""
     output_mode = "temporary" if option in {"temp", "temporary", "موقت"} else "save"
     if replied is None:
-        pending_stt_modes[message.from_user.id] = output_mode
-        await message.reply("🎙️ فایل بعدی را بفرست؛ مستقیم متنش را استخراج می‌کنم و خود فایل در کمد ذخیره نمی‌شود.")
+        if option:
+            pending_stt_modes[message.from_user.id] = output_mode
+            await message.reply("🎙️ حالا صدا یا ویدیو را بفرست. خود فایل در کمد ذخیره نمی‌شود.")
+        else:
+            pending_stt_modes.pop(message.from_user.id, None)
+            await message.reply(
+                "📝 خروجی متن را چطور می‌خواهی؟",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("فقط همین‌جا", callback_data="stt_mode:temporary"),
+                     InlineKeyboardButton("ذخیره در کمد", callback_data="stt_mode:save")],
+                    [InlineKeyboardButton("لغو", callback_data="home")],
+                ]),
+            )
         return
     media = next((getattr(replied, name, None) for name in ("audio", "voice", "video", "video_note", "document") if replied and getattr(replied, name, None)), None)
     if media is None:
@@ -1661,6 +1672,12 @@ async def _handle_file_impl(client, message: Message, status_msg: Message):
 async def handle_file(client, message: Message):
     """Queue bursts per user so every forwarded message is processed in order."""
     user_id = message.from_user.id
+    # A pending STT request owns the next audio/video message. Keep this guard
+    # here as well as the earlier handler so a future handler-order change can
+    # never accidentally add the source file to the user's cabinet.
+    if user_id in pending_stt_modes and any((message.video, message.audio, message.voice, message.document, message.video_note)):
+        await handle_pending_stt_media(client, message)
+        return
     queue = upload_message_queues.setdefault(user_id, asyncio.Queue())
     position = queue.qsize() + (1 if user_id in upload_workers else 0)
     status_msg = await message.reply("⏳ در صف ذخیره…" if position else "⏳ در حال ذخیره…")
@@ -2022,12 +2039,12 @@ async def handle_callback(client, callback: CallbackQuery):
             await callback.answer("ذخیره شد.")
 
     elif data == "stt_start":
-        pending_stt_modes[callback.from_user.id] = "save"
+        pending_stt_modes.pop(callback.from_user.id, None)
         await callback.message.edit_text(
-            "📝 **استخراج متن**\nصدا یا ویدیو را بفرست؛ متنش را آماده می‌کنم.",
+            "📝 **استخراج متن**\nاول مشخص کن خروجی کجا بماند.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("خروجی موقت", callback_data="stt_mode:temporary"),
-                 InlineKeyboardButton("ذخیره در کمد ✓", callback_data="stt_mode:save")],
+                [InlineKeyboardButton("فقط همین‌جا", callback_data="stt_mode:temporary"),
+                 InlineKeyboardButton("ذخیره در کمد", callback_data="stt_mode:save")],
                 [InlineKeyboardButton("↩️ منوی اصلی", callback_data="home")],
             ]),
         )
@@ -2036,7 +2053,16 @@ async def handle_callback(client, callback: CallbackQuery):
     elif data.startswith("stt_mode:"):
         mode = data.split(":", 1)[1]
         pending_stt_modes[callback.from_user.id] = "temporary" if mode == "temporary" else "save"
-        await callback.answer("حالت موقت" if mode == "temporary" else "در کمد ذخیره می‌شود")
+        selected_temporary = mode == "temporary"
+        await callback.message.edit_text(
+            "🎙️ حالا صدا یا ویدیو را بفرست.\nخود فایل ورودی در کمد ذخیره نمی‌شود.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton(f"{'✓ ' if selected_temporary else ''}فقط همین‌جا", callback_data="stt_mode:temporary"),
+                 InlineKeyboardButton(f"{'✓ ' if not selected_temporary else ''}ذخیره در کمد", callback_data="stt_mode:save")],
+                [InlineKeyboardButton("لغو", callback_data="home")],
+            ]),
+        )
+        await callback.answer("حالت انتخاب شد")
 
     elif data == "noop":
         await callback.answer()

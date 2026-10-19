@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../lib/store';
-import { TelegramFile, Folder, api, canPreviewText, sendFilesToTelegram, useRemovePackItem, useUpdateFile, useUpdateFolder, useUploadFile } from '../lib/api';
+import { TelegramFile, Folder, api, canPreviewText, sendFilesToTelegram, useUpdateFile, useUpdateFolder, useUploadFile } from '../lib/api';
 import { Play, Download, DownloadCloud, Link, Edit, FolderInput, Trash2, Globe, ShieldOff, HardDriveDownload, Eye, EyeOff, AlignLeft, ListPlus, Heart, Info, Pin, Tags, ChevronDown, ChevronUp, X, AudioLines, Send, Palette, Image as ImageIcon, Boxes } from 'lucide-react';
 import { saveFileOffline } from '../lib/offline';
 
@@ -9,7 +9,6 @@ export default function GlobalContextMenu() {
     const updateFile = useUpdateFile();
     const updateFolder = useUpdateFolder();
     const uploadFile = useUploadFile();
-    const removePackItem = useRemovePackItem();
     const menuRef = useRef<HTMLDivElement>(null);
     const [copiedId, setCopiedId] = useState<string | null>(null);
     const [showMore, setShowMore] = useState(false);
@@ -226,7 +225,7 @@ export default function GlobalContextMenu() {
             <div className="min-h-0 overflow-y-auto p-3">
                 {isMultiSelect ? <div className="space-y-3"><p className="rounded-xl bg-primary-500/10 px-3 py-2 text-sm text-primary-200">{selectedFileIds.size.toLocaleString('fa-IR')} فایل انتخاب شده</p><div className="grid grid-cols-2 gap-2"><ActionTile icon={<Send/>} label="ارسال به تلگرام" onClick={()=>void handleSendToTelegram(selectedFiles)}/>{!readOnlyWorkspace&&<><ActionTile icon={<Boxes/>} label="افزودن به جعبه" onClick={()=>{window.dispatchEvent(new CustomEvent('komod-add-to-pack',{detail:{fileIds:[...selectedFileIds]}}));setActiveContextMenu(null)}}/><ActionTile icon={<FolderInput/>} label="جابه‌جایی" onClick={()=>handleAction(()=>setMoveFiles(selectedFiles))}/><ActionTile danger icon={<Trash2/>} label="حذف" onClick={()=>handleAction(()=>setDeleteConfirm({type:'file',items:Array.from(selectedFileIds).map(id=>({id} as any))}))}/></>}</div></div> : file ? <>
                     <div className="grid grid-cols-2 gap-2">
-                        {activeContextMenu.packId&&activeContextMenu.packItemId&&<ActionTile icon={<X/>} label="برداشتن از جعبه" onClick={async()=>{const packId=activeContextMenu.packId!;const itemId=activeContextMenu.packItemId!;setActiveContextMenu(null);await removePackItem.mutateAsync({id:packId,itemId});addToast('فایل از جعبه بیرون آمد.')}}/>}
+                        {activeContextMenu.packId&&activeContextMenu.packItemId&&<ActionTile icon={<X/>} label="برداشتن از جعبه" onClick={()=>{window.dispatchEvent(new CustomEvent('komod-pack-confirm-remove',{detail:{packId:activeContextMenu.packId,itemId:activeContextMenu.packItemId}}));setActiveContextMenu(null)}}/>}
                         {!readOnlyWorkspace&&<ActionTile icon={<Boxes/>} label={activeContextMenu.packId?'افزودن به جعبهٔ دیگر':'افزودن به جعبه'} onClick={()=>{window.dispatchEvent(new CustomEvent('komod-add-to-pack',{detail:{fileIds:[file.id]}}));setActiveContextMenu(null)}}/>}
                         {playable&&<ActionTile icon={<Play/>} label="پخش" onClick={()=>handleAction(()=>handlePlay(file))}/>}
                         {previewable&&<ActionTile icon={<Eye/>} label={previewLabel} onClick={()=>handleAction(()=>setContentPreviewFile(file))}/>}

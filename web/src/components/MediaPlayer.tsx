@@ -23,9 +23,14 @@ interface MediaPlayerContentProps {
     onClose: () => void;
     isMinimized: boolean;
     setMinimized: (minimized: boolean) => void;
+    inline?: boolean;
 }
 
-function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaPlayerContentProps) {
+export function InlineMediaPlayer({ file }: { file: TelegramFile }) {
+    return <MediaPlayerContent file={file} onClose={() => undefined} isMinimized={false} setMinimized={() => undefined} inline />;
+}
+
+function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline = false }: MediaPlayerContentProps) {
     const { playQueue, queueIndex, repeatMode, playNext, playPrevious, shuffleQueue, reverseQueue, removeQueueItem, moveQueueItem, appendQueueItems, setRepeatMode, setPlaylistFile, addToast } = useAppStore();
     const videoRef = useRef<HTMLVideoElement>(null);
     const nextAudioRef = useRef<HTMLAudioElement>(null);
@@ -733,7 +738,8 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
     return (
         <div
             ref={containerRef}
-            className={`${isMinimized ? 'mini-player' : 'video-player'} fixed z-[240] transition-all duration-300 ease-in-out ${
+            className={`${isMinimized ? 'mini-player' : 'video-player'} ${inline ? 'relative h-full w-full overflow-hidden bg-black' : 'fixed z-[240]'} transition-all duration-300 ease-in-out ${
+                inline ? '' :
                 isMinimized
                     ? 'bottom-[calc(5rem+env(safe-area-inset-bottom))] left-0 right-0 h-20 max-h-[25vh] border-t border-white/10 bg-dark-900 shadow-2xl md:bottom-0'
                 : 'inset-0 bg-black flex items-center justify-center font-sans'
@@ -777,12 +783,12 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                                 </a>
                             </div>
                         </div>
-                        <button
+                        {!inline && <button
                             onClick={onClose}
                             className="mt-6 text-dark-400 hover:text-white text-sm transition-colors"
                         >
                             بستن
-                        </button>
+                        </button>}
                     </div>
                 ) : (
                     <>
@@ -902,7 +908,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                             {isVideo && <h3 dir="auto" className="max-w-[min(52vw,28rem)] truncate text-base font-medium text-white sm:text-lg" title={cleanFileName}>{cleanFileName}</h3>}
                         </div>
                         {hasQueue && <p data-track-counter dir="rtl" className="absolute left-1/2 top-16 z-50 -translate-x-1/2 whitespace-nowrap rounded-xl border border-white/15 bg-black/75 px-4 py-2 text-sm font-bold text-white shadow-xl backdrop-blur-md">ترک <span className="font-black text-primary-300">{queuePosition.toLocaleString('fa-IR')}</span> از <span className="font-black text-primary-300">{queueLength.toLocaleString('fa-IR')}</span></p>}
-                        <div className="flex shrink-0 items-center justify-end gap-1 sm:gap-2">
+                        {!inline && <div className="flex shrink-0 items-center justify-end gap-1 sm:gap-2">
                              <button
                                 onClick={() => void minimizePlayer()}
                                 className="p-2 text-white hover:bg-white/20 rounded-full transition-colors"
@@ -916,7 +922,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized }: MediaP
                             >
                                 <X className="w-6 h-6" />
                             </button>
-                        </div>
+                        </div>}
                     </div>
 
                     {/* Secondary tools stay away from the transport controls. */}
