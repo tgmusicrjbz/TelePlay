@@ -309,7 +309,9 @@ export default function FileBrowser() {
         isLoading = activityLoading;
     } else {
         displayFiles = allFiles;
-        isLoading = filesLoading;
+        // A pack-only filter must not wait for the unrelated files request.
+        // This was the reason selecting «جعبه» could leave the page empty.
+        isLoading = packOnlyFilter ? false : filesLoading;
     }
     if (hiddenOnly) displayFiles = displayFiles?.filter(item => item.is_hidden);
 
@@ -333,7 +335,7 @@ export default function FileBrowser() {
     });
 
     // Combined loading state
-    isLoading = isLoading || (activeSection === 'files' && (foldersLoading || (hiddenOnly && folderTreeLoading)));
+    isLoading = isLoading || (activeSection === 'files' && ((showFolders && foldersLoading) || (hiddenOnly && folderTreeLoading)));
     
     // Mutations
     const deleteFilesMutation = useDeleteFiles();

@@ -24,13 +24,14 @@ interface MediaPlayerContentProps {
     isMinimized: boolean;
     setMinimized: (minimized: boolean) => void;
     inline?: boolean;
+    inlineExpanded?: boolean;
 }
 
-export function InlineMediaPlayer({ file }: { file: TelegramFile }) {
-    return <MediaPlayerContent file={file} onClose={() => undefined} isMinimized={false} setMinimized={() => undefined} inline />;
+export function InlineMediaPlayer({ file, expanded = false }: { file: TelegramFile; expanded?: boolean }) {
+    return <MediaPlayerContent file={file} onClose={() => undefined} isMinimized={false} setMinimized={() => undefined} inline inlineExpanded={expanded} />;
 }
 
-function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline = false }: MediaPlayerContentProps) {
+function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline = false, inlineExpanded = false }: MediaPlayerContentProps) {
     const { playQueue, queueIndex, repeatMode, playNext, playPrevious, shuffleQueue, reverseQueue, removeQueueItem, moveQueueItem, appendQueueItems, setRepeatMode, setPlaylistFile, addToast } = useAppStore();
     const videoRef = useRef<HTMLVideoElement>(null);
     const nextAudioRef = useRef<HTMLAudioElement>(null);
@@ -44,7 +45,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
     const [isMuted, setIsMuted] = useState(false);
     const [showControls, setShowControls] = useState(true);
     const [isFullscreen, setIsFullscreen] = useState(false);
-    const compactInline = inline && !isFullscreen;
+    const compactInline = inline && !inlineExpanded && !isFullscreen;
     const [playbackSpeed, setPlaybackSpeed] = useState(1);
     const [isPiP, setIsPiP] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
@@ -252,13 +253,16 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
         }
     };
 
-    const toggleFullscreen = () => {
+    const toggleFullscreen = async () => {
         if (!document.fullscreenElement) {
-            containerRef.current?.requestFullscreen();
-            setIsFullscreen(true);
+            try {
+                await containerRef.current?.requestFullscreen();
+                setIsFullscreen(document.fullscreenElement === containerRef.current);
+            } catch {
+                setIsFullscreen(false);
+            }
         } else {
-            document.exitFullscreen();
-            setIsFullscreen(false);
+            await document.exitFullscreen();
         }
     };
 
@@ -753,6 +757,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
             data-media-kind={isVideo ? 'video' : 'audio'}
             data-inline={compactInline ? 'true' : 'false'}
             data-embedded={inline ? 'true' : 'false'}
+            data-fullscreen={isFullscreen ? 'true' : 'false'}
             data-controls-locked={controlsLocked ? 'true' : 'false'}
             style={!isMinimized && !isVideo ? ({ backgroundImage: authorizedThumbnailUrl ? `linear-gradient(135deg, rgba(8,10,20,.96), rgba(38,12,54,.84)), url(${authorizedThumbnailUrl})` : 'linear-gradient(135deg, #080a14, #260c36)', backgroundPosition: 'center', backgroundSize: 'cover' }) : undefined}
             onMouseMove={undefined}
@@ -982,7 +987,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
                     <div data-player-controls data-player-transport dir="ltr" className={`absolute left-1/2 z-30 flex -translate-x-1/2 items-center ${isVideo && !audioOnly && !videoHidden ? `top-1/2 -translate-y-1/2 ${compactInline?'gap-0.5':'gap-2 sm:gap-5'}` : `${compactInline?'bottom-20 gap-0.5':'bottom-32 gap-2 sm:gap-5'}`}`}>
                         {isVideo && <button disabled={!hasQueue} onClick={(e) => { e.stopPropagation(); playPrevious(); }} className="rounded-full p-2 text-white/65 transition hover:bg-white/10 hover:text-white disabled:opacity-30" title="ویدیوی قبلی"><SkipBack className="h-5 w-5"/></button>}
                         <button disabled={!isVideo && !hasQueue} onClick={(e) => { e.stopPropagation(); isVideo ? handleSkip(-10) : playPrevious(); }} className="rounded-full p-3 text-white/70 transition hover:bg-white/10 hover:text-white disabled:opacity-30" title={isVideo ? '۱۰ ثانیه عقب' : 'ترک قبلی'}>{isVideo ? <RotateCcw className="h-6 w-6"/> : <SkipBack className="h-7 w-7"/>}</button>
-                        {isVideo ? <button onClick={(e) => { e.stopPropagation(); togglePlay(e); }} className={`flex items-center justify-center rounded-full bg-primary-500 text-white shadow-2xl shadow-primary-500/35 transition duration-200 hover:scale-105 hover:bg-primary-400 active:scale-95 ${compactInline?'h-14 w-14':'h-20 w-20'}`} aria-label={isPlaying ? 'توقف' : 'پخش'}>{isPlaying ? <Pause className={compactInline?'h-6 w-6':'h-9 w-9'}/> : <Play className={`${compactInline?'h-6 w-6':'h-9 w-9'} ml-1`}/>}</button> : <button onClick={(e) => { e.stopPropagation(); togglePlay(e); }} className={`flex items-center justify-center rounded-full bg-primary-500 text-white shadow-xl shadow-primary-500/30 transition hover:scale-105 hover:bg-primary-400 ${compactInline?'h-14 w-14':'h-20 w-20'}`}>{isPlaying ? <Pause className={compactInline?'h-6 w-6':'h-9 w-9'}/> : <Play className={`${compactInline?'h-6 w-6':'h-9 w-9'} ml-1`}/>}</button>}
+                        {isVideo ? <button data-primary-play onClick={(e) => { e.stopPropagation(); togglePlay(e); }} className={`flex items-center justify-center rounded-full bg-primary-500 text-white shadow-2xl shadow-primary-500/35 transition duration-200 hover:scale-105 hover:bg-primary-400 active:scale-95 ${compactInline?'h-14 w-14':'h-20 w-20'}`} aria-label={isPlaying ? 'توقف' : 'پخش'}>{isPlaying ? <Pause className={compactInline?'h-6 w-6':'h-9 w-9'}/> : <Play className={`${compactInline?'h-6 w-6':'h-9 w-9'} ml-1`}/>}</button> : <button data-primary-play onClick={(e) => { e.stopPropagation(); togglePlay(e); }} className={`flex items-center justify-center rounded-full bg-primary-500 text-white shadow-xl shadow-primary-500/30 transition hover:scale-105 hover:bg-primary-400 ${compactInline?'h-14 w-14':'h-20 w-20'}`}>{isPlaying ? <Pause className={compactInline?'h-6 w-6':'h-9 w-9'}/> : <Play className={`${compactInline?'h-6 w-6':'h-9 w-9'} ml-1`}/>}</button>}
                         <button disabled={!isVideo && !hasQueue} onClick={(e) => { e.stopPropagation(); isVideo ? handleSkip(10) : playNext(); }} className="rounded-full p-3 text-white/70 transition hover:bg-white/10 hover:text-white disabled:opacity-30" title={isVideo ? '۱۰ ثانیه جلو' : 'ترک بعدی'}>{isVideo ? <RotateCw className="h-6 w-6"/> : <SkipForward className="h-7 w-7"/>}</button>
                         {isVideo && <button disabled={!hasQueue} onClick={(e) => { e.stopPropagation(); playNext(); }} className="rounded-full p-2 text-white/65 transition hover:bg-white/10 hover:text-white disabled:opacity-30" title="ویدیوی بعدی"><SkipForward className="h-5 w-5"/></button>}
                     </div>

@@ -54,7 +54,7 @@ from app.routers.files import (
 from app.routers.folders import delete_folder_contents, list_folders, update_folder
 from app.routers.streaming import public_share_info, stored_message_response, unlock_public_share
 from app.routers.playlists import add_playlist_items, create_playlist, reorder_playlist, shuffle_playlist
-from app.routers.packs import create_pack, get_pack, reorder_pack
+from app.routers.packs import create_pack, get_pack, remove_pack_item, reorder_pack
 from app.schemas import BatchFileUpdate, CredentialsUpdate, FileUpdate, FolderUpdate, PackCreate, PackReorder, PasswordLoginRequest, PlayerStateUpdate, PlaylistAddItems, PlaylistCreate, PlaylistReorder, PublicShareCreate, PublicShareUnlock, SavedFilter, SavedFiltersUpdate, TagBatchDelete, TagDefinition, TagSettingsUpdate
 from app.telegram import configure_main_client, start_one_client
 from app import telegram
@@ -76,13 +76,18 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(created.type_counts, {"image": 1, "text": 1})
             reordered = await reorder_pack(created.id, PackReorder(item_ids=[created.items[1].id, created.items[0].id]), db, user)
             self.assertEqual([item.file.id for item in reordered.items], [text_file.id, image.id])
+            reduced = await remove_pack_item(created.id, reordered.items[0].id, db, user)
+            self.assertEqual([item.file.id for item in reduced.items], [image.id])
+            self.assertEqual(reduced.item_count, 1)
             fetched = await get_pack(created.id, db, user)
-            self.assertEqual([item.file.id for item in fetched.items], [text_file.id, image.id])
+            self.assertEqual([item.file.id for item in fetched.items], [image.id])
             duplicate_name = await create_pack(PackCreate(name="موضوع سفر", parent_folder_id=self.folder_id, file_ids=[]), db, user)
             self.assertNotEqual(duplicate_name.id, created.id)
             self.assertEqual(duplicate_name.name, created.name)
             folder_listing = await list_files(folder_id=self.folder_id, file_type=None, search=None, page=1, per_page=20, db=db, current_user=user)
-            self.assertTrue({image.id, text_file.id}.isdisjoint({item.id for item in folder_listing.files}))
+            listed_ids = {item.id for item in folder_listing.files}
+            self.assertNotIn(image.id, listed_ids)
+            self.assertIn(text_file.id, listed_ids)
 
     async def test_caption_directives_are_parsed_and_removed_from_description(self):
         from app.caption_metadata import parse_file_caption

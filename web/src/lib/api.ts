@@ -555,6 +555,7 @@ export const useDeleteFile = () => {
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['files'] });
+            queryClient.invalidateQueries({ queryKey: ['packs'] });
         },
     });
 };
@@ -569,6 +570,7 @@ export const useDeleteFiles = () => {
             queryClient.invalidateQueries({ queryKey: ['files'] });
             queryClient.invalidateQueries({ queryKey: ['folders'] });
             queryClient.invalidateQueries({ queryKey: ['storage'] });
+            queryClient.invalidateQueries({ queryKey: ['packs'] });
         },
     });
 };
@@ -850,13 +852,13 @@ const usePackMutation = <TVariables>(request: (variables: TVariables) => Promise
 };
 
 export const useCreatePack = () => usePackMutation(async (payload: { name: string; description?: string; parent_folder_id: number | null; hide_member_files?: boolean; file_ids: number[] }) =>
-    (await api.post<Pack>('/packs', payload)).data);
+    (await api.post<Pack>('/packs', payload, { timeout: 60_000 })).data);
 export const useUpdatePack = () => usePackMutation(async ({ id, ...payload }: { id: number; name?: string; description?: string; parent_folder_id?: number | null; cover_file_id?: number | null; hide_member_files?: boolean }) =>
     (await api.patch<Pack>(`/packs/${id}`, payload)).data);
 export const useAddPackItems = () => usePackMutation(async ({ id, fileIds }: { id: number; fileIds: number[] }) =>
-    (await api.post<Pack>(`/packs/${id}/items`, { file_ids: fileIds })).data);
+    (await api.post<Pack>(`/packs/${id}/items`, { file_ids: fileIds }, { timeout: 60_000 })).data);
 export const useRemovePackItem = () => usePackMutation(async ({ id, itemId }: { id: number; itemId: number }) =>
-    (await api.delete<Pack>(`/packs/${id}/items/${itemId}`)).data);
+    (await api.delete<Pack>(`/packs/${id}/items/${itemId}`, { timeout: 30_000 })).data);
 export const useReorderPack = () => usePackMutation(async ({ id, itemIds }: { id: number; itemIds: number[] }) =>
     (await api.put<Pack>(`/packs/${id}/reorder`, { item_ids: itemIds })).data);
 export const useDeletePack = () => {
