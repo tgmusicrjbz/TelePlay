@@ -23,7 +23,8 @@
 .markdown-article--plum :is(h1,h2,h3,h4,h5,h6,strong,a,.katex) { color: #e9a8ff !important; }
 .markdown-article--sepia :is(h1,h2,h3,h4,h5,h6,strong,a,.katex) { color: #f0bd79 !important; }
 .markdown-article--cream :is(h1,h2,h3,h4,h5,h6,strong,a,.katex), .markdown-article--white :is(h1,h2,h3,h4,h5,h6,strong,a,.katex) { color: #81552e !important; }
-.markdown-article--cream :is(pre,code), .markdown-article--white :is(pre,code) { color: #292524 !important; }
+.markdown-article--cream code:not(pre code), .markdown-article--white code:not(pre code) { color: #292524 !important; }
+.markdown-article--cream pre code, .markdown-article--white pre code { color: #e2e8f0 !important; }
 .markdown-font--vazir { font-family: "Vazirmatn", system-ui, sans-serif !important; }
 .markdown-font--yekan { font-family: "IRANYekan", "Yekan Bakh", "B Yekan", "Vazirmatn", sans-serif !important; }
 .markdown-font--iransans { font-family: "IRANSans", "Iran Sans", "Vazirmatn", sans-serif !important; }

@@ -149,6 +149,7 @@ export default function ContentPreview() {
     const toggleReaderFullscreen = async () => {
         const next = !readerFullscreen;
         setReaderFullscreen(next);
+        if (next && file?.file_type !== 'image') setReaderToolsVisible(true);
         try {
             if (next && previewRef.current?.requestFullscreen) await previewRef.current.requestFullscreen();
             else if (!next && document.fullscreenElement) await document.exitFullscreen();
@@ -206,16 +207,16 @@ export default function ContentPreview() {
                     </div>
                 ) : (
                     <>
-                        {readerToolsVisible&&<div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-white/[.06] bg-dark-950/70 px-3 py-2 sm:px-5">
-                            <div className="min-w-40"><CustomSelect value={readerFont} onChange={setReaderFont} options={readerFonts}/></div>
-                            <div className="min-w-36"><CustomSelect value={readerTone} onChange={setReaderTone} options={readerTones}/></div>
+                        {readerToolsVisible&&<div className="flex shrink-0 items-center gap-2 overflow-x-auto overscroll-x-contain border-b border-white/[.06] bg-dark-950/70 px-3 py-2 sm:flex-wrap sm:px-5">
+                            <div className="min-w-40 shrink-0"><CustomSelect value={readerFont} onChange={setReaderFont} options={readerFonts}/></div>
+                            <div className="min-w-36 shrink-0"><CustomSelect value={readerTone} onChange={setReaderTone} options={readerTones}/></div>
                             <div className="flex shrink-0 items-center rounded-xl border border-white/[.07] bg-dark-800/70 p-1">
                                 <button className="flex h-8 w-8 items-center justify-center rounded-lg text-dark-300 hover:bg-white/[.06] hover:text-white disabled:opacity-30" disabled={readerFontSize <= 13} onClick={() => setReaderFontSize(size => Math.max(13, size - 1))} title="کوچک‌تر کردن متن"><Minus className="h-4 w-4"/></button>
                                 <span dir="ltr" className="min-w-12 text-center text-xs text-dark-300">{readerFontSize}px</span>
                                 <button className="flex h-8 w-8 items-center justify-center rounded-lg text-dark-300 hover:bg-white/[.06] hover:text-white disabled:opacity-30" disabled={readerFontSize >= 24} onClick={() => setReaderFontSize(size => Math.min(24, size + 1))} title="بزرگ‌تر کردن متن"><Plus className="h-4 w-4"/></button>
                             </div>
                             <span className="hidden shrink-0 text-xs text-dark-500 sm:block">{wordCount.toLocaleString('fa-IR')} واژه</span>
-                            <div className="mr-auto flex shrink-0 flex-wrap items-center gap-1">
+                            <div className="mr-auto flex shrink-0 items-center gap-1">
                                 <div className="flex shrink-0 items-center rounded-xl border border-white/[.07] bg-dark-800/70 p-1">
                                     {([['right', AlignRight], ['center', AlignCenter], ['left', AlignLeft], ['justify', AlignJustify]] as const).map(([value, Icon]) => <button key={value} onClick={() => setReaderAlign(value)} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg p-0 leading-none ${readerAlign === value ? 'bg-primary-500/20 text-primary-200' : 'text-dark-400 hover:text-white'}`} title={value === 'right' ? 'راست‌چین' : value === 'left' ? 'چپ‌چین' : value === 'center' ? 'وسط‌چین' : 'تراز دوطرفه'}><Icon className="block h-4 w-4"/></button>)}
                                 </div>
