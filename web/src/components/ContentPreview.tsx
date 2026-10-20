@@ -7,10 +7,10 @@ import CustomSelect from './CustomSelect';
 import MarkdownContent, { MarkdownInline } from './MarkdownContent';
 import InternalFileLinkPicker from './InternalFileLinkPicker';
 import ZoomableImage from './ZoomableImage';
+import { getMarkdownCustomThemes, getMarkdownSettings, markdownBuiltInThemes, markdownFonts, MarkdownSettings } from '../lib/markdownSettings';
 
-type ReaderTone = 'dark'|'gray'|'cream'|'white'|'ocean'|'forest'|'plum'|'sepia';
-const readerFonts=[{value:'vazir',label:'وزیرمتن'},{value:'yekan',label:'یکان'},{value:'iransans',label:'ایران‌سنس'},{value:'zar',label:'زر'},{value:'bnazanin',label:'بی‌نازنین'},{value:'tahoma',label:'تاهوما'},{value:'serif',label:'نسخ'},{value:'inter',label:'Inter'},{value:'georgia',label:'Georgia'},{value:'merriweather',label:'Merriweather'},{value:'mono',label:'قلم کدنویسی'}];
-const readerTones:Array<{value:ReaderTone;color:string;label:string}>=[{value:'dark',color:'#05070b',label:'مشکی'},{value:'gray',color:'#242933',label:'خاکستری'},{value:'cream',color:'#efe4ca',label:'کاغذی'},{value:'white',color:'#ffffff',label:'روز'},{value:'ocean',color:'#082735',label:'اقیانوس'},{value:'forest',color:'#10291d',label:'جنگل'},{value:'plum',color:'#27172f',label:'آلویی'},{value:'sepia',color:'#3a2b20',label:'سپیا'}];
+const readerFonts=markdownFonts;
+const readerTones=markdownBuiltInThemes;
 
 export default function ContentPreview() {
     const { contentPreviewFile: file, contentPreviewHistory, setContentPreviewFile, goBackContentPreview, addToast } = useAppStore();
@@ -26,14 +26,15 @@ export default function ContentPreview() {
     const [imageQuality,setImageQuality]=useState<'optimized'|'original'>('optimized');
     const [imageDescriptionExpanded, setImageDescriptionExpanded] = useState(false);
     const [readerFullscreen, setReaderFullscreen] = useState(false);
-    const [readerFontSize, setReaderFontSize] = useState(() => Number(localStorage.getItem('komod-reader-font-size')) || 16);
-    const [readerLineHeight, setReaderLineHeight] = useState(() => Number(localStorage.getItem('komod-reader-line-height')) || 2);
-    const [readerTone, setReaderTone] = useState<ReaderTone>(() => {const saved=localStorage.getItem('komod-reader-tone');return saved==='warm'||saved==='paper'?'cream':(saved as ReaderTone)||'dark'});
-    const [readerFont, setReaderFont] = useState(() => localStorage.getItem('komod-reader-font') || 'vazir');
-    const [readerWrap, setReaderWrap] = useState(() => localStorage.getItem('komod-reader-wrap') !== 'off');
-    const [readerWide, setReaderWide] = useState(() => localStorage.getItem('komod-reader-wide') === 'on');
-    const [readerAlign, setReaderAlign] = useState<'right' | 'left' | 'center' | 'justify'>(() => (localStorage.getItem('komod-reader-align') as 'right' | 'left' | 'center' | 'justify') || 'right');
-    const [readerToolsVisible,setReaderToolsVisible]=useState(()=>localStorage.getItem('komod-reader-tools')!=='hidden');
+    const initialMarkdown=useRef<MarkdownSettings>(getMarkdownSettings());
+    const [readerFontSize, setReaderFontSize] = useState(initialMarkdown.current.fontSize);
+    const [readerLineHeight, setReaderLineHeight] = useState(initialMarkdown.current.lineHeight);
+    const [readerTone, setReaderTone] = useState(initialMarkdown.current.theme);
+    const [readerFont, setReaderFont] = useState(initialMarkdown.current.font);
+    const [readerWrap, setReaderWrap] = useState(initialMarkdown.current.wrap);
+    const [readerWide, setReaderWide] = useState(initialMarkdown.current.wide);
+    const [readerAlign, setReaderAlign] = useState<'right' | 'left' | 'center' | 'justify'>(initialMarkdown.current.align);
+    const [readerToolsVisible,setReaderToolsVisible]=useState(initialMarkdown.current.showToolbar);
     const [showInternalLinkPicker,setShowInternalLinkPicker]=useState(false);
     const [showAIEditor,setShowAIEditor]=useState(false);
     const [aiVersions,setAIVersions]=useState<string[]>([]);
@@ -43,6 +44,7 @@ export default function ContentPreview() {
     const [aiStatus,setAIStatus]=useState('');
     const [aiError,setAIError]=useState('');
     const refineText=useRefineSTTText();
+    const readerToneOptions=[...readerTones.map(item=>({value:item.value,label:item.label})),...getMarkdownCustomThemes().map(item=>({value:`custom:${item.id}`,label:`🎨 ${item.name}`}))];
     const previewRef = useRef<HTMLElement>(null);
     const editorRef = useRef<HTMLTextAreaElement>(null);
     const show = !!file && (file.file_type === 'image' || canPreviewText(file));
@@ -210,7 +212,7 @@ export default function ContentPreview() {
                     <>
                         {readerToolsVisible&&<div className="flex shrink-0 items-center gap-2 overflow-x-auto overscroll-x-contain border-b border-white/[.06] bg-dark-950/70 px-3 py-2 sm:flex-wrap sm:px-5">
                             <div className="min-w-40 shrink-0"><CustomSelect value={readerFont} onChange={setReaderFont} options={readerFonts}/></div>
-                            <div className="min-w-36 shrink-0"><CustomSelect value={readerTone} onChange={setReaderTone} options={readerTones}/></div>
+                            <div className="min-w-36 shrink-0"><CustomSelect value={readerTone} onChange={setReaderTone} options={readerToneOptions}/></div>
                             <div className="flex shrink-0 items-center rounded-xl border border-white/[.07] bg-dark-800/70 p-1">
                                 <button className="flex h-8 w-8 items-center justify-center rounded-lg text-dark-300 hover:bg-white/[.06] hover:text-white disabled:opacity-30" disabled={readerFontSize <= 13} onClick={() => setReaderFontSize(size => Math.max(13, size - 1))} title="کوچک‌تر کردن متن"><Minus className="h-4 w-4"/></button>
                                 <span dir="ltr" className="min-w-12 text-center text-xs text-dark-300">{readerFontSize}px</span>

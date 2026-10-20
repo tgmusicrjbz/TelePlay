@@ -4,8 +4,9 @@ import katex from 'katex';
 import 'katex/dist/katex.min.css';
 import { api, TelegramFile } from '../lib/api';
 import { useAppStore } from '../lib/store';
+import { getMarkdownPalette, MarkdownPalette } from '../lib/markdownSettings';
 
-type ReaderTone = 'dark'|'gray'|'cream'|'white'|'ocean'|'forest'|'plum'|'sepia';
+type ReaderTone = string;
 function inlineMarkdown(text: string) {
     return text.split(/(!\[[^\]]*\]\([^)]+\)|\[[^\]]+\]\([^)]+\)|<a\s+href=["'][^"']+["'][^>]*>.*?<\/a>|<(?:strong|b)>.*?<\/(?:strong|b)>|<(?:em|i)>.*?<\/(?:em|i)>|https?:\/\/[^\s<]+|\{\{[^{}]+\}\}|\$[^$\n]+\$|\*\*[^*]+\*\*|__[^_]+__|<u>.*?<\/u>|~~[^~]+~~|`[^`]+`|\*[^*]+\*)/gi).map((part, index) => {
         const image = part.match(/^!\[([^\]]*)\]\(([^)]+)\)$/); if (image) return <img key={index} src={image[2]} alt={image[1]} loading="lazy" className="my-4 max-h-[70vh] max-w-full rounded-2xl border border-white/[.07] object-contain shadow-xl"/>;
@@ -68,7 +69,7 @@ function MarkdownCodeBlock({ code, language }: { code: string; language?: string
     </div>;
 }
 
-export default function MarkdownContent({ content, fontSize = 15, lineHeight = 2, theme = 'dark', fontFamily = 'vazir', wrap = true, wide = false, align = 'right' }: { content: string; fontSize?: number; lineHeight?: number; theme?: ReaderTone; fontFamily?: string; wrap?: boolean; wide?: boolean; align?: 'right' | 'left' | 'center' | 'justify' }) {
+export default function MarkdownContent({ content, fontSize = 15, lineHeight = 2, theme = 'dark', fontFamily = 'vazir', wrap = true, wide = false, align = 'right', customPalette }: { content: string; fontSize?: number; lineHeight?: number; theme?: ReaderTone; fontFamily?: string; wrap?: boolean; wide?: boolean; align?: 'right' | 'left' | 'center' | 'justify'; customPalette?:MarkdownPalette }) {
     const blocks = useMemo(() => {
         const result: JSX.Element[] = []; let code = false; let codeLines: string[] = []; let language = '';
         const lines = content.split(/\r?\n/);
@@ -118,5 +119,12 @@ export default function MarkdownContent({ content, fontSize = 15, lineHeight = 2
         if (codeLines.length) result.push(<MarkdownCodeBlock key="code-final" code={codeLines.join('\n')} language={language}/>);
         return result;
     }, [content]);
-    return <article dir="auto" className={`markdown-article markdown-article--${theme} markdown-font--${fontFamily} mx-auto ${wide?'max-w-none':'max-w-3xl'} overflow-hidden rounded-2xl border p-4 shadow-inner transition-colors sm:p-6 ${wrap ? 'break-words' : 'overflow-x-auto whitespace-pre'}`} style={{ fontSize, lineHeight, textAlign: align }}>{blocks}</article>;
+    const palette=customPalette||getMarkdownPalette(theme);
+    const paletteStyle=palette?({
+        '--md-background':palette.background,'--md-surface':palette.surface,'--md-text':palette.text,'--md-border':palette.border,
+        '--md-h1':palette.heading1,'--md-h2':palette.heading2,'--md-h3':palette.heading3,'--md-bold':palette.bold,'--md-italic':palette.italic,
+        '--md-link':palette.link,'--md-quote':palette.quote,'--md-formula':palette.formula,'--md-inline-code':palette.inlineCodeText,
+        '--md-inline-code-bg':palette.inlineCodeBackground,'--md-code':palette.codeText,'--md-code-bg':palette.codeBackground,
+    } as React.CSSProperties):undefined;
+    return <article dir="auto" className={`markdown-article ${palette?'markdown-article--custom':`markdown-article--${theme}`} markdown-font--${fontFamily} mx-auto ${wide?'max-w-none':'max-w-3xl'} overflow-hidden rounded-2xl border p-4 shadow-inner transition-colors sm:p-6 ${wrap ? 'break-words' : 'overflow-x-auto whitespace-pre'}`} style={{...paletteStyle, fontSize, lineHeight, textAlign: align }}>{blocks}</article>;
 }

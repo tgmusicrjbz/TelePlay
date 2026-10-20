@@ -7,9 +7,10 @@ import CustomSelect from './CustomSelect';
 import TagSettingsPanel from './TagSettingsPanel';
 import TransferCenter from './TransferCenter';
 import TTSSettingsPanel from './TTSSettingsPanel';
+import MarkdownSettingsPanel from './MarkdownSettingsPanel';
 import { useAppStore } from '../lib/store';
 
-type SettingsView = 'home' | 'accounts' | 'security' | 'sessions' | 'access' | 'storage' | 'files' | 'appearance' | 'connection' | 'admin' | 'tags' | 'transfers' | 'tts';
+type SettingsView = 'home' | 'accounts' | 'security' | 'sessions' | 'access' | 'storage' | 'files' | 'appearance' | 'markdown' | 'connection' | 'admin' | 'tags' | 'transfers' | 'tts';
 type Permission = 'read' | 'write';
 type SavedColor = { color: string; name: string };
 type ServerAddress = { url: string; name: string };
@@ -291,6 +292,7 @@ export default function SettingsPage() {
                 <SettingsButton icon={<Database/>} title="فضای ذخیره‌سازی" text="اتصال کانال خصوصی خودت برای فایل‌های تازه" onClick={() => setView('storage')} />
                 <SettingsButton icon={<FolderPlus/>} title="فایل‌ها و مقصدها" text="محل فایل‌های تازه، لینک‌ها و نصب برنامه" onClick={() => setView('files')} />
                 <SettingsButton icon={<Palette/>} title="ظاهر برنامه" text="رنگ کمد و نصب Komod روی دستگاه" onClick={() => setView('appearance')} />
+                <SettingsButton icon={<FileText/>} title="مطالعه و Markdown" text="فونت، اندازه، نوار مطالعه و تم‌های متن" onClick={() => setView('markdown')} />
                 <SettingsButton icon={<Tags/>} title="مدیریت تگ‌ها" text="ساخت، رنگ‌بندی و شیوه نمایش تگ‌ها" onClick={() => setView('tags')} />
                 <SettingsButton icon={<ListRestart/>} title="مرکز انتقال‌ها" text="صف دانلود، آپلود، لینک‌ها و ذخیره آفلاین" onClick={() => setView('transfers')} />
                 <SettingsButton icon={<AudioLines/>} title="متن و صدا" text="تبدیل متن به صدا و استخراج متن از فایل صوتی یا ویدیویی" onClick={() => setView('tts')} />
@@ -338,6 +340,7 @@ export default function SettingsPage() {
         </div>}
 
         {view === 'tts' && <TTSSettingsPanel/>}
+        {view === 'markdown' && <MarkdownSettingsPanel/>}
 
         {view === 'appearance' && <Card id="appearance-mode" icon={<Sun/>} title="حالت نمایش"><div className="mt-4 grid grid-cols-2 gap-2 rounded-2xl border border-white/[.08] bg-dark-950/50 p-1.5"><button onClick={()=>chooseAppearanceMode('dark')} className={`flex min-h-12 items-center justify-center gap-2 rounded-xl text-sm transition ${appearanceMode==='dark'?'bg-primary-500 text-white shadow-lg':'text-dark-400 hover:bg-white/[.05]'}`}><Moon className="h-4 w-4"/> حالت تاریک</button><button onClick={()=>chooseAppearanceMode('light')} className={`flex min-h-12 items-center justify-center gap-2 rounded-xl text-sm transition ${appearanceMode==='light'?'bg-primary-500 text-white shadow-lg':'text-dark-400 hover:bg-white/[.05]'}`}><Sun className="h-4 w-4"/> حالت روشن</button></div></Card>}
 
@@ -389,8 +392,8 @@ export default function SettingsPage() {
     </div></SettingsSectionContext.Provider>;
 }
 
-function viewTitle(view: SettingsView) { return ({ home:'تنظیمات', accounts:'حساب‌ها', security:'ورود و امنیت', sessions:'مدیریت نشست‌ها', access:'دسترسی و اشتراک‌گذاری', storage:'فضای ذخیره‌سازی', files:'فایل‌ها و مقصدها', appearance:'ظاهر برنامه', connection:'اتصال برنامه', admin:'مدیریت کاربران', tags:'مدیریت تگ‌ها', transfers:'مرکز انتقال‌ها', tts:'متن و صدا' })[view]; }
-function viewSubtitle(view: SettingsView) { return ({ home:'بخش موردنظرت را انتخاب کن.', accounts:'حساب‌های ذخیره‌شده روی این دستگاه.', security:'رمز و روش ورودت را تنظیم کن.', sessions:'ورودهای فعال حساب فعلی را مدیریت کن.', access:'مشخص کن چه کسی کمدت را ببیند یا داخلش فایل ذخیره کند.', storage:'فضای فایل‌ها و شیوه حذف را مدیریت کن.', files:'مقصد فایل‌های تازه و لینک‌ها را انتخاب کن.', appearance:'رنگ و حالت نمایش کمد را تنظیم کن.', connection:'آدرس اصلی و مسیرهای جایگزین HTTPS را مدیریت کن.', admin:'کاربران کمد را مدیریت کن.', tags:'تگ‌های دلخواه و نمایش آن‌ها را تنظیم کن.', transfers:'همه انتقال‌های فعال و اخیر را یکجا مدیریت کن.', tts:'ساخت صدا و استخراج متن.' })[view]; }
+function viewTitle(view: SettingsView) { return ({ home:'تنظیمات', accounts:'حساب‌ها', security:'ورود و امنیت', sessions:'مدیریت نشست‌ها', access:'دسترسی و اشتراک‌گذاری', storage:'فضای ذخیره‌سازی', files:'فایل‌ها و مقصدها', appearance:'ظاهر برنامه', markdown:'مطالعه و Markdown', connection:'اتصال برنامه', admin:'مدیریت کاربران', tags:'مدیریت تگ‌ها', transfers:'مرکز انتقال‌ها', tts:'متن و صدا' })[view]; }
+function viewSubtitle(view: SettingsView) { return ({ home:'بخش موردنظرت را انتخاب کن.', accounts:'حساب‌های ذخیره‌شده روی این دستگاه.', security:'رمز و روش ورودت را تنظیم کن.', sessions:'ورودهای فعال حساب فعلی را مدیریت کن.', access:'مشخص کن چه کسی کمدت را ببیند یا داخلش فایل ذخیره کند.', storage:'فضای فایل‌ها و شیوه حذف را مدیریت کن.', files:'مقصد فایل‌های تازه و لینک‌ها را انتخاب کن.', appearance:'رنگ و حالت نمایش کمد را تنظیم کن.', markdown:'ظاهر و رفتار پیش‌فرض فایل‌های متنی را تنظیم کن.', connection:'آدرس اصلی و مسیرهای جایگزین HTTPS را مدیریت کن.', admin:'کاربران کمد را مدیریت کن.', tags:'تگ‌های دلخواه و نمایش آن‌ها را تنظیم کن.', transfers:'همه انتقال‌های فعال و اخیر را یکجا مدیریت کن.', tts:'ساخت صدا و استخراج متن.' })[view]; }
 function securityEventLabel(type: string) { return ({ login_success:'ورود موفق به حساب', login_failed:'تلاش ناموفق برای ورود', credentials_updated:'تغییر اطلاعات ورود', sessions_revoked_all:'خروج از همه نشست‌ها', sessions_revoked_others:'خروج از نشست‌های دیگر', session_revoked:'لغو یک نشست', public_link_created:'ساخت پیوند عمومی', public_link_revoked:'لغو پیوند عمومی', public_link_unlocked:'باز شدن پیوند رمزدار', public_link_password_failed:'رمز اشتباه برای پیوند عمومی', public_view:'مشاهده پیوند عمومی', account_backup_restored:'بازیابی نسخه پشتیبان حساب', workspace_grant_updated:'تغییر دسترسی اشتراک‌گذاری', workspace_grant_revoked:'لغو دسترسی اشتراک‌گذاری', vault_password_updated:'تغییر رمز گاوصندوق', vault_unlocked:'باز شدن گاوصندوق', vault_unlock_failed:'رمز اشتباه گاوصندوق' } as Record<string,string>)[type] || 'رویداد امنیتی'; }
 function permissionLabel(permission: 'owner' | Permission) { return permission === 'owner' ? 'کمد خودم' : permission === 'write' ? 'مشاهده و ذخیره' : 'فقط مشاهده'; }
 function PermissionSelect({ value, onChange }:{ value:Permission; onChange:(value:Permission)=>void }) { return <CustomSelect value={value} onChange={onChange} options={[{value:'read',label:'👁️ فقط مشاهده'},{value:'write',label:'📥 مشاهده و ذخیره'}]}/>; }

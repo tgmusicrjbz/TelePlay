@@ -25,6 +25,18 @@
 .markdown-article--cream :is(h1,h2,h3,h4,h5,h6,strong,a,.katex), .markdown-article--white :is(h1,h2,h3,h4,h5,h6,strong,a,.katex) { color: #81552e !important; }
 .markdown-article--cream code:not(pre code), .markdown-article--white code:not(pre code) { color: #292524 !important; }
 .markdown-article--cream pre code, .markdown-article--white pre code { color: #e2e8f0 !important; }
+.markdown-article--custom { background: var(--md-surface); color: var(--md-text); border-color: var(--md-border); box-shadow: 0 0 0 100vmax var(--md-background), inset 0 0 24px rgb(0 0 0 / .08); }
+.markdown-article--custom h1 { color: var(--md-h1) !important; }
+.markdown-article--custom h2 { color: var(--md-h2) !important; }
+.markdown-article--custom :is(h3,h4,h5,h6) { color: var(--md-h3) !important; }
+.markdown-article--custom strong { color: var(--md-bold) !important; }
+.markdown-article--custom em { color: var(--md-italic) !important; }
+.markdown-article--custom a, .markdown-article--custom button[class*="underline"] { color: var(--md-link) !important; }
+.markdown-article--custom blockquote { color: var(--md-quote) !important; border-color: var(--md-quote) !important; }
+.markdown-article--custom .katex { color: var(--md-formula) !important; }
+.markdown-article--custom code:not(pre code) { color: var(--md-inline-code) !important; background: color-mix(in srgb, var(--md-inline-code-bg) 68%, transparent) !important; }
+.markdown-article--custom div:has(> div > pre) { background: var(--md-code-bg) !important; border-color: var(--md-border) !important; }
+.markdown-article--custom pre, .markdown-article--custom pre code { color: var(--md-code) !important; background: var(--md-code-bg) !important; }
 .markdown-font--vazir { font-family: "Vazirmatn", system-ui, sans-serif !important; }
 .markdown-font--yekan { font-family: "IRANYekan", "Yekan Bakh", "B Yekan", "Vazirmatn", sans-serif !important; }
 .markdown-font--iransans { font-family: "IRANSans", "Iran Sans", "Vazirmatn", sans-serif !important; }
