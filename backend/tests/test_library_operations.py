@@ -88,6 +88,10 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             listed_ids = {item.id for item in folder_listing.files}
             self.assertNotIn(image.id, listed_ids)
             self.assertIn(text_file.id, listed_ids)
+            root_listing = await list_files(folder_id=None, file_type="image", search=None, page=1, per_page=20, db=db, current_user=user)
+            self.assertNotIn(image.id, {item.id for item in root_listing.files})
+            search_listing = await list_files(folder_id=None, file_type=None, search="cover", page=1, per_page=20, db=db, current_user=user)
+            self.assertNotIn(image.id, {item.id for item in search_listing.files})
 
     async def test_caption_directives_are_parsed_and_removed_from_description(self):
         from app.caption_metadata import parse_file_caption
@@ -811,6 +815,18 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             refreshed = (await db.execute(select(File).where(File.id.in_([first.id, second.id])).order_by(File.id))).scalars().all()
             self.assertEqual([item.file_name for item in refreshed], ["fav-one.mp4", "fav-two.mp3"])
             self.assertEqual([item.description for item in refreshed], ["old\nnew", "new"])
+
+    async def test_batch_edit_cleans_links_mentions_and_hashtags(self):
+        async with async_session() as db:
+            item = self.make_file(self.user_id, None, 128)
+            item.description = "دیدن [راهنما](https://example.com/x) @sample_user #تبلیغ\nمتن باقی می‌ماند"
+            db.add(item); await db.commit(); await db.refresh(item)
+            user = await db.get(User, self.user_id)
+            await batch_update_files(BatchFileUpdate(
+                ids=[item.id], cleanup_links=True, cleanup_mentions=True, cleanup_hashtags=True,
+            ), db, user)
+            await db.refresh(item)
+            self.assertEqual(item.description, "دیدن راهنما\nمتن باقی می‌ماند")
 
     async def test_batch_edit_adds_removes_and_replaces_tags(self):
         async with async_session() as db:

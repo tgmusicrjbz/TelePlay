@@ -891,7 +891,7 @@ async def render_storage_target(message: Message, telegram_id: int, parent_id: i
         buttons.append(pagination_row(f"storage_target:{parent_id or 0}", page, len(children)))
     if parent is not None:
         buttons.append([InlineKeyboardButton("⬆️ یک سطح بالاتر", callback_data=f"storage_target:{parent.parent_id or 0}:0")])
-    buttons.append([InlineKeyboardButton("➕ ساخت کشوی تازه", callback_data="create_folder")])
+    buttons.append([InlineKeyboardButton("➕ ساخت کشوی تازه", callback_data=f"create_storage_folder:{parent_id or 0}")])
     buttons.append([InlineKeyboardButton("↩️ منوی اصلی", callback_data="home")])
     current_name = path_for(folder_map.get(current_id)) if current_id else "کشوی پیش‌فرض"
     await safe_edit(
@@ -3055,9 +3055,12 @@ async def handle_callback(client, callback: CallbackQuery):
         await callback.message.edit("🧹 توضیحات فایل پاک شد.\n\n" + file_detail_text(file), reply_markup=file_detail_keyboard_for_user(file, callback.from_user.id))
         await callback.answer("توضیحات پاک شد.")
         
-    elif data == "create_folder" or data.startswith("create_folder:"):
+    elif data == "create_folder" or data.startswith("create_folder:") or data.startswith("create_storage_folder:"):
         # Interactive folder creation using listener
+        storage_destination_flow = data.startswith("create_storage_folder:")
         parent_id = int(data.split(":")[1]) if ":" in data else None
+        if storage_destination_flow and parent_id == 0:
+            parent_id = None
         if parent_id is not None:
             async with async_session() as db:
                 parent = (await db.execute(owned_folder(parent_id, callback.from_user.id))).scalar_one_or_none()
@@ -3076,7 +3079,10 @@ async def handle_callback(client, callback: CallbackQuery):
             reply, action = await wait_for_input(client, callback.message.chat.id, timeout=60)
             
             if action == "cancel" or (reply and reply.text and reply.text.startswith("/cancel")):
-                await render_folder_page(callback.message, callback.from_user.id, parent_id)
+                if storage_destination_flow:
+                    await render_storage_target(callback.message, callback.from_user.id, parent_id)
+                else:
+                    await render_folder_page(callback.message, callback.from_user.id, parent_id)
                 return
             
             folder_name = reply.text.strip() if reply.text else None
@@ -3118,13 +3124,17 @@ async def handle_callback(client, callback: CallbackQuery):
                 db.add(folder)
                 await db.commit()
             
-            await callback.message.edit(
-                f"✅ کشوی «{folder_name}» ساخته شد.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🗃️ باز کردن کشو", callback_data=f"folder:{folder.id}:0")],
-                    [InlineKeyboardButton("↩️ بازگشت به کشوی قبلی", callback_data=f"folders:{parent_id or 0}:0")],
-                ]),
-            )
+            if storage_destination_flow:
+                await set_upload_drawer(callback.from_user.id, folder.id)
+                await render_storage_target(callback.message, callback.from_user.id, folder.id, 0)
+            else:
+                await callback.message.edit(
+                    f"✅ کشوی «{folder_name}» ساخته شد.",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("🗃️ باز کردن کشو", callback_data=f"folder:{folder.id}:0")],
+                        [InlineKeyboardButton("↩️ بازگشت به کشوی قبلی", callback_data=f"folders:{parent_id or 0}:0")],
+                    ]),
+                )
             
         except Exception as e:
             if "timeout" in str(e).lower():

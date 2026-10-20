@@ -9,6 +9,9 @@ interface Props { open: boolean; count: number; onClose: () => void; onSave: (da
 export default function BatchEditModal({ open, count, onClose, onSave }: Props) {
     const [descriptionMode, setDescriptionMode] = useState<'none' | 'set' | 'append' | 'clear'>('none');
     const [description, setDescription] = useState('');
+    const [cleanupLinks,setCleanupLinks]=useState(false);
+    const [cleanupMentions,setCleanupMentions]=useState(false);
+    const [cleanupHashtags,setCleanupHashtags]=useState(false);
     const [renameMode, setRenameMode] = useState<'none' | 'prefix' | 'suffix' | 'replace'>('none');
     const [renameValue, setRenameValue] = useState('');
     const [renameSearch, setRenameSearch] = useState('');
@@ -17,22 +20,25 @@ export default function BatchEditModal({ open, count, onClose, onSave }: Props) 
     const [saving, setSaving] = useState(false);
     useEffect(() => {
         if (open) {
-            setDescriptionMode('none'); setDescription(''); setRenameMode('none');
+            setDescriptionMode('none'); setDescription(''); setCleanupLinks(false); setCleanupMentions(false); setCleanupHashtags(false); setRenameMode('none');
             setRenameValue(''); setRenameSearch(''); setTagsMode('none'); setTagsText(''); setSaving(false);
         }
     }, [open]);
     if (!open) return null;
-    const valid = (descriptionMode !== 'none' || renameMode !== 'none' || tagsMode !== 'none')
+    const valid = (descriptionMode !== 'none' || cleanupLinks || cleanupMentions || cleanupHashtags || renameMode !== 'none' || tagsMode !== 'none')
         && (renameMode === 'none' || renameMode === 'replace' || renameValue.length > 0)
         && (renameMode !== 'replace' || renameSearch.length > 0)
         && (tagsMode === 'none' || tagsMode === 'replace' || tagsText.trim().length > 0);
     const submit = async () => {
-        if (descriptionMode === 'none' && renameMode === 'none' && tagsMode === 'none') return;
+        if (descriptionMode === 'none' && !cleanupLinks && !cleanupMentions && !cleanupHashtags && renameMode === 'none' && tagsMode === 'none') return;
         setSaving(true);
         try {
             const tags = tagsText.split(/[،,\n]+/).map(tag => tag.trim()).filter(Boolean);
             await onSave({
                 ...(descriptionMode !== 'none' && { description_mode: descriptionMode, description }),
+                cleanup_links:cleanupLinks,
+                cleanup_mentions:cleanupMentions,
+                cleanup_hashtags:cleanupHashtags,
                 ...(renameMode !== 'none' && { rename_mode: renameMode, rename_value: renameValue, rename_search: renameSearch }),
                 ...(tagsMode === 'add' && { tags_add: tags }),
                 ...(tagsMode === 'remove' && { tags_remove: tags }),
@@ -47,6 +53,8 @@ export default function BatchEditModal({ open, count, onClose, onSave }: Props) 
             <label className="mt-5 block text-sm text-dark-300">توضیحات</label>
             <CustomSelect className="mt-2" value={descriptionMode} onChange={setDescriptionMode} options={[{value:'none',label:'بدون تغییر'},{value:'set',label:'جایگزینی'},{value:'append',label:'افزودن به توضیحات فعلی'},{value:'clear',label:'پاک‌کردن'}]}/>
             {(descriptionMode === 'set' || descriptionMode === 'append') && <textarea className="mt-2 min-h-24 w-full rounded-xl border border-white/10 bg-dark-800 p-3" maxLength={1024} value={description} onChange={e => setDescription(e.target.value)} placeholder="متن توضیحات…" />}
+            <div className="mt-2 grid grid-cols-3 gap-1 rounded-xl border border-white/[.06] bg-white/[.025] p-1">{([[cleanupLinks,setCleanupLinks,'پیوندها'],[cleanupMentions,setCleanupMentions,'آیدی‌ها'],[cleanupHashtags,setCleanupHashtags,'هشتگ‌ها']] as const).map(([checked,setChecked,label])=><button type="button" key={label} onClick={()=>setChecked(!checked)} className={`min-h-9 rounded-lg px-2 text-xs transition ${checked?'bg-primary-500/15 text-primary-200':'text-dark-400 hover:bg-white/[.04]'}`}>{checked?'✓ ':''}{label}</button>)}</div>
+            <p className="mt-1 text-[10px] text-dark-500">موارد انتخاب‌شده از توضیحات همهٔ فایل‌ها پاک می‌شوند.</p>
             <label className="mt-4 block text-sm text-dark-300">تغییر نام</label>
             <CustomSelect className="mt-2" value={renameMode} onChange={setRenameMode} options={[{value:'none',label:'بدون تغییر'},{value:'prefix',label:'افزودن پیشوند'},{value:'suffix',label:'افزودن پسوند'},{value:'replace',label:'پیدا و جایگزین'}]}/>
             {renameMode === 'replace' && <input className="mt-2 w-full rounded-xl border border-white/10 bg-dark-800 p-3" value={renameSearch} onChange={e => setRenameSearch(e.target.value)} placeholder="عبارت موردنظر" />}

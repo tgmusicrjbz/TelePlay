@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bold, BookOpen, Boxes, Check, ChevronLeft, ChevronRight, Code2, Eye, EyeOff, Grid3X3, Heading2, ImagePlus, Italic, Link2, List, ListChecks, Loader2, Maximize2, Minimize2, Pencil, PencilLine, Quote, Save, Table2, Trash2, Upload, X } from 'lucide-react';
+import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, BookOpen, Boxes, Check, ChevronLeft, ChevronRight, Code2, Eye, EyeOff, Grid3X3, Heading2, ImagePlus, Italic, Link2, List, ListChecks, Loader2, Maximize2, Minimize2, Minus, Pencil, PencilLine, Plus, Quote, Save, Table2, Trash2, Upload, X } from 'lucide-react';
 import { api, canPreviewText, Folder, Pack, PackSummary, TelegramFile, useAddPackItems, useCreatePack, useDeletePack, useFiles, useFolderTree, usePack, usePacks, useRemovePackItem, useUpdatePack, useUploadFile } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import CustomSelect from './CustomSelect';
 import MarkdownContent from './MarkdownContent';
 import { InlineMediaPlayer } from './MediaPlayer';
+import InternalFileLinkPicker from './InternalFileLinkPicker';
 
 const packTextPreviewCache = new Map<number,string>();
+const packReaderFonts=[{value:'vazir',label:'وزیرمتن'},{value:'yekan',label:'یکان'},{value:'iransans',label:'ایران‌سنس'},{value:'bnazanin',label:'بی‌نازنین'},{value:'tahoma',label:'تاهوما'},{value:'serif',label:'نسخ'},{value:'inter',label:'Inter'},{value:'georgia',label:'Georgia'}];
 
 function flattenFolders(items:Folder[],depth=0):Array<{value:number|null;label:string}>{return items.flatMap(folder=>[{value:folder.id,label:`${'— '.repeat(depth)}${folder.name}`},...flattenFolders(folder.children||[],depth+1)])}
 
@@ -19,6 +21,22 @@ function SafeThumbnail({src,type,className='',alt=''}:{src?:string|null;type:str
     const [failed,setFailed]=useState(false);
     useEffect(()=>setFailed(false),[src]);
     return !src||failed?<FilePlaceholder type={type} className={className}/>:<img loading="lazy" decoding="async" src={src} alt={alt} onError={()=>setFailed(true)} className={className}/>;
+}
+
+function PackImage({file}:{file:TelegramFile}) {
+    const high=authenticatedUrl(file.stream_url);
+    const preview=file.thumbnail_url?authenticatedUrl(file.thumbnail_url):'';
+    const [loaded,setLoaded]=useState(false);
+    const [failed,setFailed]=useState(false);
+    const [scale,setScale]=useState(1);
+    const pinch=useRef<{distance:number;scale:number}|null>(null);
+    useEffect(()=>{setLoaded(false);setFailed(false);setScale(1)},[file.id]);
+    const distance=(touches:React.TouchList)=>Math.hypot(touches[0].clientX-touches[1].clientX,touches[0].clientY-touches[1].clientY);
+    return <div className="relative flex h-full w-full items-center justify-center overflow-auto" style={{touchAction:scale>1?'none':'pan-y'}} onDoubleClick={()=>setScale(value=>value===1?2:1)} onTouchStart={event=>{if(event.touches.length===2)pinch.current={distance:distance(event.touches),scale}}} onTouchMove={event=>{if(event.touches.length!==2||!pinch.current)return;event.preventDefault();setScale(Math.min(5,Math.max(1,pinch.current.scale*distance(event.touches)/pinch.current.distance)))}} onTouchEnd={()=>{pinch.current=null}}>
+        {preview&&!loaded&&<img src={preview} alt="" aria-hidden className="absolute inset-0 h-full w-full object-contain blur-[1px]"/>}
+        {failed&&!preview?<FilePlaceholder type="image" className="h-40 w-40 rounded-3xl"/>:<img src={failed?preview:high} alt={file.file_name} draggable={false} onLoad={()=>setLoaded(true)} onError={()=>setFailed(true)} className={`max-h-full max-w-full object-contain transition duration-300 ${loaded||failed?'opacity-100':'opacity-0'}`} style={{transform:`scale(${scale})`,transformOrigin:'center'}}/>}
+        {scale>1&&<button type="button" className="absolute bottom-3 right-3 rounded-xl bg-black/65 px-3 py-2 text-xs backdrop-blur" onClick={()=>setScale(1)}>بازنشانی زوم</button>}
+    </div>;
 }
 
 function authenticatedUrl(url:string) {
@@ -51,25 +69,29 @@ function PackContent({file,onRead,expanded=false}:{file:TelegramFile;onRead:()=>
     const [loading,setLoading]=useState(false);
     const [editing,setEditing]=useState(false);
     const [saving,setSaving]=useState(false);
-    const [imageFallback,setImageFallback]=useState(false);
+    const [readerFontSize,setReaderFontSize]=useState(()=>Number(localStorage.getItem('komod-reader-font-size'))||16);
+    const [readerLineHeight,setReaderLineHeight]=useState(()=>Number(localStorage.getItem('komod-reader-line-height'))||2);
+    const [readerFont,setReaderFont]=useState(()=>localStorage.getItem('komod-reader-font')||'vazir');
+    const [readerAlign,setReaderAlign]=useState<'right'|'left'|'center'|'justify'>(()=>(localStorage.getItem('komod-reader-align') as 'right'|'left'|'center'|'justify')||'right');
+    const [showInternalLinkPicker,setShowInternalLinkPicker]=useState(false);
     const editorRef=useRef<HTMLTextAreaElement|null>(null);
-    const imageUrl=authenticatedUrl(file.stream_url);
     useEffect(()=>{
         const cached=packTextPreviewCache.get(file.id)||'';
-        setText(cached); setDraft(cached); setLoading(false); setEditing(false); setImageFallback(false);
+        setText(cached); setDraft(cached); setLoading(false); setEditing(false);
         if(!canPreviewText(file)) return;
         if(cached)return;
         let active=true; setLoading(true);
         api.get<{content:string}>(`/files/${file.id}/text`).then(({data})=>{packTextPreviewCache.set(file.id,data.content);if(active){setText(data.content);setDraft(data.content)}}).catch(()=>{if(active)setText('پیش‌نمایش متن آماده نشد.')}).finally(()=>{if(active)setLoading(false)});
         return()=>{active=false};
     },[file]);
-    if(file.file_type==='image') return <SafeThumbnail src={imageFallback?(file.thumbnail_url||imageUrl):imageUrl} type="image" alt={file.file_name} className="h-full max-h-full w-full object-contain"/>;
+    useEffect(()=>{localStorage.setItem('komod-reader-font-size',String(readerFontSize));localStorage.setItem('komod-reader-line-height',String(readerLineHeight));localStorage.setItem('komod-reader-font',readerFont);localStorage.setItem('komod-reader-align',readerAlign)},[readerAlign,readerFont,readerFontSize,readerLineHeight]);
+    if(file.file_type==='image') return <PackImage file={file}/>;
     if(file.file_type==='video'||file.file_type==='audio') return <InlineMediaPlayer file={file} expanded={expanded}/>;
     if(canPreviewText(file)) {
         const save=async()=>{setSaving(true);try{const {data}=await api.patch<{content:string}>(`/files/${file.id}/text`,{content:draft});packTextPreviewCache.set(file.id,data.content);setText(data.content);setDraft(data.content);setEditing(false)}finally{setSaving(false)}};
         const insert=(before:string,after='',sample='متن')=>{const input=editorRef.current;if(!input)return;const start=input.selectionStart,end=input.selectionEnd,selected=draft.slice(start,end)||sample;const next=`${draft.slice(0,start)}${before}${selected}${after}${draft.slice(end)}`;setDraft(next);requestAnimationFrame(()=>{input.focus();input.setSelectionRange(start+before.length,start+before.length+selected.length)})};
-        const tools=[['عنوان',Heading2,()=>insert('## ','','عنوان')],['ضخیم',Bold,()=>insert('**','**')],['کج',Italic,()=>insert('_','_')],['پیوند',Link2,()=>insert('[','](https://)')],['فهرست',ListChecks,()=>insert('- ','','مورد')],['نقل‌قول',Quote,()=>insert('> ','','نقل‌قول')],['کد',Code2,()=>insert('```\n','\n```','code')],['جدول',Table2,()=>insert('| عنوان | مقدار |\n| --- | --- |\n| ',' |','متن')]] as const;
-        return <div className="m-3 flex h-[calc(100%_-_1.5rem)] min-h-0 w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-white/[.07] bg-dark-950/45 sm:m-6 sm:h-[calc(100%_-_3rem)]"><div className="flex shrink-0 items-center justify-between border-b border-white/[.06] p-2"><div className="grid grid-cols-2 rounded-xl bg-white/[.04] p-1"><button type="button" onClick={()=>setEditing(false)} className={`flex h-9 items-center gap-1.5 rounded-lg px-3 text-xs transition ${!editing?'bg-primary-500 text-white':'text-dark-400 hover:text-white'}`}><BookOpen className="h-3.5 w-3.5"/>مطالعه</button><button type="button" onClick={()=>setEditing(true)} className={`flex h-9 items-center gap-1.5 rounded-lg px-3 text-xs transition ${editing?'bg-primary-500 text-white':'text-dark-400 hover:text-white'}`}><PencilLine className="h-3.5 w-3.5"/>ویرایش</button></div>{editing&&<button disabled={saving} className="flex h-9 items-center gap-1.5 rounded-xl bg-primary-500/15 px-3 text-xs font-semibold text-primary-100" onClick={()=>void save()}>{saving?<Loader2 className="h-3.5 w-3.5 animate-spin"/>:<Check className="h-3.5 w-3.5"/>}ذخیره</button>}</div>{editing&&<div className="flex shrink-0 gap-1 overflow-x-auto border-b border-white/[.06] p-2">{tools.map(([label,Icon,action])=><button key={label} type="button" title={label} onClick={action} className="btn-icon h-9 w-9 shrink-0"><Icon className="h-4 w-4"/></button>)}</div>}<div className="min-h-0 flex-1 overflow-auto p-3 sm:p-5">{loading?<span className="flex items-center justify-center gap-2 text-dark-400"><Loader2 className="h-4 w-4 animate-spin"/>در حال خواندن متن…</span>:editing?<textarea ref={editorRef} dir="auto" value={draft} onChange={event=>setDraft(event.target.value)} className="input h-full min-h-[18rem] w-full resize-none text-right leading-8"/>:<MarkdownContent content={text} wide fontSize={15} lineHeight={2}/>}</div></div>;
+        const tools=[['عنوان',Heading2,()=>insert('## ','','عنوان')],['ضخیم',Bold,()=>insert('**','**')],['کج',Italic,()=>insert('_','_')],['پیوند وب',Link2,()=>insert('[','](https://)')],['فهرست',ListChecks,()=>insert('- ','','مورد')],['نقل‌قول',Quote,()=>insert('> ','','نقل‌قول')],['کد',Code2,()=>insert('```\n','\n```','code')],['جدول',Table2,()=>insert('| عنوان | مقدار |\n| --- | --- |\n| ',' |','متن')]] as const;
+        return <><div className="m-3 flex h-[calc(100%_-_1.5rem)] min-h-0 w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-white/[.07] bg-dark-950/45 sm:m-6 sm:h-[calc(100%_-_3rem)]"><div className="flex shrink-0 items-center justify-between border-b border-white/[.06] p-2"><div className="grid grid-cols-2 rounded-xl bg-white/[.04] p-1"><button type="button" onClick={()=>setEditing(false)} className={`flex h-9 items-center gap-1.5 rounded-lg px-3 text-xs transition ${!editing?'bg-primary-500 text-white':'text-dark-400 hover:text-white'}`}><BookOpen className="h-3.5 w-3.5"/>مطالعه</button><button type="button" onClick={()=>setEditing(true)} className={`flex h-9 items-center gap-1.5 rounded-lg px-3 text-xs transition ${editing?'bg-primary-500 text-white':'text-dark-400 hover:text-white'}`}><PencilLine className="h-3.5 w-3.5"/>ویرایش</button></div>{editing&&<button disabled={saving} className="flex h-9 items-center gap-1.5 rounded-xl bg-primary-500/15 px-3 text-xs font-semibold text-primary-100" onClick={()=>void save()}>{saving?<Loader2 className="h-3.5 w-3.5 animate-spin"/>:<Check className="h-3.5 w-3.5"/>}ذخیره</button>}</div>{!editing&&<div className="flex shrink-0 items-center gap-1.5 overflow-x-auto border-b border-white/[.06] p-2"><div className="min-w-36 shrink-0"><CustomSelect value={readerFont} onChange={setReaderFont} options={packReaderFonts}/></div><div className="flex shrink-0 items-center rounded-xl border border-white/[.07] bg-dark-800/70 p-1"><button className="btn-icon h-8 w-8" disabled={readerFontSize<=13} onClick={()=>setReaderFontSize(value=>Math.max(13,value-1))}><Minus className="h-3.5 w-3.5"/></button><span dir="ltr" className="min-w-10 text-center text-[10px] text-dark-300">{readerFontSize}px</span><button className="btn-icon h-8 w-8" disabled={readerFontSize>=24} onClick={()=>setReaderFontSize(value=>Math.min(24,value+1))}><Plus className="h-3.5 w-3.5"/></button></div><div className="flex shrink-0 items-center rounded-xl border border-white/[.07] bg-dark-800/70 p-1">{([['right',AlignRight],['center',AlignCenter],['left',AlignLeft],['justify',AlignJustify]] as const).map(([value,Icon])=><button key={value} className={`btn-icon h-8 w-8 ${readerAlign===value?'bg-primary-500/15 text-primary-200':''}`} onClick={()=>setReaderAlign(value)}><Icon className="h-3.5 w-3.5"/></button>)}</div><div className="flex shrink-0 items-center rounded-xl border border-white/[.07] bg-dark-800/70 p-1"><button className="btn-icon h-8 w-8" disabled={readerLineHeight<=1.4} onClick={()=>setReaderLineHeight(value=>Math.max(1.4,Number((value-.1).toFixed(1))))}><Minus className="h-3.5 w-3.5"/></button><span dir="ltr" className="min-w-8 text-center text-[10px] text-dark-300">{readerLineHeight.toFixed(1)}</span><button className="btn-icon h-8 w-8" disabled={readerLineHeight>=2.8} onClick={()=>setReaderLineHeight(value=>Math.min(2.8,Number((value+.1).toFixed(1))))}><Plus className="h-3.5 w-3.5"/></button></div></div>}{editing&&<div className="flex shrink-0 gap-1 overflow-x-auto border-b border-white/[.06] p-2">{tools.map(([label,Icon,action])=><button key={label} type="button" title={label} onClick={action} className="btn-icon h-9 w-9 shrink-0"><Icon className="h-4 w-4"/></button>)}<button type="button" title="پیوند به فایل کمد" onClick={()=>setShowInternalLinkPicker(true)} className="btn-icon h-9 w-9 shrink-0"><Link2 className="h-4 w-4"/></button></div>}<div className="min-h-0 flex-1 overflow-auto p-3 sm:p-5">{loading?<span className="flex items-center justify-center gap-2 text-dark-400"><Loader2 className="h-4 w-4 animate-spin"/>در حال خواندن متن…</span>:editing?<textarea ref={editorRef} dir="auto" value={draft} onChange={event=>setDraft(event.target.value)} className="input h-full min-h-[18rem] w-full resize-none text-right leading-8"/>:<MarkdownContent content={text} wide fontSize={readerFontSize} lineHeight={readerLineHeight} fontFamily={readerFont} align={readerAlign}/>}</div></div>{showInternalLinkPicker&&<InternalFileLinkPicker onClose={()=>setShowInternalLinkPicker(false)} onSelect={linkedFile=>{insert('[',`](komod://file/${linkedFile.id})`,linkedFile.file_name);setShowInternalLinkPicker(false)}}/>}</>;
     }
     return <button type="button" onClick={onRead} className="max-w-lg p-8 text-center"><FilePlaceholder type={file.file_type} className="mx-auto h-32 w-32 rounded-[2rem]"/><h3 dir="auto" className="mt-5 break-words text-lg font-bold">{file.file_name}</h3></button>;
 }

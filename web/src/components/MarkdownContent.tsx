@@ -2,12 +2,18 @@ import { Fragment, useMemo, useState } from 'react';
 import { Copy } from 'lucide-react';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
+import { api, TelegramFile } from '../lib/api';
+import { useAppStore } from '../lib/store';
 
 type ReaderTone = 'dark'|'gray'|'cream'|'white'|'ocean'|'forest'|'plum'|'sepia';
 function inlineMarkdown(text: string) {
     return text.split(/(!\[[^\]]*\]\([^)]+\)|\[[^\]]+\]\([^)]+\)|<a\s+href=["'][^"']+["'][^>]*>.*?<\/a>|<(?:strong|b)>.*?<\/(?:strong|b)>|<(?:em|i)>.*?<\/(?:em|i)>|https?:\/\/[^\s<]+|\{\{[^{}]+\}\}|\$[^$\n]+\$|\*\*[^*]+\*\*|__[^_]+__|<u>.*?<\/u>|~~[^~]+~~|`[^`]+`|\*[^*]+\*)/gi).map((part, index) => {
         const image = part.match(/^!\[([^\]]*)\]\(([^)]+)\)$/); if (image) return <img key={index} src={image[2]} alt={image[1]} loading="lazy" className="my-4 max-h-[70vh] max-w-full rounded-2xl border border-white/[.07] object-contain shadow-xl"/>;
-        const link = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/); if (link) return <a key={index} href={link[2]} target="_blank" rel="noreferrer" className="break-all font-medium text-sky-300 underline decoration-sky-500/40 underline-offset-4 transition hover:text-sky-200">{link[1]}</a>;
+        const link = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/); if (link) {
+            const internal=link[2].match(/^komod:\/\/file\/(\d+)$/i);
+            if(internal)return <button type="button" key={index} onClick={()=>void openInternalFile(Number(internal[1]))} className="inline-flex max-w-full items-center gap-1 break-words font-medium text-primary-200 underline decoration-primary-400/40 underline-offset-4 transition hover:text-primary-100">{link[1]}</button>;
+            return <a key={index} href={link[2]} target="_blank" rel="noreferrer" className="break-all font-medium text-sky-300 underline decoration-sky-500/40 underline-offset-4 transition hover:text-sky-200">{link[1]}</a>;
+        }
         const htmlLink=part.match(/^<a\s+href=["']([^"']+)["'][^>]*>(.*?)<\/a>$/i); if(htmlLink)return <a key={index} href={htmlLink[1]} target="_blank" rel="noreferrer" className="break-words font-medium text-sky-300 underline decoration-sky-500/40 underline-offset-4 transition hover:text-sky-200">{htmlLink[2]}</a>;
         if(/^https?:\/\//i.test(part))return <a key={index} href={part} target="_blank" rel="noreferrer" className="break-all font-medium text-sky-300 underline decoration-sky-500/40 underline-offset-4 transition hover:text-sky-200">{part}</a>;
         const htmlStrong=part.match(/^<(?:strong|b)>(.*?)<\/(?:strong|b)>$/i); if(htmlStrong)return <strong key={index} className="font-extrabold text-amber-200">{htmlStrong[1]}</strong>;
@@ -21,6 +27,21 @@ function inlineMarkdown(text: string) {
         if (part.startsWith('*')) return <em key={index} className="text-violet-200">{part.slice(1, -1)}</em>;
         return <Fragment key={index}>{part}</Fragment>;
     });
+}
+
+export function MarkdownInline({content}:{content:string}) {
+    return <>{content.split(/\r?\n/).map((line,index)=><Fragment key={index}>{index>0&&<br/>}{inlineMarkdown(line)}</Fragment>)}</>;
+}
+
+async function openInternalFile(id:number) {
+    const store=useAppStore.getState();
+    try {
+        const {data}=await api.get<TelegramFile>(`/files/${id}`);
+        if(data.file_type==='audio'||data.file_type==='video')store.setPreviewFile(data);
+        else store.setContentPreviewFile(data);
+    } catch {
+        store.addToast('این فایل پیدا نشد یا دیگر به آن دسترسی نداری.','error');
+    }
 }
 
 function MathFormula({source,displayMode=false}:{source:string;displayMode?:boolean}) {

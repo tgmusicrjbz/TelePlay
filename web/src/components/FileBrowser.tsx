@@ -926,6 +926,14 @@ export default function FileBrowser() {
     const selectedPlayableFilesForActions = selectedFilesForActions.filter(file => file.file_type === 'audio' || file.file_type === 'video');
     const selectedFoldersForActions = folders?.filter(folder => selectedFolderIds.has(folder.id)) || [];
     const selectedItems = [...selectedFilesForActions, ...selectedFoldersForActions];
+    const selectFileRange=()=>{
+        const ordered=(displayFiles||[]).map(file=>file.id);
+        const selectedIndexes=ordered.map((id,index)=>selectedFileIds.has(id)?index:-1).filter(index=>index>=0);
+        if(selectedIndexes.length<2){addToast('اول فایل ابتدا و انتهای بازه را انتخاب کن.','info');return}
+        const first=Math.min(...selectedIndexes),last=Math.max(...selectedIndexes);
+        selectAll(ordered.slice(first,last+1),Array.from(selectedFolderIds));
+        addToast(`${(last-first+1).toLocaleString('fa-IR')} فایلِ بین دو انتخاب انتخاب شد.`);
+    };
     const sectionTitle = activeSection === 'activity' ? 'فعالیت' : (breadcrumbs[breadcrumbs.length - 1]?.name || 'کمد من');
     const shownFolderCount = showFolders ? visibleFolders?.length || 0 : 0;
     const shownPackCount = showPacks ? visiblePacks.length : 0;
@@ -1196,6 +1204,7 @@ export default function FileBrowser() {
                             <span className="shrink-0 px-2 text-xs font-semibold text-primary-200">{selectedItems.length ? `${selectedItems.length.toLocaleString('fa-IR')} انتخاب` : 'یک کارت را لمس کن'}</span>
                             {selectedItems.length === 1 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-200 hover:bg-white/10" aria-label="تغییر نام" title="تغییر نام" onClick={() => selectedFilesForActions[0] ? setRenameFile(selectedFilesForActions[0]) : setRenameFolder(selectedFoldersForActions[0])}><Pencil className="h-5 w-5" /></button>}
                             {selectedFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-200 hover:bg-white/10" aria-label="تگ‌ها و ویرایش گروهی" title="افزودن، حذف یا جایگزینی تگ‌ها" onClick={() => setShowBatchEdit(true)}><Tags className="h-5 w-5" /></button>}
+                            {selectedFileIds.size>=2&&<button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-primary-200 hover:bg-primary-500/10" aria-label="انتخاب فایل‌های میانی" title="انتخاب همه فایل‌های بین اولین و آخرین انتخاب" onClick={selectFileRange}><ListChecks className="h-5 w-5"/></button>}
                             {selectedFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-violet-200 hover:bg-violet-500/10" aria-label="ساخت جعبه" title="قرار دادن فایل‌های انتخابی در یک جعبه" onClick={() => setShowCreatePack(true)}><Boxes className="h-5 w-5" /></button>}
                             {selectedPlayableFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-emerald-300 hover:bg-emerald-500/10" aria-label="ساخت صف پخش موقت" title="پخش پشت‌سرهم فایل‌های انتخاب‌شده" onClick={() => { startQueue(selectedPlayableFilesForActions,0); cancelSelection(); addToast('صف پخش موقت ساخته شد.'); }}><Play className="h-5 w-5" /></button>}
                             {selectedPlayableFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-500/10 text-primary-200 hover:bg-primary-500/20" aria-label="افزودن به پلی‌لیست" title="افزودن فایل‌های صدا و ویدیو به پلی‌لیست" onClick={() => setPlaylistFiles(selectedPlayableFilesForActions)}><ListPlus className="h-5 w-5" /></button>}
@@ -1219,6 +1228,7 @@ export default function FileBrowser() {
                                 <span className="text-sm font-medium text-primary-200 px-2">{selectedItems.length.toLocaleString('fa-IR')} مورد انتخاب شده</span>
                                 {selectedItems.length === 1 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => selectedFilesForActions[0] ? setRenameFile(selectedFilesForActions[0]) : setRenameFolder(selectedFoldersForActions[0])}><Pencil className="w-4 h-4" /> تغییر نام</button>}
                                 {selectedFilesForActions.length > 0 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => setShowBatchEdit(true)}><Tags className="w-4 h-4" /> تگ‌ها و ویرایش</button>}
+                                {selectedFileIds.size>=2&&<button className="btn-secondary shrink-0 text-sm flex items-center gap-2 text-primary-200" onClick={selectFileRange}><ListChecks className="h-4 w-4"/> انتخاب فاصله</button>}
                                 {selectedFilesForActions.length > 0 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2 text-violet-200" onClick={() => setShowCreatePack(true)}><Boxes className="w-4 h-4" /> ساخت جعبه</button>}
                                 {selectedPlayableFilesForActions.length > 0 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2 text-emerald-200" onClick={() => { startQueue(selectedPlayableFilesForActions,0); cancelSelection(); addToast('صف پخش موقت ساخته شد.'); }}><Play className="w-4 h-4" /> پخش پشت‌سرهم</button>}
                                 {selectedPlayableFilesForActions.length > 0 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => setPlaylistFiles(selectedPlayableFilesForActions)}><ListPlus className="w-4 h-4" /> افزودن به پلی‌لیست</button>}

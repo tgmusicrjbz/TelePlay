@@ -1135,6 +1135,9 @@ export interface BatchFileEdit {
     ids: number[];
     description_mode?: 'set' | 'append' | 'clear';
     description?: string;
+    cleanup_links?: boolean;
+    cleanup_mentions?: boolean;
+    cleanup_hashtags?: boolean;
     rename_mode?: 'prefix' | 'suffix' | 'replace';
     rename_value?: string;
     rename_search?: string;

@@ -115,6 +115,9 @@ class BatchFileUpdate(BaseModel):
     ids: List[int] = Field(min_length=1, max_length=500)
     description_mode: Optional[Literal["set", "append", "clear"]] = None
     description: Optional[str] = None
+    cleanup_links: bool = False
+    cleanup_mentions: bool = False
+    cleanup_hashtags: bool = False
     rename_mode: Optional[Literal["prefix", "suffix", "replace"]] = None
     rename_value: Optional[str] = None
     rename_search: Optional[str] = None

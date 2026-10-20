@@ -773,28 +773,23 @@ async def list_files(
     
     
     # Apply filters
-    browsing_parent_id: int | None = None
-    is_folder_browse = False
     if folder_id is not None:
         query = query.where(File.folder_id == folder_id)
-        browsing_parent_id = folder_id
-        is_folder_browse = not search
     elif scope and (scope["folder_ids"] or scope["file_ids"]) and not search and not file_type and not favorite_only:
         query = query.where(File.id.in_(scope["file_ids"]) if scope["file_ids"] else false())
     elif not hidden_only and not search and not file_type and not favorite_only and not (scope and (scope["folder_ids"] or scope["file_ids"])):
         # If simply browsing (no search/filter), only show files in root (folder_id is NULL)
         query = query.where(File.folder_id.is_(None))
-        is_folder_browse = True
 
-    if is_folder_browse:
-        pack_parent = Pack.parent_folder_id.is_(None) if browsing_parent_id is None else Pack.parent_folder_id == browsing_parent_id
-        query = query.where(~exists().where(
-            PackItem.file_id == File.id,
-            PackItem.pack_id == Pack.id,
-            Pack.user_id == current_user.id,
-            Pack.hide_member_files.is_(True),
-            pack_parent,
-        ))
+    # A pack marked as exclusive owns the visibility of its members regardless
+    # of where the pack and source files live. Stable file ids still keep the
+    # members available inside the pack itself.
+    query = query.where(~exists().where(
+        PackItem.file_id == File.id,
+        PackItem.pack_id == Pack.id,
+        Pack.user_id == current_user.id,
+        Pack.hide_member_files.is_(True),
+    ))
         
     if file_type:
         file_types = [item.strip() for item in file_type.split(",") if item.strip()]
@@ -1251,6 +1246,23 @@ async def batch_update_files(
     tags_to_add = clean_tags(update_data.tags_add)
     tags_to_remove = {tag.casefold() for tag in clean_tags(update_data.tags_remove)}
     replacement_tags = clean_tags(update_data.tags_replace) if update_data.tags_replace is not None else None
+    def clean_description(value: str | None) -> str | None:
+        if not value:
+            return None
+        cleaned = value
+        if update_data.cleanup_links:
+            cleaned = re.sub(r"\[([^\]]+)\]\(https?://[^)]+\)", r"\1", cleaned, flags=re.IGNORECASE)
+            cleaned = re.sub(r"<a\s+[^>]*href=[\"']https?://[^\"']+[\"'][^>]*>(.*?)</a>", r"\1", cleaned, flags=re.IGNORECASE | re.DOTALL)
+            cleaned = re.sub(r"https?://\S+", "", cleaned, flags=re.IGNORECASE)
+        if update_data.cleanup_mentions:
+            cleaned = re.sub(r"(?<![\w@])@[A-Za-z0-9_]{3,}", "", cleaned)
+        if update_data.cleanup_hashtags:
+            cleaned = re.sub(r"(?<![\w#])#[^\s#]+", "", cleaned)
+        cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+        cleaned = re.sub(r"[ \t]+\n", "\n", cleaned)
+        cleaned = re.sub(r"\n[ \t]+", "\n", cleaned)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+        return cleaned[:1024] or None
     for file in files:
         if update_data.is_hidden is not None:
             file.is_hidden = update_data.is_hidden
@@ -1262,6 +1274,8 @@ async def batch_update_files(
             file.description = description or None
         elif update_data.description_mode == "append" and description:
             file.description = f"{file.description}\n{description}".strip()[:1024] if file.description else description
+        if update_data.cleanup_links or update_data.cleanup_mentions or update_data.cleanup_hashtags:
+            file.description = clean_description(file.description)
 
         if update_data.rename_mode:
             name = file.file_name

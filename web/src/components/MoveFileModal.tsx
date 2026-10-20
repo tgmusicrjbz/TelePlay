@@ -2,8 +2,8 @@
  * MoveFileModal - modal for selecting a destination folder
  */
 import { useState } from 'react';
-import { X, Folder as FolderIcon, ChevronRight, Home } from 'lucide-react';
-import { useFolderTree, TelegramFile, Folder, useMoveFiles, useMoveFolders } from '../lib/api';
+import { X, Folder as FolderIcon, ChevronRight, Home, Plus } from 'lucide-react';
+import { useFolderTree, TelegramFile, Folder, useMoveFiles, useMoveFolders, useCreateFolder } from '../lib/api';
 import { useAppStore } from '../lib/store';
 
 interface MoveFileModalProps {
@@ -16,6 +16,9 @@ export default function MoveFileModal({ items, onClose }: MoveFileModalProps) {
     const { data: folderTree, isLoading } = useFolderTree();
     const { mutateAsync: moveFiles, isPending: isFilesPending } = useMoveFiles();
     const { mutateAsync: moveFolders, isPending: isFoldersPending } = useMoveFolders();
+    const createFolder=useCreateFolder();
+    const [creatingFolder,setCreatingFolder]=useState(false);
+    const [folderName,setFolderName]=useState('');
     const { addToast, clearSelection } = useAppStore();
 
     const isPending = isFilesPending || isFoldersPending;
@@ -54,6 +57,15 @@ export default function MoveFileModal({ items, onClose }: MoveFileModalProps) {
         } catch (error) {
             addToast('جابه‌جایی انجام نشد. دوباره تلاش کن.', 'error');
         }
+    };
+    const handleCreateFolder=async()=>{
+        const name=folderName.trim();
+        if(!name)return;
+        try{
+            const folder=await createFolder.mutateAsync({name,parent_id:selectedId});
+            setSelectedId(folder.id);setFolderName('');setCreatingFolder(false);
+            addToast('کشوی تازه ساخته و به‌عنوان مقصد انتخاب شد.');
+        }catch{addToast('ساخت کشوی تازه انجام نشد.','error')}
     };
 
     return (
@@ -96,6 +108,8 @@ export default function MoveFileModal({ items, onClose }: MoveFileModalProps) {
                         ))
                     )}
                 </div>
+
+                {creatingFolder?<div className="mb-4 flex gap-2 rounded-xl border border-primary-400/15 bg-primary-500/[.05] p-2"><input autoFocus dir="auto" className="input min-w-0 flex-1 text-right" value={folderName} onChange={event=>setFolderName(event.target.value)} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();void handleCreateFolder()}}} placeholder="نام کشوی تازه"/><button disabled={!folderName.trim()||createFolder.isPending} className="btn-primary shrink-0 px-3 text-xs" onClick={()=>void handleCreateFolder()}>{createFolder.isPending?'…':'ساخت'}</button><button className="btn-icon shrink-0" onClick={()=>setCreatingFolder(false)}><X className="h-4 w-4"/></button></div>:<button type="button" onClick={()=>setCreatingFolder(true)} className="mb-4 flex min-h-10 w-full items-center justify-center gap-2 rounded-xl border border-primary-400/15 bg-primary-500/[.06] text-sm text-primary-200"><Plus className="h-4 w-4"/>ساخت کشوی تازه در مقصد فعلی</button>}
 
                 <div className="flex justify-end gap-3">
                     <button

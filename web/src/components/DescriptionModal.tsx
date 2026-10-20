@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
-import { AlignLeft, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { AlignLeft, Link, Link2, X } from 'lucide-react';
+import InternalFileLinkPicker from './InternalFileLinkPicker';
 
 interface DescriptionModalProps {
     isOpen: boolean;
@@ -13,6 +14,8 @@ export default function DescriptionModal({ isOpen, itemType, currentDescription,
     const [description, setDescription] = useState(currentDescription);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
+    const [showFilePicker,setShowFilePicker]=useState(false);
+    const textareaRef=useRef<HTMLTextAreaElement>(null);
 
     useEffect(() => {
         if (isOpen) {
@@ -22,6 +25,7 @@ export default function DescriptionModal({ isOpen, itemType, currentDescription,
     }, [isOpen, currentDescription]);
 
     if (!isOpen) return null;
+    const insertLink=(title:string,url:string)=>{const input=textareaRef.current;if(!input)return;const start=input.selectionStart,end=input.selectionEnd,selected=description.slice(start,end)||title;const value=`[${selected}](${url})`;setDescription(`${description.slice(0,start)}${value}${description.slice(end)}`);requestAnimationFrame(()=>{input.focus();input.setSelectionRange(start+value.length,start+value.length)})};
 
     const submit = async (event: React.FormEvent) => {
         event.preventDefault();
@@ -47,7 +51,8 @@ export default function DescriptionModal({ isOpen, itemType, currentDescription,
                     </h2>
                     <button type="button" onClick={onClose} className="p-1 hover:bg-dark-700 rounded"><X className="w-5 h-5" /></button>
                 </div>
-                <textarea
+                <div className="mb-2 flex items-center gap-1 rounded-xl border border-white/[.06] bg-white/[.025] p-1"><button type="button" className="btn-icon h-9 w-9" title="پیوند وب" onClick={()=>insertLink('عنوان لینک','https://')}><Link className="h-4 w-4"/></button><button type="button" className="btn-icon h-9 w-9" title="پیوند به فایل کمد" onClick={()=>setShowFilePicker(true)}><Link2 className="h-4 w-4"/></button><span className="mr-1 text-xs text-dark-500">روی متن انتخاب‌شده پیوند بگذار</span></div><textarea
+                    ref={textareaRef}
                     value={description}
                     onChange={(event) => setDescription(event.target.value)}
                     maxLength={1024}
@@ -71,6 +76,7 @@ export default function DescriptionModal({ isOpen, itemType, currentDescription,
                     </button>
                 </div>
             </form>
+            {showFilePicker&&<InternalFileLinkPicker onClose={()=>setShowFilePicker(false)} onSelect={file=>{insertLink(file.file_name,`komod://file/${file.id}`);setShowFilePicker(false)}}/>}
         </div>
     );
 }
