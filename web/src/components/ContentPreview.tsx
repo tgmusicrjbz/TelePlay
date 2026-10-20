@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, BookOpen, Braces, Check, ChevronLeft, ChevronRight, Code2, Copy, Download, Heading1, Image as ImageIcon, Italic, Link, Link2, List, ListChecks, ListOrdered, Maximize2, Minimize2, Minus, Moon, MoveHorizontal, Pencil, Plus, Quote, Redo2, Settings2, Sigma, Sparkles, Strikethrough, Sun, Table2, Underline, Undo2, Wand2, WrapText, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { AlignCenter, AlignJustify, AlignLeft, AlignRight, ArrowRight, Bold, BookOpen, Braces, Check, ChevronLeft, ChevronRight, Code2, Copy, Download, Heading1, Image as ImageIcon, Italic, Link, Link2, List, ListChecks, ListOrdered, Maximize2, Minimize2, Minus, Moon, MoveHorizontal, Pencil, Plus, Quote, Redo2, Settings2, Sigma, Sparkles, Strikethrough, Sun, Table2, Underline, Undo2, Wand2, WrapText, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { api, canPreviewText, useFiles, useRefineSTTText } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { cacheTextFile, getOfflineText, updateOfflineTextDraft } from '../lib/offline';
@@ -13,7 +13,7 @@ const readerFonts=[{value:'vazir',label:'وزیرمتن'},{value:'yekan',label:'
 const readerTones:Array<{value:ReaderTone;color:string;label:string}>=[{value:'dark',color:'#05070b',label:'مشکی'},{value:'gray',color:'#242933',label:'خاکستری'},{value:'cream',color:'#efe4ca',label:'کاغذی'},{value:'white',color:'#ffffff',label:'روز'},{value:'ocean',color:'#082735',label:'اقیانوس'},{value:'forest',color:'#10291d',label:'جنگل'},{value:'plum',color:'#27172f',label:'آلویی'},{value:'sepia',color:'#3a2b20',label:'سپیا'}];
 
 export default function ContentPreview() {
-    const { contentPreviewFile: file, setContentPreviewFile, addToast } = useAppStore();
+    const { contentPreviewFile: file, contentPreviewHistory, setContentPreviewFile, goBackContentPreview, addToast } = useAppStore();
     const [content, setContent] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
@@ -196,6 +196,7 @@ export default function ContentPreview() {
                         {file.file_type !== 'image' && file.description && <p dir="auto" className="mt-1 line-clamp-2 max-w-2xl whitespace-pre-wrap text-sm text-dark-400" title={file.description}><MarkdownInline content={file.description}/></p>}
                     </div>
                     <div className="flex shrink-0 items-center gap-1">
+                        {contentPreviewHistory.length>0&&<button onClick={goBackContentPreview} className="btn-icon text-primary-200" title="برگشت به متن قبلی"><ArrowRight className="h-5 w-5"/></button>}
                         {file.file_type !== 'image' && <><button onClick={openAIEditor} disabled={file.id<0||loading} className="btn-icon text-primary-200 disabled:opacity-30" title="ویرایش با هوش مصنوعی"><Sparkles className="h-5 w-5"/></button><button onClick={()=>setReaderToolsVisible(value=>!value)} className={`btn-icon ${readerToolsVisible?'text-primary-200':''}`} title={readerToolsVisible?'مخفی‌کردن تنظیمات مطالعه':'نمایش تنظیمات مطالعه'}><Settings2 className="h-5 w-5"/></button><button onClick={async () => { await navigator.clipboard.writeText(editing ? draft : content); addToast('متن کپی شد 📋'); }} className="btn-icon" title="کپی متن"><Copy className="h-5 w-5" /></button><button onClick={() => setEditing(value => !value)} className={`btn-secondary flex shrink-0 items-center gap-2 px-3 py-2 text-xs ${editing?'text-primary-200':''}`} title={editing?'حالت مطالعه':'ویرایش متن'}>{editing?<BookOpen className="h-4 w-4"/>:<Pencil className="h-4 w-4"/>}<span className="hidden sm:inline">{editing?'مطالعه':'ویرایش'}</span></button><button onClick={() => void toggleReaderFullscreen()} className="btn-icon" title={readerFullscreen ? 'خروج از تمام‌صفحه' : 'مطالعه در تمام‌صفحه'}>{readerFullscreen ? <Minimize2 className="h-5 w-5"/> : <Maximize2 className="h-5 w-5"/>}</button></>}
                         <button onClick={() => setContentPreviewFile(null)} className="btn-icon" title="بستن"><X className="w-5 h-5" /></button>
                     </div>

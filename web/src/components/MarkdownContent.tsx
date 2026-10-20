@@ -38,7 +38,7 @@ async function openInternalFile(id:number) {
     try {
         const {data}=await api.get<TelegramFile>(`/files/${id}`);
         if(data.file_type==='audio'||data.file_type==='video')store.setPreviewFile(data);
-        else store.setContentPreviewFile(data);
+        else store.openLinkedContentFile(data);
     } catch {
         store.addToast('این فایل پیدا نشد یا دیگر به آن دسترسی نداری.','error');
     }

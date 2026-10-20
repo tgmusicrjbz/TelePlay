@@ -89,6 +89,9 @@ interface AppState {
     setPreviewFile: (file: TelegramFile | null) => void;
     contentPreviewFile: TelegramFile | null;
     setContentPreviewFile: (file: TelegramFile | null) => void;
+    contentPreviewHistory: TelegramFile[];
+    openLinkedContentFile: (file: TelegramFile) => void;
+    goBackContentPreview: () => void;
     detailsFile: TelegramFile | null;
     setDetailsFile: (file: TelegramFile | null) => void;
 
@@ -231,7 +234,19 @@ export const useAppStore = create<AppState>((set) => ({
     previewFile: restoredPlayer.current,
     setPreviewFile: (file) => set({ previewFile: file }),
     contentPreviewFile: null,
-    setContentPreviewFile: (file) => set({ contentPreviewFile: file }),
+    contentPreviewHistory: [],
+    setContentPreviewFile: (file) => set(file ? { contentPreviewFile: file } : { contentPreviewFile: null, contentPreviewHistory: [] }),
+    openLinkedContentFile: (file) => set((state) => ({
+        contentPreviewFile: file,
+        contentPreviewHistory: state.contentPreviewFile
+            ? [...state.contentPreviewHistory, state.contentPreviewFile].slice(-20)
+            : state.contentPreviewHistory,
+    })),
+    goBackContentPreview: () => set((state) => {
+        const previous = state.contentPreviewHistory.at(-1);
+        if (!previous) return state;
+        return { contentPreviewFile: previous, contentPreviewHistory: state.contentPreviewHistory.slice(0, -1) };
+    }),
     detailsFile: null,
     setDetailsFile: (file) => set({ detailsFile: file }),
 
