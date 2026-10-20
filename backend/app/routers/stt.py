@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import get_current_user
 from ..database import get_db
 from ..models import File, Folder, User
-from ..stt import STTJob, consume_stt_quota, stt_queue
+from ..stt import GeminiSTTProvider, STTJob, consume_stt_quota, stt_queue
 from ..gemini_keys import decrypt_user_keys
 
 router = APIRouter(prefix="/stt", tags=["Speech to text"])
@@ -21,6 +21,24 @@ class STTCreate(BaseModel):
     prompt: str = Field(default="", max_length=4000)
     folder_id: int | None = None
     output_mode: Literal["temporary", "save"] = "save"
+
+
+class STTRefine(BaseModel):
+    content: str = Field(min_length=1, max_length=200_000)
+    prompt: str = Field(min_length=1, max_length=4_000)
+
+
+@router.post("/refine")
+async def refine_stt_text(payload: STTRefine, current_user: User = Depends(get_current_user)):
+    personal_keys = decrypt_user_keys(current_user.gemini_api_keys_encrypted)
+    keys = list(dict.fromkeys(personal_keys + stt_queue.provider.api_keys))
+    if not keys:
+        raise HTTPException(status_code=503, detail="برای ویرایش متن، کلید Gemini تنظیم نشده است.")
+    try:
+        content = await GeminiSTTProvider(keys).refine_text(payload.content.strip(), payload.prompt.strip())
+    except RuntimeError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    return {"content": content}
 
 
 @router.post("/jobs", status_code=202)

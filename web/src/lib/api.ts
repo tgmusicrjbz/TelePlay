@@ -1406,6 +1406,10 @@ export const useCancelSTTJob = () => { const queryClient=useQueryClient(); retur
 export const useDismissSTTJob = () => { const queryClient=useQueryClient(); return useMutation({
     mutationFn:async(id:string)=>api.delete(`/stt/jobs/${id}`), onSuccess:()=>queryClient.invalidateQueries({queryKey:['stt-jobs']}),
 }); };
+export const useRefineSTTText = () => useMutation({
+    mutationFn: async ({content,prompt}:{content:string;prompt:string}) =>
+        (await api.post<{content:string}>('/stt/refine',{content,prompt},{timeout:180_000})).data,
+});
 
 export const sendFilesToTelegram = async (ids:number[]) =>
     (await api.post<{sent:number;failed:number[]}>('/files/send-to-telegram', {ids})).data;

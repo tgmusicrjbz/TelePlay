@@ -111,6 +111,46 @@ class GeminiSTTProvider:
             raise RuntimeError("سرور کمد نتوانست به Gemini متصل شود؛ اتصال خروجی سرور را بررسی کن.") from last_error
         raise RuntimeError("Gemini متن معتبری از فایل برنگرداند.") from last_error
 
+    async def refine_text(self, content: str, instruction: str) -> str:
+        """Apply one user-directed edit to a transcription and return Markdown only."""
+        last_error: Exception | None = None
+        async with self._key_lock:
+            ordered_keys = self._ordered_keys()
+            if ordered_keys:
+                self.cursor = (self.api_keys.index(ordered_keys[0]) + 1) % len(self.api_keys)
+        for key in ordered_keys:
+            try:
+                result = await asyncio.to_thread(self._text_request, key, content, instruction)
+                self.cursor = (self.api_keys.index(key) + 1) % len(self.api_keys)
+                return result
+            except GeminiRequestError as error:
+                last_error = error
+                if error.status == 400:
+                    raise RuntimeError(f"دستور یا متن توسط Gemini پذیرفته نشد: {error.user_detail()}") from error
+                if error.status in {429, 500, 502, 503, 504}:
+                    self.cooldowns[key] = datetime.utcnow() + timedelta(seconds=60 if error.status == 429 else 15)
+                    continue
+                if error.status in {401, 403}:
+                    self.cooldowns[key] = datetime.utcnow() + timedelta(minutes=10)
+                    continue
+                raise
+            except (TimeoutError, URLError) as error:
+                last_error = error
+                self.cooldowns[key] = datetime.utcnow() + timedelta(seconds=15)
+        if isinstance(last_error, GeminiRequestError):
+            if last_error.status == 429:
+                detail = "سهمیه همه کلیدهای Gemini پر شده است. کمی بعد دوباره تلاش کن."
+            elif last_error.status in {401, 403}:
+                detail = "کلیدهای Gemini معتبر نیستند یا اجازه استفاده از مدل را ندارند."
+            elif last_error.status in {500, 502, 503, 504}:
+                detail = "سرویس Gemini موقتاً در دسترس نیست."
+            else:
+                detail = last_error.user_detail()
+            raise RuntimeError(f"ویرایش متن انجام نشد: {detail}") from last_error
+        if isinstance(last_error, (TimeoutError, URLError)):
+            raise RuntimeError("سرور کمد نتوانست برای ویرایش متن به Gemini متصل شود.") from last_error
+        raise RuntimeError("هیچ کلید Gemini فعالی برای ویرایش متن وجود ندارد.")
+
     @staticmethod
     def _json_request(request: Request, timeout: int = 180) -> tuple[dict, object]:
         try:
@@ -196,6 +236,32 @@ class GeminiSTTProvider:
                     urlopen(Request(f"https://generativelanguage.googleapis.com/v1beta/{quote(file_name, safe='/')}?{urlencode({'key': key})}", method="DELETE"), timeout=30).close()
                 except Exception:
                     pass
+
+    def _text_request(self, key: str, content: str, instruction: str) -> str:
+        system_instruction = (
+            "You are an expert Persian and multilingual text editor. Apply the user's instruction to the supplied text. "
+            "Preserve technical terms, English words, names, numbers and factual meaning unless the user explicitly asks otherwise. "
+            "Return only the final edited text as clean Markdown. Do not explain your work and do not wrap the answer in a code fence."
+        )
+        payload = {
+            "systemInstruction": {"parts": [{"text": system_instruction}]},
+            "contents": [{"role": "user", "parts": [{"text": (
+                f"دستور کاربر:\n{instruction.strip()}\n\n"
+                "متن ورودی بین نشانگرها قرار دارد:\n---BEGIN TEXT---\n"
+                f"{content}\n---END TEXT---"
+            )}]}],
+            "generationConfig": {"temperature": 0.2},
+        }
+        endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{settings.gemini_stt_model}:generateContent?{urlencode({'key': key})}"
+        result, _ = self._json_request(Request(
+            endpoint, data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"}, method="POST",
+        ), 240)
+        parts = result.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+        text = "\n".join(str(part.get("text", "")) for part in parts if part.get("text")).strip()
+        if not text:
+            raise RuntimeError("Gemini متن ویرایش‌شده‌ای برنگرداند.")
+        return text
 
 
 @dataclass
