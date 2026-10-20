@@ -866,6 +866,9 @@ const usePackMutation = <TVariables>(request: (variables: TVariables) => Promise
         mutationFn: request,
         onSuccess: (pack: Pack) => {
             queryClient.setQueryData(['packs', 'detail', pack.id], pack);
+            queryClient.setQueriesData<PackSummary[]>({
+                predicate: query => query.queryKey[0] === 'packs' && query.queryKey[1] !== 'detail',
+            }, current => current?.map(item => item.id === pack.id ? { ...item, ...pack } : item));
             queryClient.invalidateQueries({ queryKey: ['packs'] });
             queryClient.invalidateQueries({ queryKey: ['files'] });
         },

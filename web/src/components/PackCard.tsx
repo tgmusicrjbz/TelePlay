@@ -4,6 +4,13 @@ import { api, Pack, type PackSummary, useDeletePack } from '../lib/api';
 import { savePackOffline } from '../lib/offline';
 import { useAppStore } from '../lib/store';
 
+function authenticatedMediaUrl(url:string) {
+    if(!url||url.startsWith('blob:')||url.startsWith('data:'))return url;
+    if(/[?&]token=/.test(url))return url;
+    const token=localStorage.getItem('access_token')||'';
+    return `${url}${url.includes('?')?'&':'?'}token=${encodeURIComponent(token)}`;
+}
+
 function DefaultPackCover({className=''}:{className?:string}) {
     return <span className={`relative flex h-full w-full items-center justify-center overflow-hidden bg-gradient-to-br from-primary-500/35 via-[#17213a] to-sky-500/20 ${className}`}><span className="absolute -right-5 -top-7 h-24 w-24 rounded-full bg-white/10 blur-2xl"/><span className="absolute -bottom-8 -left-5 h-24 w-24 rounded-full bg-primary-400/20 blur-2xl"/><span className="relative flex h-14 w-14 rotate-[-6deg] items-center justify-center rounded-2xl border border-white/15 bg-black/25 text-primary-100 shadow-2xl backdrop-blur"><Boxes className="h-7 w-7"/></span></span>;
 }
@@ -14,7 +21,7 @@ export default function PackCard({ pack, viewMode, onOpen }: { pack: PackSummary
     const [confirmDelete,setConfirmDelete]=useState(false);
     const remove=useDeletePack();
     const addToast=useAppStore(state=>state.addToast);
-    const cover=pack.cover_url||pack.cover_urls[0];
+    const cover=authenticatedMediaUrl(pack.cover_url||pack.cover_urls[0]||'');
     const meta=`${pack.item_count.toLocaleString('fa-IR')} آیتم`;
     const openEdit=()=>{setMenuOpen(false);onOpen();window.setTimeout(()=>window.dispatchEvent(new Event('komod-pack-edit')),80)};
     const saveOffline=async()=>{setMenuOpen(false);setSaving(true);try{const {data}=await api.get<Pack>(`/packs/${pack.id}`);await savePackOffline(data);addToast(`جعبه «${pack.name}» آفلاین شد.`)}catch(error){addToast(error instanceof Error?error.message:'ذخیره جعبه انجام نشد.','error')}finally{setSaving(false)}};

@@ -31,7 +31,11 @@ def _pack_summary(pack: Pack) -> PackSummary:
     visual = [item.file for item in ordered if item.file.file_type in ("image", "video") and item.file.thumbnail_file_id]
     previews = [f"/api/stream/{file.id}/thumbnail?quality=best&workspace={pack.user_id}" for file in visual[:4]]
     custom_cover_id = pack.cover_file_id if pack.cover_file and not pack.cover_file.is_hidden else None
-    cover_url = f"/api/stream/{custom_cover_id}?workspace={pack.user_id}" if custom_cover_id else (previews[0] if previews else None)
+    if custom_cover_id:
+        cover_path = f"/api/stream/{custom_cover_id}/thumbnail?quality=best" if pack.cover_file.thumbnail_file_id else f"/api/stream/{custom_cover_id}"
+        cover_url = f"{cover_path}{'&' if '?' in cover_path else '?'}workspace={pack.user_id}"
+    else:
+        cover_url = previews[0] if previews else None
     counts: dict[str, int] = {}
     for item in ordered:
         counts[item.file.file_type] = counts.get(item.file.file_type, 0) + 1
