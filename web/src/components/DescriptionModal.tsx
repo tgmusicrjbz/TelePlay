@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlignLeft, Link, Link2, X } from 'lucide-react';
+import { AlignLeft, AtSign, Hash, Link, Link2, Sparkles, X } from 'lucide-react';
 import InternalFileLinkPicker from './InternalFileLinkPicker';
 
 interface DescriptionModalProps {
@@ -26,6 +26,13 @@ export default function DescriptionModal({ isOpen, itemType, currentDescription,
 
     if (!isOpen) return null;
     const insertLink=(title:string,url:string)=>{const input=textareaRef.current;if(!input)return;const start=input.selectionStart,end=input.selectionEnd,selected=description.slice(start,end)||title;const value=`[${selected}](${url})`;setDescription(`${description.slice(0,start)}${value}${description.slice(end)}`);requestAnimationFrame(()=>{input.focus();input.setSelectionRange(start+value.length,start+value.length)})};
+    const cleanDescription=(kind:'links'|'mentions'|'hashtags'|'all')=>{
+        let next=description;
+        if(kind==='links'||kind==='all') next=next.replace(/\[[^\]]*\]\(https?:\/\/[^)]+\)|https?:\/\/\S+/giu,' ');
+        if(kind==='mentions'||kind==='all') next=next.replace(/(^|\s)@[\p{L}\p{N}_]{3,}/gu,'$1');
+        if(kind==='hashtags'||kind==='all') next=next.replace(/(^|\s)#[\p{L}\p{N}_\u200c-]+/gu,'$1');
+        setDescription(next.replace(/[ \t]{2,}/g,' ').replace(/\n[ \t]+/g,'\n').trim());
+    };
 
     const submit = async (event: React.FormEvent) => {
         event.preventDefault();
@@ -61,6 +68,15 @@ export default function DescriptionModal({ isOpen, itemType, currentDescription,
                     placeholder="یک توضیح کوتاه بنویس…"
                     className="w-full resize-y px-4 py-3 bg-dark-700 border border-dark-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500/50"
                 />
+                <div className="mt-2 rounded-xl border border-white/[.06] bg-white/[.025] p-1.5">
+                    <div className="mb-1 flex items-center gap-1.5 px-1 text-[10px] text-dark-500"><Sparkles className="h-3.5 w-3.5"/>تمیزکاری توضیحات</div>
+                    <div className="grid grid-cols-4 gap-1">
+                        <button type="button" onClick={()=>cleanDescription('links')} className="flex min-h-9 items-center justify-center gap-1 rounded-lg text-[10px] text-dark-300 hover:bg-white/[.05]"><Link className="h-3.5 w-3.5"/>لینک‌ها</button>
+                        <button type="button" onClick={()=>cleanDescription('mentions')} className="flex min-h-9 items-center justify-center gap-1 rounded-lg text-[10px] text-dark-300 hover:bg-white/[.05]"><AtSign className="h-3.5 w-3.5"/>آیدی‌ها</button>
+                        <button type="button" onClick={()=>cleanDescription('hashtags')} className="flex min-h-9 items-center justify-center gap-1 rounded-lg text-[10px] text-dark-300 hover:bg-white/[.05]"><Hash className="h-3.5 w-3.5"/>هشتگ‌ها</button>
+                        <button type="button" onClick={()=>cleanDescription('all')} className="min-h-9 rounded-lg bg-primary-500/10 px-1 text-[10px] text-primary-200 hover:bg-primary-500/15">پاک‌سازی همه</button>
+                    </div>
+                </div>
                 <div className="flex justify-between mt-2 text-xs text-dark-400">
                     <span>برای حذف توضیحات، این بخش را خالی بگذار.</span>
                     <span>{description.length}/1024</span>

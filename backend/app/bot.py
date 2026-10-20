@@ -56,6 +56,7 @@ upload_drawers: dict[int, int | None] = {}
 show_file_actions: dict[int, bool] = {}
 link_delivery_modes: dict[int, str] = {}
 pending_stt_modes: dict[int, str] = {}
+claimed_stt_messages: set[tuple[int, int]] = set()
 loaded_ui_state_users: set[int] = set()
 PAGE_SIZE = 8
 PREVIEW_TTL_SECONDS = 300
@@ -1223,6 +1224,8 @@ async def handle_pending_stt_media(client, message: Message):
     output_mode = pending_stt_modes.pop(message.from_user.id, None)
     if output_mode is None:
         return
+    claim = (message.chat.id, message.id)
+    claimed_stt_messages.add(claim)
     async def process() -> None:
         try:
             await _process_pending_stt_media(client, message, output_mode)
@@ -1230,6 +1233,8 @@ async def handle_pending_stt_media(client, message: Message):
             logger.exception("Direct STT failed for user %s", message.from_user.id)
             with contextlib.suppress(Exception):
                 await message.reply("❌ استخراج متن انجام نشد؛ دوباره تلاش کن.")
+        finally:
+            claimed_stt_messages.discard(claim)
     asyncio.create_task(process())
     # stop_propagation raises immediately. The work must already be scheduled so
     # this media can never fall through to the regular cabinet upload handler.
@@ -1685,6 +1690,8 @@ async def _handle_file_impl(client, message: Message, status_msg: Message):
 @tg_client.on_message(filters.private & (filters.video | filters.audio | filters.voice | filters.document | filters.photo | filters.animation | filters.video_note), group=0)
 async def handle_file(client, message: Message):
     """Queue bursts per user so every forwarded message is processed in order."""
+    if (message.chat.id, message.id) in claimed_stt_messages:
+        return
     user_id = message.from_user.id
     queue = upload_message_queues.setdefault(user_id, asyncio.Queue())
     position = queue.qsize() + (1 if user_id in upload_workers else 0)

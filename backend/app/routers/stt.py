@@ -1,5 +1,8 @@
 """Speech-to-text queue endpoints."""
+import asyncio
+from datetime import datetime, timedelta
 from typing import Literal
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -13,6 +16,7 @@ from ..stt import GeminiSTTProvider, STTJob, consume_stt_quota, stt_queue
 from ..gemini_keys import decrypt_user_keys
 
 router = APIRouter(prefix="/stt", tags=["Speech to text"])
+_refine_jobs: dict[str, dict] = {}
 
 
 class STTCreate(BaseModel):
@@ -39,6 +43,44 @@ async def refine_stt_text(payload: STTRefine, current_user: User = Depends(get_c
     except RuntimeError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
     return {"content": content}
+
+
+async def _run_refine_job(job_id: str, keys: list[str], content: str, prompt: str) -> None:
+    job = _refine_jobs[job_id]
+    job.update(state="processing", message="هوش مصنوعی در حال ویرایش متن است.", progress=35)
+    try:
+        result = await GeminiSTTProvider(keys).refine_text(content, prompt)
+        job.update(state="done", message="نسخه تازه آماده شد.", progress=100, content=result, finished_at=datetime.utcnow().isoformat())
+    except Exception as error:
+        job.update(state="error", message=str(error) or "ویرایش متن انجام نشد.", progress=100, finished_at=datetime.utcnow().isoformat())
+
+
+@router.post("/refine/jobs", status_code=202)
+async def create_refine_job(payload: STTRefine, current_user: User = Depends(get_current_user)):
+    personal_keys = decrypt_user_keys(current_user.gemini_api_keys_encrypted)
+    keys = list(dict.fromkeys(personal_keys + stt_queue.provider.api_keys))
+    if not keys:
+        raise HTTPException(status_code=503, detail="برای ویرایش متن، کلید Gemini تنظیم نشده است.")
+    cutoff = datetime.utcnow() - timedelta(hours=2)
+    for stale_id, stale in list(_refine_jobs.items()):
+        finished = stale.get("finished_at")
+        if finished and datetime.fromisoformat(finished) < cutoff:
+            _refine_jobs.pop(stale_id, None)
+    job_id = uuid4().hex
+    _refine_jobs[job_id] = {
+        "id": job_id, "user_id": current_user.id, "state": "queued",
+        "message": "درخواست ویرایش ثبت شد.", "progress": 10, "content": None,
+    }
+    asyncio.create_task(_run_refine_job(job_id, keys, payload.content.strip(), payload.prompt.strip()))
+    return {"job_id": job_id, "state": "queued", "message": "درخواست ویرایش ثبت شد.", "progress": 10}
+
+
+@router.get("/refine/jobs/{job_id}")
+async def get_refine_job(job_id: str, current_user: User = Depends(get_current_user)):
+    job = _refine_jobs.get(job_id)
+    if not job or job["user_id"] != current_user.id:
+        raise HTTPException(status_code=404, detail="این درخواست ویرایش پیدا نشد.")
+    return {key: value for key, value in job.items() if key != "user_id"}
 
 
 @router.post("/jobs", status_code=202)

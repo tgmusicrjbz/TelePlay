@@ -3,7 +3,7 @@
  */
 import { lazy, Suspense, useEffect, useCallback, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { FolderPlus, Folder as FolderIcon, Grid, LayoutGrid, List, Search, ChevronRight, Home, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, StickyNote, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ChevronUp, Plus, CheckSquare, Square, ListChecks, ListPlus, Upload, Star, RefreshCw, Link2, DownloadCloud, Download, Send, Eye, EyeOff, Minus, Pause, Play, Tags, Cloud, CloudOff, AudioLines, FileAudio, Sparkles, BookmarkPlus } from 'lucide-react';
+import { FolderPlus, Folder as FolderIcon, Grid, LayoutGrid, List, Search, ChevronRight, Home, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, StickyNote, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ChevronUp, Plus, CheckSquare, Square, ListChecks, ListPlus, Upload, Star, RefreshCw, Link2, DownloadCloud, Download, Send, Eye, EyeOff, Minus, Pause, Play, Tags, Cloud, CloudOff, AudioLines, FileAudio, Sparkles, BookmarkPlus, Combine } from 'lucide-react';
 import { api, useFiles, useFolders, useFolderTree, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useActivityFeed, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile, useImportLink, useTagSettings, useUnlockVault, useWorkspaces, sendFilesToTelegram, useTTSJobs, useSTTJobs, SavedFilter, useSavedFilters, useUpdateSavedFilters, usePacks } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { cacheAllTextNotes, queueOfflineText, saveFileOffline } from '../lib/offline';
@@ -103,6 +103,11 @@ export default function FileBrowser() {
     const [showFilters, setShowFilters] = useState(false);
     const [showBatchEdit, setShowBatchEdit] = useState(false);
     const [showCreatePack, setShowCreatePack] = useState(false);
+    const [showCombineTexts,setShowCombineTexts]=useState(false);
+    const [combineTitle,setCombineTitle]=useState('متن ترکیبی');
+    const [combineSeparator,setCombineSeparator]=useState<'line'|'blank'|'none'>('line');
+    const [combineIncludeNames,setCombineIncludeNames]=useState(true);
+    const [combiningTexts,setCombiningTexts]=useState(false);
     const [packFileIds,setPackFileIds]=useState<number[]>([]);
     const [openPackId, setOpenPackId] = useState<number|null>(null);
     const [selectionMode, setSelectionMode] = useState(false);
@@ -289,6 +294,15 @@ export default function FileBrowser() {
             setHasMore(filesList.page * filesList.per_page < filesList.total);
         }
     }, [filesList, activeSection]);
+
+    // Fetch remaining pages sequentially in the background. This keeps each
+    // response small while making selection/search within a folder complete
+    // without forcing the user to scroll to the bottom first.
+    useEffect(()=>{
+        if(activeSection!=='files'||!hasMore||filesFetching||!filesList||filesList.page!==page)return;
+        const timer=window.setTimeout(()=>setPage(current=>current===page?current+1:current),140);
+        return()=>window.clearTimeout(timer);
+    },[activeSection,filesFetching,filesList,hasMore,page]);
 
     // Determine which files to show
     let displayFiles: TelegramFile[] | undefined;
@@ -923,9 +937,11 @@ export default function FileBrowser() {
     }, [currentFolderId, fileTypeFilter, favoriteOnly, searchQuery, activeSection, sortValue, activeSavedFilterId]);
 
     const selectedFilesForActions = displayFiles?.filter(file => selectedFileIds.has(file.id)) || [];
+    const selectedTextFilesForActions = selectedFilesForActions.filter(file=>canPreviewText(file));
     const selectedPlayableFilesForActions = selectedFilesForActions.filter(file => file.file_type === 'audio' || file.file_type === 'video');
     const selectedFoldersForActions = folders?.filter(folder => selectedFolderIds.has(folder.id)) || [];
     const selectedItems = [...selectedFilesForActions, ...selectedFoldersForActions];
+    const combineSelectedTexts=async()=>{if(selectedTextFilesForActions.length<2)return;setCombiningTexts(true);try{const contents=await Promise.all(selectedTextFilesForActions.map(async file=>({file,content:(await api.get<{content:string}>(`/files/${file.id}/text`)).data.content})));const separator=combineSeparator==='line'?'\n\n---\n\n':combineSeparator==='blank'?'\n\n':'';const merged=contents.map(({file,content})=>`${combineIncludeNames?`## ${file.file_name}\n\n`:''}${content.trim()}`).join(separator);const raw=combineTitle.trim()||'متن ترکیبی';const name=/\.md$/i.test(raw)?raw:`${raw}.md`;await uploadFileMutation.mutateAsync({file:new File([merged],name,{type:'text/markdown;charset=utf-8'}),folderId:effectiveFolderId});setShowCombineTexts(false);cancelSelection();addToast('فایل ترکیبی ساخته شد.','success')}catch(error:any){addToast(error?.response?.data?.detail||'ترکیب متن‌ها انجام نشد.','error')}finally{setCombiningTexts(false)}};
     const selectFileRange=()=>{
         const ordered=(displayFiles||[]).map(file=>file.id);
         const selectedIndexes=ordered.map((id,index)=>selectedFileIds.has(id)?index:-1).filter(index=>index>=0);
@@ -1204,6 +1220,7 @@ export default function FileBrowser() {
                             <span className="shrink-0 px-2 text-xs font-semibold text-primary-200">{selectedItems.length ? `${selectedItems.length.toLocaleString('fa-IR')} انتخاب` : 'یک کارت را لمس کن'}</span>
                             {selectedItems.length === 1 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-200 hover:bg-white/10" aria-label="تغییر نام" title="تغییر نام" onClick={() => selectedFilesForActions[0] ? setRenameFile(selectedFilesForActions[0]) : setRenameFolder(selectedFoldersForActions[0])}><Pencil className="h-5 w-5" /></button>}
                             {selectedFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-200 hover:bg-white/10" aria-label="تگ‌ها و ویرایش گروهی" title="افزودن، حذف یا جایگزینی تگ‌ها" onClick={() => setShowBatchEdit(true)}><Tags className="h-5 w-5" /></button>}
+                            {selectedTextFilesForActions.length > 1 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-primary-200 hover:bg-primary-500/10" aria-label="ترکیب متن‌ها" title="ساخت یک فایل از متن‌های انتخابی" onClick={()=>setShowCombineTexts(true)}><Combine className="h-5 w-5"/></button>}
                             {selectedFileIds.size>=2&&<button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-primary-200 hover:bg-primary-500/10" aria-label="انتخاب فایل‌های میانی" title="انتخاب همه فایل‌های بین اولین و آخرین انتخاب" onClick={selectFileRange}><ListChecks className="h-5 w-5"/></button>}
                             {selectedFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-violet-200 hover:bg-violet-500/10" aria-label="ساخت جعبه" title="قرار دادن فایل‌های انتخابی در یک جعبه" onClick={() => setShowCreatePack(true)}><Boxes className="h-5 w-5" /></button>}
                             {selectedPlayableFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-emerald-300 hover:bg-emerald-500/10" aria-label="ساخت صف پخش موقت" title="پخش پشت‌سرهم فایل‌های انتخاب‌شده" onClick={() => { startQueue(selectedPlayableFilesForActions,0); cancelSelection(); addToast('صف پخش موقت ساخته شد.'); }}><Play className="h-5 w-5" /></button>}
@@ -1228,6 +1245,7 @@ export default function FileBrowser() {
                                 <span className="text-sm font-medium text-primary-200 px-2">{selectedItems.length.toLocaleString('fa-IR')} مورد انتخاب شده</span>
                                 {selectedItems.length === 1 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => selectedFilesForActions[0] ? setRenameFile(selectedFilesForActions[0]) : setRenameFolder(selectedFoldersForActions[0])}><Pencil className="w-4 h-4" /> تغییر نام</button>}
                                 {selectedFilesForActions.length > 0 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => setShowBatchEdit(true)}><Tags className="w-4 h-4" /> تگ‌ها و ویرایش</button>}
+                                {selectedTextFilesForActions.length > 1 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2 text-primary-200" onClick={()=>setShowCombineTexts(true)}><Combine className="h-4 w-4"/> ترکیب متن‌ها</button>}
                                 {selectedFileIds.size>=2&&<button className="btn-secondary shrink-0 text-sm flex items-center gap-2 text-primary-200" onClick={selectFileRange}><ListChecks className="h-4 w-4"/> انتخاب فاصله</button>}
                                 {selectedFilesForActions.length > 0 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2 text-violet-200" onClick={() => setShowCreatePack(true)}><Boxes className="w-4 h-4" /> ساخت جعبه</button>}
                                 {selectedPlayableFilesForActions.length > 0 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2 text-emerald-200" onClick={() => { startQueue(selectedPlayableFilesForActions,0); cancelSelection(); addToast('صف پخش موقت ساخته شد.'); }}><Play className="w-4 h-4" /> پخش پشت‌سرهم</button>}
@@ -1538,6 +1556,7 @@ export default function FileBrowser() {
                 onClose={() => setShowBatchEdit(false)}
                 onSave={handleBatchEdit}
             />
+            {showCombineTexts&&<div className="fixed inset-0 z-[260] flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-4" onClick={()=>setShowCombineTexts(false)}><section dir="rtl" className="w-full max-w-md rounded-t-3xl border border-white/10 bg-dark-900 p-5 text-right shadow-2xl sm:rounded-3xl" onClick={event=>event.stopPropagation()}><header className="flex items-center gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary-500/15 text-primary-200"><Combine className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h2 className="font-bold">ترکیب متن‌ها</h2><p className="mt-1 text-xs text-dark-400">{selectedTextFilesForActions.length.toLocaleString('fa-IR')} متن، به ترتیب نمایش فعلی</p></div><button className="btn-icon" onClick={()=>setShowCombineTexts(false)}><X className="h-5 w-5"/></button></header><label className="mt-4 block text-xs text-dark-400">نام فایل تازه<input value={combineTitle} onChange={event=>setCombineTitle(event.target.value)} className="input mt-1.5 w-full text-right" maxLength={180}/></label><div className="mt-4"><p className="mb-2 text-xs text-dark-400">جداکننده متن‌ها</p><div className="grid grid-cols-3 gap-1 rounded-2xl border border-white/[.07] bg-dark-950/40 p-1">{([{value:'line',label:'خط جداکننده'},{value:'blank',label:'فاصله خالی'},{value:'none',label:'بدون فاصله'}] as const).map(option=><button key={option.value} onClick={()=>setCombineSeparator(option.value)} className={`min-h-10 rounded-xl px-2 text-[11px] ${combineSeparator===option.value?'bg-primary-500 text-white':'text-dark-400'}`}>{option.label}</button>)}</div></div><label className="mt-4 flex min-h-12 items-center gap-3 rounded-2xl bg-white/[.035] px-3"><input type="checkbox" checked={combineIncludeNames} onChange={event=>setCombineIncludeNames(event.target.checked)} className="h-5 w-5 accent-primary-500"/><span className="text-sm">نام هر فایل بالای متنش نوشته شود</span></label><div className="mt-5 grid grid-cols-2 gap-2"><button disabled={combiningTexts} onClick={()=>void combineSelectedTexts()} className="btn-primary min-h-11 disabled:opacity-40">{combiningTexts?'در حال ساخت…':'ساخت فایل'}</button><button className="btn-secondary" onClick={()=>setShowCombineTexts(false)}>لغو</button></div></section></div>}
             {showCreatePack && <CreatePackModal fileIds={packFileIds.length?packFileIds:selectedFilesForActions.map(file=>file.id)} parentFolderId={effectiveFolderId} packs={packs} onClose={()=>{setShowCreatePack(false);setPackFileIds([])}} onCreated={pack=>{setShowCreatePack(false);setPackFileIds([]);cancelSelection();setOpenPackId(pack.id);addToast('جعبه به‌روز شد 📦','success')}}/>}
             {openPackId!==null&&<PackViewer packId={openPackId} onClose={()=>setOpenPackId(null)} onOpenFile={handleFileOpen}/>}
             {showVaultPrompt && <div className="fixed inset-0 z-[190] flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-4" onClick={()=>setShowVaultPrompt(false)}><div className="w-full max-w-sm rounded-t-3xl border border-white/10 bg-dark-900 p-5 sm:rounded-3xl" onClick={event=>event.stopPropagation()}><div className="flex items-center gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary-500/15 text-primary-200"><EyeOff className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h2 className="font-bold">گاوصندوق</h2><p className="text-xs text-dark-400">موارد مخفی را کنار بقیهٔ فایل‌ها ببین.</p></div><button className="btn-icon" onClick={()=>setShowVaultPrompt(false)}><X className="h-5 w-5"/></button></div>{!sessionStorage.getItem('komod-vault-token')&&<input autoFocus type="password" value={vaultPassword} onChange={event=>setVaultPassword(event.target.value)} className="input mt-4 w-full" placeholder="رمز گاوصندوق"/>}<div className="mt-4 grid gap-2"><button disabled={unlockVault.isPending||(!sessionStorage.getItem('komod-vault-token')&&!vaultPassword)} onClick={()=>void showVaultItems()} className="btn-primary min-h-11 disabled:opacity-40">نمایش موارد مخفی</button>{showHidden&&<button onClick={closeVaultItems} className="min-h-10 rounded-xl text-sm text-red-300 hover:bg-red-500/10">بستن گاوصندوق</button>}</div></div></div>}

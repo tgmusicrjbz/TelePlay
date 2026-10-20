@@ -1413,8 +1413,18 @@ export const useDismissSTTJob = () => { const queryClient=useQueryClient(); retu
     mutationFn:async(id:string)=>api.delete(`/stt/jobs/${id}`), onSuccess:()=>queryClient.invalidateQueries({queryKey:['stt-jobs']}),
 }); };
 export const useRefineSTTText = () => useMutation({
-    mutationFn: async ({content,prompt}:{content:string;prompt:string}) =>
-        (await api.post<{content:string}>('/stt/refine',{content,prompt},{timeout:180_000})).data,
+    mutationFn: async ({content,prompt,onStatus}:{content:string;prompt:string;onStatus?:(message:string,progress:number)=>void}) => {
+        const started=(await api.post<{job_id:string;message:string;progress:number}>('/stt/refine/jobs',{content,prompt})).data;
+        onStatus?.(started.message,started.progress);
+        for(let attempt=0;attempt<600;attempt++){
+            await new Promise(resolve=>window.setTimeout(resolve,1000));
+            const status=(await api.get<{state:string;message:string;progress:number;content?:string}>(`/stt/refine/jobs/${started.job_id}`)).data;
+            onStatus?.(status.message,status.progress);
+            if(status.state==='done'&&status.content)return{content:status.content};
+            if(status.state==='error')throw new Error(status.message||'ویرایش متن انجام نشد.');
+        }
+        throw new Error('ویرایش متن بیش از حد طول کشید؛ دوباره تلاش کن.');
+    },
 });
 
 export const sendFilesToTelegram = async (ids:number[]) =>
