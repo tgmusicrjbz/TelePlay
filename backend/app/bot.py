@@ -1219,10 +1219,25 @@ async def stt_command(client, message: Message):
 
 @tg_client.on_message(filters.private & (filters.video | filters.audio | filters.voice | filters.document | filters.video_note), group=-1)
 async def handle_pending_stt_media(client, message: Message):
-    """Consume the next media as a temporary STT source without adding it to the library."""
+    """Claim the next media for STT before the ordinary file saver sees it."""
     output_mode = pending_stt_modes.pop(message.from_user.id, None)
     if output_mode is None:
         return
+    async def process() -> None:
+        try:
+            await _process_pending_stt_media(client, message, output_mode)
+        except Exception:
+            logger.exception("Direct STT failed for user %s", message.from_user.id)
+            with contextlib.suppress(Exception):
+                await message.reply("❌ استخراج متن انجام نشد؛ دوباره تلاش کن.")
+    asyncio.create_task(process())
+    # stop_propagation raises immediately. The work must already be scheduled so
+    # this media can never fall through to the regular cabinet upload handler.
+    message.stop_propagation()
+
+
+async def _process_pending_stt_media(client, message: Message, output_mode: str) -> None:
+    """Prepare and queue a direct STT request without exposing its source in the cabinet."""
     user = await get_or_create_user(
         message.from_user.id, message.from_user.username,
         message.from_user.first_name, message.from_user.last_name,
@@ -1230,20 +1245,17 @@ async def handle_pending_stt_media(client, message: Message):
     personal_keys = decrypt_user_keys(user.gemini_api_keys_encrypted)
     if not stt_queue.available and not personal_keys:
         await message.reply("استخراج متن هنوز روی سرور فعال نشده.")
-        message.stop_propagation()
         return
     media = next((getattr(message, name, None) for name in ("audio", "voice", "video", "video_note", "document") if getattr(message, name, None)), None)
     mime = getattr(media, "mime_type", None) or ("audio/ogg" if message.voice else "video/mp4" if message.video or message.video_note else "application/octet-stream")
     if media is None or not (mime.startswith("audio/") or mime.startswith("video/") or message.audio or message.voice or message.video or message.video_note):
         await message.reply("این فایل صوتی یا ویدیویی نیست. دوباره `/stt` را بزن.")
-        message.stop_propagation()
         return
     target_channel = user.storage_channel_id or settings.telegram_storage_channel_id
     temporary_message = await forward_to_storage_channel(message, target_channel)
     stored_media = next((getattr(temporary_message, field, None) for field in ("audio", "voice", "video", "video_note", "document") if getattr(temporary_message, field, None)), None)
     if stored_media is None:
         await message.reply("فایل برای استخراج متن آماده نشد.")
-        message.stop_propagation()
         return
     async with async_session() as db:
         default_folder = await ensure_default_folder(db, user.id)
@@ -1267,7 +1279,6 @@ async def handle_pending_stt_media(client, message: Message):
             await db.commit()
             await tg_client.delete_messages(target_channel, temporary_message.id)
             await message.reply(f"⛔ {error}")
-            message.stop_propagation()
             return
     folder_id = await get_active_drawer_id(message.from_user.id)
     source_name = Path(source.file_name).stem.strip() or "صدا"
@@ -1278,9 +1289,6 @@ async def handle_pending_stt_media(client, message: Message):
     ))
     queue_note = f"\nنوبت {to_persian_digits(str(position))} در صف" if position > 1 else ""
     await message.reply(f"📝 درخواست استخراج متن ثبت شد.{queue_note}")
-    # Pyrogram raises immediately from stop_propagation(). Calling it here
-    # prevents the generic save handler only after the STT job is registered.
-    message.stop_propagation()
 
 
 def tts_bot_settings_view(preferences: dict) -> dict:

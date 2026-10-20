@@ -547,13 +547,32 @@ export const useUpdateFile = () => {
     });
 };
 
+const removeFilesFromCachedPack = (pack: Pack | undefined, ids: Set<number>) => {
+    if (!pack) return pack;
+    const items = pack.items.filter(item => !ids.has(item.file.id));
+    const typeCounts = items.reduce<Record<string, number>>((counts, item) => {
+        counts[item.file.file_type] = (counts[item.file.file_type] || 0) + 1;
+        return counts;
+    }, {});
+    return {
+        ...pack,
+        items,
+        item_count: items.length,
+        preview_names: items.slice(0, 2).map(item => item.file.file_name),
+        type_counts: typeCounts,
+        cover_file_id: pack.cover_file_id && ids.has(pack.cover_file_id) ? null : pack.cover_file_id,
+    };
+};
+
 export const useDeleteFile = () => {
     const queryClient = useQueryClient();
     return useMutation({
         mutationFn: async (id: number) => {
             await api.delete(`/files/${id}`);
+            return id;
         },
-        onSuccess: () => {
+        onSuccess: id => {
+            queryClient.setQueriesData<Pack>({ queryKey: ['packs', 'detail'] }, pack => removeFilesFromCachedPack(pack, new Set([id])));
             queryClient.invalidateQueries({ queryKey: ['files'] });
             queryClient.invalidateQueries({ queryKey: ['packs'] });
         },
@@ -565,8 +584,10 @@ export const useDeleteFiles = () => {
     return useMutation({
         mutationFn: async (ids: number[]) => {
             await api.post('/files/batch-delete', ids as any);
+            return ids;
         },
-        onSuccess: () => {
+        onSuccess: ids => {
+            queryClient.setQueriesData<Pack>({ queryKey: ['packs', 'detail'] }, pack => removeFilesFromCachedPack(pack, new Set(ids)));
             queryClient.invalidateQueries({ queryKey: ['files'] });
             queryClient.invalidateQueries({ queryKey: ['folders'] });
             queryClient.invalidateQueries({ queryKey: ['storage'] });
