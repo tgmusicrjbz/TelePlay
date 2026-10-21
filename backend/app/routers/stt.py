@@ -23,6 +23,7 @@ class STTCreate(BaseModel):
     file_id: int
     title: str = Field(default="رونویسی صدا", min_length=1, max_length=180)
     prompt: str = Field(default="", max_length=4000)
+    post_prompts: list[str] = Field(default_factory=list, max_length=5)
     folder_id: int | None = None
     output_mode: Literal["temporary", "save"] = "save"
 
@@ -98,7 +99,10 @@ async def create_stt_job(payload: STTCreate, current_user: User = Depends(get_cu
         await consume_stt_quota(db, current_user.id, int(source.duration or 0))
     except ValueError as error:
         raise HTTPException(status_code=429, detail=str(error)) from error
-    job = STTJob(user_id=current_user.id, source_file_id=source.id, title=payload.title.strip(), folder_id=folder_id, prompt=payload.prompt.strip(), output_mode=payload.output_mode, api_keys=personal_keys)
+    post_prompts = [item.strip() for item in payload.post_prompts if item.strip()][:5]
+    if any(len(item) > 4_000 for item in post_prompts):
+        raise HTTPException(status_code=422, detail="هر دستور پس از تبدیل باید حداکثر ۴۰۰۰ نویسه باشد.")
+    job = STTJob(user_id=current_user.id, source_file_id=source.id, title=payload.title.strip(), folder_id=folder_id, prompt=payload.prompt.strip(), post_prompts=post_prompts, output_mode=payload.output_mode, api_keys=personal_keys)
     position = await stt_queue.enqueue(job)
     return {"job_id": job.id, "queue_position": position, "message": "تبدیل صدا به متن شروع شد."}
 

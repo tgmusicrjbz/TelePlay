@@ -9,7 +9,7 @@ from passlib.context import CryptContext
 from pyrogram.enums import ChatMemberStatus, ChatType
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -49,6 +49,16 @@ async def security_events(
         "device": item.user_agent,
         "created_at": item.created_at,
     } for item in events]
+
+
+@router.delete("/accounts/security-events")
+async def clear_security_events(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await db.execute(delete(SecurityEvent).where(SecurityEvent.user_id == current_user.id))
+    await db.commit()
+    return {"cleared": True}
 
 
 @router.get("/accounts/export")
@@ -980,6 +990,14 @@ async def admin_error_logs(_: User = Depends(require_admin), db: AsyncSession = 
         "path": row.path, "message": row.message, "resolved": row.resolved,
         "created_at": row.created_at,
     } for row in rows]
+
+
+@router.delete("/admin/errors")
+async def clear_admin_error_logs(_: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    from ..models import ErrorLog
+    await db.execute(delete(ErrorLog))
+    await db.commit()
+    return {"cleared": True}
 
 
 @router.patch("/admin/errors/{error_id}")

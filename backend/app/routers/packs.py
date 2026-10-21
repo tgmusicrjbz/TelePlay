@@ -42,7 +42,8 @@ def _pack_summary(pack: Pack) -> PackSummary:
     return PackSummary(
         id=pack.id, name=pack.name, description=pack.description,
         parent_folder_id=pack.parent_folder_id, item_count=len(ordered),
-        cover_file_id=custom_cover_id, hide_member_files=pack.hide_member_files, cover_url=cover_url,
+        cover_file_id=custom_cover_id, cover_position_x=pack.cover_position_x, cover_position_y=pack.cover_position_y,
+        hide_member_files=pack.hide_member_files, cover_url=cover_url,
         cover_urls=([cover_url] + previews)[:4] if cover_url else previews,
         preview_names=[item.file.file_name for item in ordered[:2]],
         type_counts=counts, position=pack.position,
@@ -154,6 +155,10 @@ async def update_pack(pack_id: int, payload: PackUpdate, db: AsyncSession = Depe
             cover = (await db.execute(select(File).where(File.id == cover_id, File.user_id == current_user.id, File.file_type == "image"))).scalar_one_or_none()
             if cover is None: raise HTTPException(status_code=400, detail="کاور باید یکی از عکس‌های کمد باشد")
         pack.cover_file_id = cover_id
+    if "cover_position_x" in changes and changes["cover_position_x"] is not None:
+        pack.cover_position_x = changes["cover_position_x"]
+    if "cover_position_y" in changes and changes["cover_position_y"] is not None:
+        pack.cover_position_y = changes["cover_position_y"]
     await db.commit()
     return _pack_response(await _owned_pack(db, pack_id, current_user.id))
 

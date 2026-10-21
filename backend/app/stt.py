@@ -271,6 +271,7 @@ class STTJob:
     title: str
     folder_id: int | None
     prompt: str = ""
+    post_prompts: list[str] | None = None
     output_mode: str = "save"
     telegram_id: int | None = None
     api_keys: list[str] | None = None
@@ -320,7 +321,7 @@ class STTQueue:
             job = STTJob(
                 user_id=user.id, source_file_id=int(payload["source_file_id"]),
                 title=str(payload.get("title") or "رونویسی صدا"), folder_id=payload.get("folder_id"),
-                prompt=str(payload.get("prompt") or ""), output_mode=str(payload.get("output_mode") or "save"),
+                prompt=str(payload.get("prompt") or ""), post_prompts=list(payload.get("post_prompts") or []), output_mode=str(payload.get("output_mode") or "save"),
                 telegram_id=payload.get("telegram_id"), api_keys=decrypt_user_keys(user.gemini_api_keys_encrypted),
                 cleanup_source=bool(payload.get("cleanup_source", False)), id=job_id,
             )
@@ -355,7 +356,7 @@ class STTQueue:
         await create_job(
             job_id=job.id, user_id=job.user_id, kind="stt", title=job.title,
             payload={"id": job.id, "user_id": job.user_id, "source_file_id": job.source_file_id,
-                     "title": job.title, "folder_id": job.folder_id, "prompt": job.prompt,
+                     "title": job.title, "folder_id": job.folder_id, "prompt": job.prompt, "post_prompts": job.post_prompts or [],
                      "output_mode": job.output_mode, "telegram_id": job.telegram_id,
                      "cleanup_source": job.cleanup_source},
             status=self.statuses[job.id],
@@ -467,6 +468,13 @@ class STTQueue:
                 markdown = await provider.transcribe(media_path, mime_type, job.prompt)
             if self.controls.get(job.id):
                 return
+            for index, instruction in enumerate(job.post_prompts or []):
+                if self.controls.get(job.id):
+                    return
+                progress = min(82, 60 + int((index / max(1, len(job.post_prompts or []))) * 20))
+                self.statuses[job.id].update(state="transcribing", message=f"پردازش هوشمند؛ مرحله {index + 1} از {len(job.post_prompts or [])}", progress=progress)
+                await self._persist_status(job.id)
+                markdown = await provider.refine_text(markdown, instruction)
             if job.output_mode == "temporary":
                 self.statuses[job.id].update(state="done", message="متن آماده است", progress=100, content=markdown, finished_at=datetime.utcnow().isoformat())
                 await self._persist_status(job.id)

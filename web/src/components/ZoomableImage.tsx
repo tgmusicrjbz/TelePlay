@@ -50,7 +50,7 @@ export default function ZoomableImage({src,previewSrc='',alt='',scale,onScaleCha
         if(drag.current?.pointerId===event.pointerId&&scale>1)setPosition(clamp({x:drag.current.position.x+event.clientX-drag.current.start.x,y:drag.current.position.y+event.clientY-drag.current.start.y}));
     };
     const release=(event:React.PointerEvent<HTMLDivElement>)=>{event.stopPropagation();pointers.current.delete(event.pointerId);if(pointers.current.size<2)gesture.current=null;if(drag.current?.pointerId===event.pointerId)drag.current=null;setMoving(pointers.current.size>0)};
-    return <div ref={frameRef} className={`relative flex h-full w-full select-none items-center justify-center overflow-hidden ${scale>1?'cursor-grab active:cursor-grabbing':''} ${className}`} style={{touchAction:'none'}}
+    return <div ref={frameRef} data-zoomable-image="true" data-zoomed={scale>1?'true':'false'} className={`relative flex h-full w-full select-none items-center justify-center overflow-hidden ${scale>1?'cursor-grab active:cursor-grabbing':''} ${className}`} style={{touchAction:'none'}}
         onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={release} onPointerCancel={release}
         onWheel={event=>{event.preventDefault();zoomAt(scale*(event.deltaY<0?1.16:.86),event.clientX,event.clientY)}}
         onDoubleClick={event=>{event.stopPropagation();if(scale>1){onScaleChange(1);setPosition({x:0,y:0})}else zoomAt(2.25,event.clientX,event.clientY)}}>

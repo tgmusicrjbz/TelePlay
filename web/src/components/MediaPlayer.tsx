@@ -131,6 +131,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
     const hasQueue = playQueue.length > 0;
     const toggleAudioOnly = async () => {
         if (preparingAudio) return;
+        setShowVideoMoreMenu(false);
         audioSwitchPosition.current = videoRef.current?.currentTime || 0;
         if (audioOnly) { setAudioOnly(false); setVideoHidden(false); return; }
         if (audioVariantUrl) { setAudioOnly(true); setVideoHidden(false); return; }
@@ -449,6 +450,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
         if (sleepTimeout.current) clearTimeout(sleepTimeout.current);
         setSleepMode(mode);
         setShowSleepMenu(false);
+        setShowVideoMoreMenu(false);
         if (mode === '15' || mode === '30' || mode === '45' || mode === '60') {
             sleepTimeout.current = setTimeout(() => {
                 videoRef.current?.pause();
@@ -948,13 +950,13 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
                                 <div className="space-y-1">
                                 <button className={`flex min-h-10 w-full items-center gap-2 rounded-lg px-2.5 text-xs transition ${videoHidden?'bg-primary-500/20 text-primary-200':'text-dark-200 hover:bg-white/[.07]'}`} onClick={()=>{setVideoHidden(value=>{if(!value&&audioOnly)setAudioOnly(false);return !value});setShowVideoMoreMenu(false)}}><EyeOff className="h-4 w-4 shrink-0"/><span>{videoHidden?'روشن کردن تصویر':'خاموش کردن تصویر'}</span></button>
                                 <button disabled={preparingAudio} className={`flex min-h-10 w-full items-center gap-2 rounded-lg px-2.5 text-xs transition disabled:opacity-50 ${audioOnly?'bg-primary-500/20 text-primary-200':'text-dark-200 hover:bg-white/[.07]'}`} onClick={()=>void toggleAudioOnly()}><Headphones className="h-4 w-4 shrink-0"/><span>{preparingAudio?'آماده‌سازی…':audioOnly ? 'بازگشت به ویدیو' : 'فقط صدا'}</span></button>
-                                <button className={`flex min-h-10 w-full items-center gap-2 rounded-lg px-2.5 text-xs transition ${repeatMode!=='off'?'bg-primary-500/20 text-primary-200':'text-dark-200 hover:bg-white/[.07]'}`} onClick={() => setRepeatMode(repeatMode === 'off' ? (hasQueue ? 'all' : 'one') : repeatMode === 'all' ? 'one' : 'off')}><Repeat2 className="h-4 w-4 shrink-0"/><span>{repeatMode === 'off' ? 'تکرار خاموش' : repeatMode === 'all' ? 'تکرار صف' : 'تکرار همین ویدیو'}</span></button>
+                                <button className={`flex min-h-10 w-full items-center gap-2 rounded-lg px-2.5 text-xs transition ${repeatMode!=='off'?'bg-primary-500/20 text-primary-200':'text-dark-200 hover:bg-white/[.07]'}`} onClick={() => {setRepeatMode(repeatMode === 'off' ? (hasQueue ? 'all' : 'one') : repeatMode === 'all' ? 'one' : 'off');setShowVideoMoreMenu(false)}}><Repeat2 className="h-4 w-4 shrink-0"/><span>{repeatMode === 'off' ? 'تکرار خاموش' : repeatMode === 'all' ? 'تکرار صف' : 'تکرار همین ویدیو'}</span></button>
                                 <button className={`flex min-h-10 w-full items-center gap-2 rounded-lg px-2.5 text-xs transition ${sleepMode!=='off'?'bg-primary-500/20 text-primary-200':'text-dark-200 hover:bg-white/[.07]'}`} onClick={() => setShowSleepMenu(open => !open)}><Clock3 className="h-4 w-4 shrink-0"/><span>تایمر خواب</span><ChevronDown className={`mr-auto h-3.5 w-3.5 transition ${showSleepMenu?'rotate-180':''}`}/></button>
                                 {showSleepMenu && <div className="grid grid-cols-2 gap-1 rounded-lg bg-black/20 p-1">
                                     {([['15','۱۵ دقیقه'],['30','۳۰ دقیقه'],['45','۴۵ دقیقه'],['60','۱ ساعت'],['track','پایان ویدیو'],['end','پایان صف']] as const).map(([mode,label])=><button key={mode} onClick={()=>setSleepTimer(mode)} className={`rounded-lg px-2 py-2 text-[11px] ${sleepMode===mode?'bg-primary-500/25 text-primary-200':'text-dark-300 hover:bg-white/[.05]'}`}>{label}</button>)}
                                     {sleepMode !== 'off'&&<button onClick={()=>setSleepTimer('off')} className="col-span-2 rounded-lg px-2 py-2 text-[11px] text-red-300 hover:bg-red-500/10">لغو تایمر</button>}
                                 </div>}
-                                {document.pictureInPictureEnabled && <button className="flex min-h-10 w-full items-center gap-2 rounded-lg px-2.5 text-xs text-dark-200 hover:bg-white/[.07]" onClick={togglePiP}><PictureInPicture2 className="h-4 w-4 shrink-0"/><span>{isPiP ? 'خروج از تصویر کوچک' : 'تصویر در تصویر'}</span></button>}
+                                {document.pictureInPictureEnabled && <button className="flex min-h-10 w-full items-center gap-2 rounded-lg px-2.5 text-xs text-dark-200 hover:bg-white/[.07]" onClick={()=>{setShowVideoMoreMenu(false);void togglePiP()}}><PictureInPicture2 className="h-4 w-4 shrink-0"/><span>{isPiP ? 'خروج از تصویر کوچک' : 'تصویر در تصویر'}</span></button>}
                                 </div>
                             </div>}
                         </div>}

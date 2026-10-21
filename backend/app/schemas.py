@@ -297,6 +297,8 @@ class PackUpdate(BaseModel):
     description: Optional[str] = Field(default=None, max_length=2048)
     parent_folder_id: Optional[int] = None
     cover_file_id: Optional[int] = None
+    cover_position_x: Optional[int] = Field(default=None, ge=0, le=100)
+    cover_position_y: Optional[int] = Field(default=None, ge=0, le=100)
     hide_member_files: Optional[bool] = None
 
 
@@ -323,6 +325,8 @@ class PackSummary(BaseModel):
     parent_folder_id: Optional[int] = None
     item_count: int = 0
     cover_file_id: Optional[int] = None
+    cover_position_x: int = 50
+    cover_position_y: int = 50
     hide_member_files: bool = False
     cover_url: Optional[str] = None
     cover_urls: List[str] = Field(default_factory=list)

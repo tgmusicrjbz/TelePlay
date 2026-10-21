@@ -203,6 +203,10 @@ async def init_db():
             pack_bool_type = "BOOLEAN" if url.drivername.startswith("postgresql") else "INTEGER"
             pack_bool_default = "FALSE" if url.drivername.startswith("postgresql") else "0"
             await conn.execute(text(f"ALTER TABLE packs ADD COLUMN hide_member_files {pack_bool_type} NOT NULL DEFAULT {pack_bool_default}"))
+        if "cover_position_x" not in pack_columns:
+            await conn.execute(text("ALTER TABLE packs ADD COLUMN cover_position_x INTEGER NOT NULL DEFAULT 50"))
+        if "cover_position_y" not in pack_columns:
+            await conn.execute(text("ALTER TABLE packs ADD COLUMN cover_position_y INTEGER NOT NULL DEFAULT 50"))
         # Pack names are labels rather than identifiers. Users may intentionally
         # keep multiple packs with the same name in one drawer.
         if url.drivername.startswith("postgresql"):

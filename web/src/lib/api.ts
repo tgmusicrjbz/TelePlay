@@ -178,6 +178,8 @@ export interface PackSummary {
     parent_folder_id: number | null;
     item_count: number;
     cover_file_id: number | null;
+    cover_position_x: number;
+    cover_position_y: number;
     hide_member_files: boolean;
     cover_url: string | null;
     cover_urls: string[];
@@ -877,7 +879,7 @@ const usePackMutation = <TVariables>(request: (variables: TVariables) => Promise
 
 export const useCreatePack = () => usePackMutation(async (payload: { name: string; description?: string; parent_folder_id: number | null; hide_member_files?: boolean; file_ids: number[] }) =>
     (await api.post<Pack>('/packs', payload, { timeout: 60_000 })).data);
-export const useUpdatePack = () => usePackMutation(async ({ id, ...payload }: { id: number; name?: string; description?: string; parent_folder_id?: number | null; cover_file_id?: number | null; hide_member_files?: boolean }) =>
+export const useUpdatePack = () => usePackMutation(async ({ id, ...payload }: { id: number; name?: string; description?: string; parent_folder_id?: number | null; cover_file_id?: number | null; cover_position_x?:number; cover_position_y?:number; hide_member_files?: boolean }) =>
     (await api.patch<Pack>(`/packs/${id}`, payload)).data);
 export const useAddPackItems = () => usePackMutation(async ({ id, fileIds }: { id: number; fileIds: number[] }) =>
     (await api.post<Pack>(`/packs/${id}/items`, { file_ids: fileIds }, { timeout: 60_000 })).data);
@@ -1276,6 +1278,10 @@ export const useSecurityEvents = () => useQuery({
     queryKey: ['security-events'],
     queryFn: async () => (await api.get<SecurityEvent[]>('/accounts/security-events?limit=30')).data,
 });
+export const useClearSecurityEvents = () => { const queryClient=useQueryClient(); return useMutation({
+    mutationFn: async () => (await api.delete('/accounts/security-events')).data,
+    onSuccess: () => queryClient.invalidateQueries({queryKey:['security-events']}),
+}); };
 export const useRevokeSession = () => {
     const queryClient = useQueryClient();
     return useMutation({ mutationFn: async (id: string) => api.delete(`/auth/sessions/${id}`), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['sessions'] }) });
@@ -1302,6 +1308,7 @@ export const useAdminStats = (enabled: boolean) => useQuery({ queryKey: ['adminS
 export const useAdminHealth = (enabled: boolean) => useQuery({ queryKey: ['adminHealth'], queryFn: async () => (await api.get<AdminHealth>('/admin/health')).data, enabled, retry: 1, staleTime: 10_000, refetchInterval: enabled ? 30_000 : false });
 export const useAdminErrors = (enabled: boolean) => useQuery({ queryKey: ['adminErrors'], queryFn: async () => (await api.get<AdminErrorLog[]>('/admin/errors')).data, enabled, retry: 1, staleTime: 15_000 });
 export const useResolveAdminError = () => { const queryClient=useQueryClient(); return useMutation({ mutationFn: async(errorId:string)=>(await api.patch(`/admin/errors/${errorId}`)).data, onSuccess:()=>queryClient.invalidateQueries({queryKey:['adminErrors']}) }); };
+export const useClearAdminErrors = () => { const queryClient=useQueryClient(); return useMutation({ mutationFn: async()=>(await api.delete('/admin/errors')).data, onSuccess:()=>queryClient.invalidateQueries({queryKey:['adminErrors']}) }); };
 export const useAccountPreferences = () => useQuery({ queryKey: ['accountPreferences'], queryFn: async () => (await api.get<AccountPreferences>('/accounts/preferences')).data });
 export const useVaultStatus = () => useQuery({ queryKey: ['vaultStatus'], queryFn: async () => (await api.get<VaultStatus>('/accounts/vault')).data });
 export const useSetVaultPassword = () => {
@@ -1402,7 +1409,7 @@ export const useSTTJobs = () => useQuery<STTJobStatus[]>({
     refetchInterval:query=>(query.state.data||[]).some(job=>!['done','error','cancelled'].includes(job.state))?1500:false,
 });
 export const useCreateSTTJob = () => { const queryClient=useQueryClient(); return useMutation({
-    mutationFn:async(payload:{file_id:number;title:string;prompt?:string;folder_id?:number|null;output_mode:'temporary'|'save'})=>(await api.post('/stt/jobs',payload)).data,
+    mutationFn:async(payload:{file_id:number;title:string;prompt?:string;post_prompts?:string[];folder_id?:number|null;output_mode:'temporary'|'save'})=>(await api.post('/stt/jobs',payload)).data,
     onSuccess:()=>queryClient.invalidateQueries({queryKey:['stt-jobs']}),
 }); };
 export const useCancelSTTJob = () => { const queryClient=useQueryClient(); return useMutation({
@@ -1414,16 +1421,16 @@ export const useDismissSTTJob = () => { const queryClient=useQueryClient(); retu
 }); };
 export const useRefineSTTText = () => useMutation({
     mutationFn: async ({content,prompt,onStatus}:{content:string;prompt:string;onStatus?:(message:string,progress:number)=>void}) => {
-        const started=(await api.post<{job_id:string;message:string;progress:number}>('/stt/refine/jobs',{content,prompt})).data;
+        const started=(await api.post<{job_id:string;message:string;progress:number}>('/stt/refine/jobs',{content,prompt},{timeout:30_000})).data;
         onStatus?.(started.message,started.progress);
-        for(let attempt=0;attempt<600;attempt++){
+        for(let attempt=0;attempt<1200;attempt++){
             await new Promise(resolve=>window.setTimeout(resolve,1000));
-            const status=(await api.get<{state:string;message:string;progress:number;content?:string}>(`/stt/refine/jobs/${started.job_id}`)).data;
+            const status=(await api.get<{state:string;message:string;progress:number;content?:string}>(`/stt/refine/jobs/${started.job_id}`,{timeout:30_000})).data;
             onStatus?.(status.message,status.progress);
             if(status.state==='done'&&status.content)return{content:status.content};
             if(status.state==='error')throw new Error(status.message||'ویرایش متن انجام نشد.');
         }
-        throw new Error('ویرایش متن بیش از حد طول کشید؛ دوباره تلاش کن.');
+        throw new Error('ویرایش متن بیشتر از ۲۰ دقیقه طول کشید؛ متن را کوتاه‌تر کن یا دوباره تلاش کن.');
     },
 });
 

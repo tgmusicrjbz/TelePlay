@@ -1690,7 +1690,8 @@ async def _handle_file_impl(client, message: Message, status_msg: Message):
 @tg_client.on_message(filters.private & (filters.video | filters.audio | filters.voice | filters.document | filters.photo | filters.animation | filters.video_note), group=0)
 async def handle_file(client, message: Message):
     """Queue bursts per user so every forwarded message is processed in order."""
-    if (message.chat.id, message.id) in claimed_stt_messages:
+    chat_id = getattr(getattr(message, "chat", None), "id", None) or message.from_user.id
+    if (chat_id, message.id) in claimed_stt_messages:
         return
     user_id = message.from_user.id
     queue = upload_message_queues.setdefault(user_id, asyncio.Queue())
