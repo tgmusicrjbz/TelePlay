@@ -20,8 +20,19 @@ def build_search_expansion_instruction(known_tags: list[str]) -> str:
     )
 
 
-def parse_search_expansion(raw: str, original_query: str) -> dict[str, object]:
-    """Parse and constrain model output, then build the existing OR query syntax."""
+def build_related_file_instruction(known_tags: list[str]) -> str:
+    tags = "، ".join(tag for tag in known_tags[:80] if tag) or "تعریف نشده"
+    return (
+        "از مشخصات فایل، کلیدواژه‌هایی استخراج کن که برای پیدا کردن فایل‌های واقعاً مرتبط در همان کمد مناسب باشند. "
+        "موضوع، نام‌های خاص، پروژه، شخص، مکان و تگ‌های مستقیم را نگه دار؛ پسوند فایل، کلمات عمومی و حدس‌های دور را حذف کن. "
+        f"تگ‌های تعریف‌شده کاربر: {tags}. "
+        'فقط JSON معتبر با ساختار {"terms":["عبارت اول","عبارت دوم"]} برگردان. '
+        f"حداکثر {MAX_SEARCH_TERMS} مورد، هر مورد کوتاه و بدون Markdown."
+    )
+
+
+def parse_search_terms(raw: str) -> list[str]:
+    """Parse and constrain a model-produced list of search terms."""
     cleaned = raw.strip()
     fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", cleaned, re.DOTALL | re.IGNORECASE)
     candidate = fenced.group(1) if fenced else cleaned
@@ -33,14 +44,11 @@ def parse_search_expansion(raw: str, original_query: str) -> dict[str, object]:
     except (TypeError, ValueError, json.JSONDecodeError) as error:
         raise ValueError("جست‌وجوی هوشمند پاسخ معتبری برنگرداند.") from error
 
-    original = re.sub(r"\s+", " ", original_query).strip()[:300]
-    if not original:
-        raise ValueError("عبارت جست‌وجو خالی است.")
     raw_terms = payload.get("terms", []) if isinstance(payload, dict) else []
     if not isinstance(raw_terms, list):
         raise ValueError("جست‌وجوی هوشمند پاسخ معتبری برنگرداند.")
 
-    seen = {original.casefold()}
+    seen: set[str] = set()
     terms: list[str] = []
     for item in raw_terms:
         term = re.sub(r"[;؛,،]+", " ", str(item or ""))
@@ -52,6 +60,15 @@ def parse_search_expansion(raw: str, original_query: str) -> dict[str, object]:
         terms.append(term)
         if len(terms) >= MAX_SEARCH_TERMS:
             break
+    return terms
+
+
+def parse_search_expansion(raw: str, original_query: str) -> dict[str, object]:
+    """Parse model output, then build the existing OR query syntax."""
+    original = re.sub(r"\s+", " ", original_query).strip()[:300]
+    if not original:
+        raise ValueError("عبارت جست‌وجو خالی است.")
+    terms = [term for term in parse_search_terms(raw) if term.casefold() != original.casefold()]
     # Semicolons are OR groups in the library's existing search grammar.
     expanded_query = "؛".join([original, *terms])
     return {"query": expanded_query, "terms": terms}

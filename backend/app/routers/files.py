@@ -51,7 +51,7 @@ from ..services import (
 )
 from ..audit import add_security_event
 from ..ai_metadata import build_metadata_source, metadata_instruction, parse_metadata_suggestion
-from ..ai_search import build_search_expansion_instruction, parse_search_expansion
+from ..ai_search import build_related_file_instruction, build_search_expansion_instruction, parse_search_expansion, parse_search_terms
 from ..gemini_keys import decrypt_user_keys
 from ..stt import GeminiSTTProvider, stt_queue
 from ..tts import load_tts_settings
@@ -63,6 +63,7 @@ limiter = Limiter(key_func=get_remote_address)
 share_password_context = CryptContext(schemes=["pbkdf2_sha256"], pbkdf2_sha256__default_rounds=310_000, deprecated="auto")
 _text_index_locks: dict[int, asyncio.Lock] = {}
 _smart_search_cache: dict[tuple[int, str, str, str], tuple[datetime, dict[str, object]]] = {}
+_related_terms_cache: dict[tuple[int, int, str, str, str], tuple[datetime, list[str]]] = {}
 
 
 class TextContentUpdate(BaseModel):
@@ -146,6 +147,98 @@ async def suggest_file_metadata(
         return parse_metadata_suggestion(raw, file.file_name, excluded_tags)
     except (RuntimeError, ValueError) as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
+
+
+@router.post("/{file_id}/related")
+@limiter.limit("8/minute")
+async def find_related_files(
+    file_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    source = (await db.execute(select(File).where(File.id == file_id, File.user_id == current_user.id))).scalar_one_or_none()
+    if source is None:
+        raise HTTPException(status_code=404, detail="فایل پیدا نشد.")
+    if source.is_hidden and not has_vault_access(request, current_user):
+        require_vault_access(request, current_user)
+    personal_keys = decrypt_user_keys(current_user.gemini_api_keys_encrypted)
+    keys = list(dict.fromkeys(personal_keys + stt_queue.provider.api_keys))
+    if not keys:
+        raise HTTPException(status_code=503, detail="برای پیدا کردن فایل‌های مرتبط، کلید Gemini تنظیم نشده است.")
+    try:
+        stored_tags = json.loads(current_user.tag_settings_json or "[]")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        stored_tags = []
+    known_tags = [str(item.get("name") or "").strip() for item in stored_tags if isinstance(item, dict) and item.get("name")]
+    source_text = build_metadata_source(source)
+    # A short sample is enough for topic extraction and keeps token usage low.
+    source_text = source_text[:3500]
+    preferences = load_tts_settings(current_user)
+    tag_fingerprint = hashlib.sha256("\0".join(known_tags).encode("utf-8")).hexdigest()[:12]
+    source_version = (source.updated_at or source.created_at).isoformat()
+    cache_key = (current_user.id, source.id, source_version, preferences["text_model"], tag_fingerprint)
+    cached = _related_terms_cache.get(cache_key)
+    if cached and cached[0] > datetime.utcnow():
+        terms = cached[1]
+    else:
+        provider = GeminiSTTProvider(keys, text_model=preferences["text_model"])
+        try:
+            raw = await provider.refine_text(source_text, build_related_file_instruction(known_tags))
+            terms = parse_search_terms(raw)
+        except (RuntimeError, ValueError) as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
+        _related_terms_cache[cache_key] = (datetime.utcnow() + timedelta(hours=1), terms)
+    if not terms:
+        return {"files": [], "terms": []}
+
+    await index_missing_text_notes(db, current_user.id)
+    term_clauses = []
+    for term in terms:
+        escaped = f"%{escape_like(term)}%"
+        term_clauses.append(or_(
+            File.file_name.ilike(escaped, escape="\\"),
+            File.description.ilike(escaped, escape="\\"),
+            File.tags_json.ilike(escaped, escape="\\"),
+            File.search_text.ilike(escaped, escape="\\"),
+        ))
+    candidate_query = select(File).where(
+        File.user_id == current_user.id,
+        File.id != source.id,
+        or_(*term_clauses),
+        ~exists().where(Playlist.cover_file_id == File.id, Playlist.user_id == current_user.id),
+        ~exists().where(Folder.cover_file_id == File.id, Folder.user_id == current_user.id),
+        ~exists().where(
+            PackItem.file_id == File.id,
+            PackItem.pack_id == Pack.id,
+            Pack.user_id == current_user.id,
+            Pack.hide_member_files.is_(True),
+        ),
+    )
+    if not has_vault_access(request, current_user):
+        candidate_query = candidate_query.where(File.is_hidden.is_(False))
+    candidates = (await db.execute(candidate_query.limit(250))).scalars().all()
+
+    def relevance(candidate: File) -> tuple[int, datetime, int]:
+        try:
+            candidate_tags = " ".join(str(tag) for tag in json.loads(candidate.tags_json or "[]"))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            candidate_tags = ""
+        name = (candidate.file_name or "").casefold()
+        description = (candidate.description or "").casefold()
+        tags = candidate_tags.casefold()
+        content = (candidate.search_text or "").casefold()
+        score = sum(
+            (4 if term.casefold() in tags else 0)
+            + (3 if term.casefold() in name else 0)
+            + (2 if term.casefold() in description else 0)
+            + (1 if term.casefold() in content else 0)
+            for term in terms
+        )
+        return score, candidate.updated_at or candidate.created_at, candidate.id
+
+    ranked = sorted(candidates, key=relevance, reverse=True)[:8]
+    return {"files": [add_urls_to_file(item) for item in ranked], "terms": terms}
 
 
 class LinkImportRequest(BaseModel):

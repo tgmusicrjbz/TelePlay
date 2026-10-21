@@ -65,6 +65,7 @@ export interface GeminiKeySummary { count:number; masked:string[]; }
 export interface GeminiKeyHealth { masked:string; status:'healthy'|'limited'|'denied'|'unreachable'|'error'; message:string; }
 export interface FileMetadataSuggestion { title:string; description:string; tags:string[]; }
 export interface SmartSearchExpansion { query:string; terms:string[]; }
+export interface RelatedFilesResult { files:TelegramFile[]; terms:string[]; }
 export interface TTSJobStatus { id: string; state: 'queued'|'paused'|'synthesizing'|'merging'|'uploading'|'done'|'error'|'cancelled'; message: string; progress: number; chunks_total: number; chunks_done: number; title: string; model?:string; file_id?: number; stream_url?: string; created_at: string; finished_at?: string; }
 export interface STTJobStatus { id:string; source_file_id:number; title:string; output_mode?:'temporary'|'save'; model?:string; state:'queued'|'downloading'|'transcribing'|'saving'|'done'|'error'|'cancelled'; message:string; progress:number; content?:string; file_id?:number; created_at:string; finished_at?:string; }
 
@@ -579,6 +580,10 @@ export const useSuggestFileMetadata = () => useMutation({
 
 export const useExpandSmartSearch = () => useMutation({
     mutationFn: async (query:string) => (await api.post<SmartSearchExpansion>('/files/search/expand',{query})).data,
+});
+
+export const useRelatedFiles = () => useMutation({
+    mutationFn: async (id:number) => (await api.post<RelatedFilesResult>(`/files/${id}/related`)).data,
 });
 
 export const useDeleteFile = () => {
