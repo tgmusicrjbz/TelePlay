@@ -22,6 +22,19 @@ def decrypt_credentials(value:str|None)->dict:
     try: return json.loads(_cipher().decrypt((value or "").encode()).decode()) if value else {}
     except (InvalidToken,ValueError,TypeError,json.JSONDecodeError): return {}
 
+def credential_accounts(value:str|None,fallback_email:str|None=None)->tuple[list[dict],str|None]:
+    stored=decrypt_credentials(value)
+    if isinstance(stored.get("accounts"),list):
+        accounts=[item for item in stored["accounts"] if isinstance(item,dict) and item.get("email")]
+        return accounts,stored.get("active_email") or (accounts[0].get("email") if accounts else None)
+    if stored.get("access_token") or stored.get("refresh_token"):
+        email=stored.get("email") or fallback_email
+        return ([{**stored,"email":email}] if email else []),email
+    return [],None
+
+def encrypt_account_store(accounts:list[dict],active_email:str|None)->str|None:
+    return encrypt_credentials({"accounts":accounts,"active_email":active_email}) if accounts else None
+
 def authorization_url(user_id:int)->str:
     state=jwt.encode({"sub":str(user_id),"purpose":"google-drive","exp":int(time.time())+600},settings.jwt_secret,algorithm="HS256")
     return "https://accounts.google.com/o/oauth2/v2/auth?"+urlencode({"client_id":settings.google_client_id,"redirect_uri":redirect_uri(),"response_type":"code","scope":SCOPES,"access_type":"offline","prompt":"consent select_account","include_granted_scopes":"true","state":state})
@@ -42,14 +55,16 @@ async def exchange_code(code:str)->dict:
     return await asyncio.to_thread(_json_request,"https://oauth2.googleapis.com/token",data={"code":code,"client_id":settings.google_client_id,"client_secret":settings.google_client_secret,"redirect_uri":redirect_uri(),"grant_type":"authorization_code"})
 
 async def access_token(user,db)->str:
-    credentials=decrypt_credentials(user.google_drive_credentials_encrypted)
+    accounts,active_email=credential_accounts(user.google_drive_credentials_encrypted,user.google_drive_email)
+    credentials=next((item for item in accounts if item.get("email")==active_email),accounts[0] if accounts else None)
     if not credentials: raise ValueError("حساب گوگل متصل نیست.")
     if credentials.get("access_token") and float(credentials.get("expires_at",0))>time.time()+60: return credentials["access_token"]
     refresh=credentials.get("refresh_token")
     if not refresh: raise ValueError("اتصال گوگل منقضی شده؛ دوباره متصلش کن.")
     fresh=await asyncio.to_thread(_json_request,"https://oauth2.googleapis.com/token",data={"refresh_token":refresh,"client_id":settings.google_client_id,"client_secret":settings.google_client_secret,"grant_type":"refresh_token"})
     credentials.update(fresh); credentials["refresh_token"]=refresh; credentials["expires_at"]=time.time()+int(fresh.get("expires_in",3600))
-    user.google_drive_credentials_encrypted=encrypt_credentials(credentials); await db.commit()
+    accounts=[credentials if item.get("email")==credentials.get("email") else item for item in accounts]
+    user.google_drive_credentials_encrypted=encrypt_account_store(accounts,credentials.get("email")); await db.commit()
     return credentials["access_token"]
 
 async def account_email(token:str)->str|None:

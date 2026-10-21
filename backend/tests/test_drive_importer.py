@@ -1,5 +1,5 @@
 from app.drive_importer import _detect_type, _response_filename, extract_google_drive_file_id
-from app.google_drive import decrypt_credentials, encrypt_credentials
+from app.google_drive import credential_accounts, decrypt_credentials, encrypt_account_store, encrypt_credentials
 
 
 def test_extracts_file_id_from_google_drive_file_link():
@@ -30,6 +30,14 @@ def test_google_credentials_are_encrypted_at_rest():
     encrypted=encrypt_credentials(raw)
     assert "secret-access" not in encrypted
     assert decrypt_credentials(encrypted)==raw
+
+
+def test_google_account_store_supports_multiple_accounts_and_legacy_tokens():
+    accounts=[{"email":"one@example.com","refresh_token":"one"},{"email":"two@example.com","refresh_token":"two"}]
+    encrypted=encrypt_account_store(accounts,"two@example.com")
+    assert credential_accounts(encrypted)==(accounts,"two@example.com")
+    legacy=encrypt_credentials({"refresh_token":"old"})
+    assert credential_accounts(legacy,"legacy@example.com")[1]=="legacy@example.com"
 
 
 def test_decodes_persian_rfc5987_filename():

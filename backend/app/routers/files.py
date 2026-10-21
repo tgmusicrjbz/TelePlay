@@ -35,7 +35,7 @@ from ..config import get_settings
 from ..media_metadata import extract_embedded_cover
 from ..downloader import ImportJob, link_importer
 from ..drive_importer import drive_importer, extract_google_drive_file_id
-from ..google_drive import authorization_url, decode_state, exchange_code, encrypt_credentials, account_email, access_token as google_access_token, list_files as google_list_files, configured as google_drive_configured
+from ..google_drive import authorization_url, decode_state, exchange_code, account_email, access_token as google_access_token, list_files as google_list_files, configured as google_drive_configured, credential_accounts, encrypt_account_store
 from ..processing_jobs import update_job
 from .folders import ensure_default_folder
 from ..services import (
@@ -79,6 +79,9 @@ class DriveSelectionImportRequest(BaseModel):
     file_names: dict[str,str] = Field(default_factory=dict)
     mime_types: dict[str,str] = Field(default_factory=dict)
     folder_id: Optional[int] = None
+
+class DriveAccountRequest(BaseModel):
+    email: str = Field(min_length=3,max_length=255)
 
 
 class SendToTelegramRequest(BaseModel):
@@ -338,7 +341,8 @@ async def import_from_google_drive(
 
 @router.get("/drive/status")
 async def google_drive_status(current_user:User=Depends(get_current_user)):
-    return {"configured":google_drive_configured(),"connected":bool(current_user.google_drive_credentials_encrypted),"email":current_user.google_drive_email}
+    accounts,active=credential_accounts(current_user.google_drive_credentials_encrypted,current_user.google_drive_email)
+    return {"configured":google_drive_configured(),"connected":bool(accounts),"email":active,"accounts":[item.get("email") for item in accounts]}
 
 @router.get("/drive/connect")
 async def connect_google_drive(current_user:User=Depends(get_current_user)):
@@ -351,25 +355,37 @@ async def google_drive_callback(code:str,state:str,db:AsyncSession=Depends(get_d
         user_id=decode_state(state); token=await exchange_code(code)
         user=await db.get(User,user_id)
         if user is None: raise ValueError("user")
-        previous={}
-        if not token.get("refresh_token") and user.google_drive_credentials_encrypted:
-            from ..google_drive import decrypt_credentials
-            previous=decrypt_credentials(user.google_drive_credentials_encrypted)
+        email=await account_email(token["access_token"])
+        if not email: raise ValueError("email")
+        accounts,_=credential_accounts(user.google_drive_credentials_encrypted,user.google_drive_email)
+        previous=next((item for item in accounts if item.get("email")==email),{})
         if previous.get("refresh_token") and not token.get("refresh_token"): token["refresh_token"]=previous["refresh_token"]
         import time
         token["expires_at"]=time.time()+int(token.get("expires_in",3600))
-        user.google_drive_credentials_encrypted=encrypt_credentials(token)
-        user.google_drive_email=await account_email(token["access_token"])
+        token["email"]=email
+        accounts=[item for item in accounts if item.get("email")!=email]+[token]
+        user.google_drive_credentials_encrypted=encrypt_account_store(accounts,email)
+        user.google_drive_email=email
         await db.commit()
         return RedirectResponse(f"{settings.web_base_url.rstrip('/')}?drive=connected")
     except Exception:
         logger.exception("Google Drive OAuth callback failed")
         return RedirectResponse(f"{settings.web_base_url.rstrip('/')}?drive=error")
 
+@router.post("/drive/switch")
+async def switch_google_drive(payload:DriveAccountRequest,current_user:User=Depends(get_current_user),db:AsyncSession=Depends(get_db)):
+    accounts,_=credential_accounts(current_user.google_drive_credentials_encrypted,current_user.google_drive_email)
+    if not any(item.get("email")==payload.email for item in accounts): raise HTTPException(status_code=404,detail="این حساب گوگل پیدا نشد.")
+    current_user.google_drive_credentials_encrypted=encrypt_account_store(accounts,payload.email);current_user.google_drive_email=payload.email;await db.commit()
+    return {"ok":True,"email":payload.email}
+
 @router.delete("/drive/disconnect")
-async def disconnect_google_drive(current_user:User=Depends(get_current_user),db:AsyncSession=Depends(get_db)):
-    current_user.google_drive_credentials_encrypted=None; current_user.google_drive_email=None; await db.commit()
-    return {"ok":True}
+async def disconnect_google_drive(email:Optional[str]=None,current_user:User=Depends(get_current_user),db:AsyncSession=Depends(get_db)):
+    accounts,active=credential_accounts(current_user.google_drive_credentials_encrypted,current_user.google_drive_email)
+    target=email or active; accounts=[item for item in accounts if item.get("email")!=target]
+    next_email=active if active!=target and any(item.get("email")==active for item in accounts) else (accounts[0].get("email") if accounts else None)
+    current_user.google_drive_credentials_encrypted=encrypt_account_store(accounts,next_email);current_user.google_drive_email=next_email;await db.commit()
+    return {"ok":True,"email":next_email}
 
 @router.get("/drive/browse")
 async def browse_google_drive(folder_id:str="root",q:str="",current_user:User=Depends(get_current_user),db:AsyncSession=Depends(get_db)):
