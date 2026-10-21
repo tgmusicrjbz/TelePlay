@@ -51,6 +51,7 @@ from ..services import (
 )
 from ..audit import add_security_event
 from ..ai_metadata import build_metadata_source, metadata_instruction, parse_metadata_suggestion
+from ..ai_insights import insights_instruction, parse_file_insights
 from ..ai_search import build_related_file_instruction, build_search_expansion_instruction, parse_search_expansion, parse_search_terms
 from ..gemini_keys import decrypt_user_keys
 from ..stt import GeminiSTTProvider, stt_queue
@@ -64,6 +65,7 @@ share_password_context = CryptContext(schemes=["pbkdf2_sha256"], pbkdf2_sha256__
 _text_index_locks: dict[int, asyncio.Lock] = {}
 _smart_search_cache: dict[tuple[int, str, str, str], tuple[datetime, dict[str, object]]] = {}
 _related_terms_cache: dict[tuple[int, int, str, str, str], tuple[datetime, list[str]]] = {}
+_ai_insights_cache: dict[tuple[int, int, str, str], tuple[datetime, dict[str, object]]] = {}
 
 
 class TextContentUpdate(BaseModel):
@@ -239,6 +241,47 @@ async def find_related_files(
 
     ranked = sorted(candidates, key=relevance, reverse=True)[:8]
     return {"files": [add_urls_to_file(item) for item in ranked], "terms": terms}
+
+
+@router.post("/{file_id}/ai-insights")
+@limiter.limit("8/minute")
+async def create_file_insights(
+    file_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    source = (await db.execute(select(File).where(File.id == file_id, File.user_id == current_user.id))).scalar_one_or_none()
+    if source is None:
+        raise HTTPException(status_code=404, detail="فایل پیدا نشد.")
+    if source.is_hidden and not has_vault_access(request, current_user):
+        require_vault_access(request, current_user)
+    if source.file_type == "text" and source.search_text is None:
+        await index_missing_text_notes(db, current_user.id)
+        await db.refresh(source)
+    if not (source.search_text or "").strip() and len((source.description or "").strip()) < 40:
+        raise HTTPException(status_code=400, detail="برای خلاصه‌سازی این فایل هنوز متن یا توضیحات کافی وجود ندارد.")
+
+    personal_keys = decrypt_user_keys(current_user.gemini_api_keys_encrypted)
+    keys = list(dict.fromkeys(personal_keys + stt_queue.provider.api_keys))
+    if not keys:
+        raise HTTPException(status_code=503, detail="برای خلاصه هوشمند، کلید Gemini تنظیم نشده است.")
+    preferences = load_tts_settings(current_user)
+    source_version = (source.updated_at or source.created_at).isoformat()
+    cache_key = (current_user.id, source.id, source_version, preferences["text_model"])
+    cached = _ai_insights_cache.get(cache_key)
+    if cached and cached[0] > datetime.utcnow():
+        return cached[1]
+
+    provider = GeminiSTTProvider(keys, text_model=preferences["text_model"])
+    source_text = build_metadata_source(source)[:16_000]
+    try:
+        raw = await provider.refine_text(source_text, insights_instruction())
+        result = parse_file_insights(raw)
+    except (RuntimeError, ValueError) as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    _ai_insights_cache[cache_key] = (datetime.utcnow() + timedelta(hours=1), result)
+    return result
 
 
 class LinkImportRequest(BaseModel):
