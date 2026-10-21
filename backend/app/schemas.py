@@ -193,6 +193,8 @@ class FileResponse(FileBase):
     is_shortcut: bool = False
     audio_stream_url: Optional[str] = None
     audio_variant_size: Optional[int] = None
+    compatible_video_stream_url: Optional[str] = None
+    compatible_video_size: Optional[int] = None
     
     model_config = ConfigDict(from_attributes=True)
 

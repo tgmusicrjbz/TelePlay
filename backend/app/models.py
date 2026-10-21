@@ -235,6 +235,11 @@ class File(Base):
     audio_variant_message_id: Mapped[Optional[int]] = mapped_column(BigInteger)
     audio_variant_storage_channel_id: Mapped[Optional[int]] = mapped_column(BigInteger)
     audio_variant_size: Mapped[Optional[int]] = mapped_column(BigInteger)
+    compatible_video_file_id: Mapped[Optional[str]] = mapped_column(String(255))
+    compatible_video_unique_id: Mapped[Optional[str]] = mapped_column(String(255))
+    compatible_video_message_id: Mapped[Optional[int]] = mapped_column(BigInteger)
+    compatible_video_storage_channel_id: Mapped[Optional[int]] = mapped_column(BigInteger)
+    compatible_video_size: Mapped[Optional[int]] = mapped_column(BigInteger)
     
     # Sharing
     public_hash: Mapped[Optional[str]] = mapped_column(String(64), unique=True, index=True)

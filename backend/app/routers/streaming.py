@@ -17,7 +17,7 @@ from passlib.context import CryptContext
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
-from ..database import get_db
+from ..database import async_session, get_db
 from ..models import File, SecurityEvent, User
 from ..auth import create_public_share_token, get_current_user, require_vault_access, verify_public_share_token
 from ..schemas import PublicShareUnlock
@@ -38,6 +38,8 @@ limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(prefix="/stream", tags=["Streaming"])
 settings = get_settings()
 _audio_variant_locks: dict[int, asyncio.Lock] = {}
+_compatible_video_tasks: dict[int, asyncio.Task] = {}
+_compatible_video_status: dict[int, dict] = {}
 share_password_context = CryptContext(schemes=["pbkdf2_sha256"], pbkdf2_sha256__default_rounds=310_000, deprecated="auto")
 
 
@@ -208,6 +210,126 @@ async def stream_audio_variant(
     if request.headers.get("range"):
         headers["Content-Range"] = f"bytes {start}-{end}/{file.audio_variant_size}"
     return StreamingResponse(audio_streamer(), status_code=206 if request.headers.get("range") else 200, media_type="audio/mp4", headers=headers)
+
+
+async def _build_compatible_video(file_id: int, user_id: int) -> None:
+    """Build an H.264/AAC copy without holding an HTTP request open."""
+    status = _compatible_video_status.setdefault(file_id, {})
+    try:
+        status.update(state="downloading", progress=10, message="در حال دریافت فایل اصلی")
+        async with async_session() as db:
+            file = await db.get(File, file_id)
+            user = await db.get(User, user_id)
+            if file is None or user is None or file.user_id != user.id or file.file_type != "video":
+                raise RuntimeError("فایل ویدیو پیدا نشد.")
+            if file.compatible_video_message_id:
+                status.update(state="done", progress=100, message="نسخه سازگار آماده است", stream_url=f"/api/stream/{file.id}/compatible")
+                return
+            message = await get_message_from_channel(file.channel_message_id, file.storage_channel_id)
+            if message is None:
+                raise RuntimeError("فایل در فضای ذخیره‌سازی پیدا نشد.")
+            with tempfile.TemporaryDirectory(prefix="komod-compatible-video-") as temporary:
+                source = Path(temporary) / "source"
+                output = Path(temporary) / "compatible.mp4"
+                downloaded = await telegram.tg_client.download_media(message, file_name=str(source))
+                if not downloaded:
+                    raise RuntimeError("دریافت فایل اصلی کامل نشد.")
+                status.update(state="converting", progress=40, message="در حال سازگارکردن ویدیو")
+                process = await asyncio.create_subprocess_exec(
+                    "ffmpeg", "-y", "-loglevel", "error", "-i", str(downloaded),
+                    "-map", "0:v:0", "-map", "0:a:0?", "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
+                    "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(output),
+                    stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+                )
+                try:
+                    _, stderr = await asyncio.wait_for(process.communicate(), timeout=3600)
+                except asyncio.TimeoutError:
+                    process.kill(); await process.communicate()
+                    raise RuntimeError("آماده‌سازی ویدیو بیش از حد طول کشید.")
+                if process.returncode or not output.exists() or not output.stat().st_size:
+                    logger.error("Compatible video ffmpeg failed: %s", stderr.decode("utf-8", "ignore")[-1200:])
+                    raise RuntimeError("ساخت نسخه سازگار ویدیو انجام نشد.")
+                status.update(state="uploading", progress=85, message="در حال ذخیره نسخه سازگار")
+                target = file.storage_channel_id or user.storage_channel_id or settings.telegram_storage_channel_id
+                sent = await telegram.tg_client.send_video(
+                    chat_id=target, video=str(output), supports_streaming=True,
+                )
+                media = sent.video or sent.document
+                if media is None:
+                    raise RuntimeError("ذخیره نسخه سازگار انجام نشد.")
+                file.compatible_video_file_id = media.file_id
+                file.compatible_video_unique_id = media.file_unique_id
+                file.compatible_video_message_id = sent.id
+                file.compatible_video_storage_channel_id = target
+                file.compatible_video_size = media.file_size or output.stat().st_size
+                await db.commit()
+                status.update(state="done", progress=100, message="نسخه سازگار آماده شد", stream_url=f"/api/stream/{file.id}/compatible")
+    except Exception as error:
+        logger.exception("Compatible video build failed for file %s", file_id)
+        status.update(state="error", progress=0, message=str(error) or "آماده‌سازی نسخه سازگار انجام نشد.")
+    finally:
+        _compatible_video_tasks.pop(file_id, None)
+
+
+@router.post("/{file_id:int}/compatible-video", status_code=202)
+async def prepare_compatible_video(
+    file_id: int, request: Request, db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    file = (await db.execute(select(File).where(File.id == file_id, File.user_id == current_user.id))).scalar_one_or_none()
+    if file is None or file.file_type != "video":
+        raise HTTPException(status_code=404, detail="فایل ویدیو پیدا نشد.")
+    if file.is_hidden:
+        require_vault_access(request, current_user)
+    if file.compatible_video_message_id:
+        return {"state":"done", "progress":100, "message":"نسخه سازگار آماده است", "stream_url":f"/api/stream/{file.id}/compatible"}
+    if not shutil.which("ffmpeg"):
+        raise HTTPException(status_code=503, detail="ساخت نسخه سازگار روی این سرور فعال نیست.")
+    task = _compatible_video_tasks.get(file_id)
+    if task is None or task.done():
+        _compatible_video_status[file_id] = {"state":"queued", "progress":2, "message":"در صف آماده‌سازی"}
+        _compatible_video_tasks[file_id] = asyncio.create_task(_build_compatible_video(file_id, current_user.id))
+    return _compatible_video_status[file_id]
+
+
+@router.get("/{file_id:int}/compatible-video/status")
+async def compatible_video_status(
+    file_id: int, request: Request, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    file = (await db.execute(select(File).where(File.id == file_id, File.user_id == current_user.id))).scalar_one_or_none()
+    if file is None or file.file_type != "video":
+        raise HTTPException(status_code=404, detail="فایل ویدیو پیدا نشد.")
+    if file.is_hidden:
+        require_vault_access(request, current_user)
+    if file.compatible_video_message_id:
+        return {"state":"done", "progress":100, "message":"نسخه سازگار آماده است", "stream_url":f"/api/stream/{file.id}/compatible"}
+    return _compatible_video_status.get(file_id, {"state":"idle", "progress":0, "message":"آماده‌سازی شروع نشده است"})
+
+
+@router.get("/{file_id:int}/compatible")
+async def stream_compatible_video(
+    file_id: int, request: Request, db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    file = (await db.execute(select(File).where(File.id == file_id, File.user_id == current_user.id))).scalar_one_or_none()
+    if file is None or not file.compatible_video_message_id or not file.compatible_video_size:
+        raise HTTPException(status_code=404, detail="نسخه سازگار هنوز آماده نشده است.")
+    if file.is_hidden:
+        require_vault_access(request, current_user)
+    message = await get_message_from_channel(file.compatible_video_message_id, file.compatible_video_storage_channel_id)
+    if message is None:
+        raise HTTPException(status_code=404, detail="نسخه سازگار پیدا نشد.")
+    start, end = parse_range_header(request.headers.get("range"), file.compatible_video_size)
+    if start >= file.compatible_video_size or end < start:
+        return Response(status_code=416, headers={"Content-Range":f"bytes */{file.compatible_video_size}"})
+    async def video_streamer():
+        async for chunk in stream_file_generator(telegram.tg_client, message, start, end):
+            yield chunk
+    headers = {"Accept-Ranges":"bytes", "Content-Length":str(end-start+1), "Cache-Control":"private, max-age=86400"}
+    if request.headers.get("range"):
+        headers["Content-Range"] = f"bytes {start}-{end}/{file.compatible_video_size}"
+    return StreamingResponse(video_streamer(), status_code=206 if request.headers.get("range") else 200, media_type="video/mp4", headers=headers)
 
 
 @router.get("/{file_id:int}")

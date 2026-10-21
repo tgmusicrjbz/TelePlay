@@ -1602,6 +1602,11 @@ async def _handle_file_impl(client, message: Message, status_msg: Message):
                     audio_variant_message_id=duplicate.audio_variant_message_id,
                     audio_variant_storage_channel_id=duplicate.audio_variant_storage_channel_id,
                     audio_variant_size=duplicate.audio_variant_size,
+                    compatible_video_file_id=duplicate.compatible_video_file_id,
+                    compatible_video_unique_id=duplicate.compatible_video_unique_id,
+                    compatible_video_message_id=duplicate.compatible_video_message_id,
+                    compatible_video_storage_channel_id=duplicate.compatible_video_storage_channel_id,
+                    compatible_video_size=duplicate.compatible_video_size,
                 )
                 db.add(shortcut)
                 await db.commit()

@@ -188,6 +188,11 @@ async def init_db():
             ("audio_variant_message_id", "BIGINT"),
             ("audio_variant_storage_channel_id", "BIGINT"),
             ("audio_variant_size", "BIGINT"),
+            ("compatible_video_file_id", "VARCHAR(255)"),
+            ("compatible_video_unique_id", "VARCHAR(255)"),
+            ("compatible_video_message_id", "BIGINT"),
+            ("compatible_video_storage_channel_id", "BIGINT"),
+            ("compatible_video_size", "BIGINT"),
         ):
             if column_name not in columns:
                 await conn.execute(text(f"ALTER TABLE files ADD COLUMN {column_name} {column_type}"))

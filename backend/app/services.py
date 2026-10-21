@@ -92,6 +92,8 @@ def add_urls_to_file(file: File) -> dict:
         "is_shortcut": bool(file.is_shortcut),
         "audio_stream_url": f"/api/stream/{file.id}/audio?workspace={file.user_id}" if file.audio_variant_message_id else None,
         "audio_variant_size": file.audio_variant_size,
+        "compatible_video_stream_url": f"/api/stream/{file.id}/compatible?workspace={file.user_id}" if file.compatible_video_message_id else None,
+        "compatible_video_size": file.compatible_video_size,
         "public_expires_at": file.public_expires_at,
         "public_allow_download": file.public_allow_download,
         "public_view_limit": file.public_view_limit,
@@ -130,19 +132,27 @@ async def unreferenced_storage_messages(db: AsyncSession, files: List[File]) -> 
 
 
 async def unreferenced_audio_variant_messages(db: AsyncSession, files: List[File]) -> dict[int | None, list[int]]:
-    """Return cached audio variants that are no longer shared by surviving shortcuts."""
+    """Return cached media variants no longer shared by surviving shortcuts."""
     deleting_ids = {item.id for item in files if item.id is not None}
-    references = {(item.audio_variant_storage_channel_id, item.audio_variant_message_id) for item in files if item.audio_variant_message_id}
+    audio_references = {(item.audio_variant_storage_channel_id, item.audio_variant_message_id) for item in files if item.audio_variant_message_id}
+    video_references = {(item.compatible_video_storage_channel_id, item.compatible_video_message_id) for item in files if item.compatible_video_message_id}
+    references = audio_references | video_references
     if not references:
         return {}
-    conditions = [and_(
+    audio_conditions = [and_(
         File.audio_variant_storage_channel_id.is_(None) if channel_id is None else File.audio_variant_storage_channel_id == channel_id,
         File.audio_variant_message_id == message_id,
     ) for channel_id, message_id in references]
-    query = select(File.audio_variant_storage_channel_id, File.audio_variant_message_id).where(or_(*conditions))
+    video_conditions = [and_(
+        File.compatible_video_storage_channel_id.is_(None) if channel_id is None else File.compatible_video_storage_channel_id == channel_id,
+        File.compatible_video_message_id == message_id,
+    ) for channel_id, message_id in references]
+    audio_query = select(File.audio_variant_storage_channel_id, File.audio_variant_message_id).where(or_(*audio_conditions))
+    video_query = select(File.compatible_video_storage_channel_id, File.compatible_video_message_id).where(or_(*video_conditions))
     if deleting_ids:
-        query = query.where(File.id.notin_(deleting_ids))
-    retained = set((await db.execute(query)).all())
+        audio_query = audio_query.where(File.id.notin_(deleting_ids))
+        video_query = video_query.where(File.id.notin_(deleting_ids))
+    retained = set((await db.execute(audio_query)).all()) | set((await db.execute(video_query)).all())
     grouped: dict[int | None, list[int]] = {}
     for channel_id, message_id in references - retained:
         grouped.setdefault(channel_id, []).append(message_id)

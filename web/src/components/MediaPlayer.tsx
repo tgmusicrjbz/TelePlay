@@ -74,6 +74,9 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
     const [videoHidden, setVideoHidden] = useState(false);
     const [audioVariantUrl, setAudioVariantUrl] = useState<string|null>(file.audio_stream_url || null);
     const [preparingAudio, setPreparingAudio] = useState(false);
+    const [compatibleVideoUrl, setCompatibleVideoUrl] = useState<string|null>(file.compatible_video_stream_url || null);
+    const [compatibilityMessage, setCompatibilityMessage] = useState<string|null>(null);
+    const compatibilityAttempted = useRef(false);
     const audioSwitchPosition = useRef<number|null>(null);
     const [videoOrientation, setVideoOrientation] = useState<'auto' | 'portrait' | 'landscape'>('auto');
     const [controlsLocked, setControlsLocked] = useState(false);
@@ -115,7 +118,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
         document.addEventListener('fullscreenchange', syncFullscreen);
         return () => document.removeEventListener('fullscreenchange', syncFullscreen);
     }, []);
-    useEffect(()=>{setAudioOnly(false);setVideoHidden(false);setAudioVariantUrl(file.audio_stream_url||null);},[file.id,file.audio_stream_url]);
+    useEffect(()=>{setAudioOnly(false);setVideoHidden(false);setAudioVariantUrl(file.audio_stream_url||null);setCompatibleVideoUrl(file.compatible_video_stream_url||null);setCompatibilityMessage(null);compatibilityAttempted.current=false;},[file.id,file.audio_stream_url,file.compatible_video_stream_url]);
     useEffect(()=>{
         let disposed=false; let objectUrl:string|null=null;
         setOfflineStreamUrl(null);
@@ -146,6 +149,27 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
             addToast(error?.response?.data?.detail||'ساخت نسخه صوتی انجام نشد.','error');
         } finally { setPreparingAudio(false); }
     };
+    const prepareCompatibleVideo = useCallback(async () => {
+        if (!isVideo || compatibilityAttempted.current || offlineStreamUrl) return;
+        compatibilityAttempted.current = true;
+        const resumeAt = videoRef.current?.currentTime || currentTime || 0;
+        setError(null); setIsLoading(true); setCompatibilityMessage('در حال آماده‌سازی نسخه سازگار…');
+        try {
+            let {data} = await api.post<{state:string;progress:number;message:string;stream_url?:string}>(`/stream/${file.id}/compatible-video`);
+            for (let attempt=0; attempt<400 && data.state!=='done' && data.state!=='error'; attempt+=1) {
+                setCompatibilityMessage(`${data.message}${data.progress ? ` · ${data.progress.toLocaleString('fa-IR')}٪` : ''}`);
+                await new Promise(resolve=>window.setTimeout(resolve,3000));
+                data=(await api.get<typeof data>(`/stream/${file.id}/compatible-video/status`)).data;
+            }
+            if (data.state!=='done'||!data.stream_url) throw new Error(data.message||'آماده‌سازی نسخه سازگار انجام نشد.');
+            setCompatibleVideoUrl(data.stream_url); setCompatibilityMessage(null); setError(null);
+            window.setTimeout(()=>{if(videoRef.current){videoRef.current.currentTime=resumeAt;void videoRef.current.play().catch(()=>undefined)}},180);
+        } catch(error:any) {
+            compatibilityAttempted.current=false;
+            setCompatibilityMessage(null); setIsLoading(false);
+            setError(error?.response?.data?.detail||error?.message||'آماده‌سازی نسخه سازگار انجام نشد.');
+        }
+    },[currentTime,file.id,isVideo,offlineStreamUrl]);
     const saveNamedQueue = async () => {
         const name = queueName.trim();
         if (!name || !playQueue.length) return;
@@ -425,8 +449,10 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
             if (code === 2) {
                 setError('ارتباط با فایل قطع شد یا اینترنت پایدار نیست.');
             } else if (code === 3) {
+                if (isVideo && !compatibleVideoUrl && !offlineStreamUrl) { void prepareCompatibleVideo(); return; }
                 setError(`فایل دریافت شد، اما مرورگر نتوانست ${isVideo ? 'تصویر ویدیو' : 'صدای آن'} را رمزگشایی کند.`);
             } else if (code === 4) {
+                if (isVideo && !compatibleVideoUrl && !offlineStreamUrl) { void prepareCompatibleVideo(); return; }
                 setError(isVideo
                     ? 'مرورگر نتوانست این ویدیو را شروع کند. پسوند MP4 به‌تنهایی سازگاری را تضمین نمی‌کند و ممکن است کُدک تصویر یا صدا پشتیبانی نشود؛ یک‌بار تلاش دوباره یا دانلود فایل را امتحان کن.'
                     : 'مرورگر نتوانست این فایل صدا را شروع کند. ممکن است کُدک داخلی فایل پشتیبانی نشود؛ یک‌بار تلاش دوباره یا دانلود فایل را امتحان کن.');
@@ -663,7 +689,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
         return `${window.location.origin}${url}`;
     };
 
-    const selectedStreamUrl = audioOnly && audioVariantUrl ? audioVariantUrl : (offlineStreamUrl||file.stream_url);
+    const selectedStreamUrl = audioOnly && audioVariantUrl ? audioVariantUrl : (offlineStreamUrl||compatibleVideoUrl||file.stream_url);
     const isOfflineSource = selectedStreamUrl.startsWith('blob:');
     const relativeStreamUrl = isOfflineSource ? selectedStreamUrl : `${selectedStreamUrl}${selectedStreamUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(token || '')}&retry=${streamRetry}`;
     const authorizedStreamUrl = isOfflineSource ? relativeStreamUrl : getAbsoluteUrl(relativeStreamUrl);
@@ -838,8 +864,9 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
 
                         {/* Loading Spinner */}
                         {isLoading && !error && !isMinimized && (
-                            <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
+                            <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 pointer-events-none z-20 bg-black/20">
                                 <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-primary-500"></div>
+                                {compatibilityMessage&&<p className="rounded-full bg-dark-950/80 px-4 py-2 text-xs text-dark-200 backdrop-blur-md">{compatibilityMessage}</p>}
                             </div>
                         )}
                         {skipFeedback && !isMinimized && (

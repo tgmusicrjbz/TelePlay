@@ -116,6 +116,8 @@ export interface TelegramFile {
     is_shortcut?: boolean;
     audio_stream_url?: string | null;
     audio_variant_size?: number | null;
+    compatible_video_stream_url?: string | null;
+    compatible_video_size?: number | null;
     tags?: string[];
 }
 
