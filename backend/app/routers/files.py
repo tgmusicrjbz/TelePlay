@@ -35,7 +35,7 @@ from ..config import get_settings
 from ..media_metadata import extract_embedded_cover
 from ..downloader import ImportJob, link_importer
 from ..drive_importer import drive_importer, extract_google_drive_file_id
-from ..google_drive import authorization_url, decode_state, exchange_code, account_email, access_token as google_access_token, list_files as google_list_files, configured as google_drive_configured, credential_accounts, encrypt_account_store
+from ..google_drive import authorization_url, decode_state, exchange_code, account_email, access_token as google_access_token, list_files as google_list_files, configured as google_drive_configured, full_configured as google_drive_full_configured, picker_configured as google_picker_configured, picker_bootstrap, active_credentials, account_key, credential_accounts, encrypt_account_store
 from ..processing_jobs import update_job
 from .folders import ensure_default_folder
 from ..services import (
@@ -82,6 +82,7 @@ class DriveSelectionImportRequest(BaseModel):
 
 class DriveAccountRequest(BaseModel):
     email: str = Field(min_length=3,max_length=255)
+    mode: Optional[str] = None
 
 
 class SendToTelegramRequest(BaseModel):
@@ -342,29 +343,32 @@ async def import_from_google_drive(
 @router.get("/drive/status")
 async def google_drive_status(current_user:User=Depends(get_current_user)):
     accounts,active=credential_accounts(current_user.google_drive_credentials_encrypted,current_user.google_drive_email)
-    return {"configured":google_drive_configured(),"connected":bool(accounts),"email":active,"accounts":[item.get("email") for item in accounts]}
+    active_account=next((item for item in accounts if account_key(item)==active),None)
+    return {"configured":google_drive_configured(),"full_configured":google_drive_full_configured(),"picker_configured":google_picker_configured(),"connected":bool(accounts),"email":(active_account or {}).get("email"),"mode":(active_account or {}).get("mode") if active_account else None,"accounts":[{"email":item.get("email"),"mode":item.get("mode","full")} for item in accounts]}
 
 @router.get("/drive/connect")
-async def connect_google_drive(current_user:User=Depends(get_current_user)):
-    if not google_drive_configured(): raise HTTPException(status_code=503,detail="اتصال گوگل هنوز روی سرور تنظیم نشده است.")
-    return {"url":authorization_url(current_user.id)}
+async def connect_google_drive(mode:str="picker",current_user:User=Depends(get_current_user)):
+    if mode not in {"full","picker"}: raise HTTPException(status_code=400,detail="نوع اتصال گوگل معتبر نیست.")
+    try: return {"url":authorization_url(current_user.id,mode)}
+    except ValueError as error: raise HTTPException(status_code=503,detail=str(error))
 
 @router.get("/drive/oauth/callback")
 async def google_drive_callback(code:str,state:str,db:AsyncSession=Depends(get_db)):
     try:
-        user_id=decode_state(state); token=await exchange_code(code)
+        (user_id,mode)=decode_state(state); token=await exchange_code(code,mode)
         user=await db.get(User,user_id)
         if user is None: raise ValueError("user")
         email=await account_email(token["access_token"])
         if not email: raise ValueError("email")
         accounts,_=credential_accounts(user.google_drive_credentials_encrypted,user.google_drive_email)
-        previous=next((item for item in accounts if item.get("email")==email),{})
-        if previous.get("refresh_token") and not token.get("refresh_token"): token["refresh_token"]=previous["refresh_token"]
+        previous=next((item for item in accounts if item.get("email")==email and item.get("mode","full")==mode),{})
+        if previous.get("mode","full")==mode and previous.get("refresh_token") and not token.get("refresh_token"): token["refresh_token"]=previous["refresh_token"]
         import time
         token["expires_at"]=time.time()+int(token.get("expires_in",3600))
         token["email"]=email
-        accounts=[item for item in accounts if item.get("email")!=email]+[token]
-        user.google_drive_credentials_encrypted=encrypt_account_store(accounts,email)
+        token["mode"]=mode
+        accounts=[item for item in accounts if not (item.get("email")==email and item.get("mode","full")==mode)]+[token]
+        user.google_drive_credentials_encrypted=encrypt_account_store(accounts,account_key(token))
         user.google_drive_email=email
         await db.commit()
         return RedirectResponse(f"{settings.web_base_url.rstrip('/')}?drive=connected")
@@ -375,21 +379,33 @@ async def google_drive_callback(code:str,state:str,db:AsyncSession=Depends(get_d
 @router.post("/drive/switch")
 async def switch_google_drive(payload:DriveAccountRequest,current_user:User=Depends(get_current_user),db:AsyncSession=Depends(get_db)):
     accounts,_=credential_accounts(current_user.google_drive_credentials_encrypted,current_user.google_drive_email)
-    if not any(item.get("email")==payload.email for item in accounts): raise HTTPException(status_code=404,detail="این حساب گوگل پیدا نشد.")
-    current_user.google_drive_credentials_encrypted=encrypt_account_store(accounts,payload.email);current_user.google_drive_email=payload.email;await db.commit()
-    return {"ok":True,"email":payload.email}
+    target=next((item for item in accounts if item.get("email")==payload.email and (not payload.mode or item.get("mode","full")==payload.mode)),None)
+    if not target: raise HTTPException(status_code=404,detail="این اتصال گوگل پیدا نشد.")
+    current_user.google_drive_credentials_encrypted=encrypt_account_store(accounts,account_key(target));current_user.google_drive_email=target.get("email");await db.commit()
+    return {"ok":True,"email":target.get("email"),"mode":target.get("mode","full")}
 
 @router.delete("/drive/disconnect")
-async def disconnect_google_drive(email:Optional[str]=None,current_user:User=Depends(get_current_user),db:AsyncSession=Depends(get_db)):
+async def disconnect_google_drive(email:Optional[str]=None,mode:Optional[str]=None,current_user:User=Depends(get_current_user),db:AsyncSession=Depends(get_db)):
     accounts,active=credential_accounts(current_user.google_drive_credentials_encrypted,current_user.google_drive_email)
-    target=email or active; accounts=[item for item in accounts if item.get("email")!=target]
-    next_email=active if active!=target and any(item.get("email")==active for item in accounts) else (accounts[0].get("email") if accounts else None)
-    current_user.google_drive_credentials_encrypted=encrypt_account_store(accounts,next_email);current_user.google_drive_email=next_email;await db.commit()
-    return {"ok":True,"email":next_email}
+    target=next((item for item in accounts if account_key(item)==active),None) if not email else next((item for item in accounts if item.get("email")==email and (not mode or item.get("mode","full")==mode)),None)
+    if target: accounts=[item for item in accounts if account_key(item)!=account_key(target)]
+    next_key=active if any(account_key(item)==active for item in accounts) else (account_key(accounts[0]) if accounts else None)
+    next_account=next((item for item in accounts if account_key(item)==next_key),None)
+    current_user.google_drive_credentials_encrypted=encrypt_account_store(accounts,next_key);current_user.google_drive_email=(next_account or {}).get("email");await db.commit()
+    return {"ok":True,"email":(next_account or {}).get("email"),"mode":(next_account or {}).get("mode")}
 
 @router.get("/drive/browse")
 async def browse_google_drive(folder_id:str="root",q:str="",current_user:User=Depends(get_current_user),db:AsyncSession=Depends(get_db)):
-    try: token=await google_access_token(current_user,db); return await google_list_files(token,folder_id,q)
+    try:
+        _,credentials=active_credentials(current_user)
+        if credentials and credentials.get("mode","full")!="full": raise ValueError("برای مرور همه پوشه‌ها، اتصال کامل آزمایشی را انتخاب کن.")
+        token=await google_access_token(current_user,db); return await google_list_files(token,folder_id,q)
+    except ValueError as error: raise HTTPException(status_code=401,detail=str(error))
+
+@router.get("/drive/picker-config")
+async def google_drive_picker_config(current_user:User=Depends(get_current_user),db:AsyncSession=Depends(get_db)):
+    if not google_picker_configured(): raise HTTPException(status_code=503,detail="انتخاب‌گر عمومی گوگل هنوز روی سرور تنظیم نشده است.")
+    try: return await picker_bootstrap(current_user,db)
     except ValueError as error: raise HTTPException(status_code=401,detail=str(error))
 
 @router.post("/drive/import-selected",status_code=202)

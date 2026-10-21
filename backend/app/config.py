@@ -88,6 +88,13 @@ class Settings(BaseSettings):
     google_client_id: str = Field("", alias="GOOGLE_CLIENT_ID")
     google_client_secret: str = Field("", alias="GOOGLE_CLIENT_SECRET")
     google_redirect_uri: str = Field("", alias="GOOGLE_REDIRECT_URI")
+    # Public Google Picker OAuth client. Keep the full Drive client above in
+    # Testing for approved accounts and publish this narrower client.
+    google_picker_client_id: str = Field("", alias="GOOGLE_PICKER_CLIENT_ID")
+    google_picker_client_secret: str = Field("", alias="GOOGLE_PICKER_CLIENT_SECRET")
+    google_picker_redirect_uri: str = Field("", alias="GOOGLE_PICKER_REDIRECT_URI")
+    google_picker_api_key: str = Field("", alias="GOOGLE_PICKER_API_KEY")
+    google_picker_app_id: str = Field("", alias="GOOGLE_PICKER_APP_ID")
 
     # Gemini text-to-speech. Keep these keys on the server; they must never be
     # returned by an API endpoint or embedded in the web bundle.

@@ -1,5 +1,7 @@
 from app.drive_importer import _detect_type, _response_filename, extract_google_drive_file_id
-from app.google_drive import credential_accounts, decrypt_credentials, encrypt_account_store, encrypt_credentials
+from app.google_drive import credential_accounts, decode_state, decrypt_credentials, encrypt_account_store, encrypt_credentials, settings
+from jose import jwt
+import time
 
 
 def test_extracts_file_id_from_google_drive_file_link():
@@ -33,11 +35,19 @@ def test_google_credentials_are_encrypted_at_rest():
 
 
 def test_google_account_store_supports_multiple_accounts_and_legacy_tokens():
-    accounts=[{"email":"one@example.com","refresh_token":"one"},{"email":"two@example.com","refresh_token":"two"}]
-    encrypted=encrypt_account_store(accounts,"two@example.com")
-    assert credential_accounts(encrypted)==(accounts,"two@example.com")
+    accounts=[{"email":"one@example.com","mode":"picker","refresh_token":"one"},{"email":"two@example.com","mode":"full","refresh_token":"two"}]
+    encrypted=encrypt_account_store(accounts,"two@example.com|full")
+    assert credential_accounts(encrypted)==(accounts,"two@example.com|full")
     legacy=encrypt_credentials({"refresh_token":"old"})
-    assert credential_accounts(legacy,"legacy@example.com")[1]=="legacy@example.com"
+    assert credential_accounts(legacy,"legacy@example.com")[1]=="legacy@example.com|full"
+
+
+def test_google_account_store_keeps_picker_and_full_for_same_email():
+    accounts=[{"email":"same@example.com","mode":"picker"},{"email":"same@example.com","mode":"full"}]
+    encrypted=encrypt_account_store(accounts,"same@example.com|picker")
+    stored,active=credential_accounts(encrypted)
+    assert len(stored)==2
+    assert active=="same@example.com|picker"
 
 
 def test_decodes_persian_rfc5987_filename():
@@ -48,3 +58,13 @@ def test_decodes_persian_rfc5987_filename():
 def test_repairs_utf8_filename_exposed_as_latin1():
     mojibake="آهنگ فارسی.mp3".encode("utf-8").decode("latin-1")
     assert _response_filename({"Content-Disposition":f'attachment; filename="{mojibake}"'},"fallback") == "آهنگ فارسی.mp3"
+
+
+def test_google_oauth_state_preserves_connection_mode():
+    state=jwt.encode({"sub":"42","purpose":"google-drive","mode":"picker","exp":int(time.time())+60},settings.jwt_secret,algorithm="HS256")
+    assert decode_state(state)==(42,"picker")
+
+
+def test_legacy_google_oauth_state_defaults_to_full_access():
+    state=jwt.encode({"sub":"7","purpose":"google-drive","exp":int(time.time())+60},settings.jwt_secret,algorithm="HS256")
+    assert decode_state(state)==(7,"full")
