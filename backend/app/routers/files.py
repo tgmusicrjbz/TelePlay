@@ -52,6 +52,7 @@ from ..services import (
 from ..audit import add_security_event
 from ..ai_metadata import build_metadata_source, metadata_instruction, parse_metadata_suggestion
 from ..ai_insights import insights_instruction, parse_file_insights
+from ..ai_organization import folder_suggestion_instruction, parse_folder_suggestions
 from ..ai_search import build_related_file_instruction, build_search_expansion_instruction, parse_search_expansion, parse_search_terms
 from ..gemini_keys import decrypt_user_keys
 from ..stt import GeminiSTTProvider, stt_queue
@@ -66,6 +67,7 @@ _text_index_locks: dict[int, asyncio.Lock] = {}
 _smart_search_cache: dict[tuple[int, str, str, str], tuple[datetime, dict[str, object]]] = {}
 _related_terms_cache: dict[tuple[int, int, str, str, str], tuple[datetime, list[str]]] = {}
 _ai_insights_cache: dict[tuple[int, int, str, str], tuple[datetime, dict[str, object]]] = {}
+_folder_suggestion_cache: dict[tuple[int, int, str, str, str], tuple[datetime, list[dict[str, object]]]] = {}
 
 
 class TextContentUpdate(BaseModel):
@@ -282,6 +284,72 @@ async def create_file_insights(
         raise HTTPException(status_code=502, detail=str(error)) from error
     _ai_insights_cache[cache_key] = (datetime.utcnow() + timedelta(hours=1), result)
     return result
+
+
+@router.post("/{file_id}/ai-folder-suggestions")
+@limiter.limit("8/minute")
+async def suggest_file_folders(
+    file_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    source = (await db.execute(select(File).where(File.id == file_id, File.user_id == current_user.id))).scalar_one_or_none()
+    if source is None:
+        raise HTTPException(status_code=404, detail="فایل پیدا نشد.")
+    vault_open = has_vault_access(request, current_user)
+    if source.is_hidden and not vault_open:
+        require_vault_access(request, current_user)
+    if source.file_type == "text" and source.search_text is None:
+        await index_missing_text_notes(db, current_user.id)
+        await db.refresh(source)
+    folders = (await db.execute(select(Folder).where(Folder.user_id == current_user.id).order_by(Folder.id))).scalars().all()
+    by_id = {folder.id: folder for folder in folders}
+
+    def folder_path(folder: Folder) -> tuple[str, bool]:
+        names: list[str] = []
+        hidden = False
+        seen: set[int] = set()
+        current: Folder | None = folder
+        while current is not None and current.id not in seen:
+            seen.add(current.id)
+            names.append(current.name)
+            hidden = hidden or bool(current.is_hidden)
+            current = by_id.get(current.parent_id) if current.parent_id is not None else None
+        return " / ".join(reversed(names)), hidden
+
+    allowed: dict[int, dict[str, str]] = {}
+    for folder in folders:
+        path, hidden = folder_path(folder)
+        if folder.id == source.folder_id or (hidden and not vault_open):
+            continue
+        allowed[folder.id] = {"name": folder.name, "path": path}
+    if not allowed:
+        return {"suggestions": []}
+
+    personal_keys = decrypt_user_keys(current_user.gemini_api_keys_encrypted)
+    keys = list(dict.fromkeys(personal_keys + stt_queue.provider.api_keys))
+    if not keys:
+        raise HTTPException(status_code=503, detail="برای پیشنهاد کشو، کلید Gemini تنظیم نشده است.")
+    preferences = load_tts_settings(current_user)
+    folder_fingerprint = hashlib.sha256("\0".join(f"{key}:{value['path']}" for key, value in allowed.items()).encode("utf-8")).hexdigest()[:16]
+    source_version = (source.updated_at or source.created_at).isoformat()
+    cache_key = (current_user.id, source.id, source_version, preferences["text_model"], folder_fingerprint)
+    cached = _folder_suggestion_cache.get(cache_key)
+    if cached and cached[0] > datetime.utcnow():
+        return {"suggestions": cached[1]}
+
+    folder_lines = [f"{folder_id}: {value['path']}" for folder_id, value in list(allowed.items())[:250]]
+    listed_ids = {int(line.split(":", 1)[0]) for line in folder_lines}
+    listed = {folder_id: value for folder_id, value in allowed.items() if folder_id in listed_ids}
+    provider = GeminiSTTProvider(keys, text_model=preferences["text_model"])
+    try:
+        raw = await provider.refine_text(build_metadata_source(source)[:5000], folder_suggestion_instruction(folder_lines))
+        suggestions = parse_folder_suggestions(raw, listed)
+    except (RuntimeError, ValueError) as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    _folder_suggestion_cache[cache_key] = (datetime.utcnow() + timedelta(hours=1), suggestions)
+    return {"suggestions": suggestions}
 
 
 class LinkImportRequest(BaseModel):
