@@ -34,6 +34,37 @@ settings = get_settings()
 TERMINAL_STATES = {"done", "error", "cancelled"}
 
 
+def extract_interaction_text(payload: dict) -> str:
+    """Read text from current and compatible Interactions API response shapes."""
+    for key in ("output_text", "outputText"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    interaction = payload.get("interaction")
+    if isinstance(interaction, dict):
+        direct = extract_interaction_text(interaction)
+        if direct:
+            return direct
+
+    texts: list[str] = []
+
+    def walk(value, inside_output: bool = False) -> None:
+        if isinstance(value, dict):
+            kind = str(value.get("type") or "").lower()
+            output_scope = inside_output or kind in {"model_output", "output", "text"}
+            text = value.get("text")
+            if output_scope and isinstance(text, str) and text.strip():
+                texts.append(text.strip())
+            for key, child in value.items():
+                walk(child, output_scope or key.lower() in {"output", "outputs", "steps", "response"})
+        elif isinstance(value, list):
+            for child in value:
+                walk(child, inside_output)
+
+    walk(payload)
+    return "\n".join(dict.fromkeys(texts)).strip()
+
+
 async def consume_stt_quota(db, user_id: int, duration: int) -> TTSUsage:
     """Validate and account for an accepted transcription request."""
     today = datetime.utcnow().date()
@@ -58,8 +89,11 @@ async def consume_stt_quota(db, user_id: int, duration: int) -> TTSUsage:
 
 
 class GeminiSTTProvider:
-    def __init__(self, api_keys: list[str]) -> None:
+    def __init__(self, api_keys: list[str], stt_model: str | None = None, text_model: str | None = None, stt_mode: str = "verbatim") -> None:
         self.api_keys = api_keys
+        self.stt_model = stt_model or settings.gemini_stt_model
+        self.text_model = text_model or "gemini-3.8-flash"
+        self.stt_mode = stt_mode if stt_mode in {"verbatim", "smart"} else "verbatim"
         self.cursor = 0
         self.cooldowns: dict[str, datetime] = {}
         self._key_lock = asyncio.Lock()
@@ -106,7 +140,7 @@ class GeminiSTTProvider:
                 detail = "سرویس Gemini موقتاً در دسترس نیست. کمی بعد دوباره تلاش کن."
             else:
                 detail = last_error.user_detail()
-            raise RuntimeError(f"تبدیل صدا با {settings.gemini_stt_model} انجام نشد: {detail}") from last_error
+            raise RuntimeError(f"تبدیل صدا با {self.stt_model} انجام نشد: {detail}") from last_error
         if isinstance(last_error, (TimeoutError, URLError)):
             raise RuntimeError("سرور کمد نتوانست به Gemini متصل شود؛ اتصال خروجی سرور را بررسی کن.") from last_error
         raise RuntimeError("Gemini متن معتبری از فایل برنگرداند.") from last_error
@@ -209,6 +243,27 @@ class GeminiSTTProvider:
                 state = str(remote.get("state", "ACTIVE")).upper()
             else:
                 raise RuntimeError("آماده‌شدن فایل برای تبدیل بیش از حد طول کشید.")
+            if self.stt_model == "gemini-3.5-transcribe":
+                payload = {
+                    "model": self.stt_model,
+                    "input": [{"type": "audio", "uri": file_uri, "mime_type": mime_type}],
+                    "generation_config": {"transcription_config": {"mode": self.stt_mode}},
+                }
+                endpoint = f"https://generativelanguage.googleapis.com/v1beta/interactions?{urlencode({'key': key})}"
+                try:
+                    result, _ = self._json_request(Request(endpoint, data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"}, method="POST"), 600)
+                except GeminiRequestError as error:
+                    if error.status not in {400, 404}:
+                        raise
+                    logger.warning("Dedicated transcription model unavailable; using Gemini 3.8 Flash fallback (%s)", error.status)
+                else:
+                    text = extract_interaction_text(result)
+                    if not text:
+                        raise RuntimeError("Gemini متن معتبری از فایل برنگرداند.")
+                    if custom_prompt.strip():
+                        text = self._text_request(key, text, custom_prompt.strip())
+                    return text
+
             instruction = (
                 "محتوای این فایل صوتی یا ویدیویی را بدون خلاصه‌سازی و بدون تغییر معنا، دقیق رونویسی کن. "
                 "اصطلاحات تخصصی و کلمات انگلیسی را به همان زبان نگه دار. خروجی فقط Markdown خوانا باشد؛ "
@@ -223,7 +278,8 @@ class GeminiSTTProvider:
                 ]}],
                 "generationConfig": {"temperature": 0.1},
             }
-            endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{settings.gemini_stt_model}:generateContent?{urlencode({'key': key})}"
+            fallback_model = "gemini-3.8-flash" if self.stt_model == "gemini-3.5-transcribe" else self.stt_model
+            endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{fallback_model}:generateContent?{urlencode({'key': key})}"
             result, _ = self._json_request(Request(endpoint, data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"}, method="POST"), 600)
             parts = result.get("candidates", [{}])[0].get("content", {}).get("parts", [])
             text = "\n".join(str(part.get("text", "")) for part in parts if part.get("text")).strip()
@@ -252,7 +308,7 @@ class GeminiSTTProvider:
             )}]}],
             "generationConfig": {"temperature": 0.2},
         }
-        endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{settings.gemini_stt_model}:generateContent?{urlencode({'key': key})}"
+        endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{self.text_model}:generateContent?{urlencode({'key': key})}"
         result, _ = self._json_request(Request(
             endpoint, data=json.dumps(payload).encode(),
             headers={"Content-Type": "application/json"}, method="POST",
@@ -276,6 +332,9 @@ class STTJob:
     telegram_id: int | None = None
     api_keys: list[str] | None = None
     cleanup_source: bool = False
+    stt_model: str = ""
+    text_model: str = ""
+    stt_mode: str = "verbatim"
     id: str = ""
 
 
@@ -324,6 +383,9 @@ class STTQueue:
                 prompt=str(payload.get("prompt") or ""), post_prompts=list(payload.get("post_prompts") or []), output_mode=str(payload.get("output_mode") or "save"),
                 telegram_id=payload.get("telegram_id"), api_keys=decrypt_user_keys(user.gemini_api_keys_encrypted),
                 cleanup_source=bool(payload.get("cleanup_source", False)), id=job_id,
+                stt_model=str(payload.get("stt_model") or settings.gemini_stt_model),
+                text_model=str(payload.get("text_model") or "gemini-3.8-flash"),
+                stt_mode=str(payload.get("stt_mode") or "verbatim"),
             )
             status.update(state="queued", message="ادامه پس از راه‌اندازی دوباره", progress=0, output_mode=job.output_mode)
             self.statuses[job_id] = status
@@ -351,14 +413,15 @@ class STTQueue:
             await self.start()
         position = 1 + sum(1 for status in self.statuses.values() if status.get("state") not in {"done", "error", "cancelled"})
         job.id = job.id or uuid.uuid4().hex
-        self.statuses[job.id] = {"id": job.id, "user_id": job.user_id, "source_file_id": job.source_file_id, "title": job.title, "output_mode": job.output_mode, "state": "queued", "message": "منتظر نوبت", "progress": 0, "created_at": datetime.utcnow().isoformat()}
+        self.statuses[job.id] = {"id": job.id, "user_id": job.user_id, "source_file_id": job.source_file_id, "title": job.title, "output_mode": job.output_mode, "model": job.stt_model or settings.gemini_stt_model, "state": "queued", "message": "منتظر نوبت", "progress": 0, "created_at": datetime.utcnow().isoformat()}
         self.controls[job.id] = False
         await create_job(
             job_id=job.id, user_id=job.user_id, kind="stt", title=job.title,
             payload={"id": job.id, "user_id": job.user_id, "source_file_id": job.source_file_id,
                      "title": job.title, "folder_id": job.folder_id, "prompt": job.prompt, "post_prompts": job.post_prompts or [],
                      "output_mode": job.output_mode, "telegram_id": job.telegram_id,
-                     "cleanup_source": job.cleanup_source},
+                     "cleanup_source": job.cleanup_source, "stt_model": job.stt_model,
+                     "text_model": job.text_model, "stt_mode": job.stt_mode},
             status=self.statuses[job.id],
         )
         self.durable_job_ids.add(job.id)
@@ -436,7 +499,12 @@ class STTQueue:
             logger.warning("Could not remove temporary STT source %s", message_id, exc_info=True)
 
     async def _process(self, job: STTJob) -> None:
-        provider = GeminiSTTProvider(list(dict.fromkeys((job.api_keys or []) + self.provider.api_keys))) if job.api_keys else self.provider
+        provider = GeminiSTTProvider(
+            list(dict.fromkeys((job.api_keys or []) + self.provider.api_keys)),
+            stt_model=job.stt_model or settings.gemini_stt_model,
+            text_model=job.text_model or "gemini-3.8-flash",
+            stt_mode=job.stt_mode,
+        )
         async with async_session() as db:
             source = (await db.execute(select(File).where(File.id == job.source_file_id, File.user_id == job.user_id))).scalar_one_or_none()
             user = await db.get(User, job.user_id)

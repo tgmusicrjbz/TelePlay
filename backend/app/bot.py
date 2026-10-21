@@ -1208,10 +1208,12 @@ async def stt_command(client, message: Message):
             return
     folder_id = await get_active_drawer_id(message.from_user.id)
     source_name = Path(source.file_name).stem.strip() or "صدا"
+    preferences = load_tts_settings(user)
     job = STTJob(
         user_id=user.id, source_file_id=source.id, title=f"📝 متن {source_name}"[:180],
         folder_id=folder_id, output_mode=output_mode, telegram_id=message.from_user.id,
         api_keys=personal_keys, cleanup_source=cleanup_source,
+        stt_model=preferences["stt_model"], text_model=preferences["text_model"], stt_mode=preferences["stt_mode"],
     )
     position = await stt_queue.enqueue(job)
     queue_note = f"\nنوبت {to_persian_digits(str(position))} در صف" if position > 1 else ""
@@ -1287,10 +1289,12 @@ async def _process_pending_stt_media(client, message: Message, output_mode: str)
             return
     folder_id = await get_active_drawer_id(message.from_user.id)
     source_name = Path(source.file_name).stem.strip() or "صدا"
+    preferences = load_tts_settings(user)
     position = await stt_queue.enqueue(STTJob(
         user_id=user.id, source_file_id=source.id, title=f"📝 متن {source_name}"[:180],
         folder_id=folder_id, output_mode=output_mode, telegram_id=message.from_user.id,
         api_keys=personal_keys, cleanup_source=True,
+        stt_model=preferences["stt_model"], text_model=preferences["text_model"], stt_mode=preferences["stt_mode"],
     ))
     queue_note = f"\nنوبت {to_persian_digits(str(position))} در صف" if position > 1 else ""
     await message.reply(f"📝 درخواست استخراج متن ثبت شد.{queue_note}")
@@ -2990,6 +2994,7 @@ async def handle_callback(client, callback: CallbackQuery):
                 await callback.answer(str(error), show_alert=True)
                 return
             source_name = Path(file.file_name).stem.strip() or "صدا"
+            preferences = load_tts_settings(user) if user else {}
             job = STTJob(
                 user_id=file.user_id,
                 source_file_id=file.id,
@@ -2998,6 +3003,9 @@ async def handle_callback(client, callback: CallbackQuery):
                 output_mode="save",
                 telegram_id=callback.from_user.id,
                 api_keys=personal_keys,
+                stt_model=preferences.get("stt_model", settings.gemini_stt_model),
+                text_model=preferences.get("text_model", "gemini-3.8-flash"),
+                stt_mode=preferences.get("stt_mode", "verbatim"),
             )
         position = await stt_queue.enqueue(job)
         queue_note = f" · نوبت {to_persian_digits(str(position))}" if position > 1 else ""

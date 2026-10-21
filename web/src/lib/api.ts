@@ -59,11 +59,12 @@ export interface StorageChannelItem { channel_id:number; title?:string|null; act
 export interface StorageChannel { configured: boolean; channel_id?: number | null; title?: string | null; channels:StorageChannelItem[]; }
 export interface TTSVoice { value: string; label: string; description: string; gender: 'female'|'male'; pitch: 'low'|'medium'|'high'; }
 export interface TTSModelOption { value:string; label:string; description:string; profile:'quality'|'economy'; }
-export interface TTSSettings { voice: string; style: string; speed: number; model: string; auto_expression: boolean; gender: 'all'|'female'|'male'; pitch: 'all'|'medium'|'low'|'high'; use_case: 'general'|'audiobook'|'podcast'|'story'|'education'|'news'|'advertising'|'accessibility'; folder_id: number|null; available: boolean; personal_key_count?: number; voices: TTSVoice[]; models:TTSModelOption[]; }
+export interface AIModelOption { value:string; label:string; description:string; }
+export interface TTSSettings { voice: string; style: string; speed: number; model: string; stt_model:string; stt_mode:'verbatim'|'smart'; text_model:string; auto_expression: boolean; gender: 'all'|'female'|'male'; pitch: 'all'|'medium'|'low'|'high'; use_case: 'general'|'audiobook'|'podcast'|'story'|'education'|'news'|'advertising'|'accessibility'; folder_id: number|null; available: boolean; personal_key_count?: number; voices: TTSVoice[]; models:TTSModelOption[]; stt_models:AIModelOption[]; text_models:AIModelOption[]; }
 export interface GeminiKeySummary { count:number; masked:string[]; }
 export interface GeminiKeyHealth { masked:string; status:'healthy'|'limited'|'denied'|'unreachable'|'error'; message:string; }
-export interface TTSJobStatus { id: string; state: 'queued'|'paused'|'synthesizing'|'merging'|'uploading'|'done'|'error'|'cancelled'; message: string; progress: number; chunks_total: number; chunks_done: number; title: string; file_id?: number; stream_url?: string; created_at: string; finished_at?: string; }
-export interface STTJobStatus { id:string; source_file_id:number; title:string; output_mode?:'temporary'|'save'; state:'queued'|'downloading'|'transcribing'|'saving'|'done'|'error'|'cancelled'; message:string; progress:number; content?:string; file_id?:number; created_at:string; finished_at?:string; }
+export interface TTSJobStatus { id: string; state: 'queued'|'paused'|'synthesizing'|'merging'|'uploading'|'done'|'error'|'cancelled'; message: string; progress: number; chunks_total: number; chunks_done: number; title: string; model?:string; file_id?: number; stream_url?: string; created_at: string; finished_at?: string; }
+export interface STTJobStatus { id:string; source_file_id:number; title:string; output_mode?:'temporary'|'save'; model?:string; state:'queued'|'downloading'|'transcribing'|'saving'|'done'|'error'|'cancelled'; message:string; progress:number; content?:string; file_id?:number; created_at:string; finished_at?:string; }
 
 export interface Folder {
     id: number;
@@ -1364,7 +1365,7 @@ export const useTTSSettings = () => useQuery<TTSSettings>({
 export const useUpdateTTSSettings = () => {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (payload: Pick<TTSSettings, 'voice'|'style'|'speed'|'model'|'auto_expression'|'gender'|'pitch'|'use_case'|'folder_id'>) => (await api.put<TTSSettings>('/tts/settings', payload)).data,
+        mutationFn: async (payload: Pick<TTSSettings, 'voice'|'style'|'speed'|'model'|'stt_model'|'stt_mode'|'text_model'|'auto_expression'|'gender'|'pitch'|'use_case'|'folder_id'>) => (await api.put<TTSSettings>('/tts/settings', payload)).data,
         onSuccess: data => queryClient.setQueryData(['tts-settings'], data),
     });
 };

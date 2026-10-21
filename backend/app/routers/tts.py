@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import get_current_user
 from ..database import get_db
 from ..models import Folder, TTSVoicePreview, User
-from ..tts import GeminiTTSProvider, TTSJob, TTS_MODEL_OPTIONS, VOICE_OPTIONS, consume_tts_quota, load_tts_settings, normalize_tts_settings, tts_queue
+from ..tts import GeminiTTSProvider, STT_MODEL_OPTIONS, TEXT_MODEL_OPTIONS, TTSJob, TTS_MODEL_OPTIONS, VOICE_OPTIONS, consume_tts_quota, load_tts_settings, normalize_tts_settings, tts_queue
 from ..gemini_keys import check_gemini_key, decrypt_user_keys, encrypt_user_keys
 
 router = APIRouter(prefix="/tts", tags=["Text to speech"])
@@ -25,6 +25,9 @@ class TTSSettingsUpdate(BaseModel):
     style: str = Field(default="", max_length=500)
     speed: float = Field(default=1, ge=.5, le=2)
     model: str = Field(min_length=1, max_length=120)
+    stt_model: str | None = Field(default=None, min_length=1, max_length=120)
+    stt_mode: Literal["verbatim", "smart"] | None = None
+    text_model: str | None = Field(default=None, min_length=1, max_length=120)
     auto_expression: bool = True
     gender: Literal["all", "female", "male"] = "all"
     pitch: Literal["all", "low", "medium", "high"] = "all"
@@ -95,6 +98,8 @@ async def get_tts_settings(current_user: User = Depends(get_current_user)):
         "personal_key_count": len(personal_keys),
         "voices": VOICE_OPTIONS,
         "models": TTS_MODEL_OPTIONS,
+        "stt_models": STT_MODEL_OPTIONS,
+        "text_models": TEXT_MODEL_OPTIONS,
     }
 
 
@@ -108,11 +113,11 @@ async def update_tts_settings(
         folder = (await db.execute(select(Folder).where(Folder.id == payload.folder_id, Folder.user_id == current_user.id))).scalar_one_or_none()
         if folder is None:
             raise HTTPException(status_code=404, detail="کشوی پیش‌فرض پیدا نشد.")
-    preferences = normalize_tts_settings(payload.model_dump())
+    preferences = normalize_tts_settings({**load_tts_settings(current_user), **payload.model_dump(exclude_none=True)})
     current_user.tts_settings_json = json.dumps(preferences, ensure_ascii=False)
     await db.commit()
     personal_keys = decrypt_user_keys(current_user.gemini_api_keys_encrypted)
-    return {**preferences, "available": tts_queue.available or bool(personal_keys), "personal_key_count": len(personal_keys), "voices": VOICE_OPTIONS, "models": TTS_MODEL_OPTIONS}
+    return {**preferences, "available": tts_queue.available or bool(personal_keys), "personal_key_count": len(personal_keys), "voices": VOICE_OPTIONS, "models": TTS_MODEL_OPTIONS, "stt_models": STT_MODEL_OPTIONS, "text_models": TEXT_MODEL_OPTIONS}
 
 
 @router.post("/jobs", status_code=202)

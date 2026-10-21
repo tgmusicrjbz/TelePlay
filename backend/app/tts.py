@@ -41,6 +41,9 @@ DEFAULT_TTS_SETTINGS = {
     "style": "طبیعی، گرم و واضح",
     "speed": 1.0,
     "model": settings.gemini_tts_model,
+    "stt_model": settings.gemini_stt_model,
+    "stt_mode": "verbatim",
+    "text_model": "gemini-3.8-flash",
     "auto_expression": True,
     "folder_id": None,
     "bot_output_mode": "save",
@@ -60,6 +63,15 @@ TTS_MODEL_OPTIONS = [
     },
 ]
 SUPPORTED_TTS_MODELS = {item["value"] for item in TTS_MODEL_OPTIONS}
+STT_MODEL_OPTIONS = [
+    {"value": "gemini-3.8-flash", "label": "انعطاف‌پذیر", "description": "رونویسی همراه با دستور دلخواه و قالب‌بندی Markdown"},
+    {"value": "gemini-3.5-transcribe", "label": "تخصصی رونویسی", "description": "مدل اختصاصی تشخیص گفتار برای دقت بیشتر در فایل صوتی"},
+]
+TEXT_MODEL_OPTIONS = [
+    {"value": "gemini-3.8-flash", "label": "Gemini 3.8 Flash", "description": "برای خلاصه‌سازی و ویرایش چندمرحله‌ای متن"},
+]
+SUPPORTED_STT_MODELS = {item["value"] for item in STT_MODEL_OPTIONS}
+SUPPORTED_TEXT_MODELS = {item["value"] for item in TEXT_MODEL_OPTIONS}
 VOICE_OPTIONS = [
     {"value": "Kore", "label": "🌷 Kore · گرم و متعادل", "description": "صدایی گرم برای روایت، آموزش و متن‌های روزمره", "gender": "female", "pitch": "medium"},
     {"value": "Aoede", "label": "✨ Aoede · روشن و لطیف", "description": "مناسب متن‌های دوستانه، معرفی و محتوای سبک", "gender": "female", "pitch": "high"},
@@ -91,6 +103,12 @@ def normalize_tts_settings(value: dict | None) -> dict:
         requested_model = "gemini-3.8-flash-tts"
     default_model = settings.gemini_tts_model if settings.gemini_tts_model in SUPPORTED_TTS_MODELS else "gemini-3.8-flash-tts"
     raw["model"] = requested_model if requested_model in SUPPORTED_TTS_MODELS else default_model
+    requested_stt_model = str(raw.get("stt_model") or settings.gemini_stt_model).strip()[:120]
+    default_stt_model = settings.gemini_stt_model if settings.gemini_stt_model in SUPPORTED_STT_MODELS else "gemini-3.8-flash"
+    raw["stt_model"] = requested_stt_model if requested_stt_model in SUPPORTED_STT_MODELS else default_stt_model
+    raw["stt_mode"] = raw.get("stt_mode") if raw.get("stt_mode") in {"verbatim", "smart"} else "verbatim"
+    requested_text_model = str(raw.get("text_model") or "gemini-3.8-flash").strip()[:120]
+    raw["text_model"] = requested_text_model if requested_text_model in SUPPORTED_TEXT_MODELS else "gemini-3.8-flash"
     raw["speed"] = min(2.0, max(0.5, float(raw.get("speed") or 1)))
     raw["auto_expression"] = bool(raw.get("auto_expression", True))
     raw["gender"] = raw.get("gender") if raw.get("gender") in {"all", "female", "male"} else DEFAULT_TTS_SETTINGS["gender"]
@@ -547,7 +565,7 @@ class TTSQueue:
         self.statuses[job.id] = {
             "id": job.id, "user_id": job.user_id, "state": "queued", "message": "منتظر نوبت",
             "progress": 0, "chunks_total": len(chunks), "chunks_done": 0,
-            "title": job.title, "created_at": datetime.utcnow().isoformat(),
+            "title": job.title, "model": job.preferences.get("model"), "created_at": datetime.utcnow().isoformat(),
         }
         self.controls[job.id] = {"paused": False, "cancelled": False}
         await create_job(
