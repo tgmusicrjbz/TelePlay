@@ -8,6 +8,7 @@ from difflib import SequenceMatcher
 import json
 import re
 from fastapi import APIRouter, Depends, File as FormFile, Form, HTTPException, Query, Request, UploadFile
+from fastapi.responses import RedirectResponse
 import secrets
 import logging
 import os
@@ -34,6 +35,7 @@ from ..config import get_settings
 from ..media_metadata import extract_embedded_cover
 from ..downloader import ImportJob, link_importer
 from ..drive_importer import drive_importer, extract_google_drive_file_id
+from ..google_drive import authorization_url, decode_state, exchange_code, encrypt_credentials, account_email, access_token as google_access_token, list_files as google_list_files, configured as google_drive_configured
 from ..processing_jobs import update_job
 from .folders import ensure_default_folder
 from ..services import (
@@ -70,6 +72,12 @@ class LinkImportRequest(BaseModel):
 
 class DriveImportRequest(BaseModel):
     url: str = Field(min_length=20, max_length=2048)
+    folder_id: Optional[int] = None
+
+class DriveSelectionImportRequest(BaseModel):
+    file_ids: list[str] = Field(min_length=1,max_length=50)
+    file_names: dict[str,str] = Field(default_factory=dict)
+    mime_types: dict[str,str] = Field(default_factory=dict)
     folder_id: Optional[int] = None
 
 
@@ -327,6 +335,62 @@ async def import_from_google_drive(
     require_scoped_folder(request,folder_id)
     job_id=await drive_importer.enqueue(url=payload.url.strip(),file_id=drive_file_id,user_id=current_user.id,folder_id=folder_id)
     return {"job_id":job_id,"message":"انتقال از گوگل درایو شروع شد."}
+
+@router.get("/drive/status")
+async def google_drive_status(current_user:User=Depends(get_current_user)):
+    return {"configured":google_drive_configured(),"connected":bool(current_user.google_drive_credentials_encrypted),"email":current_user.google_drive_email}
+
+@router.get("/drive/connect")
+async def connect_google_drive(current_user:User=Depends(get_current_user)):
+    if not google_drive_configured(): raise HTTPException(status_code=503,detail="اتصال گوگل هنوز روی سرور تنظیم نشده است.")
+    return {"url":authorization_url(current_user.id)}
+
+@router.get("/drive/oauth/callback")
+async def google_drive_callback(code:str,state:str,db:AsyncSession=Depends(get_db)):
+    try:
+        user_id=decode_state(state); token=await exchange_code(code)
+        user=await db.get(User,user_id)
+        if user is None: raise ValueError("user")
+        previous={}
+        if not token.get("refresh_token") and user.google_drive_credentials_encrypted:
+            from ..google_drive import decrypt_credentials
+            previous=decrypt_credentials(user.google_drive_credentials_encrypted)
+        if previous.get("refresh_token") and not token.get("refresh_token"): token["refresh_token"]=previous["refresh_token"]
+        import time
+        token["expires_at"]=time.time()+int(token.get("expires_in",3600))
+        user.google_drive_credentials_encrypted=encrypt_credentials(token)
+        user.google_drive_email=await account_email(token["access_token"])
+        await db.commit()
+        return RedirectResponse(f"{settings.web_base_url.rstrip('/')}?drive=connected")
+    except Exception:
+        logger.exception("Google Drive OAuth callback failed")
+        return RedirectResponse(f"{settings.web_base_url.rstrip('/')}?drive=error")
+
+@router.delete("/drive/disconnect")
+async def disconnect_google_drive(current_user:User=Depends(get_current_user),db:AsyncSession=Depends(get_db)):
+    current_user.google_drive_credentials_encrypted=None; current_user.google_drive_email=None; await db.commit()
+    return {"ok":True}
+
+@router.get("/drive/browse")
+async def browse_google_drive(folder_id:str="root",q:str="",current_user:User=Depends(get_current_user),db:AsyncSession=Depends(get_db)):
+    try: token=await google_access_token(current_user,db); return await google_list_files(token,folder_id,q)
+    except ValueError as error: raise HTTPException(status_code=401,detail=str(error))
+
+@router.post("/drive/import-selected",status_code=202)
+async def import_selected_google_drive(payload:DriveSelectionImportRequest,request:Request,current_user:User=Depends(get_current_user),db:AsyncSession=Depends(get_db)):
+    folder_id=payload.folder_id
+    if folder_id is None: folder_id=(await ensure_default_folder(db,current_user.id)).id; await db.commit()
+    else:
+        folder=(await db.execute(select(Folder).where(Folder.id==folder_id,Folder.user_id==current_user.id))).scalar_one_or_none()
+        if folder is None: raise HTTPException(status_code=404,detail="کشوی مقصد پیدا نشد.")
+    require_scoped_folder(request,folder_id)
+    if not current_user.google_drive_credentials_encrypted: raise HTTPException(status_code=401,detail="اول حساب گوگل را متصل کن.")
+    jobs=[]
+    for file_id in payload.file_ids:
+        if not re.fullmatch(r"[A-Za-z0-9_-]{10,}",file_id): continue
+        jobs.append(await drive_importer.enqueue(url=f"drive://{file_id}",file_id=file_id,user_id=current_user.id,folder_id=folder_id,authenticated=True,file_name=payload.file_names.get(file_id),mime_type=payload.mime_types.get(file_id)))
+    if not jobs: raise HTTPException(status_code=400,detail="فایل معتبری انتخاب نشده است.")
+    return {"job_ids":jobs,"message":f"{len(jobs)} فایل به صف انتقال اضافه شد."}
 
 
 @router.get("/import-drive/status")

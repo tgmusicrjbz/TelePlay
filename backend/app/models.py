@@ -37,6 +37,8 @@ class User(Base):
     player_state_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
     offline_manifest_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
     gemini_api_keys_encrypted: Mapped[Optional[str]] = mapped_column(Text)
+    google_drive_credentials_encrypted: Mapped[Optional[str]] = mapped_column(Text)
+    google_drive_email: Mapped[Optional[str]] = mapped_column(String(255))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     auth_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

@@ -10,7 +10,7 @@ import tempfile
 import uuid
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from sqlalchemy import select
@@ -72,12 +72,12 @@ class GoogleDriveImporter:
         self.tasks: dict[str, asyncio.Task] = {}
         self.cancelled: set[str] = set()
 
-    async def enqueue(self, *, url: str, file_id: str, user_id: int, folder_id: int) -> str:
+    async def enqueue(self, *, url: str, file_id: str, user_id: int, folder_id: int, authenticated: bool=False, file_name: str|None=None, mime_type: str|None=None) -> str:
         job_id = uuid.uuid4().hex
         status = {"id":job_id,"source":"drive","url":url,"user_id":user_id,"folder_id":folder_id,"state":"queued","message":"در صف دریافت از گوگل درایو","progress":1,"created_at":datetime.utcnow().isoformat()}
         self.statuses[job_id] = status
-        await create_job(job_id=job_id,user_id=user_id,kind="drive",title="Google Drive",payload={"url":url,"file_id":file_id,"folder_id":folder_id},status=status)
-        self.tasks[job_id] = asyncio.create_task(self._run(job_id, file_id, user_id, folder_id))
+        await create_job(job_id=job_id,user_id=user_id,kind="drive",title="Google Drive",payload={"url":url,"file_id":file_id,"folder_id":folder_id,"authenticated":authenticated,"file_name":file_name,"mime_type":mime_type},status=status)
+        self.tasks[job_id] = asyncio.create_task(self._run(job_id, file_id, user_id, folder_id,authenticated,file_name,mime_type))
         return job_id
 
     def list(self, user_id: int) -> list[dict]:
@@ -103,14 +103,20 @@ class GoogleDriveImporter:
     def _set(self, job_id: str, **changes) -> None:
         if job_id in self.statuses: self.statuses[job_id].update(changes)
 
-    def _download(self, job_id: str, file_id: str, target_dir: str) -> tuple[str,str|None]:
-        url=f"https://drive.usercontent.google.com/download?id={file_id}&export=download&confirm=t"
-        request=Request(url,headers={"User-Agent":"Mozilla/5.0 Komod/1.0","Accept":"*/*"})
+    def _download(self, job_id: str, file_id: str, target_dir: str, access_token: str|None=None, preferred_name: str|None=None, preferred_mime: str|None=None) -> tuple[str,str|None]:
+        exports={"application/vnd.google-apps.document":("application/pdf",".pdf"),"application/vnd.google-apps.spreadsheet":("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",".xlsx"),"application/vnd.google-apps.presentation":("application/vnd.openxmlformats-officedocument.presentationml.presentation",".pptx"),"application/vnd.google-apps.drawing":("application/pdf",".pdf")}
+        export=exports.get(preferred_mime or "")
+        if access_token and export: url=f"https://www.googleapis.com/drive/v3/files/{file_id}/export?{urlencode({'mimeType':export[0]})}"
+        else: url=f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media" if access_token else f"https://drive.usercontent.google.com/download?id={file_id}&export=download&confirm=t"
+        headers={"User-Agent":"Mozilla/5.0 Komod/1.0","Accept":"*/*"}
+        if access_token: headers["Authorization"]=f"Bearer {access_token}"
+        request=Request(url,headers=headers)
         with urlopen(request,timeout=90) as response:
             content_type=(response.headers.get_content_type() or "application/octet-stream").lower()
             total=int(response.headers.get("Content-Length") or 0)
             if total>MAX_DRIVE_FILE_SIZE: raise RuntimeError("حجم فایل برای انتقال مستقیم بیش از حد زیاد است.")
-            filename=_response_filename(response.headers,file_id)
+            filename=sanitize_filename(preferred_name)[:500] if preferred_name else _response_filename(response.headers,file_id)
+            if export and not Path(filename).suffix: filename+=export[1]
             if not Path(filename).suffix:
                 guessed_extension=mimetypes.guess_extension(content_type)
                 if guessed_extension: filename=f"{filename}{guessed_extension}"
@@ -129,12 +135,19 @@ class GoogleDriveImporter:
                 raise RuntimeError("فایل عمومی نیست. دسترسی را روی «هرکس لینک را دارد» بگذار.")
             return target, content_type
 
-    async def _run(self, job_id: str, drive_file_id: str, user_id: int, folder_id: int) -> None:
+    async def _run(self, job_id: str, drive_file_id: str, user_id: int, folder_id: int, authenticated: bool=False, file_name: str|None=None, mime_type: str|None=None) -> None:
         sent=None; target_channel=None
         try:
             self._set(job_id,state="downloading",message="در حال اتصال به گوگل درایو",progress=3)
             with tempfile.TemporaryDirectory(prefix="komod-drive-") as temporary:
-                path,mime=await asyncio.to_thread(self._download,job_id,drive_file_id,temporary)
+                token=None
+                if authenticated:
+                    from .google_drive import access_token
+                    async with async_session() as token_db:
+                        token_user=await token_db.get(User,user_id)
+                        if token_user is None: raise RuntimeError("حساب کاربر پیدا نشد.")
+                        token=await access_token(token_user,token_db)
+                path,mime=await asyncio.to_thread(self._download,job_id,drive_file_id,temporary,token,file_name,mime_type)
                 if job_id in self.cancelled: raise asyncio.CancelledError()
                 filename=Path(path).name; file_size=Path(path).stat().st_size; file_type=_detect_type(filename,mime)
                 digest=await asyncio.to_thread(_sha256,path)

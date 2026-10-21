@@ -85,6 +85,9 @@ class Settings(BaseSettings):
     
     # Web
     web_base_url: str = "http://localhost:3000"
+    google_client_id: str = Field("", alias="GOOGLE_CLIENT_ID")
+    google_client_secret: str = Field("", alias="GOOGLE_CLIENT_SECRET")
+    google_redirect_uri: str = Field("", alias="GOOGLE_REDIRECT_URI")
 
     # Gemini text-to-speech. Keep these keys on the server; they must never be
     # returned by an API endpoint or embedded in the web bundle.
