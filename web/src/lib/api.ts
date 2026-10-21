@@ -68,6 +68,7 @@ export interface SmartSearchExpansion { query:string; terms:string[]; }
 export interface RelatedFilesResult { files:TelegramFile[]; terms:string[]; }
 export interface FileInsights { summary:string; key_points:string[]; topics:string[]; }
 export interface FolderSuggestion { folder_id:number; name:string; path:string; reason:string; confidence:number; }
+export interface FileQuestionTurn { role:'user'|'assistant'; content:string; }
 export interface TTSJobStatus { id: string; state: 'queued'|'paused'|'synthesizing'|'merging'|'uploading'|'done'|'error'|'cancelled'; message: string; progress: number; chunks_total: number; chunks_done: number; title: string; model?:string; file_id?: number; stream_url?: string; created_at: string; finished_at?: string; }
 export interface STTJobStatus { id:string; source_file_id:number; title:string; output_mode?:'temporary'|'save'; model?:string; state:'queued'|'downloading'|'transcribing'|'saving'|'done'|'error'|'cancelled'; message:string; progress:number; content?:string; file_id?:number; created_at:string; finished_at?:string; }
 
@@ -594,6 +595,10 @@ export const useFileInsights = () => useMutation({
 
 export const useSuggestFileFolders = () => useMutation({
     mutationFn: async (id:number) => (await api.post<{suggestions:FolderSuggestion[]}>(`/files/${id}/ai-folder-suggestions`)).data,
+});
+
+export const useAskFileQuestion = () => useMutation({
+    mutationFn: async ({id,question,history}:{id:number;question:string;history:FileQuestionTurn[]}) => (await api.post<{answer:string}>(`/files/${id}/ask`,{question,history})).data,
 });
 
 export const useDeleteFile = () => {

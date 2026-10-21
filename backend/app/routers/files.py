@@ -53,6 +53,7 @@ from ..audit import add_security_event
 from ..ai_metadata import build_metadata_source, metadata_instruction, parse_metadata_suggestion
 from ..ai_insights import insights_instruction, parse_file_insights
 from ..ai_organization import folder_suggestion_instruction, parse_folder_suggestions
+from ..ai_question import build_question_context, clean_grounded_answer, question_instruction
 from ..ai_search import build_related_file_instruction, build_search_expansion_instruction, parse_search_expansion, parse_search_terms
 from ..gemini_keys import decrypt_user_keys
 from ..stt import GeminiSTTProvider, stt_queue
@@ -68,6 +69,7 @@ _smart_search_cache: dict[tuple[int, str, str, str], tuple[datetime, dict[str, o
 _related_terms_cache: dict[tuple[int, int, str, str, str], tuple[datetime, list[str]]] = {}
 _ai_insights_cache: dict[tuple[int, int, str, str], tuple[datetime, dict[str, object]]] = {}
 _folder_suggestion_cache: dict[tuple[int, int, str, str, str], tuple[datetime, list[dict[str, object]]]] = {}
+_file_question_cache: dict[tuple[int, int, str, str, str], tuple[datetime, str]] = {}
 
 
 class TextContentUpdate(BaseModel):
@@ -76,6 +78,16 @@ class TextContentUpdate(BaseModel):
 
 class SmartSearchRequest(BaseModel):
     query: str = Field(min_length=2, max_length=300)
+
+
+class FileQuestionTurn(BaseModel):
+    role: str = Field(pattern="^(user|assistant)$")
+    content: str = Field(min_length=1, max_length=3000)
+
+
+class FileQuestionRequest(BaseModel):
+    question: str = Field(min_length=2, max_length=2000)
+    history: list[FileQuestionTurn] = Field(default_factory=list, max_length=6)
 
 
 @router.post("/search/expand")
@@ -350,6 +362,61 @@ async def suggest_file_folders(
         raise HTTPException(status_code=502, detail=str(error)) from error
     _folder_suggestion_cache[cache_key] = (datetime.utcnow() + timedelta(hours=1), suggestions)
     return {"suggestions": suggestions}
+
+
+@router.post("/{file_id}/ask")
+@limiter.limit("15/minute")
+async def ask_file_question(
+    file_id: int,
+    payload: FileQuestionRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    source = (await db.execute(select(File).where(File.id == file_id, File.user_id == current_user.id))).scalar_one_or_none()
+    if source is None:
+        raise HTTPException(status_code=404, detail="فایل پیدا نشد.")
+    if source.is_hidden and not has_vault_access(request, current_user):
+        require_vault_access(request, current_user)
+    if source.file_type == "text" and source.search_text is None:
+        await index_missing_text_notes(db, current_user.id)
+        await db.refresh(source)
+    content = (source.search_text or "").strip()
+    if not content and len((source.description or "").strip()) < 40:
+        raise HTTPException(status_code=400, detail="برای پرسش از این فایل هنوز متن یا توضیحات کافی وجود ندارد.")
+
+    personal_keys = decrypt_user_keys(current_user.gemini_api_keys_encrypted)
+    keys = list(dict.fromkeys(personal_keys + stt_queue.provider.api_keys))
+    if not keys:
+        raise HTTPException(status_code=503, detail="برای پرسش از فایل، کلید Gemini تنظیم نشده است.")
+    try:
+        tags = [str(item) for item in json.loads(source.tags_json or "[]") if str(item).strip()]
+    except (TypeError, ValueError, json.JSONDecodeError):
+        tags = []
+    history = [turn.model_dump() for turn in payload.history]
+    preferences = load_tts_settings(current_user)
+    source_version = (source.updated_at or source.created_at).isoformat()
+    conversation_fingerprint = hashlib.sha256(json.dumps({"q": payload.question, "h": history}, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:20]
+    cache_key = (current_user.id, source.id, source_version, preferences["text_model"], conversation_fingerprint)
+    cached = _file_question_cache.get(cache_key)
+    if cached and cached[0] > datetime.utcnow():
+        return {"answer": cached[1]}
+
+    context = build_question_context(
+        file_name=source.file_name,
+        description=source.description or "",
+        tags=tags,
+        content=content or source.description or "",
+        question=payload.question,
+    )
+    provider = GeminiSTTProvider(keys, text_model=preferences["text_model"])
+    try:
+        raw = await provider.refine_text(context, question_instruction(payload.question, history))
+        answer = clean_grounded_answer(raw)
+    except (RuntimeError, ValueError) as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    _file_question_cache[cache_key] = (datetime.utcnow() + timedelta(minutes=20), answer)
+    return {"answer": answer}
 
 
 class LinkImportRequest(BaseModel):
