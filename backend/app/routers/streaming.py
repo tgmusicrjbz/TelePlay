@@ -56,6 +56,17 @@ def media_type_for(file: File) -> str:
     return "application/octet-stream"
 
 
+def playable_message_media(message):
+    """Return every Telegram media shape that can be streamed by the player."""
+    return (
+        getattr(message, "video", None)
+        or getattr(message, "video_note", None)
+        or getattr(message, "audio", None)
+        or getattr(message, "voice", None)
+        or getattr(message, "document", None)
+    )
+
+
 def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
     """Parse HTTP Range header for video seeking support."""
     if not range_header:
@@ -226,7 +237,9 @@ async def stream_file(
     if file.file_type == "text" or message.photo:
         return await stored_message_response(file, message, request.headers.get("range"), download)
 
-    media = message.video or message.audio or message.voice or message.document
+    media = playable_message_media(message)
+    if media is None:
+        raise HTTPException(status_code=422, detail="این پیام فایل قابل پخشی ندارد.")
     file_size = getattr(media, "file_size", None) or file.file_size
     range_header = request.headers.get("range")
     from_bytes, until_bytes = parse_range_header(range_header, file_size)
@@ -305,6 +318,8 @@ async def get_thumbnail(
                 return Response(content=embedded_cover, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=604800, stale-while-revalidate=2592000"})
         if message.video and message.video.thumbs:
             thumbnail = select_best_thumbnail(message.video.thumbs)
+        elif getattr(message, "video_note", None) and message.video_note.thumbs:
+            thumbnail = select_best_thumbnail(message.video_note.thumbs)
         elif message.document and message.document.thumbs:
             thumbnail = select_best_thumbnail(message.document.thumbs)
         elif message.audio and message.audio.thumbs:
