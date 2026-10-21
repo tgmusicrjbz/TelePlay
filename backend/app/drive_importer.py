@@ -9,6 +9,8 @@ import re
 import tempfile
 import uuid
 from datetime import datetime
+from email.header import decode_header, make_header
+from email.message import Message
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
@@ -43,9 +45,18 @@ def extract_google_drive_file_id(value: str) -> str | None:
 
 def _response_filename(headers, file_id: str) -> str:
     disposition = headers.get("Content-Disposition", "")
-    encoded = re.search(r"filename\*=UTF-8''([^;]+)", disposition, re.IGNORECASE)
-    plain = re.search(r'filename="?([^";]+)', disposition, re.IGNORECASE)
-    name = unquote(encoded.group(1)) if encoded else plain.group(1).strip() if plain else f"google-drive-{file_id}"
+    message=Message(); message["content-disposition"]=disposition
+    name=message.get_filename()
+    if not name:
+        encoded = re.search(r"filename\*=UTF-8''([^;]+)", disposition, re.IGNORECASE)
+        plain = re.search(r'filename="?([^";]+)', disposition, re.IGNORECASE)
+        name = unquote(encoded.group(1)) if encoded else plain.group(1).strip() if plain else f"google-drive-{file_id}"
+    try: name=str(make_header(decode_header(unquote(name))))
+    except (UnicodeDecodeError,LookupError,ValueError): name=unquote(name)
+    # Some Google/proxy responses expose UTF-8 header bytes as latin-1 text.
+    if any(marker in name for marker in ("Ø","Ù","Ã","Â")):
+        try: name=name.encode("latin-1").decode("utf-8")
+        except (UnicodeEncodeError,UnicodeDecodeError): pass
     return sanitize_filename(name)[:500]
 
 

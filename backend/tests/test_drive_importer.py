@@ -1,4 +1,4 @@
-from app.drive_importer import _detect_type, extract_google_drive_file_id
+from app.drive_importer import _detect_type, _response_filename, extract_google_drive_file_id
 from app.google_drive import decrypt_credentials, encrypt_credentials
 
 
@@ -30,3 +30,13 @@ def test_google_credentials_are_encrypted_at_rest():
     encrypted=encrypt_credentials(raw)
     assert "secret-access" not in encrypted
     assert decrypt_credentials(encrypted)==raw
+
+
+def test_decodes_persian_rfc5987_filename():
+    headers={"Content-Disposition":"attachment; filename*=UTF-8''%D8%A2%D9%87%D9%86%DA%AF%20%D8%AA%D8%B3%D8%AA.mp3"}
+    assert _response_filename(headers,"fallback") == "آهنگ تست.mp3"
+
+
+def test_repairs_utf8_filename_exposed_as_latin1():
+    mojibake="آهنگ فارسی.mp3".encode("utf-8").decode("latin-1")
+    assert _response_filename({"Content-Disposition":f'attachment; filename="{mojibake}"'},"fallback") == "آهنگ فارسی.mp3"
