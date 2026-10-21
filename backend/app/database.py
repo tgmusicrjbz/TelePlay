@@ -94,6 +94,10 @@ async def init_db():
             delete_default = "TRUE" if url.drivername.startswith("postgresql") else "1"
             delete_type = "BOOLEAN" if url.drivername.startswith("postgresql") else "INTEGER"
             await conn.execute(text(f"ALTER TABLE users ADD COLUMN delete_storage_files {delete_type} NOT NULL DEFAULT {delete_default}"))
+        if "youtube_caption_template" not in user_columns:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN youtube_caption_template TEXT NOT NULL DEFAULT '📝 [عنوان]\n📺 [سازنده]\n🔗 [لینک]'"))
+        if "instagram_caption_template" not in user_columns:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN instagram_caption_template TEXT NOT NULL DEFAULT '📝 [عنوان]\n📷 [سازنده]\n🔗 [لینک]'"))
         if "tag_settings_json" not in user_columns:
             await conn.execute(text("ALTER TABLE users ADD COLUMN tag_settings_json TEXT NOT NULL DEFAULT '[]'"))
         if "tag_exclusions_json" not in user_columns:

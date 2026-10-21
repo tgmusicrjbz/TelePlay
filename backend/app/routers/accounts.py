@@ -17,7 +17,7 @@ from ..auth import create_vault_token, get_current_user, require_vault_access
 from ..config import get_settings
 from ..database import get_db
 from ..models import AuthSession, File, Folder, Pack, PackItem, Playlist, PlaylistItem, ProcessingJob, SecurityEvent, TTSUsage, User, WorkspaceGrant
-from ..schemas import AccountPreferences, AdminHealthResponse, AdminStatsResponse, AdminUserCreate, AdminUserResponse, AdminUserUpdate, SavedFilter, SavedFiltersUpdate, ServiceHealthItem, StorageChannelItem, StorageChannelResponse, StorageChannelUpdate, StuckJobResponse, TagBatchDelete, TagDefinitionResponse, TagSettingsResponse, TagSettingsUpdate, VaultPasswordRequest, VaultStatus, VaultTokenResponse, WorkspaceGrantCreate, WorkspaceResponse
+from ..schemas import AccountPreferences, AccountPreferencesUpdate, AdminHealthResponse, AdminStatsResponse, AdminUserCreate, AdminUserResponse, AdminUserUpdate, SavedFilter, SavedFiltersUpdate, ServiceHealthItem, StorageChannelItem, StorageChannelResponse, StorageChannelUpdate, StuckJobResponse, TagBatchDelete, TagDefinitionResponse, TagSettingsResponse, TagSettingsUpdate, VaultPasswordRequest, VaultStatus, VaultTokenResponse, WorkspaceGrantCreate, WorkspaceResponse
 from .. import telegram
 from ..audit import add_security_event
 from ..services import sanitize_filename
@@ -93,6 +93,8 @@ async def export_account_data(
         },
         "preferences": {
             "delete_storage_files": current_user.delete_storage_files,
+            "youtube_caption_template": current_user.youtube_caption_template,
+            "instagram_caption_template": current_user.instagram_caption_template,
             "show_file_tags": current_user.show_file_tags,
             "file_tag_limit": current_user.file_tag_limit,
             "tag_settings": parsed(current_user.tag_settings_json, []),
@@ -153,6 +155,10 @@ async def import_account_data(
     preferences = payload.get("preferences") if isinstance(payload.get("preferences"), dict) else {}
     if "delete_storage_files" in preferences:
         current_user.delete_storage_files = bool(preferences["delete_storage_files"])
+    for field in ("youtube_caption_template", "instagram_caption_template"):
+        value = preferences.get(field)
+        if isinstance(value, str) and len(value) <= 1000:
+            setattr(current_user, field, value.strip())
     current_user.show_file_tags = bool(preferences.get("show_file_tags", current_user.show_file_tags))
     current_user.file_tag_limit = max(1, min(int(preferences.get("file_tag_limit", current_user.file_tag_limit) or 2), 6))
     tag_settings = preferences.get("tag_settings")
@@ -670,18 +676,31 @@ async def remove_storage_channel(channel_id: int, current_user: User = Depends(g
 
 @router.get("/accounts/preferences", response_model=AccountPreferences)
 async def get_account_preferences(current_user: User = Depends(get_current_user)):
-    return AccountPreferences(delete_storage_files=current_user.delete_storage_files)
+    return AccountPreferences(
+        delete_storage_files=current_user.delete_storage_files,
+        youtube_caption_template=current_user.youtube_caption_template,
+        instagram_caption_template=current_user.instagram_caption_template,
+    )
 
 
 @router.put("/accounts/preferences", response_model=AccountPreferences)
 async def update_account_preferences(
-    payload: AccountPreferences,
+    payload: AccountPreferencesUpdate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    current_user.delete_storage_files = payload.delete_storage_files
+    if payload.delete_storage_files is not None:
+        current_user.delete_storage_files = payload.delete_storage_files
+    if payload.youtube_caption_template is not None:
+        current_user.youtube_caption_template = payload.youtube_caption_template.strip()
+    if payload.instagram_caption_template is not None:
+        current_user.instagram_caption_template = payload.instagram_caption_template.strip()
     await db.commit()
-    return AccountPreferences(delete_storage_files=current_user.delete_storage_files)
+    return AccountPreferences(
+        delete_storage_files=current_user.delete_storage_files,
+        youtube_caption_template=current_user.youtube_caption_template,
+        instagram_caption_template=current_user.instagram_caption_template,
+    )
 
 
 @router.get("/accounts/vault", response_model=VaultStatus)

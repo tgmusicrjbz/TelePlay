@@ -546,6 +546,14 @@ class StorageChannelResponse(BaseModel):
 
 class AccountPreferences(BaseModel):
     delete_storage_files: bool = True
+    youtube_caption_template: str = Field(default="📝 [عنوان]\n📺 [سازنده]\n🔗 [لینک]", max_length=1000)
+    instagram_caption_template: str = Field(default="📝 [عنوان]\n📷 [سازنده]\n🔗 [لینک]", max_length=1000)
+
+
+class AccountPreferencesUpdate(BaseModel):
+    delete_storage_files: Optional[bool] = None
+    youtube_caption_template: Optional[str] = Field(default=None, max_length=1000)
+    instagram_caption_template: Optional[str] = Field(default=None, max_length=1000)
 
 
 class VaultStatus(BaseModel):

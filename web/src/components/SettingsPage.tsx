@@ -8,6 +8,7 @@ import TagSettingsPanel from './TagSettingsPanel';
 import TransferCenter from './TransferCenter';
 import TTSSettingsPanel from './TTSSettingsPanel';
 import MarkdownSettingsPanel from './MarkdownSettingsPanel';
+import LinkCaptionSettings from './LinkCaptionSettings';
 import { useAppStore } from '../lib/store';
 
 type SettingsView = 'home' | 'accounts' | 'security' | 'sessions' | 'access' | 'storage' | 'files' | 'appearance' | 'markdown' | 'connection' | 'admin' | 'tags' | 'transfers' | 'tts';
@@ -356,6 +357,8 @@ export default function SettingsPage() {
 
         {view === 'files' && <Card id="files-links" icon={<Download/>} title="مقصد لینک‌ها" subtitle="برای یوتیوب و اینستاگرام کشوی پیش‌فرض جداگانه تعیین کن."><div className="mt-4 grid gap-3 sm:grid-cols-2"><CustomSelect label="لینک‌های یوتیوب" value={youtubeFolder} onChange={value=>{setYoutubeFolder(String(value));localStorage.setItem('komod-youtube-folder',String(value));}} options={[{value:'none',label:'هر بار انتخاب می‌کنم'},...incomingFolderOptions]}/><CustomSelect label="لینک‌های اینستاگرام" value={instagramFolder} onChange={value=>{setInstagramFolder(String(value));localStorage.setItem('komod-instagram-folder',String(value));}} options={[{value:'none',label:'هر بار انتخاب می‌کنم'},...incomingFolderOptions]}/></div></Card>}
 
+        {view === 'files' && (!selectedSubsection || selectedSubsection === 'files-link-caption') && <LinkCaptionSettings/>}
+
         {view === 'connection' && user?.is_admin && <div className="space-y-4">
             <Card icon={<MonitorSmartphone/>} title="حالت اتصال" subtitle="در حالت آفلاین فقط محتوای ذخیره‌شده روی همین دستگاه نمایش داده می‌شود."><div className="mt-4 grid grid-cols-2 overflow-hidden rounded-xl border border-white/[.08] bg-dark-950/50 p-1"><button onClick={()=>changeConnectionMode(false)} className={`min-h-10 rounded-lg text-sm transition ${!forceOffline?'bg-primary-500 text-white':'text-dark-400'}`}>آنلاین</button><button onClick={()=>changeConnectionMode(true)} className={`min-h-10 rounded-lg text-sm transition ${forceOffline?'bg-primary-500 text-white':'text-dark-400'}`}>آفلاین</button></div></Card>
             <Card icon={<Globe2/>} title="مسیر اتصال" subtitle="اگر آدرس اصلی در شبکه‌ات باز نمی‌شود، آدرس HTTPS یک دامنه جایگزین یا reverse proxy را اینجا ذخیره کن.">
@@ -424,7 +427,7 @@ function settingsSectionLinks(view:SettingsView):Array<{id:string;label:string}>
         sessions:[{id:'sessions-active',label:'نشست‌ها'},{id:'sessions-events',label:'رویدادهای امنیتی'}],
         security:[{id:'security-login',label:'ورود'},{id:'security-vault',label:'گاوصندوق'}],
         access:[{id:'access-workspaces',label:'کمدهای در دسترس'},{id:'access-sharing',label:'اشتراک‌گذاری'}],
-        files:[{id:'files-root',label:'نمایش فایل‌ها'},{id:'files-incoming',label:'فایل‌های تازه'},{id:'files-links',label:'مقصد لینک‌ها'}],
+        files:[{id:'files-root',label:'نمایش فایل‌ها'},{id:'files-incoming',label:'فایل‌های تازه'},{id:'files-links',label:'مقصد لینک‌ها'},{id:'files-link-caption',label:'توضیحات لینک'}],
         storage:[{id:'storage-overview',label:'نمای کلی'},{id:'storage-channel',label:'فضای شخصی'},{id:'storage-delete',label:'حذف فایل'}],
         appearance:[{id:'appearance-color',label:'رنگ کمد'},{id:'appearance-mode',label:'روشن یا تاریک'}],
         tags:[{id:'tags-library',label:'تگ‌های من'},{id:'tags-display',label:'نمایش تگ‌ها'}],

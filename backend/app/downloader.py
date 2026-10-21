@@ -23,6 +23,7 @@ from .auth import create_access_token
 from .config import get_settings
 from .database import async_session
 from .models import File, Folder, User
+from .link_captions import render_link_caption
 from .processing_jobs import create_job, delete_finished_jobs, delete_job, load_jobs, update_job
 from .services import sanitize_filename, select_best_thumbnail
 from . import telegram
@@ -584,6 +585,16 @@ class LinkImportService:
                 media = copied.video or copied.audio or copied.voice or copied.document or (select_best_thumbnail(copied.photo.sizes) if copied.photo else None)
                 if media is None:
                     continue
+                is_youtube = "youtu" in (item.get("source_url") or job.url).lower()
+                caption_template = user.youtube_caption_template if is_youtube else user.instagram_caption_template
+                description = render_link_caption(
+                    caption_template,
+                    title=item.get("title"), author=item.get("author"),
+                    url=item.get("source_url") or job.url,
+                    platform="یوتیوب" if is_youtube else "اینستاگرام",
+                    media_type={"video": "ویدیو", "audio": "صدا", "image": "عکس"}.get(item["type"], "فایل"),
+                    quality="صدا" if job.quality == "audio" else f"{job.quality}p" if str(job.quality).isdigit() else job.quality,
+                )
                 stored = File(
                     user_id=user.id,
                     folder_id=folder_id,
@@ -592,10 +603,7 @@ class LinkImportService:
                     file_id=media.file_id,
                     file_unique_id=media.file_unique_id,
                     file_name=filename,
-                    description=(
-                        f"{'📺' if 'youtu' in job.url.lower() else '📷'} {item.get('author')}\n\n🔗 {item.get('source_url') or job.url}"
-                        if item.get("author") else f"🔗 {item.get('source_url') or job.url}"
-                    ),
+                    description=description,
                     file_size=getattr(media, "file_size", None) or 0,
                     mime_type=(getattr(media, "mime_type", None) or ("video/mp4" if item["type"] == "video" else "audio/mpeg" if item["type"] == "audio" else "image/jpeg")),
                     file_type=item["type"],

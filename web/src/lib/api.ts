@@ -43,7 +43,7 @@ export interface ServiceHealthItem { key:string; label:string; status:'healthy'|
 export interface StuckJob { id:string; kind:string; title:string; state:string; progress:number; updated_at:string; }
 export interface AdminHealth { checked_at:string; overall:'healthy'|'warning'|'error'; services:ServiceHealthItem[]; stuck_jobs:StuckJob[]; }
 export interface AdminErrorLog { id:number; error_id:string; method:string; path:string; message:string; resolved:boolean; created_at:string; }
-export interface AccountPreferences { delete_storage_files: boolean; }
+export interface AccountPreferences { delete_storage_files: boolean; youtube_caption_template: string; instagram_caption_template: string; }
 export interface TagDefinition { name: string; color: string; category?: string; file_count?: number; }
 export interface TagSettings { tags: TagDefinition[]; excluded_tags: string[]; show_file_tags: boolean; display_limit: number; }
 export interface SavedFilter {
@@ -1325,7 +1325,7 @@ export const useUnlockVault = () => useMutation({
 export const useUpdateAccountPreferences = () => {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (payload: AccountPreferences) => (await api.put<AccountPreferences>('/accounts/preferences', payload)).data,
+        mutationFn: async (payload: Partial<AccountPreferences>) => (await api.put<AccountPreferences>('/accounts/preferences', payload)).data,
         onMutate: async payload => {
             await queryClient.cancelQueries({queryKey:['accountPreferences']});
             const previous=queryClient.getQueryData<AccountPreferences>(['accountPreferences']);
