@@ -238,6 +238,7 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             user = await db.get(User, self.user_id)
             direct = await db.get(File, self.direct_file_id)
             direct.tags_json = json.dumps(["پروژه", "نگه‌دار"], ensure_ascii=False)
+            direct.description = "تگ‌ها: پروژه، نگه‌دار\nیادداشت #پروژه"
             await update_tag_settings(TagSettingsUpdate(
                 tags=[TagDefinition(name="پروژه", color="#14b8a6"), TagDefinition(name="نگه‌دار", color="#2563eb")],
                 show_file_tags=True, display_limit=3,
@@ -246,6 +247,8 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             await db.refresh(direct)
             self.assertNotIn("پروژه", [tag.name for tag in result.tags])
             self.assertEqual(json.loads(direct.tags_json), ["نگه‌دار"])
+            self.assertEqual(direct.description, "تگ‌ها: نگه‌دار\nیادداشت")
+            self.assertIn("پروژه", json.loads(user.tag_exclusions_json))
 
     async def test_deleting_multiple_tags_removes_them_in_one_pass(self):
         async with async_session() as db:

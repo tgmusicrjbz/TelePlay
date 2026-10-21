@@ -15,7 +15,7 @@ def extract_tags_from_caption(caption: str | None, excluded_tags: list[str] | No
         if tag and key not in seen and key not in excluded:
             cleaned.append(tag)
             seen.add(key)
-    prefix_pattern = r"(?:^|\n)\s*(?:تگ[‌\s]*ها?|برچسب[‌\s]*ها?|tags?)\s*[:：]\s*(.+?)(?=\n|$)"
+    prefix_pattern = r"(?:^|\n)\s*(?:تگ(?:[‌\s]*ها)?|برچسب(?:[‌\s]*ها)?|tags?)\s*[:：]\s*(.+?)(?=\n|$)"
     for line_match in re.findall(prefix_pattern, caption, flags=re.IGNORECASE):
         for part in re.split(r"[,،;؛\s]+", line_match):
             tag = part.strip().lstrip("#")[:40]
@@ -24,6 +24,35 @@ def extract_tags_from_caption(caption: str | None, excluded_tags: list[str] | No
                 cleaned.append(tag)
                 seen.add(key)
     return cleaned[:20]
+
+
+def remove_tags_from_caption(caption: str | None, names: list[str] | set[str]) -> str | None:
+    """Remove deleted hashtags and tag-list entries without touching normal words."""
+    if not caption:
+        return caption
+    keys = {str(name).strip().lstrip("#").casefold() for name in names if str(name).strip()}
+    if not keys:
+        return caption
+
+    def remove_hashtag(match: re.Match[str]) -> str:
+        return "" if match.group(1).casefold() in keys else match.group(0)
+
+    hashtag_pattern = re.compile(r"#([^\s#.,;:!?\"'()\[\]{}<>/\\+=*&^%$@~`|]+)")
+    tag_line = re.compile(r"^(\s*(?:تگ(?:[‌\s]*ها)?|برچسب(?:[‌\s]*ها)?|tags?)\s*[:：]\s*)(.*)$", re.IGNORECASE)
+    output: list[str] = []
+    for raw_line in caption.splitlines():
+        match = tag_line.match(raw_line)
+        if match:
+            values = [part.strip() for part in re.split(r"[,،;؛]", match.group(2)) if part.strip()]
+            kept = [value for value in values if value.lstrip("#").casefold() not in keys]
+            if kept:
+                output.append(f"{match.group(1)}{'، '.join(kept)}")
+            continue
+        cleaned = hashtag_pattern.sub(remove_hashtag, raw_line)
+        cleaned = re.sub(r"[ \t]{2,}", " ", cleaned).rstrip()
+        output.append(cleaned)
+    result = "\n".join(output).strip()
+    return result or None
 
 
 CAPTION_DIRECTIVE_RE = re.compile(

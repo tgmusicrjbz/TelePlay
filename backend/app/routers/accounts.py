@@ -440,6 +440,14 @@ async def _delete_tag_definitions(names: list[str], current_user: User, db: Asyn
         stored = []
     definitions = [item for item in clean_tag_definitions(stored if isinstance(stored, list) else []) if item["name"].casefold() not in keys]
     current_user.tag_settings_json = json.dumps(definitions, ensure_ascii=False)
+    try:
+        exclusions = clean_tag_exclusions(json.loads(current_user.tag_exclusions_json or "[]"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        exclusions = []
+    existing_exclusions = {item.casefold() for item in exclusions}
+    exclusions.extend(sorted(key for key in keys if key not in existing_exclusions))
+    current_user.tag_exclusions_json = json.dumps(clean_tag_exclusions(exclusions), ensure_ascii=False)
+    from ..caption_metadata import remove_tags_from_caption
     files = (await db.execute(select(File).where(File.user_id == current_user.id))).scalars().all()
     for file in files:
         try:
@@ -449,6 +457,9 @@ async def _delete_tag_definitions(names: list[str], current_user: User, db: Asyn
         cleaned = [tag for tag in tags if str(tag).strip().lstrip("#").casefold() not in keys]
         if cleaned != tags:
             file.tags_json = json.dumps(cleaned, ensure_ascii=False)
+        cleaned_description = remove_tags_from_caption(file.description, keys)
+        if cleaned_description != file.description:
+            file.description = cleaned_description
     await db.commit()
     return await get_tag_settings(current_user, db)
 

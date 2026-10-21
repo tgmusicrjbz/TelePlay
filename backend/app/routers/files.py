@@ -33,6 +33,8 @@ from .. import telegram
 from ..config import get_settings
 from ..media_metadata import extract_embedded_cover
 from ..downloader import ImportJob, link_importer
+from ..drive_importer import drive_importer, extract_google_drive_file_id
+from ..processing_jobs import update_job
 from .folders import ensure_default_folder
 from ..services import (
     escape_like, 
@@ -64,6 +66,11 @@ class LinkImportRequest(BaseModel):
     folder_id: Optional[int] = None
     new_folder_name: Optional[str] = Field(default=None, max_length=255)
     quality: Optional[str] = Field(default="480", pattern="^(auto|audio|480|720|1080)$")
+
+
+class DriveImportRequest(BaseModel):
+    url: str = Field(min_length=20, max_length=2048)
+    folder_id: Optional[int] = None
 
 
 class SendToTelegramRequest(BaseModel):
@@ -300,6 +307,51 @@ async def retry_import_link(job_id: str, current_user: User = Depends(get_curren
 async def clear_finished_import_links(current_user: User = Depends(get_current_user)):
     removed = link_importer.clear_finished(current_user.id)
     return {"removed": removed}
+
+
+@router.post("/import-drive", status_code=202)
+async def import_from_google_drive(
+    payload: DriveImportRequest, request: Request, db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    drive_file_id=extract_google_drive_file_id(payload.url)
+    if not drive_file_id:
+        raise HTTPException(status_code=400,detail="لینک فایل گوگل درایو معتبر نیست.")
+    folder_id=payload.folder_id
+    if folder_id is None:
+        folder_id=(await ensure_default_folder(db,current_user.id)).id
+        await db.commit()
+    else:
+        folder=(await db.execute(select(Folder).where(Folder.id==folder_id,Folder.user_id==current_user.id))).scalar_one_or_none()
+        if folder is None: raise HTTPException(status_code=404,detail="کشوی مقصد پیدا نشد.")
+    require_scoped_folder(request,folder_id)
+    job_id=await drive_importer.enqueue(url=payload.url.strip(),file_id=drive_file_id,user_id=current_user.id,folder_id=folder_id)
+    return {"job_id":job_id,"message":"انتقال از گوگل درایو شروع شد."}
+
+
+@router.get("/import-drive/status")
+async def google_drive_import_queue(current_user: User = Depends(get_current_user)):
+    return drive_importer.list(current_user.id)
+
+
+@router.get("/import-drive/status/{job_id}")
+async def google_drive_import_status(job_id: str,current_user: User = Depends(get_current_user)):
+    status=drive_importer.status(job_id,current_user.id)
+    if status is None: raise HTTPException(status_code=404,detail="وضعیت این انتقال پیدا نشد.")
+    return status
+
+
+@router.post("/import-drive/status/{job_id}/cancel")
+async def cancel_google_drive_import(job_id: str,current_user: User = Depends(get_current_user)):
+    status=drive_importer.cancel(job_id,current_user.id)
+    if status is None: raise HTTPException(status_code=404,detail="وضعیت این انتقال پیدا نشد.")
+    await update_job(job_id,status)
+    return status
+
+
+@router.delete("/import-drive/status")
+async def clear_finished_google_drive_imports(current_user: User = Depends(get_current_user)):
+    return {"removed":await drive_importer.clear_finished(current_user.id)}
 
 
 @router.get("/offline-manifest", response_model=OfflineManifestResponse)
