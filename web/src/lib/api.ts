@@ -58,8 +58,10 @@ export interface VaultStatus { configured: boolean; }
 export interface StorageChannelItem { channel_id:number; title?:string|null; active:boolean; }
 export interface StorageChannel { configured: boolean; channel_id?: number | null; title?: string | null; channels:StorageChannelItem[]; }
 export interface TTSVoice { value: string; label: string; description: string; gender: 'female'|'male'; pitch: 'low'|'medium'|'high'; }
-export interface TTSSettings { voice: string; style: string; speed: number; model: string; auto_expression: boolean; gender: 'all'|'female'|'male'; pitch: 'all'|'low'|'medium'|'high'; use_case: 'general'|'audiobook'|'podcast'|'story'|'education'|'news'|'advertising'|'accessibility'; folder_id: number|null; available: boolean; personal_key_count?: number; voices: TTSVoice[]; }
+export interface TTSModelOption { value:string; label:string; description:string; profile:'quality'|'economy'; }
+export interface TTSSettings { voice: string; style: string; speed: number; model: string; auto_expression: boolean; gender: 'all'|'female'|'male'; pitch: 'all'|'medium'|'low'|'high'; use_case: 'general'|'audiobook'|'podcast'|'story'|'education'|'news'|'advertising'|'accessibility'; folder_id: number|null; available: boolean; personal_key_count?: number; voices: TTSVoice[]; models:TTSModelOption[]; }
 export interface GeminiKeySummary { count:number; masked:string[]; }
+export interface GeminiKeyHealth { masked:string; status:'healthy'|'limited'|'denied'|'unreachable'|'error'; message:string; }
 export interface TTSJobStatus { id: string; state: 'queued'|'paused'|'synthesizing'|'merging'|'uploading'|'done'|'error'|'cancelled'; message: string; progress: number; chunks_total: number; chunks_done: number; title: string; file_id?: number; stream_url?: string; created_at: string; finished_at?: string; }
 export interface STTJobStatus { id:string; source_file_id:number; title:string; output_mode?:'temporary'|'save'; state:'queued'|'downloading'|'transcribing'|'saving'|'done'|'error'|'cancelled'; message:string; progress:number; content?:string; file_id?:number; created_at:string; finished_at?:string; }
 
@@ -1369,6 +1371,7 @@ export const useUpdateTTSSettings = () => {
 export const useGeminiKeys = () => useQuery<GeminiKeySummary>({queryKey:['gemini-personal-keys'],queryFn:async()=>(await api.get('/tts/personal-keys')).data});
 export const useUpdateGeminiKeys = () => {const queryClient=useQueryClient();return useMutation({mutationFn:async(keys:string[])=>(await api.put<GeminiKeySummary>('/tts/personal-keys',{keys})).data,onSuccess:data=>{queryClient.setQueryData(['gemini-personal-keys'],data);queryClient.invalidateQueries({queryKey:['tts-settings']})}})};
 export const useDeleteGeminiKeys = () => {const queryClient=useQueryClient();return useMutation({mutationFn:async()=>(await api.delete<GeminiKeySummary>('/tts/personal-keys')).data,onSuccess:data=>{queryClient.setQueryData(['gemini-personal-keys'],data);queryClient.invalidateQueries({queryKey:['tts-settings']})}})};
+export const useTestGeminiKeys = () => useMutation({mutationFn:async()=>(await api.post<{results:GeminiKeyHealth[]}>('/tts/personal-keys/test')).data.results});
 export const useTTSJobs = () => useQuery<TTSJobStatus[]>({
     queryKey: ['tts-jobs'],
     queryFn: async () => (await api.get<TTSJobStatus[]>('/tts/jobs')).data,

@@ -1,6 +1,7 @@
 """Gemini text-to-speech settings and background job endpoints."""
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Literal
 
@@ -12,8 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import get_current_user
 from ..database import get_db
 from ..models import Folder, TTSVoicePreview, User
-from ..tts import GeminiTTSProvider, TTSJob, VOICE_OPTIONS, consume_tts_quota, load_tts_settings, normalize_tts_settings, tts_queue
-from ..gemini_keys import decrypt_user_keys, encrypt_user_keys
+from ..tts import GeminiTTSProvider, TTSJob, TTS_MODEL_OPTIONS, VOICE_OPTIONS, consume_tts_quota, load_tts_settings, normalize_tts_settings, tts_queue
+from ..gemini_keys import check_gemini_key, decrypt_user_keys, encrypt_user_keys
 
 router = APIRouter(prefix="/tts", tags=["Text to speech"])
 VOICE_PREVIEW_VERSION = "v3"
@@ -76,6 +77,15 @@ async def delete_personal_keys(current_user: User = Depends(get_current_user), d
     return {"count": 0, "masked": []}
 
 
+@router.post("/personal-keys/test")
+async def test_personal_keys(current_user: User = Depends(get_current_user)):
+    keys = decrypt_user_keys(current_user.gemini_api_keys_encrypted)
+    if not keys:
+        raise HTTPException(status_code=400, detail="هنوز کلید شخصی ذخیره نشده است.")
+    results = await asyncio.gather(*(asyncio.to_thread(check_gemini_key, key) for key in keys))
+    return {"results": results}
+
+
 @router.get("/settings")
 async def get_tts_settings(current_user: User = Depends(get_current_user)):
     personal_keys = decrypt_user_keys(current_user.gemini_api_keys_encrypted)
@@ -84,6 +94,7 @@ async def get_tts_settings(current_user: User = Depends(get_current_user)):
         "available": tts_queue.available or bool(personal_keys),
         "personal_key_count": len(personal_keys),
         "voices": VOICE_OPTIONS,
+        "models": TTS_MODEL_OPTIONS,
     }
 
 
@@ -101,7 +112,7 @@ async def update_tts_settings(
     current_user.tts_settings_json = json.dumps(preferences, ensure_ascii=False)
     await db.commit()
     personal_keys = decrypt_user_keys(current_user.gemini_api_keys_encrypted)
-    return {**preferences, "available": tts_queue.available or bool(personal_keys), "personal_key_count": len(personal_keys), "voices": VOICE_OPTIONS}
+    return {**preferences, "available": tts_queue.available or bool(personal_keys), "personal_key_count": len(personal_keys), "voices": VOICE_OPTIONS, "models": TTS_MODEL_OPTIONS}
 
 
 @router.post("/jobs", status_code=202)

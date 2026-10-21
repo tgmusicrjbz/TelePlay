@@ -58,6 +58,10 @@ class TTSHelpersTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(preferences["folder_id"], 42)
         self.assertEqual(preferences["use_case"], "podcast")
 
+    def test_tts_model_is_allowlisted_and_lite_model_is_available(self):
+        self.assertEqual(normalize_tts_settings({"model": "gemini-3.8-flash-lite-tts"})["model"], "gemini-3.8-flash-lite-tts")
+        self.assertEqual(normalize_tts_settings({"model": "made-up-model"})["model"], "gemini-3.8-flash-tts")
+
     def test_legacy_scoped_tags_become_director_notes(self):
         content = build_interaction_content("شروع <whisper>این بخش آرام است.</whisper> پایان", "روان")
         self.assertEqual(content[0]["text"], "شروع [whispering]این بخش آرام است.[resumes normal speech] پایان")

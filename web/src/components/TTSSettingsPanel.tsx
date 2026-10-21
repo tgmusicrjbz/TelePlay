@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AudioLines, Check, ClipboardCopy, FileAudio, Headphones, Maximize2, Minimize2, Pause, Play, Plus, Redo2, RotateCcw, Save, Sparkles, Square, Trash2, Undo2, Volume2, Wand2, X } from 'lucide-react';
-import { api, Folder, STTJobStatus, useCancelSTTJob, useClearFinishedTTSJobs, useControlTTSJob, useCreateSTTJob, useCreateTTSJob, useDeleteGeminiKeys, useDismissSTTJob, useDismissTTSJob, useFiles, useFolderTree, useGeminiKeys, useRefineSTTText, useSTTJobs, useTTSJobs, useTTSSettings, useUpdateGeminiKeys, useUpdateTTSSettings, useUploadFile } from '../lib/api';
+import { api, Folder, STTJobStatus, useCancelSTTJob, useClearFinishedTTSJobs, useControlTTSJob, useCreateSTTJob, useCreateTTSJob, useDeleteGeminiKeys, useDismissSTTJob, useDismissTTSJob, useFiles, useFolderTree, useGeminiKeys, useRefineSTTText, useSTTJobs, useTestGeminiKeys, useTTSJobs, useTTSSettings, useUpdateGeminiKeys, useUpdateTTSSettings, useUploadFile } from '../lib/api';
 import CustomSelect from './CustomSelect';
 
 const STATES:Record<string,string>={queued:'در صف',paused:'متوقف',synthesizing:'در حال ساخت',merging:'در حال یکپارچه‌سازی',uploading:'در حال ذخیره',done:'آماده',error:'خطا',cancelled:'لغوشده'};
@@ -124,6 +124,7 @@ export default function TTSSettingsPanel(){
     const {data:geminiKeys}=useGeminiKeys();
     const updateGeminiKeys=useUpdateGeminiKeys();
     const deleteGeminiKeys=useDeleteGeminiKeys();
+    const testGeminiKeys=useTestGeminiKeys();
     const [geminiKeyInput,setGeminiKeyInput]=useState('');
     const create=useCreateTTSJob();
     const control=useControlTTSJob();
@@ -139,6 +140,7 @@ export default function TTSSettingsPanel(){
     const [useCase,setUseCase]=useState<'general'|'audiobook'|'podcast'|'story'|'education'|'news'|'advertising'|'accessibility'>('general');
     const [style,setStyle]=useState('طبیعی، گرم و واضح');
     const [speed,setSpeed]=useState(1);
+    const [model,setModel]=useState('gemini-3.8-flash-tts');
     const [autoExpression,setAutoExpression]=useState(true);
     const [title,setTitle]=useState('صدای ساخته‌شده');
     const [text,setText]=useState('');
@@ -163,7 +165,7 @@ export default function TTSSettingsPanel(){
     const [refineJob,setRefineJob]=useState<STTJobStatus|null>(null);
     const [fullscreenSTTJob,setFullscreenSTTJob]=useState<STTJobStatus|null>(null);
 
-    useEffect(()=>{if(settings){setVoice(settings.voice);setGender(settings.gender);setPitch(settings.pitch);setUseCase(settings.use_case);setStyle(settings.style);setSpeed(settings.speed);setAutoExpression(settings.auto_expression);setFolder(settings.folder_id?String(settings.folder_id):'default')}},[settings]);
+    useEffect(()=>{if(settings){setVoice(settings.voice);setGender(settings.gender);setPitch(settings.pitch);setUseCase(settings.use_case);setStyle(settings.style);setSpeed(settings.speed);setModel(settings.model);setAutoExpression(settings.auto_expression);setFolder(settings.folder_id?String(settings.folder_id):'default')}},[settings]);
     useEffect(()=>localStorage.setItem('komod-stt-output-mode',sttOutput),[sttOutput]);
     useEffect(()=>()=>{if(previewUrl.startsWith('blob:'))URL.revokeObjectURL(previewUrl)},[previewUrl]);
     useEffect(()=>()=>{localStorage.removeItem('komod-stt-source-file');localStorage.removeItem('komod-stt-source-title')},[]);
@@ -179,7 +181,7 @@ export default function TTSSettingsPanel(){
     const selectedVoice=settings?.voices.find(item=>item.value===voice);
     useEffect(()=>{if(availableVoices.length&&!availableVoices.some(item=>item.value===voice))setVoice(availableVoices[0].value)},[availableVoices,voice]);
 
-    const save=async()=>{if(!settings)return;setMessage(null);try{await update.mutateAsync({voice,gender,pitch,use_case:useCase,style,speed,auto_expression:autoExpression,model:settings.model,folder_id:folder==='default'?null:Number(folder)});setMessage({kind:'ok',text:'تنظیمات و کشوی پیش‌فرض صدا ذخیره شد.'})}catch(error:any){setMessage({kind:'error',text:error?.response?.data?.detail||'ذخیره تنظیمات انجام نشد.'})}};
+    const save=async()=>{if(!settings)return;setMessage(null);try{await update.mutateAsync({voice,gender,pitch,use_case:useCase,style,speed,auto_expression:autoExpression,model,folder_id:folder==='default'?null:Number(folder)});setMessage({kind:'ok',text:'تنظیمات و کشوی پیش‌فرض صدا ذخیره شد.'})}catch(error:any){setMessage({kind:'error',text:error?.response?.data?.detail||'ذخیره تنظیمات انجام نشد.'})}};
     const submit=async()=>{const normalized=normalizeDirectorNotes(text).trim();if(!normalized)return;setText(normalized);setMessage(null);try{await create.mutateAsync({text:normalized,title:title.trim()||'صدای ساخته‌شده',folder_id:outputMode==='save'?(folder==='default'?null:Number(folder)):null,voice,gender,pitch,use_case:useCase,style,speed,auto_expression:autoExpression,output_mode:outputMode});setMessage({kind:'ok',text:outputMode==='preview'?'صدا در حال آماده‌شدن برای پخش است.':outputMode==='telegram'?'صدا ساخته می‌شود و در تلگرام می‌آید.':'ساخت صدا شروع شد.'})}catch(error:any){setMessage({kind:'error',text:error?.response?.data?.detail||'ساخت صدا شروع نشد.'})}};
     const insertText=(value:string,cursorOffset=value.length)=>{const target=textAreaRef.current;const start=target?.selectionStart??text.length;const end=target?.selectionEnd??start;setText(`${text.slice(0,start)}${value}${text.slice(end)}`);requestAnimationFrame(()=>{target?.focus();target?.setSelectionRange(start+cursorOffset,start+cursorOffset)})};
     const insertScopedCue=(tag:string)=>{const target=textAreaRef.current;const start=target?.selectionStart??text.length;const end=target?.selectionEnd??start;const selected=text.slice(start,end)||'متن این بخش';const value=`${tag}${selected}[resumes normal speech]`;insertText(value,tag.length+(end>start?selected.length:0))};
@@ -213,6 +215,7 @@ export default function TTSSettingsPanel(){
         {speechMode==='tts'&&ttsPanel==='voice'&&<section className="rounded-2xl border border-white/[.07] bg-dark-900/70 p-4 sm:p-5">
             <div className="flex w-full items-center gap-2 text-right"><Sparkles className="h-5 w-5 text-primary-300"/><h2 className="min-w-0 flex-1 font-bold">گوینده و شیوه خواندن</h2></div>
             <div className="mt-4 border-t border-white/[.06] pt-4">
+            <div className="mb-3 rounded-2xl border border-white/[.06] bg-dark-950/30 p-3"><CustomSelect label="مدل ساخت صدا" value={model} onChange={setModel} options={(settings?.models||[]).map(item=>({value:item.value,label:item.label}))}/><p className="mt-2 text-[11px] leading-5 text-dark-500">{settings?.models?.find(item=>item.value===model)?.description||'مدل مناسب ساخت صدا را انتخاب کن.'}</p></div>
             <div className="grid gap-3 sm:grid-cols-3"><CustomSelect label="جنس صدا" value={gender} onChange={setGender} options={[...GENDERS]}/><CustomSelect label="زیر و بمی" value={pitch} onChange={setPitch} options={[...PITCHES]}/><CustomSelect label="کاربرد" value={useCase} onChange={setUseCase} options={[...USE_CASES]}/></div>
             <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]"><CustomSelect label="گوینده" value={voice} onChange={value=>{setVoice(value);void playVoicePreview(value)}} options={availableVoices.map(item=>({value:item.value,label:item.label}))}/><div className="mt-[1.375rem] flex min-h-11 items-center justify-center gap-2 rounded-xl bg-white/[.04] px-4 text-xs text-dark-400"><Headphones className="h-4 w-4"/>{previewing?'در حال آماده‌سازی نمونه…':'با انتخاب صدا، نمونه پخش می‌شود'}</div></div>
             {selectedVoice&&<p className="mt-2 rounded-xl bg-white/[.035] px-3 py-2 text-xs leading-6 text-dark-400">{selectedVoice.description}</p>}
@@ -227,16 +230,18 @@ export default function TTSSettingsPanel(){
                 <div className="flex items-center justify-between gap-3">
                     <div>
                         <h3 className="text-sm font-bold">کلید Gemini خودم</h3>
-                        <p className="mt-1 text-[11px] leading-5 text-dark-500">برای سهمیه بیشتر؛ کلیدها رمزگذاری و فقط هنگام درخواست Gemini استفاده می‌شوند.</p>
+                        <p className="mt-1 text-[11px] leading-5 text-dark-500">برای استفاده از پروژه Gemini خودت؛ کلیدها رمزگذاری و فقط هنگام درخواست استفاده می‌شوند.</p>
                     </div>
                     {geminiKeys?.count?<span className="rounded-full bg-emerald-500/10 px-2 py-1 text-[10px] text-emerald-300">{geminiKeys.count.toLocaleString('fa-IR')} کلید</span>:null}
                 </div>
                 <textarea dir="rtl" value={geminiKeyInput} onChange={event=>setGeminiKeyInput(event.target.value)} className="input mt-3 min-h-20 w-full resize-none text-right font-mono text-xs" placeholder="هر کلید را در یک خط وارد کن"/>
                 <div className="mt-2 grid grid-cols-2 gap-2">
-                    <button disabled={!geminiKeyInput.trim()||updateGeminiKeys.isPending} onClick={async()=>{try{await updateGeminiKeys.mutateAsync(geminiKeyInput.split(/[\n,]+/).map(value=>value.trim()).filter(Boolean));setGeminiKeyInput('');setMessage({kind:'ok',text:'کلیدهای Gemini ذخیره شدند.'})}catch(error:any){setMessage({kind:'error',text:error?.response?.data?.detail||'ذخیره کلید انجام نشد.'})}}} className="btn-primary min-h-10 text-xs disabled:opacity-40">ذخیره کلیدها</button>
-                    <button disabled={!geminiKeys?.count||deleteGeminiKeys.isPending} onClick={()=>void deleteGeminiKeys.mutateAsync()} className="min-h-10 rounded-xl bg-red-500/10 text-xs text-red-300 disabled:opacity-40">حذف کلیدها</button>
+                    <button disabled={!geminiKeyInput.trim()||updateGeminiKeys.isPending} onClick={async()=>{try{await updateGeminiKeys.mutateAsync(geminiKeyInput.split(/[\n,]+/).map(value=>value.trim()).filter(Boolean));testGeminiKeys.reset();setGeminiKeyInput('');setMessage({kind:'ok',text:'کلیدهای Gemini ذخیره شدند.'})}catch(error:any){setMessage({kind:'error',text:error?.response?.data?.detail||'ذخیره کلید انجام نشد.'})}}} className="btn-primary min-h-10 text-xs disabled:opacity-40">ذخیره کلیدها</button>
+                    <button disabled={!geminiKeys?.count||deleteGeminiKeys.isPending} onClick={async()=>{await deleteGeminiKeys.mutateAsync();testGeminiKeys.reset()}} className="min-h-10 rounded-xl bg-red-500/10 text-xs text-red-300 disabled:opacity-40">حذف کلیدها</button>
                 </div>
                 {geminiKeys?.masked?.length?<p dir="ltr" className="mt-2 text-left text-[10px] text-dark-500">{geminiKeys.masked.join(' · ')}</p>:null}
+                {geminiKeys?.count?<button type="button" disabled={testGeminiKeys.isPending} onClick={async()=>{try{await testGeminiKeys.mutateAsync()}catch(error:any){setMessage({kind:'error',text:error?.response?.data?.detail||'بررسی کلیدها انجام نشد.'})}}} className="mt-2 min-h-10 w-full rounded-xl border border-primary-400/15 bg-primary-500/[.07] text-xs font-semibold text-primary-200 transition hover:bg-primary-500/15 disabled:opacity-40">{testGeminiKeys.isPending?'در حال بررسی کلیدها…':'بررسی سلامت کلیدها'}</button>:null}
+                {testGeminiKeys.data?.length?<div className="mt-2 space-y-1.5">{testGeminiKeys.data.map((item,index)=><div key={`${item.masked}-${index}`} className="flex items-center gap-2 rounded-xl bg-white/[.035] px-3 py-2 text-[11px]"><span className={`h-2.5 w-2.5 shrink-0 rounded-full ${item.status==='healthy'?'bg-emerald-400':item.status==='limited'?'bg-amber-400':'bg-red-400'}`}/><code dir="ltr" className="text-dark-300">{item.masked}</code><span className="min-w-0 flex-1 text-right leading-5 text-dark-400">{item.message}</span></div>)}</div>:null}
                 <details className="mt-3 overflow-hidden rounded-2xl border border-white/[.06] bg-white/[.03] text-xs text-dark-400">
                     <summary className="cursor-pointer px-3 py-3 font-medium text-primary-200">🔑 چطور کلید Gemini بگیرم؟</summary>
                     <div className="border-t border-white/[.06] px-3 pb-3 pt-2">

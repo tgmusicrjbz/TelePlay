@@ -45,6 +45,21 @@ DEFAULT_TTS_SETTINGS = {
     "folder_id": None,
     "bot_output_mode": "save",
 }
+TTS_MODEL_OPTIONS = [
+    {
+        "value": "gemini-3.8-flash-tts",
+        "label": "کیفیت بهتر",
+        "description": "برای روایت، متن‌های احساسی و خروجی نهایی",
+        "profile": "quality",
+    },
+    {
+        "value": "gemini-3.8-flash-lite-tts",
+        "label": "سریع و کم‌مصرف",
+        "description": "برای پیش‌نمایش و متن‌های روزمره با هزینه کمتر",
+        "profile": "economy",
+    },
+]
+SUPPORTED_TTS_MODELS = {item["value"] for item in TTS_MODEL_OPTIONS}
 VOICE_OPTIONS = [
     {"value": "Kore", "label": "🌷 Kore · گرم و متعادل", "description": "صدایی گرم برای روایت، آموزش و متن‌های روزمره", "gender": "female", "pitch": "medium"},
     {"value": "Aoede", "label": "✨ Aoede · روشن و لطیف", "description": "مناسب متن‌های دوستانه، معرفی و محتوای سبک", "gender": "female", "pitch": "high"},
@@ -71,9 +86,11 @@ def normalize_tts_settings(value: dict | None) -> dict:
     voices = {item["value"] for item in VOICE_OPTIONS}
     raw["voice"] = raw["voice"] if raw["voice"] in voices else DEFAULT_TTS_SETTINGS["voice"]
     raw["style"] = str(raw.get("style") or DEFAULT_TTS_SETTINGS["style"]).strip()[:500]
-    raw["model"] = str(raw.get("model") or settings.gemini_tts_model).strip()[:120]
-    if raw["model"] == "gemini-2.5-flash-preview-tts":
-        raw["model"] = "gemini-3.8-flash-tts"
+    requested_model = str(raw.get("model") or settings.gemini_tts_model).strip()[:120]
+    if requested_model == "gemini-2.5-flash-preview-tts":
+        requested_model = "gemini-3.8-flash-tts"
+    default_model = settings.gemini_tts_model if settings.gemini_tts_model in SUPPORTED_TTS_MODELS else "gemini-3.8-flash-tts"
+    raw["model"] = requested_model if requested_model in SUPPORTED_TTS_MODELS else default_model
     raw["speed"] = min(2.0, max(0.5, float(raw.get("speed") or 1)))
     raw["auto_expression"] = bool(raw.get("auto_expression", True))
     raw["gender"] = raw.get("gender") if raw.get("gender") in {"all", "female", "male"} else DEFAULT_TTS_SETTINGS["gender"]
