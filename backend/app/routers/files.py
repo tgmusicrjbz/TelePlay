@@ -50,6 +50,10 @@ from ..services import (
     telegram_text_with_links,
 )
 from ..audit import add_security_event
+from ..ai_metadata import build_metadata_source, metadata_instruction, parse_metadata_suggestion
+from ..gemini_keys import decrypt_user_keys
+from ..stt import GeminiSTTProvider, stt_queue
+from ..tts import load_tts_settings
 
 router = APIRouter(prefix="/files", tags=["Files"])
 settings = get_settings()
@@ -61,6 +65,40 @@ _text_index_locks: dict[int, asyncio.Lock] = {}
 
 class TextContentUpdate(BaseModel):
     content: str = Field(min_length=1, max_length=1_000_000)
+
+
+@router.post("/{file_id}/ai-metadata")
+async def suggest_file_metadata(
+    file_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    request: Request = None,
+):
+    file = (await db.execute(select(File).where(File.id == file_id, File.user_id == current_user.id))).scalar_one_or_none()
+    if file is None:
+        raise HTTPException(status_code=404, detail="فایل پیدا نشد.")
+    if file.is_hidden and not has_vault_access(request, current_user):
+        require_vault_access(request, current_user)
+    personal_keys = decrypt_user_keys(current_user.gemini_api_keys_encrypted)
+    keys = list(dict.fromkeys(personal_keys + stt_queue.provider.api_keys))
+    if not keys:
+        raise HTTPException(status_code=503, detail="برای پیشنهاد هوشمند، کلید Gemini تنظیم نشده است.")
+    try:
+        stored_tags = json.loads(current_user.tag_settings_json or "[]")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        stored_tags = []
+    known_tags = [str(item.get("name") or "").strip() for item in stored_tags if isinstance(item, dict) and item.get("name")]
+    try:
+        excluded_tags = [str(item) for item in json.loads(current_user.tag_exclusions_json or "[]")]
+    except (TypeError, ValueError, json.JSONDecodeError):
+        excluded_tags = []
+    preferences = load_tts_settings(current_user)
+    provider = GeminiSTTProvider(keys, text_model=preferences["text_model"])
+    try:
+        raw = await provider.refine_text(build_metadata_source(file), metadata_instruction(known_tags, excluded_tags))
+        return parse_metadata_suggestion(raw, file.file_name, excluded_tags)
+    except (RuntimeError, ValueError) as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
 
 
 class LinkImportRequest(BaseModel):
