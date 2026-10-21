@@ -51,6 +51,7 @@ from ..services import (
 )
 from ..audit import add_security_event
 from ..ai_metadata import build_metadata_source, metadata_instruction, parse_metadata_suggestion
+from ..ai_search import build_search_expansion_instruction, parse_search_expansion
 from ..gemini_keys import decrypt_user_keys
 from ..stt import GeminiSTTProvider, stt_queue
 from ..tts import load_tts_settings
@@ -61,10 +62,56 @@ logger = logging.getLogger(__name__)
 limiter = Limiter(key_func=get_remote_address)
 share_password_context = CryptContext(schemes=["pbkdf2_sha256"], pbkdf2_sha256__default_rounds=310_000, deprecated="auto")
 _text_index_locks: dict[int, asyncio.Lock] = {}
+_smart_search_cache: dict[tuple[int, str, str, str], tuple[datetime, dict[str, object]]] = {}
 
 
 class TextContentUpdate(BaseModel):
     content: str = Field(min_length=1, max_length=1_000_000)
+
+
+class SmartSearchRequest(BaseModel):
+    query: str = Field(min_length=2, max_length=300)
+
+
+@router.post("/search/expand")
+@limiter.limit("12/minute")
+async def expand_smart_search(
+    payload: SmartSearchRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+):
+    """Expand one explicit query without exposing library contents to Gemini."""
+    personal_keys = decrypt_user_keys(current_user.gemini_api_keys_encrypted)
+    keys = list(dict.fromkeys(personal_keys + stt_queue.provider.api_keys))
+    if not keys:
+        raise HTTPException(status_code=503, detail="برای جست‌وجوی هوشمند، کلید Gemini تنظیم نشده است.")
+    try:
+        stored_tags = json.loads(current_user.tag_settings_json or "[]")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        stored_tags = []
+    known_tags = [str(item.get("name") or "").strip() for item in stored_tags if isinstance(item, dict) and item.get("name")]
+    preferences = load_tts_settings(current_user)
+    normalized_query = re.sub(r"\s+", " ", payload.query).strip()
+    tag_fingerprint = hashlib.sha256("\0".join(known_tags).encode("utf-8")).hexdigest()[:12]
+    cache_key = (current_user.id, preferences["text_model"], normalized_query.casefold(), tag_fingerprint)
+    cached = _smart_search_cache.get(cache_key)
+    if cached and cached[0] > datetime.utcnow():
+        return cached[1]
+    provider = GeminiSTTProvider(keys, text_model=preferences["text_model"])
+    try:
+        raw = await provider.refine_text(normalized_query, build_search_expansion_instruction(known_tags))
+        result = parse_search_expansion(raw, normalized_query)
+        if len(_smart_search_cache) >= 500:
+            now = datetime.utcnow()
+            for key, (expires_at, _) in list(_smart_search_cache.items()):
+                if expires_at <= now:
+                    _smart_search_cache.pop(key, None)
+            if len(_smart_search_cache) >= 500:
+                _smart_search_cache.pop(next(iter(_smart_search_cache)))
+        _smart_search_cache[cache_key] = (datetime.utcnow() + timedelta(minutes=20), result)
+        return result
+    except (RuntimeError, ValueError) as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
 
 
 @router.post("/{file_id}/ai-metadata")

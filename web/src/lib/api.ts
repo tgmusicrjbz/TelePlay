@@ -64,6 +64,7 @@ export interface TTSSettings { voice: string; style: string; speed: number; mode
 export interface GeminiKeySummary { count:number; masked:string[]; }
 export interface GeminiKeyHealth { masked:string; status:'healthy'|'limited'|'denied'|'unreachable'|'error'; message:string; }
 export interface FileMetadataSuggestion { title:string; description:string; tags:string[]; }
+export interface SmartSearchExpansion { query:string; terms:string[]; }
 export interface TTSJobStatus { id: string; state: 'queued'|'paused'|'synthesizing'|'merging'|'uploading'|'done'|'error'|'cancelled'; message: string; progress: number; chunks_total: number; chunks_done: number; title: string; model?:string; file_id?: number; stream_url?: string; created_at: string; finished_at?: string; }
 export interface STTJobStatus { id:string; source_file_id:number; title:string; output_mode?:'temporary'|'save'; model?:string; state:'queued'|'downloading'|'transcribing'|'saving'|'done'|'error'|'cancelled'; message:string; progress:number; content?:string; file_id?:number; created_at:string; finished_at?:string; }
 
@@ -574,6 +575,10 @@ const removeFilesFromCachedPack = (pack: Pack | undefined, ids: Set<number>) => 
 
 export const useSuggestFileMetadata = () => useMutation({
     mutationFn: async (id:number) => (await api.post<FileMetadataSuggestion>(`/files/${id}/ai-metadata`)).data,
+});
+
+export const useExpandSmartSearch = () => useMutation({
+    mutationFn: async (query:string) => (await api.post<SmartSearchExpansion>('/files/search/expand',{query})).data,
 });
 
 export const useDeleteFile = () => {

@@ -4,7 +4,7 @@
 import { lazy, Suspense, useEffect, useCallback, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { FolderPlus, Folder as FolderIcon, Grid, LayoutGrid, List, Search, ChevronRight, Home, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, StickyNote, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ChevronUp, Plus, CheckSquare, Square, ListChecks, ListPlus, Upload, Star, RefreshCw, Link2, DownloadCloud, Download, Send, Eye, EyeOff, Minus, Pause, Play, Tags, Cloud, CloudOff, AudioLines, FileAudio, Sparkles, BookmarkPlus, Combine } from 'lucide-react';
-import { api, useFiles, useFolders, useFolderTree, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useActivityFeed, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile, useImportLink, useTagSettings, useUnlockVault, useWorkspaces, sendFilesToTelegram, useTTSJobs, useSTTJobs, SavedFilter, useSavedFilters, useUpdateSavedFilters, usePacks } from '../lib/api';
+import { api, useFiles, useFolders, useFolderTree, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useActivityFeed, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile, useImportLink, useTagSettings, useUnlockVault, useWorkspaces, sendFilesToTelegram, useTTSJobs, useSTTJobs, SavedFilter, useSavedFilters, useUpdateSavedFilters, usePacks, useExpandSmartSearch } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { cacheAllTextNotes, queueOfflineText, saveFileOffline } from '../lib/offline';
 import FileCard from './FileCard';
@@ -325,16 +325,36 @@ export default function FileBrowser() {
     }, []);
 
     const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(searchQuery);
+    const [smartSearchQuery, setSmartSearchQuery] = useState<string | null>(null);
+    const [smartSearchTerms, setSmartSearchTerms] = useState<string[]>([]);
+    const expandSmartSearch = useExpandSmartSearch();
     useEffect(() => {
         const timer = window.setTimeout(() => setDebouncedSearchQuery(searchQuery.trim()), 300);
         return () => window.clearTimeout(timer);
     }, [searchQuery]);
+    useEffect(() => {
+        setSmartSearchQuery(null);
+        setSmartSearchTerms([]);
+    }, [searchQuery]);
+    const runSmartSearch = async () => {
+        const query=searchQuery.trim();
+        if(query.length<2){addToast('اول عبارت جست‌وجو را بنویس.','info');return}
+        try{
+            const expanded=await expandSmartSearch.mutateAsync(query);
+            setSmartSearchQuery(expanded.query);
+            setSmartSearchTerms(expanded.terms);
+            setPage(1);setAllFiles([]);
+        }catch(error:any){
+            addToast(error?.response?.data?.detail||'جست‌وجوی هوشمند آماده نشد؛ جست‌وجوی عادی همچنان فعاله.','error');
+        }
+    };
 
     // Data Fetching
     const packFilterActive = fileTypeFilter.includes('pack');
     const apiFileTypeFilter = fileTypeFilter.filter(type => type !== 'pack');
     const packOnlyFilter = packFilterActive && apiFileTypeFilter.length === 0;
-    const { data: filesList, isLoading: filesLoading, isFetching: filesFetching, error: filesError, refetch: refetchFiles } = useFiles(hiddenOnly || debouncedSearchQuery || activeSavedFilterId ? undefined : effectiveFolderId, apiFileTypeFilter.join(',') || undefined, debouncedSearchQuery || undefined, page, sortValue, favoriteOnly, false, showHidden, hiddenOnly);
+    const effectiveSearchQuery=smartSearchQuery||debouncedSearchQuery;
+    const { data: filesList, isLoading: filesLoading, isFetching: filesFetching, error: filesError, refetch: refetchFiles } = useFiles(hiddenOnly || effectiveSearchQuery || activeSavedFilterId ? undefined : effectiveFolderId, apiFileTypeFilter.join(',') || undefined, effectiveSearchQuery || undefined, page, sortValue, favoriteOnly, false, showHidden, hiddenOnly);
     const { data: activityFeed, isLoading: activityLoading, isError: activityError, refetch: refetchActivity } = useActivityFeed(activeSection === 'activity', 50);
     
 
@@ -1248,8 +1268,11 @@ export default function FileBrowser() {
                                 placeholder="جست‌وجو در کمد…"
                                 value={searchQuery}
                                 onChange={(e) => {setActiveSavedFilterId(null);setSearchQuery(e.target.value)}}
-                                className="w-full bg-dark-800/50 border border-white/[0.06] rounded-lg pr-9 pl-3 py-1.5 text-sm text-white focus:outline-none focus:border-primary-500/50 focus:bg-dark-800 transition-all"
+                                onKeyDown={event=>{if(event.key==='Enter'&&event.shiftKey&&activeSection==='files'){event.preventDefault();void runSmartSearch()}}}
+                                className="w-full bg-dark-800/50 border border-white/[0.06] rounded-lg pr-9 pl-10 py-1.5 text-sm text-white focus:outline-none focus:border-primary-500/50 focus:bg-dark-800 transition-all"
                             />
+                            {activeSection==='files'&&<button type="button" onClick={()=>void runSmartSearch()} disabled={expandSmartSearch.isPending||searchQuery.trim().length<2} className={`absolute left-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md transition disabled:opacity-35 ${smartSearchQuery?'bg-primary-500/20 text-primary-200':'text-dark-400 hover:bg-white/[.06] hover:text-white'}`} title="جست‌وجوی هوشمند (Shift + Enter)" aria-label="جست‌وجوی هوشمند">{expandSmartSearch.isPending?<RefreshCw className="h-3.5 w-3.5 animate-spin"/>:<Sparkles className="h-3.5 w-3.5"/>}</button>}
+                            {activeSection==='files'&&smartSearchQuery&&<div className="absolute inset-x-0 top-[calc(100%+.45rem)] z-50 flex items-center gap-2 rounded-xl border border-primary-400/15 bg-dark-900/95 px-2.5 py-2 text-[11px] text-primary-100 shadow-xl backdrop-blur-xl"><Sparkles className="h-3.5 w-3.5 shrink-0"/><span className="min-w-0 flex-1 truncate">هوشمند: {smartSearchTerms.length?smartSearchTerms.join('، '):'عبارت اصلی'}</span><button type="button" onClick={()=>{setSmartSearchQuery(null);setSmartSearchTerms([]);setPage(1);setAllFiles([])}} className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md hover:bg-white/10" aria-label="بازگشت به جست‌وجوی عادی"><X className="h-3.5 w-3.5"/></button></div>}
                             {activeSection === 'files' && searchQuery.trim() === debouncedSearchQuery && filesList?.search_mode === 'fuzzy' && Boolean(filesList.suggestions?.length) && <div className="absolute inset-x-0 top-[calc(100%+.45rem)] z-50 rounded-2xl border border-white/[.09] bg-dark-900/95 p-2 shadow-2xl backdrop-blur-xl">
                                 <p className="px-2 pb-1.5 text-[11px] text-dark-400">نتیجهٔ دقیق پیدا نشد؛ شاید منظورت این‌هاست:</p>
                                 <div className="flex flex-wrap gap-1.5">{filesList.suggestions!.map(suggestion=><button key={suggestion} type="button" onClick={()=>{setActiveSavedFilterId(null);setSearchQuery(suggestion)}} className="max-w-full truncate rounded-xl bg-primary-500/10 px-2.5 py-1.5 text-xs text-primary-200 transition hover:bg-primary-500/20">{suggestion}</button>)}</div>
