@@ -47,6 +47,8 @@ export default function ContentPreview() {
     const readerToneOptions=[...readerTones.map(item=>({value:item.value,label:item.label})),...getMarkdownCustomThemes().map(item=>({value:`custom:${item.id}`,label:`🎨 ${item.name}`}))];
     const previewRef = useRef<HTMLElement>(null);
     const editorRef = useRef<HTMLTextAreaElement>(null);
+    // A delayed initial fetch must never replace a locally saved version.
+    const textLoadVersionRef = useRef(0);
     const show = !!file && (file.file_type === 'image' || canPreviewText(file));
     const {data:imageLibrary}=useFiles(undefined,'image','',1,'created:desc');
     const imageItems=imageLibrary?.files||[];
@@ -83,6 +85,7 @@ export default function ContentPreview() {
     useEffect(() => {
         if (!show || !file || file.file_type === 'image') return;
         let cancelled = false;
+        const loadVersion = ++textLoadVersionRef.current;
         setLoading(true);
         setContent('');
         setError('');
@@ -103,9 +106,9 @@ export default function ContentPreview() {
             }
         };
         loadText()
-            .then(text => { if (!cancelled) { setContent(text); setDraft(text); } })
-            .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : 'متن بارگذاری نشد.'); })
-            .finally(() => { if (!cancelled) setLoading(false); });
+            .then(text => { if (!cancelled && loadVersion === textLoadVersionRef.current) { setContent(text); setDraft(text); } })
+            .catch((err) => { if (!cancelled && loadVersion === textLoadVersionRef.current) setError(err instanceof Error ? err.message : 'متن بارگذاری نشد.'); })
+            .finally(() => { if (!cancelled && loadVersion === textLoadVersionRef.current) setLoading(false); });
         return () => { cancelled = true; };
     }, [file?.id, show]);
 
@@ -140,12 +143,17 @@ export default function ContentPreview() {
         try {
             if (file.id < 0) {
                 await updateOfflineTextDraft(file.id, draft);
-                setContent(draft); setEditing(false); addToast('نسخه آفلاین یادداشت ویرایش شد.');
+                textLoadVersionRef.current += 1;
+                setContent(draft); setDraft(draft); setEditing(false); addToast('تغییرات یادداشت آفلاین ذخیره شد.');
                 return;
             }
             const { data } = await api.patch<{ content: string }>(`/files/${file.id}/text`, { content: draft });
             await cacheTextFile(file, data.content);
-            setContent(data.content); setEditing(false);
+            textLoadVersionRef.current += 1;
+            setContent(data.content); setDraft(data.content); setEditing(false);
+            addToast('تغییرات متن ذخیره شد.');
+        } catch (reason: any) {
+            addToast(reason?.response?.data?.detail || 'ذخیره متن انجام نشد. دوباره تلاش کن.', 'error');
         } finally { setSaving(false); }
     };
     const toggleReaderFullscreen = async () => {
@@ -187,7 +195,7 @@ export default function ContentPreview() {
     const openAIEditor=()=>{setAIVersions([content]);setAIVersion(0);setAIText(content);setAIPrompt('');setAIStatus('');setAIError('');setShowAIEditor(true)};
     const applyAIInstruction=async()=>{if(!aiText.trim()||!aiPrompt.trim())return;setAIError('');setAIStatus('درخواست ویرایش در حال ثبت است…');try{const result=await refineText.mutateAsync({content:aiText,prompt:aiPrompt.trim(),onStatus:message=>setAIStatus(message)});const next=[...aiVersions.slice(0,aiVersion+1),result.content];setAIVersions(next);setAIVersion(next.length-1);setAIText(result.content);setAIPrompt('');setAIStatus('نسخه تازه آماده شد.')}catch(reason:any){setAIStatus('');setAIError(reason?.response?.data?.detail||reason?.message||'ویرایش متن انجام نشد.')}};
     const showAIVersion=(nextIndex:number)=>{const next=Math.max(0,Math.min(nextIndex,aiVersions.length-1));setAIVersion(next);setAIText(aiVersions[next]);setAIError('')};
-    const saveAIResult=async()=>{if(!file||file.id<0||!aiText.trim())return;setAIError('');setAIStatus('در حال ذخیره در کمد…');try{const {data}=await api.patch<{content:string}>(`/files/${file.id}/text`,{content:aiText});await cacheTextFile(file,data.content);setContent(data.content);setDraft(data.content);setShowAIEditor(false);addToast('نسخه ویرایش‌شده ذخیره شد.')}catch(reason:any){setAIStatus('');setAIError(reason?.response?.data?.detail||'ذخیره متن انجام نشد.')}};
+    const saveAIResult=async()=>{if(!file||file.id<0||!aiText.trim())return;setAIError('');setAIStatus('در حال ذخیره در کمد…');try{const {data}=await api.patch<{content:string}>(`/files/${file.id}/text`,{content:aiText});await cacheTextFile(file,data.content);textLoadVersionRef.current+=1;setContent(data.content);setDraft(data.content);setShowAIEditor(false);addToast('نسخه ویرایش‌شده ذخیره شد.')}catch(reason:any){setAIStatus('');setAIError(reason?.response?.data?.detail||'ذخیره متن انجام نشد.')}};
 
     return (
         <div className={`fixed inset-0 z-[220] flex items-center justify-center bg-black/85 backdrop-blur-md ${readerFullscreen ? 'p-0' : 'p-3 sm:p-8'}`} onClick={() => setContentPreviewFile(null)}>
