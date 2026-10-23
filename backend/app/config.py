@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     # Use string field to avoid JSON parsing issues with comma-separated env var
     telegram_helper_bot_tokens_str: str = Field("", alias="TELEGRAM_HELPER_BOT_TOKENS")
     telegram_worker_session: str = Field("", alias="TELEGRAM_WORKER_SESSION")
+    # Extra user sessions for parallel YouTube/Instagram imports.  Keep the
+    # original singular setting so existing deployments keep working.
+    telegram_worker_sessions_str: str = Field("", alias="TELEGRAM_WORKER_SESSIONS")
     
     # Authorized Users (optional - comma separated IDs)
     auth_users_str: str = Field("", alias="AUTH_USERS")
@@ -59,6 +62,17 @@ class Settings(BaseSettings):
     @property
     def all_bot_tokens(self) -> list[str]:
         return [self.telegram_bot_token] + self.telegram_helper_bot_tokens
+
+    @property
+    def telegram_worker_sessions(self) -> list[str]:
+        """Configured import accounts, de-duplicated in a stable order."""
+        values = [*self.telegram_worker_session.split(","), *self.telegram_worker_sessions_str.split(",")]
+        sessions: list[str] = []
+        for value in values:
+            value = value.strip()
+            if value and value not in sessions:
+                sessions.append(value)
+        return sessions
     
     telegram_storage_channel_id: int
     

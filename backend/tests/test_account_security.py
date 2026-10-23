@@ -1,6 +1,7 @@
 import os
 import time
 import unittest
+from fastapi import HTTPException
 
 os.environ.setdefault("TELEGRAM_API_ID", "12345")
 os.environ.setdefault("TELEGRAM_API_HASH", "test-hash")
@@ -10,6 +11,7 @@ os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./security-test.sqlit
 os.environ.setdefault("JWT_SECRET", "test-secret")
 
 from app.account_security import decrypt_secret, encrypt_secret, new_totp_secret, secret_from_setup_token, setup_token, totp_code, verify_totp
+from app.routers.auth import _validate_password
 
 
 class AccountSecurityTests(unittest.TestCase):
@@ -27,6 +29,12 @@ class AccountSecurityTests(unittest.TestCase):
         token = setup_token(secret)
         self.assertNotIn(secret, token)
         self.assertEqual(secret_from_setup_token(token), secret)
+
+    def test_password_requires_all_four_character_groups(self):
+        _validate_password("Passw0rd!")
+        for value in ("passw0rd!", "PASSWORD0!", "Password!", "Password0", "Pa0!"):
+            with self.assertRaises(HTTPException):
+                _validate_password(value)
 
 
 if __name__ == "__main__":

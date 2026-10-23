@@ -14,7 +14,7 @@ async def main() -> None:
         session = await client.export_session_string()
         print("\nTELEGRAM_WORKER_SESSION=\n")
         print(session)
-        print("\nاین مقدار را بدون کوتیشن در Railway قرار بده.")
+        print("\nبرای افزودن حساب‌های بعدی، همین اسکریپت را با همان API ID و Hash برای هر حساب اجرا کن؛ نشست‌های تازه را با کاما در TELEGRAM_WORKER_SESSIONS در Railway قرار بده.")
     finally:
         await client.stop()
 

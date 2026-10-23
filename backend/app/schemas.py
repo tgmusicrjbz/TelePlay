@@ -407,14 +407,14 @@ class TelegramWebAppRequest(BaseModel):
 
 class PasswordLoginRequest(BaseModel):
     username: str = Field(min_length=4, max_length=32)
-    password: str = Field(min_length=10, max_length=128)
+    password: str = Field(min_length=8, max_length=128)
     otp: Optional[str] = Field(default=None, min_length=6, max_length=8)
 
 
 class CredentialsUpdate(BaseModel):
     username: str = Field(min_length=4, max_length=32)
     current_password: Optional[str] = Field(default=None, max_length=128)
-    new_password: Optional[str] = Field(default=None, min_length=10, max_length=128)
+    new_password: Optional[str] = Field(default=None, min_length=8, max_length=128)
 
 
 class CredentialsStatus(BaseModel):

@@ -64,9 +64,15 @@ def _normalize_login_username(value: str) -> str:
 
 
 def _validate_password(password: str) -> None:
-    categories = sum((any(char.isalpha() for char in password), any(char.isdigit() for char in password), any(not char.isalnum() for char in password)))
-    if len(password) < 10 or categories < 2:
-        raise HTTPException(status_code=422, detail="رمز باید حداقل ۱۰ نویسه و ترکیبی از حروف، عدد یا نشانه‌ها باشد.")
+    valid = (
+        len(password) >= 8
+        and any(char.islower() for char in password)
+        and any(char.isupper() for char in password)
+        and any(char.isdigit() for char in password)
+        and any(not char.isalnum() for char in password)
+    )
+    if not valid:
+        raise HTTPException(status_code=422, detail="رمز باید دست‌کم ۸ نویسه و شامل حرف بزرگ، حرف کوچک، عدد و نماد باشد.")
 
 
 def _auth_response(user: User, session: AuthSession) -> AuthResponse:

@@ -14,7 +14,7 @@ export default function PwaManager() {
     const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
     const [installed, setInstalled] = useState(isStandalone());
     const [waitingWorker, setWaitingWorker] = useState<ServiceWorker | null>(null);
-    const [showIosHelp, setShowIosHelp] = useState(false);
+    const [showInstallHelp, setShowInstallHelp] = useState(false);
     const [showNudge, setShowNudge] = useState(() => Number(localStorage.getItem('komod-install-nudge-until') || 0) < Date.now());
     const isIos = useMemo(() => /iphone|ipad|ipod/i.test(navigator.userAgent)
         || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1), []);
@@ -90,8 +90,11 @@ export default function PwaManager() {
             await installPrompt.prompt();
             const choice = await installPrompt.userChoice;
             if (choice.outcome !== 'accepted') setInstallPrompt(null);
-        } else if (isIos) {
-            setShowIosHelp(true);
+        } else {
+            // Chromium only exposes the native prompt after its own install
+            // checks succeed.  Keep this action useful in every browser by
+            // showing the appropriate manual path while that prompt is absent.
+            setShowInstallHelp(true);
         }
     };
 
@@ -121,14 +124,17 @@ export default function PwaManager() {
             {showInstall && showNudge && <div className="flex w-[min(20rem,calc(100vw-1.5rem))] items-center gap-2 rounded-2xl border border-primary-400/25 bg-dark-900/95 p-2 shadow-2xl backdrop-blur-xl"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-500/15 text-primary-200"><Download className="h-5 w-5"/></span><button onClick={install} className="min-w-0 flex-1 text-right"><strong className="block text-sm">نصب کمد</strong><small className="block truncate text-[10px] text-dark-400">دسترسی سریع از صفحهٔ اصلی دستگاه</small></button><button onClick={install} className="rounded-xl bg-primary-500 px-3 py-2 text-xs font-semibold text-white">نصب</button><button onClick={dismissNudge} className="btn-icon h-9 w-9" title="فعلاً نه"><X className="h-4 w-4"/></button></div>}
         </div>}
 
-        {showIosHelp && <div className="fixed inset-0 z-[210] flex items-end justify-center bg-black/70 p-4 backdrop-blur-sm sm:items-center" onClick={() => setShowIosHelp(false)}>
+        {showInstallHelp && <div className="fixed inset-0 z-[210] flex items-end justify-center bg-black/70 p-4 backdrop-blur-sm sm:items-center" onClick={() => setShowInstallHelp(false)}>
             <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-dark-900 p-5 text-right shadow-2xl" dir="rtl" onClick={event => event.stopPropagation()}>
-                <div className="flex items-center justify-between"><h2 className="font-bold">نصب کمد روی آیفون یا آیپد</h2><button className="btn-icon" onClick={() => setShowIosHelp(false)}><X className="h-5 w-5" /></button></div>
-                <ol className="mt-5 space-y-4 text-sm leading-7 text-dark-200">
+                <div className="flex items-center justify-between"><h2 className="font-bold">نصب کمد روی دستگاه</h2><button className="btn-icon" onClick={() => setShowInstallHelp(false)}><X className="h-5 w-5" /></button></div>
+                {isIos ? <ol className="mt-5 space-y-4 text-sm leading-7 text-dark-200">
                     <li className="flex gap-3"><Share className="mt-1 h-5 w-5 shrink-0 text-primary-300" /><span>در Safari دکمهٔ <strong>Share</strong> را بزن.</span></li>
                     <li className="flex gap-3"><PlusSquare className="mt-1 h-5 w-5 shrink-0 text-primary-300" /><span>گزینهٔ <strong>Add to Home Screen</strong> را انتخاب کن.</span></li>
-                </ol>
-                <button className="btn-primary mt-5 w-full" onClick={() => setShowIosHelp(false)}>متوجه شدم</button>
+                </ol> : <ol className="mt-5 space-y-4 text-sm leading-7 text-dark-200">
+                    <li className="flex gap-3"><Download className="mt-1 h-5 w-5 shrink-0 text-primary-300" /><span>منوی مرورگر را باز کن و گزینهٔ <strong>Install app</strong> یا <strong>نصب برنامه</strong> را بزن.</span></li>
+                    <li className="flex gap-3"><RefreshCw className="mt-1 h-5 w-5 shrink-0 text-primary-300" /><span>اگر این گزینه را نمی‌بینی، صفحه را با اینترنت باز و یک‌بار تازه‌سازی کن؛ سپس از Chrome یا Edge امتحان کن.</span></li>
+                </ol>}
+                <button className="btn-primary mt-5 w-full" onClick={() => setShowInstallHelp(false)}>متوجه شدم</button>
             </div>
         </div>}
     </>;

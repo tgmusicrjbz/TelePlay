@@ -111,18 +111,18 @@ def _friendly_import_error(error: Exception) -> str:
 
 class LinkImportService:
     def __init__(self) -> None:
-        self.client: Client | None = None
+        self.clients: list[Client] = []
         self.queue: asyncio.Queue[ImportJob] = asyncio.Queue()
-        self.task: asyncio.Task | None = None
+        self.tasks: list[asyncio.Task] = []
         self.statuses: dict[str, dict] = {}
         self.controls: dict[str, dict[str, bool]] = {}
-        self.active_job_id: str | None = None
+        self.active_job_ids: set[str] = set()
         self.durable_job_ids: set[str] = set()
         self._recovered = False
 
     @property
     def available(self) -> bool:
-        return bool(settings.telegram_worker_session)
+        return bool(settings.telegram_worker_sessions)
 
     async def start(self) -> None:
         if not self.available:
@@ -130,23 +130,32 @@ class LinkImportService:
         if not self._recovered:
             await self._recover()
             self._recovered = True
-        if self.client is None:
-            self.client = Client(
-                "komod-worker",
-                api_id=settings.telegram_api_id,
-                api_hash=settings.telegram_api_hash,
-                session_string=settings.telegram_worker_session,
-                in_memory=True,
-                no_updates=True,
-            )
-            await self.client.start()
-        if self.task is None or self.task.done():
-            if self.task is not None and not self.task.cancelled():
-                error = self.task.exception()
-                if error is not None:
-                    logger.error("Restarting failed link-import worker: %s", error)
-            self.task = asyncio.create_task(self._run(), name="link-import-worker")
-            logger.info("Background link importer started")
+        if not self.clients:
+            try:
+                for index, session in enumerate(settings.telegram_worker_sessions, 1):
+                    client = Client(
+                        f"komod-worker-{index}",
+                        api_id=settings.telegram_api_id,
+                        api_hash=settings.telegram_api_hash,
+                        session_string=session,
+                        in_memory=True,
+                        no_updates=True,
+                    )
+                    await client.start()
+                    self.clients.append(client)
+            except Exception:
+                await asyncio.gather(*(client.stop() for client in self.clients), return_exceptions=True)
+                self.clients.clear()
+                raise
+        if not self.tasks or any(task.done() for task in self.tasks):
+            for task in self.tasks:
+                task.cancel()
+            await asyncio.gather(*self.tasks, return_exceptions=True)
+            self.tasks = [
+                asyncio.create_task(self._run(client, index), name=f"link-import-worker-{index}")
+                for index, client in enumerate(self.clients, 1)
+            ]
+            logger.info("Background link importer started with %s Telegram account(s)", len(self.clients))
 
     async def _recover(self) -> None:
         for payload, status in await load_jobs("link", recent_for=timedelta(seconds=45)):
@@ -176,18 +185,17 @@ class LinkImportService:
             await self.queue.put(job)
 
     async def stop(self) -> None:
-        if self.task:
-            self.task.cancel()
-            await asyncio.gather(self.task, return_exceptions=True)
-            self.task = None
-        if self.client:
-            await self.client.stop()
-            self.client = None
+        for task in self.tasks:
+            task.cancel()
+        await asyncio.gather(*self.tasks, return_exceptions=True)
+        self.tasks.clear()
+        await asyncio.gather(*(client.stop() for client in self.clients), return_exceptions=True)
+        self.clients.clear()
 
     async def enqueue(self, job: ImportJob) -> int:
         if not self.available:
-            raise RuntimeError("TELEGRAM_WORKER_SESSION is not configured")
-        if self.client is None or self.task is None or self.task.done():
+            raise RuntimeError("TELEGRAM_WORKER_SESSION یا TELEGRAM_WORKER_SESSIONS تنظیم نشده است")
+        if not self.clients or not self.tasks or any(task.done() for task in self.tasks):
             await self.start()
         position = 1 + sum(1 for status in self.statuses.values() if status.get("state") not in {"done", "error", "cancelled"})
         job.id = job.id or uuid.uuid4().hex
@@ -257,7 +265,7 @@ class LinkImportService:
         if control["paused"]:
             status.update(state="paused", message="متوقف شد")
         else:
-            state = "downloading" if self.active_job_id == job_id else "queued"
+            state = "downloading" if job_id in self.active_job_ids else "queued"
             status.update(state=state, message="ادامه یافت")
         self._persist_soon(job_id)
         return status
@@ -304,14 +312,17 @@ class LinkImportService:
             await asyncio.sleep(.35)
         return not control.get("cancelled")
 
-    async def _run(self) -> None:
+    async def _run(self, client: Client, worker_index: int) -> None:
         while True:
             job = await self.queue.get()
             try:
-                self.active_job_id = job.id
+                self.active_job_ids.add(job.id)
                 if not await self._checkpoint(job):
                     continue
-                self.statuses[job.id].update(state="downloading", message="در حال دریافت فایل اصلی", progress=10)
+                self.statuses[job.id].update(
+                    state="downloading", message="در حال دریافت فایل اصلی", progress=10,
+                    worker=worker_index,
+                )
                 await self._persist_status(job.id)
                 playlist_title, playlist_entries = await asyncio.to_thread(_youtube_playlist_entries, job.url)
                 sources = playlist_entries or [{"url": job.url, "title": ""}]
@@ -323,7 +334,7 @@ class LinkImportService:
                         progress = 10 + round((source_index - 1) / len(sources) * 65)
                         self.statuses[job.id].update(message=f"مورد {source_index} از {len(sources)}", progress=progress)
                         await self._persist_status(job.id)
-                    downloaded = await self._download(job, source["url"], job.quality)
+                    downloaded = await self._download(client, job, source["url"], job.quality)
                     for item_index, item in enumerate(downloaded, 1):
                         item["source_url"] = source["url"]
                         item["collection_title"] = playlist_title
@@ -335,7 +346,7 @@ class LinkImportService:
                     continue
                 self.statuses[job.id].update(state="saving", message="در حال ذخیره در کمد", progress=80)
                 await self._persist_status(job.id)
-                saved = await self._store(job, items)
+                saved = await self._store(client, job, items)
                 if not saved:
                     raise RuntimeError("هیچ فایل قابل ذخیره‌ای در پاسخ پیدا نشد")
                 if job.send_to_telegram:
@@ -373,17 +384,14 @@ class LinkImportService:
                 self.statuses[job.id].update(state="error", message=friendly_error, finished_at=datetime.utcnow().isoformat())
                 await self._persist_status(job.id)
             finally:
-                if self.active_job_id == job.id:
-                    self.active_job_id = None
+                self.active_job_ids.discard(job.id)
                 self.queue.task_done()
 
-    async def _download(self, job: ImportJob, url: str, quality: str) -> list[dict]:
-        if self.client is None:
-            raise RuntimeError("Import worker is unavailable")
+    async def _download(self, client: Client, job: ImportJob, url: str, quality: str) -> list[dict]:
         raw_title, source_author = await asyncio.to_thread(_oembed_metadata, url)
         title = sanitize_filename(raw_title)
         is_instagram = "instagram.com" in url.lower()
-        sent = await self.client.send_message("allsaverbot", url)
+        sent = await client.send_message("allsaverbot", url)
         clicked: set[str] = set()
         found: list[dict] = []
         seen: set[int] = set()
@@ -392,7 +400,7 @@ class LinkImportService:
         async def click_button(message, button) -> bool:
             try:
                 if getattr(button, "callback_data", None):
-                    await self.client.request_callback_answer(
+                    await client.request_callback_answer(
                         chat_id="allsaverbot",
                         message_id=message.id,
                         callback_data=button.callback_data,
@@ -443,7 +451,7 @@ class LinkImportService:
             if not await self._checkpoint(job):
                 raise ImportCancelled()
             received_now = 0
-            async for message in self.client.get_chat_history("allsaverbot", limit=60):
+            async for message in client.get_chat_history("allsaverbot", limit=60):
                 if message.id <= sent.id or message.id in seen or message.reply_markup:
                     continue
                 kind = media_kind(message)
@@ -465,10 +473,10 @@ class LinkImportService:
                 break
             if found:
                 continue
-            async for raw in self.client.get_chat_history("allsaverbot", limit=4):
+            async for raw in client.get_chat_history("allsaverbot", limit=4):
                 if raw.id <= sent.id or not raw.reply_markup:
                     continue
-                message = await self.client.get_messages("allsaverbot", raw.id)
+                message = await client.get_messages("allsaverbot", raw.id)
                 if not message.reply_markup:
                     continue
                 buttons = [button for row in message.reply_markup.inline_keyboard for button in row if not getattr(button, "url", None)]
@@ -492,7 +500,7 @@ class LinkImportService:
                     # an hourglass forever. Re-sending creates a fresh job
                     # instead of blocking Komod's entire FIFO queue.
                     if waited >= 32 and language_retries < 2:
-                        sent = await self.client.send_message("allsaverbot", url)
+                        sent = await client.send_message("allsaverbot", url)
                         clicked.clear()
                         language_retries += 1
                         language_wait_started = time.monotonic()
@@ -527,14 +535,14 @@ class LinkImportService:
                     if await click_button(message, target):
                         clicked.add(button_key(message, target))
                         break
-            async for message in self.client.get_chat_history("allsaverbot", limit=3):
+            async for message in client.get_chat_history("allsaverbot", limit=3):
                 if message.id > sent.id and message.text and not message.reply_markup and any(word in message.text.lower() for word in ("error", "ошибка", "не удалось")):
                     raise RuntimeError(message.text[:180])
         if not found:
             raise TimeoutError("زمان دریافت فایل از سرویس دانلود تمام شد")
         return sorted(found, key=lambda item: item["message"].id)
 
-    async def _copy_to_storage(self, message, item_type: str, filename: str, channel_id: int):
+    async def _copy_to_storage(self, client: Client, message, item_type: str, filename: str, channel_id: int):
         """Copy server-side when possible; fall back to bot re-upload.
 
         The Telegram account behind TELEGRAM_WORKER_SESSION does not need to be
@@ -548,7 +556,7 @@ class LinkImportService:
             raise RuntimeError("ربات ذخیره‌سازی در دسترس نیست")
         with tempfile.TemporaryDirectory(prefix="komod-link-") as temp_dir:
             target = str(Path(temp_dir) / filename)
-            downloaded = await self.client.download_media(message, file_name=target)
+            downloaded = await client.download_media(message, file_name=target)
             if not downloaded:
                 raise RuntimeError("دریافت فایل اصلی کامل نشد")
             if item_type == "video":
@@ -559,9 +567,7 @@ class LinkImportService:
                 return await telegram.tg_client.send_photo(channel_id, downloaded)
             return await telegram.tg_client.send_document(channel_id, downloaded)
 
-    async def _store(self, job: ImportJob, items: list[dict]) -> list[File]:
-        if self.client is None:
-            raise RuntimeError("Import worker is unavailable")
+    async def _store(self, client: Client, job: ImportJob, items: list[dict]) -> list[File]:
         saved: list[File] = []
         async with async_session() as db:
             user = await db.get(User, job.user_id)
@@ -591,7 +597,7 @@ class LinkImportService:
                 sequence = int(item.get("sequence") or index)
                 indexed = f" - {sequence:02d}" if len(items) > 1 else ""
                 filename = sanitize_filename(f"{item['title']}{indexed}{suffix}")
-                copied = await self._copy_to_storage(item["message"], item["type"], filename, target_channel_id)
+                copied = await self._copy_to_storage(client, item["message"], item["type"], filename, target_channel_id)
                 media = copied.video or copied.audio or copied.voice or copied.document or (select_best_thumbnail(copied.photo.sizes) if copied.photo else None)
                 if media is None:
                     continue
