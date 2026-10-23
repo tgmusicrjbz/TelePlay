@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { Activity, AlertTriangle, ArrowRight, AtSign, ChevronLeft, AudioLines, Check, CheckCircle2, Database, Download, FileStack, FileText, FolderPlus, Gauge, Globe2, HardDrive, KeyRound, ListRestart, LockKeyhole, LogOut, MonitorSmartphone, Moon, MoreVertical, Palette, Pencil, Plus, RefreshCw, Search, Shield, Smartphone, Sun, Tags, Trash2, UserRoundCog, Users, Warehouse, XCircle } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowRight, AtSign, ChevronLeft, AudioLines, Check, CheckCircle2, Database, Download, FileStack, FileText, FolderPlus, Gauge, Globe2, Grid2X2, HardDrive, KeyRound, LayoutGrid, List, ListRestart, LockKeyhole, LogOut, MonitorSmartphone, Moon, MoreVertical, Palette, Pencil, Plus, RefreshCw, Search, Shield, Smartphone, Sun, Tags, Trash2, UserRoundCog, Users, Warehouse, XCircle } from 'lucide-react';
 import { AdminUser, Folder, TelegramFile, TwoFactorSetup, api, formatFileSize, formatIranTime, formatPersianDate, getServerOrigin, useAccountPreferences, useAddAdminUser, useAdminErrors, useAdminHealth, useAdminStats, useAdminUsers, useClearAdminErrors, useClearSecurityEvents, useCredentials, useCurrentUser, useDisableTwoFactor, useEnableTwoFactor, useFiles, useFolderTree, useGrantWorkspace, useLogoutAll, useLogoutOthers, useRemoveAdminUser, useRemoveStorageChannel, useResetStorageChannel, useResolveAdminError, useRevokeSession, useRevokeWorkspace, useSecurityEvents, useSessions, useSetStorageChannel, useSetVaultPassword, useSetupTwoFactor, useStorageChannel, useStorageStats, useUnlockVault, useUpdateAccountPreferences, useUpdateAdminUser, useUpdateCredentials, useVaultStatus, useWorkspaceGrants, useWorkspaces } from '../lib/api';
 import { activateAccount, forgetAccount, savedAccounts, saveAuthenticatedAccount, syncCurrentAccount } from '../lib/accounts';
 import { applyAppearanceMode, applyCustomTheme, applyTheme, colorThemes, ActiveTheme, AppearanceMode, ColorTheme, getStoredAppearanceMode, getStoredTheme } from '../lib/theme';
@@ -13,6 +13,7 @@ import CardDisplaySettings from './CardDisplaySettings';
 import { useAppStore } from '../lib/store';
 
 type SettingsView = 'home' | 'accounts' | 'security' | 'sessions' | 'access' | 'storage' | 'files' | 'appearance' | 'markdown' | 'connection' | 'admin' | 'tags' | 'transfers' | 'tts';
+type SettingsHomeLayout = 'cards' | 'list' | 'compact';
 type Permission = 'read' | 'write';
 type SavedColor = { color: string; name: string };
 type ServerAddress = { url: string; name: string };
@@ -97,6 +98,10 @@ export default function SettingsPage() {
     const [vaultPassword,setVaultPasswordValue]=useState('');
     const [vaultMessage,setVaultMessage]=useState<{kind:'ok'|'error';text:string}|null>(null);
     const [activeSubsection,setActiveSubsection]=useState<string|null>(null);
+    const [homeLayout,setHomeLayout]=useState<SettingsHomeLayout>(()=>{
+        const stored=localStorage.getItem('komod-settings-home-layout');
+        return stored==='list'||stored==='compact'?'list'===stored?'list':'compact':'cards';
+    });
     const accounts = savedAccounts();
     const incomingFolderOptions = useMemo(() => {
         const result = [{value:'default',label:'🗃️ کشوی پیش‌فرض'}];
@@ -292,27 +297,45 @@ export default function SettingsPage() {
 
         {sectionLinks.length>1&&<SectionJumpNav items={sectionLinks} active={selectedSubsection} onChange={setActiveSubsection} mobileGrid={view==='admin'}/>}
 
-        {view === 'home' && <div className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                <SummaryCard icon={<Smartphone/>} title={displayName} text="حساب فعال تلگرام" />
-                <SummaryCard icon={<HardDrive/>} title={storage ? formatFileSize(storage.total_size) : '…'} text="حجم فایل‌های فضای فعال" />
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                <SettingsButton icon={<Users/>} title="حساب‌ها" text="افزودن حساب و جابه‌جایی بین حساب‌ها" onClick={() => setView('accounts')} />
-                <SettingsButton icon={<KeyRound/>} title="ورود و امنیت" text="نام کاربری، رمز عبور و بازیابی امن" onClick={() => setView('security')} />
-                <SettingsButton icon={<MonitorSmartphone/>} title="مدیریت نشست‌ها" text="دستگاه‌های واردشده و خروج از نشست‌ها" onClick={() => setView('sessions')} />
-                <SettingsButton icon={<Shield/>} title="دسترسی و اشتراک‌گذاری" text="کمدهای مشترک و سطح دسترسی کاربران" onClick={() => setView('access')} />
-                <SettingsButton icon={<Database/>} title="فضای ذخیره‌سازی" text="اتصال کانال خصوصی خودت برای فایل‌های تازه" onClick={() => setView('storage')} />
-                <SettingsButton icon={<FolderPlus/>} title="فایل‌ها و مقصدها" text="محل فایل‌های تازه، لینک‌ها و نصب برنامه" onClick={() => setView('files')} />
-                <SettingsButton icon={<Palette/>} title="ظاهر برنامه" text="رنگ کمد و نصب Komod روی دستگاه" onClick={() => setView('appearance')} />
-                <SettingsButton icon={<FileText/>} title="مطالعه و Markdown" text="فونت، اندازه، نوار مطالعه و تم‌های متن" onClick={() => setView('markdown')} />
-                <SettingsButton icon={<Tags/>} title="مدیریت تگ‌ها" text="ساخت، رنگ‌بندی و شیوه نمایش تگ‌ها" onClick={() => setView('tags')} />
-                <SettingsButton icon={<ListRestart/>} title="مرکز انتقال‌ها" text="صف دانلود، آپلود، لینک‌ها و ذخیره آفلاین" onClick={() => setView('transfers')} />
-                <SettingsButton icon={<AudioLines/>} title="متن و صدا" text="تبدیل متن به صدا و استخراج متن از فایل صوتی یا ویدیویی" onClick={() => setView('tts')} />
-                {user?.is_admin && <SettingsButton icon={<Globe2/>} title="اتصال برنامه" text="آدرس اصلی یا مسیر HTTPS جایگزین" onClick={() => setView('connection')} />}
-                {user?.is_admin && <SettingsButton icon={<UserRoundCog/>} title="مدیریت کاربران" text="نام، وضعیت و مصرف کاربران کمد" onClick={() => setView('admin')} />}
-            </div>
-            <button type="button" onClick={() => window.dispatchEvent(new Event('komod-install-request'))} className="btn-secondary mx-auto inline-flex min-h-10 items-center gap-2 border-primary-400/20 bg-primary-500/[.08] px-3 text-xs text-primary-100 hover:bg-primary-500/[.14]"><Download className="h-4 w-4"/>نصب کمد روی این دستگاه</button>
+        {view === 'home' && <div className="space-y-5">
+            <section className="overflow-hidden rounded-3xl border border-white/[.07] bg-gradient-to-bl from-primary-500/[.12] via-dark-900/80 to-dark-950/85 p-4 sm:p-5">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="grid min-w-0 flex-1 gap-2 sm:grid-cols-2">
+                        <SummaryCard icon={<Smartphone/>} title={displayName} text="حساب فعال" />
+                        <SummaryCard icon={<HardDrive/>} title={storage ? formatFileSize(storage.total_size) : '…'} text="فضای استفاده‌شده" />
+                    </div>
+                    <SettingsLayoutPicker value={homeLayout} onChange={next=>{setHomeLayout(next);localStorage.setItem('komod-settings-home-layout',next)}}/>
+                </div>
+            </section>
+
+            <SettingsGroup title="حساب و امنیت" text="ورود، دستگاه‌ها و دسترسی دیگران" icon={<Shield/>} layout={homeLayout}>
+                <SettingsButton layout={homeLayout} icon={<Users/>} title="حساب‌ها" text="افزودن حساب، جابه‌جایی و پشتیبان" onClick={() => setView('accounts')} />
+                <SettingsButton layout={homeLayout} icon={<KeyRound/>} title="ورود و امنیت" text="رمز عبور، بازیابی و گاوصندوق" onClick={() => setView('security')} />
+                <SettingsButton layout={homeLayout} icon={<MonitorSmartphone/>} title="مدیریت نشست‌ها" text="دستگاه‌های واردشده و رویدادهای امنیتی" onClick={() => setView('sessions')} />
+                <SettingsButton layout={homeLayout} icon={<Shield/>} title="دسترسی و اشتراک‌گذاری" text="کمدهای مشترک و سطح دسترسی افراد" onClick={() => setView('access')} />
+            </SettingsGroup>
+
+            <SettingsGroup title="فایل‌ها و فضا" text="محل نگهداری، نمایش و انتقال فایل‌ها" icon={<FolderPlus/>} layout={homeLayout}>
+                <SettingsButton layout={homeLayout} icon={<Database/>} title="فضای ذخیره‌سازی" text="فضای شخصی، آمار مصرف و حذف فایل" onClick={() => setView('storage')} />
+                <SettingsButton layout={homeLayout} icon={<FolderPlus/>} title="فایل‌ها و مقصدها" text="نمایش کارت‌ها، مقصد فایل‌های تازه و لینک‌ها" onClick={() => setView('files')} />
+                <SettingsButton layout={homeLayout} icon={<Tags/>} title="مدیریت تگ‌ها" text="ساخت، دسته‌بندی، رنگ و شیوه نمایش" onClick={() => setView('tags')} />
+                <SettingsButton layout={homeLayout} icon={<ListRestart/>} title="مرکز انتقال‌ها" text="دانلود، آپلود، لینک‌ها و ذخیره آفلاین" onClick={() => setView('transfers')} />
+            </SettingsGroup>
+
+            <SettingsGroup title="ظاهر و مطالعه" text="شخصی‌سازی شکل برنامه و متن‌ها" icon={<Palette/>} layout={homeLayout}>
+                <SettingsButton layout={homeLayout} icon={<Palette/>} title="ظاهر برنامه" text="رنگ کمد و حالت روشن یا تاریک" onClick={() => setView('appearance')} />
+                <SettingsButton layout={homeLayout} icon={<FileText/>} title="مطالعه و Markdown" text="فونت، اندازه، ابزار مطالعه و تم متن" onClick={() => setView('markdown')} />
+            </SettingsGroup>
+
+            <SettingsGroup title="ابزارها" text="کارهای هوشمند و قابلیت‌های دستگاه" icon={<AudioLines/>} layout={homeLayout}>
+                <SettingsButton layout={homeLayout} icon={<AudioLines/>} title="متن و صدا" text="ساخت صدا و استخراج متن از صوت یا ویدیو" onClick={() => setView('tts')} />
+                <SettingsButton layout={homeLayout} icon={<Download/>} title="نصب کمد" text="افزودن برنامه به صفحه اصلی این دستگاه" onClick={() => window.dispatchEvent(new Event('komod-install-request'))} />
+            </SettingsGroup>
+
+            {user?.is_admin && <SettingsGroup title="مدیریت" text="تنظیمات فنی و کاربران" icon={<UserRoundCog/>} layout={homeLayout}>
+                <SettingsButton layout={homeLayout} icon={<Globe2/>} title="اتصال برنامه" text="آدرس اصلی یا مسیر HTTPS جایگزین" onClick={() => setView('connection')} />
+                <SettingsButton layout={homeLayout} icon={<UserRoundCog/>} title="مدیریت کاربران" text="وضعیت، محدودیت و مصرف کاربران" onClick={() => setView('admin')} />
+            </SettingsGroup>}
         </div>}
 
         {view === 'accounts' && <div className="space-y-4">
@@ -440,8 +463,23 @@ function SharingScopePicker({folders,folderIds,setFolderIds,fileIds,setFileIds,f
         </section>
     </div>;
 }
-function SettingsButton({icon,title,text,onClick}:{icon:React.ReactElement;title:string;text:string;onClick:()=>void}) { return <button onClick={onClick} className="group flex min-h-24 items-center gap-3 rounded-2xl border border-white/[.07] bg-dark-900/70 p-4 text-right transition hover:border-primary-400/25 hover:bg-primary-500/[.06]"><span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary-500/10 text-primary-300 [&>svg]:h-5 [&>svg]:w-5">{icon}</span><span className="min-w-0 flex-1"><strong className="block text-sm">{title}</strong><small className="mt-1 block leading-5 text-dark-400">{text}</small></span><ArrowRight className="h-4 w-4 rotate-180 text-dark-600 transition group-hover:text-primary-300"/></button>; }
-function SummaryCard({icon,title,text}:{icon:React.ReactElement;title:string;text:string}) { return <div className="flex items-center gap-3 rounded-2xl border border-white/[.07] bg-dark-900/70 p-4"><span className="text-primary-300 [&>svg]:h-5 [&>svg]:w-5">{icon}</span><span><strong className="block text-sm">{title}</strong><small className="text-dark-500">{text}</small></span></div>; }
+function SettingsLayoutPicker({value,onChange}:{value:SettingsHomeLayout;onChange:(value:SettingsHomeLayout)=>void}) {
+    const options:Array<{value:SettingsHomeLayout;label:string;icon:React.ReactElement}>=[
+        {value:'cards',label:'کارت‌ها',icon:<LayoutGrid/>},
+        {value:'list',label:'فهرست',icon:<List/>},
+        {value:'compact',label:'فشرده',icon:<Grid2X2/>},
+    ];
+    return <div className="flex shrink-0 items-center gap-1 rounded-2xl border border-white/[.08] bg-dark-950/55 p-1" role="radiogroup" aria-label="نوع نمایش تنظیمات">{options.map(option=><button key={option.value} type="button" role="radio" aria-checked={value===option.value} title={`نمای ${option.label}`} onClick={()=>onChange(option.value)} className={`flex min-h-9 items-center gap-1.5 rounded-xl px-2.5 text-[11px] font-semibold transition sm:px-3 ${value===option.value?'bg-primary-500 text-white shadow-lg shadow-primary-950/30':'text-dark-400 hover:bg-white/[.05] hover:text-white'}`}><span className="[&>svg]:h-4 [&>svg]:w-4">{option.icon}</span><span className="hidden md:inline">{option.label}</span></button>)}</div>;
+}
+function SettingsGroup({title,text,icon,layout,children}:{title:string;text:string;icon:React.ReactElement;layout:SettingsHomeLayout;children:React.ReactNode}) {
+    const contentClass=layout==='list'?'space-y-2':layout==='compact'?'grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4':'grid gap-3 sm:grid-cols-2 lg:grid-cols-3';
+    return <section className="rounded-3xl border border-white/[.06] bg-dark-950/25 p-3 sm:p-4"><header className="mb-3 flex items-center gap-3 px-1"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary-500/10 text-primary-300 [&>svg]:h-4.5 [&>svg]:w-4.5">{icon}</span><div className="min-w-0"><h2 className="text-sm font-bold text-dark-100">{title}</h2><p className="mt-0.5 truncate text-[11px] text-dark-500">{text}</p></div></header><div className={contentClass}>{children}</div></section>;
+}
+function SettingsButton({icon,title,text,onClick,layout='cards'}:{icon:React.ReactElement;title:string;text:string;onClick:()=>void;layout?:SettingsHomeLayout}) {
+    const compact=layout==='compact';
+    return <button onClick={onClick} title={compact?`${title}؛ ${text}`:undefined} className={`group flex rounded-2xl border border-white/[.07] bg-dark-900/70 text-right transition hover:-translate-y-0.5 hover:border-primary-400/25 hover:bg-primary-500/[.06] hover:shadow-lg hover:shadow-black/10 ${compact?'min-h-28 flex-col items-center justify-center gap-2 p-3 text-center':layout==='list'?'min-h-16 items-center gap-3 p-3':'min-h-24 items-center gap-3 p-4'}`}><span className={`flex shrink-0 items-center justify-center bg-primary-500/10 text-primary-300 transition group-hover:bg-primary-500/15 group-hover:text-primary-200 [&>svg]:h-5 [&>svg]:w-5 ${compact?'h-12 w-12 rounded-2xl':'h-11 w-11 rounded-2xl'}`}>{icon}</span><span className={compact?'min-w-0':'min-w-0 flex-1'}><strong className={`block text-sm ${compact?'line-clamp-2':''}`}>{title}</strong>{!compact&&<small className={`mt-1 block text-dark-400 ${layout==='list'?'truncate':'leading-5'}`}>{text}</small>}</span>{!compact&&<ArrowRight className="h-4 w-4 shrink-0 rotate-180 text-dark-600 transition group-hover:translate-x-[-2px] group-hover:text-primary-300"/>}</button>;
+}
+function SummaryCard({icon,title,text}:{icon:React.ReactElement;title:string;text:string}) { return <div className="flex min-w-0 items-center gap-3 rounded-2xl border border-white/[.07] bg-dark-950/30 p-3.5"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary-500/10 text-primary-300 [&>svg]:h-4.5 [&>svg]:w-4.5">{icon}</span><span className="min-w-0"><strong className="block truncate text-sm">{title}</strong><small className="text-dark-500">{text}</small></span></div>; }
 function Card({id,icon,title,subtitle,children}:{id?:string;icon:React.ReactElement;title:string;subtitle?:string;children:React.ReactNode}) { const active=useContext(SettingsSectionContext); if(id&&active&&id!==active&&!id.startsWith(`${active}-`))return null; return <section id={id} className="rounded-2xl border border-white/[.07] bg-dark-900/70 p-5"><div className="flex items-center gap-3"><span className="text-primary-300 [&>svg]:h-5 [&>svg]:w-5">{icon}</span><div><h2 className="font-bold">{title}</h2>{subtitle&&<p className="mt-1 text-xs text-dark-400">{subtitle}</p>}</div></div>{title==='رنگ کمد'&&<ThemeColorControl/>}{children}</section>; }
 
 function settingsSectionLinks(view:SettingsView):Array<{id:string;label:string}>{
