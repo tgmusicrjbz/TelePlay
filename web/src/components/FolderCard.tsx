@@ -5,6 +5,7 @@ import { useRef, useState } from 'react';
 import { Check, Folder as FolderIcon, MoreVertical, ChevronRight, Pin, Star } from 'lucide-react';
 import { Folder } from '../lib/api';
 import { useAppStore } from '../lib/store';
+import { useCardDisplayPreferences } from '../lib/cardDisplay';
 
 interface FolderCardProps {
     folder: Folder;
@@ -19,6 +20,7 @@ interface FolderCardProps {
 export default function FolderCard({ folder, viewMode, selected, selectionMode = false, onSelect, onOpen, onFileDrop }: FolderCardProps) {
     const [isDragOver, setIsDragOver] = useState(false);
     const { activeContextMenu, setActiveContextMenu } = useAppStore();
+    const cardDisplay=useCardDisplayPreferences();
     const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const longPressed = useRef(false);
     const token = localStorage.getItem('access_token') || '';
@@ -123,15 +125,15 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
                             : 'bg-primary-500/10 border-primary-500/20 group-hover:bg-primary-500/20'}`}
                 >
                     {coverUrl ? <img src={coverUrl} alt="" className="h-full w-full rounded-lg object-cover"/> : folder.icon ? <span className="text-2xl leading-none">{folder.icon}</span> : <FolderIcon style={folderColor ? {color:folderColor}:undefined} className={`w-6 h-6 transition-colors ${selected ? 'text-primary-300' : 'text-primary-400 group-hover:text-primary-300'}`} />}
-                    {(folder.is_pinned || folder.is_favorite) && <span className="absolute -right-1 -top-1 flex items-center gap-0.5 rounded-full border border-white/10 bg-dark-900/95 p-1 shadow-lg">{folder.is_pinned && <Pin className="h-3 w-3 fill-current text-primary-300"/>}{folder.is_favorite && <Star className="h-3 w-3 fill-current text-amber-300"/>}</span>}
+                    {cardDisplay.statusBadges&&(folder.is_pinned || folder.is_favorite) && <span className="absolute -right-1 -top-1 flex items-center gap-0.5 rounded-full border border-white/10 bg-dark-900/95 p-1 shadow-lg">{folder.is_pinned && <Pin className="h-3 w-3 fill-current text-primary-300"/>}{folder.is_favorite && <Star className="h-3 w-3 fill-current text-amber-300"/>}</span>}
                 </div>
 
                 <div className="flex-1 min-w-0">
                     <p className={`flex items-center gap-1.5 font-medium truncate text-sm transition-colors ${selected ? 'text-primary-300' : 'text-white group-hover:text-primary-300'}`}><span className="truncate">{folder.name}</span></p>
-                    <p className="text-xs text-dark-400 mt-0.5">
+                    {cardDisplay.folderCount&&<p className="text-xs text-dark-400 mt-0.5">
                         {folder.file_count.toLocaleString('fa-IR')} فایل
-                    </p>
-                    {folder.description && <p dir="auto" className="text-xs text-dark-400 truncate mt-1" title={folder.description}>{folder.description}</p>}
+                    </p>}
+                    {cardDisplay.folderDescription&&folder.description && <p dir="auto" className="text-xs text-dark-400 truncate mt-1" title={folder.description}>{folder.description}</p>}
                 </div>
 
                 <div className="relative flex items-center gap-2">
@@ -183,7 +185,7 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
                             : 'bg-gradient-to-br from-primary-500/10 to-primary-500/5 border-primary-500/20 group-hover:border-primary-500/30'}`}
                 >
                     {coverUrl ? <img src={coverUrl} alt="" className="h-full w-full rounded-lg object-cover"/> : folder.icon ? <span className="text-xl leading-none">{folder.icon}</span> : <FolderIcon style={folderColor ? {color:folderColor}:undefined} className={`w-5 h-5 transition-colors ${selected ? 'text-primary-300' : 'text-primary-400'}`} />}
-                    {(folder.is_pinned || folder.is_favorite) && <span className="absolute -right-1 -top-1 flex items-center gap-0.5 rounded-full border border-white/10 bg-dark-900/95 p-0.5 shadow-lg">{folder.is_pinned && <Pin className="h-2.5 w-2.5 fill-current text-primary-300"/>}{folder.is_favorite && <Star className="h-2.5 w-2.5 fill-current text-amber-300"/>}</span>}
+                    {cardDisplay.statusBadges&&(folder.is_pinned || folder.is_favorite) && <span className="absolute -right-1 -top-1 flex items-center gap-0.5 rounded-full border border-white/10 bg-dark-900/95 p-0.5 shadow-lg">{folder.is_pinned && <Pin className="h-2.5 w-2.5 fill-current text-primary-300"/>}{folder.is_favorite && <Star className="h-2.5 w-2.5 fill-current text-amber-300"/>}</span>}
                 </div>
                 <div className="flex items-center gap-1">
                 {selectionMode && <button onClick={handleSelectClick} className="absolute left-0 top-0 z-20 flex h-11 w-11 items-center justify-center" aria-label={selected ? 'لغو انتخاب کشو' : 'انتخاب کشو'}><span className={`flex h-6 w-6 items-center justify-center rounded-md border ${selected ? 'border-primary-400 bg-primary-500 text-white' : 'border-white/30 bg-dark-900/90'}`}>{selected && <Check className="h-4 w-4"/>}</span></button>}
@@ -207,10 +209,10 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
             <p className={`flex items-center gap-1.5 font-medium text-sm truncate transition-colors ${selected ? 'text-primary-300' : 'text-white group-hover:text-primary-300'}`} title={folder.name}>
                 <span className="truncate">{folder.name}</span>
             </p>
-            <p className="text-xs text-dark-500 mt-1">
+            {cardDisplay.folderCount&&<p className="text-xs text-dark-500 mt-1">
                 {folder.file_count.toLocaleString('fa-IR')} فایل
-            </p>
-            {!dense && folder.description && <p dir="auto" className="text-xs text-dark-400 truncate mt-1" title={folder.description}>{folder.description}</p>}
+            </p>}
+            {!dense&&cardDisplay.folderDescription&&folder.description && <p dir="auto" className="text-xs text-dark-400 truncate mt-1" title={folder.description}>{folder.description}</p>}
         </div>
     );
 }

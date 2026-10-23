@@ -6,6 +6,7 @@ import { Play, MoreVertical, Film, Music, FileText, Image, Check, Star, Pin, Lin
 import { TelegramFile, formatFileSize, formatDuration, useUpdateFile } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import TagChips from './TagChips';
+import { useCardDisplayPreferences } from '../lib/cardDisplay';
 
 interface FileCardProps {
     file: TelegramFile;
@@ -26,6 +27,7 @@ export default function FileCard({
 }: FileCardProps) {
     const { activeContextMenu, setActiveContextMenu, addToast } = useAppStore();
     const updateFile = useUpdateFile();
+    const cardDisplay=useCardDisplayPreferences();
     const [thumbnailFailed, setThumbnailFailed] = useState(false);
     const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const longPressed = useRef(false);
@@ -107,7 +109,7 @@ export default function FileCard({
                 data-file-id={file.id}
             >
             {selectionMode && <div className="absolute left-0 top-0 z-10 flex h-11 w-11 items-center justify-center"><div className={`flex h-6 w-6 items-center justify-center rounded-md border ${selected ? 'border-primary-400 bg-primary-500 text-white' : 'border-white/30 bg-dark-900/90'}`}>{selected && <Check className="h-4 w-4" />}</div></div>}
-            {file.is_pinned && <span className="absolute left-10 top-2 z-10 text-primary-300" title="پین‌شده"><Pin className="h-3.5 w-3.5 fill-current"/></span>}
+            {cardDisplay.statusBadges&&file.is_pinned && <span className="absolute left-10 top-2 z-10 text-primary-300" title="پین‌شده"><Pin className="h-3.5 w-3.5 fill-current"/></span>}
             <button onClick={toggleFavorite} disabled={updateFile.isPending} className={`absolute right-2 top-2 z-10 rounded-full p-1.5 ${file.is_favorite ? 'bg-amber-400/15 text-amber-300' : 'text-dark-500 opacity-0 group-hover:opacity-100'}`} title={file.is_favorite ? 'برداشتن نشان' : 'نشان کردن'}><Star className={`h-3.5 w-3.5 ${file.is_favorite ? 'fill-current' : ''}`}/></button>
                 <div className="w-12 h-12 rounded-lg bg-dark-800/80 flex items-center justify-center overflow-hidden shrink-0 border border-white/[0.05]">
                     {authorizedThumbnailUrl && !thumbnailFailed ? (
@@ -119,23 +121,22 @@ export default function FileCard({
 
                 <div className="flex-1 min-w-0">
                     <p className={`font-medium truncate text-sm ${selected ? 'text-primary-200' : 'text-white'}`}>{file.file_name}</p>
-                    {file.description && <p dir="auto" className="text-xs text-dark-400 line-clamp-2 mt-0.5" title={file.description}>{file.description}</p>}
-                    <TagChips tags={file.tags} compact/>
+                    {cardDisplay.fileDescription&&file.description && <p dir="auto" className="text-xs text-dark-400 line-clamp-2 mt-0.5" title={file.description}>{file.description}</p>}
+                    {cardDisplay.fileTags&&<TagChips tags={file.tags} compact/>}
                     <div className="flex items-center gap-3 text-xs text-dark-400 mt-1">
                         {file.is_shortcut && <span className="flex items-center gap-1 text-primary-300" title="میانبر فایل موجود"><Link2 className="h-3 w-3"/> میانبر</span>}
-                        <span className="flex items-center gap-1">
+                        {cardDisplay.fileType&&<span className="flex items-center gap-1">
                             {getSmallIcon()}
                             <span>{typeLabel}</span>
-                        </span>
-                        <span className="w-1 h-1 rounded-full bg-dark-600"></span>
-                        <span>{formatFileSize(file.file_size)}</span>
-                        {file.duration && (
+                        </span>}
+                        {cardDisplay.fileSize&&<span>{formatFileSize(file.file_size)}</span>}
+                        {cardDisplay.fileDuration&&file.duration && (
                             <>
                                 <span className="w-1 h-1 rounded-full bg-dark-600"></span>
                                 <span>{formatDuration(file.duration)}</span>
                             </>
                         )}
-                        {file.last_pos && file.duration && (file.last_pos / file.duration > 0.05) && (
+                        {cardDisplay.fileProgress&&file.last_pos && file.duration && (file.last_pos / file.duration > 0.05) && (
                             <>
                                 <span className="w-1 h-1 rounded-full bg-dark-600"></span>
                                 <span className="text-primary-400">
@@ -184,8 +185,8 @@ export default function FileCard({
             data-file-id={file.id}
         >
             {selectionMode && <div className="absolute left-0 top-0 z-20 flex h-11 w-11 items-center justify-center"><div className={`flex h-6 w-6 items-center justify-center rounded-md border ${selected ? 'border-primary-400 bg-primary-500 text-white' : 'border-white/30 bg-dark-900/90'}`}>{selected && <Check className="h-4 w-4" />}</div></div>}
-            {file.is_pinned && <span className="absolute left-10 top-2 z-20 rounded-full bg-dark-950/75 p-1.5 text-primary-300" title="پین‌شده"><Pin className="h-3.5 w-3.5 fill-current"/></span>}
-            {file.is_shortcut && <span className="absolute bottom-14 right-3 z-20 flex items-center gap-1 rounded-full border border-white/10 bg-dark-950/80 px-2 py-1 text-[10px] text-primary-200" title="میانبر فایل موجود"><Link2 className="h-3 w-3"/> میانبر</span>}
+            {cardDisplay.statusBadges&&file.is_pinned && <span className="absolute left-10 top-2 z-20 rounded-full bg-dark-950/75 p-1.5 text-primary-300" title="پین‌شده"><Pin className="h-3.5 w-3.5 fill-current"/></span>}
+            {cardDisplay.statusBadges&&file.is_shortcut && <span className="absolute bottom-14 right-3 z-20 flex items-center gap-1 rounded-full border border-white/10 bg-dark-950/80 px-2 py-1 text-[10px] text-primary-200" title="میانبر فایل موجود"><Link2 className="h-3 w-3"/> میانبر</span>}
             <button onClick={toggleFavorite} disabled={updateFile.isPending} className={`absolute right-2 top-2 z-20 flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-dark-950/75 backdrop-blur ${file.is_favorite ? 'text-amber-300' : 'text-white/65 opacity-0 group-hover:opacity-100'}`} title={file.is_favorite ? 'برداشتن نشان' : 'نشان کردن'}><Star className={`h-4 w-4 ${file.is_favorite ? 'fill-current' : ''}`}/></button>
             <div className={`aspect-video rounded-lg ${dense ? 'mb-2' : 'mb-3'} overflow-hidden relative border ${selected ? 'border-primary-500/20' : 'border-white/[0.05]'} bg-dark-900/50`}>
                 {authorizedThumbnailUrl && !thumbnailFailed ? (
@@ -199,7 +200,7 @@ export default function FileCard({
                 )}
 
                 {/* Progress Bar */}
-                {file.last_pos && file.duration && (file.last_pos / file.duration > 0.05) && (
+                {cardDisplay.fileProgress&&file.last_pos && file.duration && (file.last_pos / file.duration > 0.05) && (
                     <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/40">
                         <div 
                             className="h-full bg-primary-500" 
@@ -209,7 +210,7 @@ export default function FileCard({
                 )}
 
                 {/* Duration badge */}
-                {file.duration && (
+                {cardDisplay.fileDuration&&file.duration && (
                     <div className="absolute bottom-1.5 right-1.5 bg-black/60 backdrop-blur-md px-1.5 py-0.5 rounded text-[10px] font-medium text-white shadow-sm">
                         {formatDuration(file.duration)}
                     </div>
@@ -230,20 +231,20 @@ export default function FileCard({
                     <p className={`font-medium text-sm truncate transition-colors ${selected ? 'text-primary-200' : 'text-white group-hover:text-primary-300'}`} title={file.file_name}>
                         {file.file_name}
                     </p>
-                    {!dense && file.description && <p dir="auto" className="text-xs text-dark-400 line-clamp-2 mt-0.5" title={file.description}>{file.description}</p>}
-                    {!dense && <TagChips tags={file.tags} compact/>}
+                    {!dense&&cardDisplay.fileDescription&&file.description && <p dir="auto" className="text-xs text-dark-400 line-clamp-2 mt-0.5" title={file.description}>{file.description}</p>}
+                    {!dense&&cardDisplay.fileTags&&<TagChips tags={file.tags} compact/>}
                     <div className="flex items-center gap-2 mt-1">
-                        <span className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md border ${
+                        {cardDisplay.fileType&&<span className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md border ${
                             selected 
                             ? 'bg-primary-500/20 border-primary-500/20 text-primary-300' 
                             : 'bg-dark-800 border-white/[0.05] text-dark-400 group-hover:border-white/[0.1]'
                         }`}>
                             {getSmallIcon()}
                             <span>{typeLabel}</span>
-                        </span>
-                        <p className="text-[10px] text-dark-500">
+                        </span>}
+                        {cardDisplay.fileSize&&<p className="text-[10px] text-dark-500">
                             {formatFileSize(file.file_size)}
-                        </p>
+                        </p>}
                     </div>
                 </div>
 

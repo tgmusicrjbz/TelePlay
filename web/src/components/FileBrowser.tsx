@@ -3,7 +3,7 @@
  */
 import { lazy, Suspense, useEffect, useCallback, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { FolderPlus, Folder as FolderIcon, Grid, LayoutGrid, List, Search, ChevronRight, Home, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, StickyNote, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ChevronUp, Plus, CheckSquare, Square, ListChecks, ListPlus, Upload, Star, RefreshCw, Link2, DownloadCloud, Download, Send, Eye, EyeOff, Minus, Pause, Play, Tags, Cloud, CloudOff, AudioLines, FileAudio, Sparkles, BookmarkPlus, Combine } from 'lucide-react';
+import { FolderPlus, Folder as FolderIcon, Grid, LayoutGrid, List, Search, ChevronRight, ChevronDown, Home, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, StickyNote, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ChevronUp, Plus, CheckSquare, Square, ListChecks, ListPlus, Upload, Star, RefreshCw, Link2, DownloadCloud, Download, Send, Eye, EyeOff, Minus, Play, Tags, Cloud, CloudOff, AudioLines, FileAudio, Sparkles, BookmarkPlus, Combine } from 'lucide-react';
 import { api, useFiles, useFolders, useFolderTree, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useActivityFeed, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile, useImportLink, useTagSettings, useUnlockVault, useWorkspaces, sendFilesToTelegram, useTTSJobs, useSTTJobs, SavedFilter, useSavedFilters, useUpdateSavedFilters, usePacks, useExpandSmartSearch } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { cacheAllTextNotes, queueOfflineText, saveFileOffline } from '../lib/offline';
@@ -130,6 +130,11 @@ export default function FileBrowser() {
         setPlaylistFiles,
         startQueue
     } = useAppStore();
+    useEffect(()=>{
+        if(localStorage.getItem('komod-open-settings-after-login')!=='1') return;
+        localStorage.removeItem('komod-open-settings-after-login');
+        setActiveSection('settings');
+    },[setActiveSection]);
 
     // Pagination state
     const [page, setPage] = useState(1);
@@ -313,8 +318,15 @@ export default function FileBrowser() {
         if (!showImportLink || !importPlatform) return;
         const saved = localStorage.getItem(importPlatform === 'youtube' ? 'komod-youtube-folder' : 'komod-instagram-folder') || 'none';
         if (saved === 'none') return;
-        setImportFolder(saved === 'default' ? (defaultFolder?.id ?? null) : Number(saved));
-    }, [showImportLink, importPlatform, defaultFolder?.id]);
+        const requested=saved==='default'?(defaultFolder?.id??null):Number(saved);
+        const valid=requested===null||requested===defaultFolder?.id||importFolderOptions.some(option=>Number(option.value)===requested);
+        if(!valid){
+            localStorage.setItem(importPlatform === 'youtube' ? 'komod-youtube-folder' : 'komod-instagram-folder','none');
+            setImportFolder(null);
+            return;
+        }
+        setImportFolder(requested);
+    }, [showImportLink, importPlatform, defaultFolder?.id, importFolderOptions]);
 
     useEffect(() => {
         const refreshMode = () => setRootFilesMode(localStorage.getItem('komod-root-files-mode') || 'folder');
@@ -811,7 +823,12 @@ export default function FileBrowser() {
         addToast('دانلود فایل‌های انتخاب‌شده شروع شد.');
     };
 
-    const openImportLink = () => { setImportFolder(incomingFolderId); setShowAddMenu(false); setShowImportLink(true); };
+    const openImportLink = () => {
+        const validIncoming=incomingFolderId===null||incomingFolderId===defaultFolder?.id||importFolderOptions.some(option=>Number(option.value)===incomingFolderId);
+        if(!validIncoming){localStorage.setItem('komod-incoming-folder','default');setIncomingFolderSetting('default')}
+        setImportFolder(validIncoming?incomingFolderId:(defaultFolder?.id??null));
+        setShowAddMenu(false); setShowImportLink(true);
+    };
     const loadDriveFolder=async(id='root',name='درایو من',reset=false)=>{setDriveLoading(true);try{const {data}=await api.get<DriveEntry[]>('/files/drive/browse',{params:{folder_id:id}});setDriveEntries(data);setDrivePath(previous=>{if(reset||id==='root')return[{id:'root',name:'درایو من'}];const existing=previous.findIndex(item=>item.id===id);return existing>=0?previous.slice(0,existing+1):[...previous,{id,name}]})}catch(error:any){addToast(error?.response?.data?.detail||'خواندن فایل‌های گوگل درایو انجام نشد.','error')}finally{setDriveLoading(false)}};
     const fetchDriveConnection=async()=>{const {data}=await api.get<DriveConnection>('/files/drive/status');setDriveConnection(data);return data};
     const openImportDrive = () => { setDriveFolder(incomingFolderId);setDriveSelected(new Set());setDriveSelectedDetails({});setShowAddMenu(false);setShowImportDrive(true);void (async()=>{try{const data=await fetchDriveConnection();if(data.connected&&data.mode==='full')void loadDriveFolder('root','درایو من',true)}catch{setDriveConnection(null)}})() };
@@ -1081,6 +1098,13 @@ export default function FileBrowser() {
         const first=Math.min(...selectedIndexes),last=Math.max(...selectedIndexes);
         selectAll(ordered.slice(first,last+1),Array.from(selectedFolderIds));
         addToast(`${(last-first+1).toLocaleString('fa-IR')} فایلِ بین دو انتخاب انتخاب شد.`);
+    };
+    const cancelAllImportJobs=async()=>{
+        try{
+            await Promise.all([api.post('/files/import-link/cancel-all'),api.post('/files/import-drive/cancel-all')]);
+            setImportJobs(previous=>previous.map(job=>['queued','downloading','saving','paused'].includes(job.state)?{...job,state:'cancelled',message:'لغو شد',progress:0}:job));
+            window.setTimeout(()=>setImportJobs(previous=>previous.filter(job=>job.state!=='cancelled')),1200);
+        }catch(error:any){addToast(error?.response?.data?.detail||'لغو صف انجام نشد.','error')}
     };
     const sectionTitle = activeSection === 'activity' ? 'فعالیت' : (breadcrumbs[breadcrumbs.length - 1]?.name || 'کمد من');
     const shownFolderCount = showFolders ? visibleFolders?.length || 0 : 0;
@@ -1702,12 +1726,12 @@ export default function FileBrowser() {
                 <div className="fixed bottom-24 left-3 z-[174] w-[min(22rem,calc(100vw-1.5rem))] overflow-hidden rounded-2xl border border-white/10 bg-dark-900/95 shadow-2xl backdrop-blur-xl">
                     <div className="flex min-h-11 items-center gap-1 border-b border-white/[.06] px-2.5">
                         <Link2 className="h-4 w-4 shrink-0 text-primary-300"/><strong className="min-w-0 flex-1 truncate text-sm">صف انتقال به کمد</strong>
-                        <button className="btn-icon h-8 w-8" onClick={()=>{setShowImportLink(true);setImportPanelMode('collapsed')}} title="افزودن لینک"><Plus className="h-4 w-4"/></button>
+                        {importJobs.some(job=>['queued','downloading','saving','paused'].includes(job.state))&&<button className="btn-icon h-8 w-8 text-red-300" onClick={()=>void cancelAllImportJobs()} title="لغو همه موارد صف"><Square className="h-4 w-4"/></button>}
                         <button className="btn-icon h-8 w-8" onClick={()=>void clearFinishedImportJobs()} title="پاک‌کردن موارد پایان‌یافته"><Trash2 className="h-4 w-4"/></button>
-                        <button className="btn-icon h-8 w-8" onClick={()=>setImportPanelMode('collapsed')} title="نمایش خیلی کوچک"><Minus className="h-4 w-4"/></button>
+                        <button className="btn-icon h-8 w-8" onClick={()=>setImportPanelMode('collapsed')} title="جمع‌کردن وضعیت"><ChevronDown className="h-4 w-4"/></button>
                         <button className="btn-icon h-8 w-8" onClick={()=>setImportPanelMode('hidden')} title="پنهان‌کردن وضعیت"><X className="h-4 w-4"/></button>
                     </div>
-                    <div className="max-h-52 divide-y divide-white/[.05] overflow-y-auto px-2">{importJobs.map(job=><div key={job.id} className="py-2"><div className="flex items-center gap-2"><span className={`h-2 w-2 shrink-0 rounded-full ${job.state==='done'?'bg-emerald-400':job.state==='error'||job.state==='cancelled'?'bg-red-400':job.state==='paused'?'bg-amber-400':'animate-pulse bg-primary-400'}`}/><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><strong className="min-w-0 flex-1 truncate text-xs">{job.source==='drive'?'گوگل درایو':job.url.includes('youtu')?'یوتیوب':'اینستاگرام'}</strong><span className="shrink-0 text-[10px] text-dark-500">{job.state==='queued'?'در صف':job.state==='downloading'?'در حال دریافت':job.state==='saving'?'در حال ذخیره':job.state==='paused'?'متوقف':job.state==='cancelled'?'لغو شد':job.state==='done'?'آماده شد':'ناموفق'}</span></div><div className="mt-1 flex items-center gap-2"><div className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-dark-950"><div className={`h-full rounded-full transition-[width] ${job.state==='error'?'bg-red-500':'bg-primary-500'}`} style={{width:`${Math.max(2,job.progress||0)}%`}}/></div><span className="w-8 shrink-0 text-left text-[10px] font-bold text-primary-300">{(job.progress||0).toLocaleString('fa-IR')}٪</span></div><p className="mt-1 truncate text-[10px] text-dark-500">{job.message}</p></div>{job.source==='link'&&['error','cancelled'].includes(job.state)&&<button className="btn-icon h-8 w-8 text-primary-200" title="تلاش دوباره" onClick={()=>void controlImportJob(job.id,'retry')}><RefreshCw className="h-3.5 w-3.5"/></button>}{['queued','downloading','saving','paused'].includes(job.state)&&<>{job.source==='link'&&<button className="btn-icon h-8 w-8" onClick={()=>void controlImportJob(job.id,'pause')} title={job.state==='paused'?'ادامه':'توقف موقت'}>{job.state==='paused'?<Play className="h-3.5 w-3.5"/>:<Pause className="h-3.5 w-3.5"/>}</button>}<button className="btn-icon h-8 w-8 text-red-300" onClick={()=>void controlImportJob(job.id,'cancel')} title="لغو"><X className="h-3.5 w-3.5"/></button></>}</div></div>)}</div>
+                    <div className="max-h-52 divide-y divide-white/[.05] overflow-y-auto px-2">{importJobs.map(job=><div key={job.id} className="py-2"><div className="flex items-center gap-2"><span className={`h-2 w-2 shrink-0 rounded-full ${job.state==='done'?'bg-emerald-400':job.state==='error'||job.state==='cancelled'?'bg-red-400':job.state==='paused'?'bg-amber-400':'animate-pulse bg-primary-400'}`}/><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><strong className="min-w-0 flex-1 truncate text-xs">{job.source==='drive'?'گوگل درایو':job.url.includes('youtu')?'یوتیوب':'اینستاگرام'}</strong><span className="shrink-0 text-[10px] text-dark-500">{job.state==='queued'?'در صف':job.state==='downloading'?'در حال دریافت':job.state==='saving'?'در حال ذخیره':job.state==='paused'?'متوقف':job.state==='cancelled'?'لغو شد':job.state==='done'?'آماده شد':'ناموفق'}</span></div><div className="mt-1 flex items-center gap-2"><div className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-dark-950"><div className={`h-full rounded-full transition-[width] ${job.state==='error'?'bg-red-500':'bg-primary-500'}`} style={{width:`${Math.max(2,job.progress||0)}%`}}/></div><span className="w-8 shrink-0 text-left text-[10px] font-bold text-primary-300">{(job.progress||0).toLocaleString('fa-IR')}٪</span></div><p className="mt-1 truncate text-[10px] text-dark-500">{job.message}</p></div>{job.source==='link'&&['error','cancelled'].includes(job.state)&&<button className="btn-icon h-8 w-8 text-primary-200" title="تلاش دوباره" onClick={()=>void controlImportJob(job.id,'retry')}><RefreshCw className="h-3.5 w-3.5"/></button>}{['queued','downloading','saving','paused'].includes(job.state)&&<button className="btn-icon h-8 w-8 text-red-300" onClick={()=>void controlImportJob(job.id,'cancel')} title="لغو"><X className="h-3.5 w-3.5"/></button>}</div></div>)}</div>
                 </div>)}
             {showImportLink && <div className="fixed inset-0 z-[170] flex items-end justify-center overflow-hidden bg-black/70 backdrop-blur-sm sm:items-center sm:p-4" onClick={() => setShowImportLink(false)}><form className="max-h-[92dvh] w-full max-w-lg overflow-x-hidden overflow-y-auto overscroll-contain rounded-t-3xl border border-white/10 bg-dark-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:max-h-[calc(100dvh-2rem)] sm:rounded-3xl sm:p-5" onClick={event => event.stopPropagation()} onSubmit={submitImportLink}><div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary-500/15 text-primary-200"><Link2 className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h2 className="font-bold">ذخیره از لینک</h2><p className="text-xs text-dark-400">لینک یوتیوب یا اینستاگرام را بفرست.</p></div><button type="button" className="btn-icon" onClick={() => setShowImportLink(false)}><X className="h-5 w-5"/></button></div><div className="mt-4"><textarea dir="auto" autoFocus rows={3} className="input w-full resize-none text-right" value={importUrl} onChange={event => setImportUrl(event.target.value)} placeholder="لینک‌هات رو اینجا وارد کن"/></div>{importUrl.trim() && <p className={`mt-2 text-xs ${importPlatform || importUrls.length > 1 ? 'text-emerald-300' : 'text-red-300'}`}>{importUrls.length > 1 ? `✓ ${importUrls.length.toLocaleString('fa-IR')} لینک برای افزودن دسته‌ای` : importPlatform === 'youtube' ? '✓ لینک یوتیوب شناسایی شد' : importPlatform === 'instagram' ? '✓ لینک اینستاگرام شناسایی شد' : 'لینک معتبر یوتیوب یا اینستاگرام نیست'}</p>}<CustomSelect className="mt-3" placement="top" label="کشوی مقصد" value={importFolder === 'new' ? 'new' : String(importFolder ?? 'root')} onChange={value => setImportFolder(value === 'new' ? 'new' : value === 'root' ? null : Number(value))} options={[{value:'root',label:'🗃️ فایل‌های من'},...(currentFolderId !== null?[{value:String(currentFolderId),label:'📍 کشوی فعلی'}]:[]),...importFolderOptions.filter(option => option.value !== String(currentFolderId)),{value:'new',label:'➕ ساخت کشوی تازه…'}]}/>{importFolder === 'new' && <input className="input mt-3 w-full" value={importFolderName} onChange={event => setImportFolderName(event.target.value)} placeholder="نام کشوی تازه"/>}{(importPlatform === 'youtube' || importUrls.length > 1) && <CustomSelect className="mt-3" placement="top" label="خروجی" value={importQuality} onChange={setImportQuality} options={[{value:'audio',label:'🎧 صدا'},{value:'480',label:'🎬 480p'},{value:'720',label:'🎬 720p'},{value:'1080',label:'🎬 1080p'}]}/>}<div className="mt-5 flex gap-2"><button type="button" className="btn-secondary flex-1" onClick={() => setShowImportLink(false)}>لغو</button><button disabled={!importUrl.trim() || (!importPlatform && importUrls.length < 2) || importLinkMutation.isPending || (importFolder === 'new' && !importFolderName.trim())} className="btn-primary flex-1 disabled:opacity-50">{importLinkMutation.isPending ? 'در حال ثبت…' : 'افزودن به صف'}</button></div></form></div>}
             {showImportDrive && <div className="fixed inset-0 z-[170] flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-4" onClick={()=>setShowImportDrive(false)}>

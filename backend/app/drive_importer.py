@@ -8,7 +8,7 @@ import mimetypes
 import re
 import tempfile
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from email.header import decode_header, make_header
 from email.message import Message
 from pathlib import Path
@@ -21,7 +21,7 @@ from sqlalchemy.orm import selectinload
 from .config import get_settings
 from .database import async_session
 from .models import File, User
-from .processing_jobs import create_job, delete_finished_jobs, update_job
+from .processing_jobs import create_job, delete_finished_jobs, delete_job, update_job
 from .services import sanitize_filename, select_best_thumbnail
 from . import telegram
 
@@ -92,6 +92,18 @@ class GoogleDriveImporter:
         return job_id
 
     def list(self, user_id: int) -> list[dict]:
+        cutoff=datetime.utcnow()-timedelta(seconds=45)
+        expired=[]
+        for job_id,item in self.statuses.items():
+            if item.get("user_id")!=user_id or item.get("state") not in {"done","error","cancelled"}: continue
+            finished_at=item.get("finished_at")
+            try:
+                if not finished_at or datetime.fromisoformat(finished_at)<cutoff: expired.append(job_id)
+            except (TypeError,ValueError): expired.append(job_id)
+        for job_id in expired:
+            self.statuses.pop(job_id,None); self.cancelled.discard(job_id)
+            try: asyncio.get_running_loop().create_task(delete_job(job_id,user_id))
+            except RuntimeError: pass
         return [dict(item) for item in self.statuses.values() if item.get("user_id")==user_id]
 
     def status(self, job_id: str, user_id: int) -> dict | None:
@@ -104,6 +116,13 @@ class GoogleDriveImporter:
         self.cancelled.add(job_id)
         item.update(state="cancelled",message="لغو شد",progress=0,finished_at=datetime.utcnow().isoformat())
         return dict(item)
+
+    async def cancel_all(self, user_id: int) -> int:
+        ids=[key for key,item in self.statuses.items() if item.get("user_id")==user_id and item.get("state") not in {"done","error","cancelled"}]
+        for key in ids:
+            status=self.cancel(key,user_id)
+            if status: await update_job(key,status)
+        return len(ids)
 
     async def clear_finished(self, user_id: int) -> int:
         ids=[key for key,item in self.statuses.items() if item.get("user_id")==user_id and item.get("state") in {"done","error","cancelled"}]

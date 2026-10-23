@@ -408,6 +408,7 @@ class TelegramWebAppRequest(BaseModel):
 class PasswordLoginRequest(BaseModel):
     username: str = Field(min_length=4, max_length=32)
     password: str = Field(min_length=10, max_length=128)
+    otp: Optional[str] = Field(default=None, min_length=6, max_length=8)
 
 
 class CredentialsUpdate(BaseModel):
@@ -419,6 +420,25 @@ class CredentialsUpdate(BaseModel):
 class CredentialsStatus(BaseModel):
     enabled: bool
     username: Optional[str] = None
+    two_factor_enabled: bool = False
+    recovery_available: bool = False
+
+
+class TwoFactorSetupResponse(BaseModel):
+    secret: str
+    provisioning_uri: str
+    setup_token: str
+
+
+class TwoFactorEnableRequest(BaseModel):
+    setup_token: str = Field(min_length=20)
+    code: str = Field(min_length=6, max_length=8)
+    current_password: Optional[str] = Field(default=None, max_length=128)
+
+
+class TwoFactorDisableRequest(BaseModel):
+    code: Optional[str] = Field(default=None, min_length=6, max_length=8)
+    current_password: Optional[str] = Field(default=None, max_length=128)
 
 
 class PublicShareCreate(BaseModel):

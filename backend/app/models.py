@@ -20,6 +20,7 @@ class User(Base):
     display_name: Mapped[Optional[str]] = mapped_column(String(255))
     login_username: Mapped[Optional[str]] = mapped_column(String(64), unique=True, index=True)
     password_hash: Mapped[Optional[str]] = mapped_column(Text)
+    totp_secret_encrypted: Mapped[Optional[str]] = mapped_column(Text)
     vault_password_hash: Mapped[Optional[str]] = mapped_column(Text)
     failed_login_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     login_locked_until: Mapped[Optional[datetime]] = mapped_column(DateTime)
@@ -64,6 +65,7 @@ class AuthSession(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    telegram_verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
 
 
 class WorkspaceGrant(Base):

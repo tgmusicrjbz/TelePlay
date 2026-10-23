@@ -31,6 +31,11 @@ from ..schemas import (
     RefreshTokenRequest,
     BotInfoResponse, SessionResponse, TelegramWebAppRequest,
     PasswordLoginRequest, CredentialsUpdate, CredentialsStatus,
+    TwoFactorSetupResponse, TwoFactorEnableRequest, TwoFactorDisableRequest,
+)
+from ..account_security import (
+    decrypt_secret, encrypt_secret, new_totp_secret, provisioning_uri,
+    secret_from_setup_token, setup_token, verify_totp,
 )
 from ..auth import (
     create_access_token,
@@ -243,6 +248,9 @@ async def password_login(
                 user.failed_login_attempts = 0
             await db.commit()
         raise HTTPException(status_code=401, detail="نام کاربری یا رمز عبور درست نیست.")
+    totp_secret = decrypt_secret(user.totp_secret_encrypted)
+    if totp_secret and not verify_totp(totp_secret, payload.otp or ""):
+        raise HTTPException(status_code=401, detail="کد تأیید دومرحله‌ای را وارد کن.")
     if not user.is_active:
         raise HTTPException(status_code=403, detail="این حساب غیرفعال است.")
     user.failed_login_attempts = 0
@@ -258,9 +266,27 @@ async def password_login(
     return _auth_response(user, session)
 
 
+def _session_from_request(request: Request, db: AsyncSession):
+    token = request.headers.get("authorization", "").removeprefix("Bearer ")
+    payload = verify_token_payload(token) if token else None
+    session_id = payload.get("sid") if payload else None
+    return session_id
+
+
+def _recent_telegram_verification(session: AuthSession | None) -> bool:
+    return bool(session and session.telegram_verified_at and session.telegram_verified_at >= datetime.utcnow() - timedelta(minutes=10))
+
+
 @router.get("/credentials", response_model=CredentialsStatus)
-async def credentials_status(current_user: User = Depends(get_current_user)):
-    return CredentialsStatus(enabled=bool(current_user.password_hash and current_user.login_username), username=current_user.login_username)
+async def credentials_status(request: Request, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    session_id = _session_from_request(request, db)
+    session = await db.get(AuthSession, session_id) if session_id else None
+    return CredentialsStatus(
+        enabled=bool(current_user.password_hash and current_user.login_username),
+        username=current_user.login_username,
+        two_factor_enabled=bool(current_user.totp_secret_encrypted),
+        recovery_available=_recent_telegram_verification(session),
+    )
 
 
 @router.put("/credentials", response_model=AuthResponse)
@@ -274,7 +300,10 @@ async def update_credentials(
     owner = (await db.execute(select(User).where(User.login_username == username, User.id != current_user.id))).scalar_one_or_none()
     if owner:
         raise HTTPException(status_code=409, detail="این نام کاربری قبلاً انتخاب شده است.")
-    if current_user.password_hash:
+    current_session_id = _session_from_request(request, db)
+    session = await db.get(AuthSession, current_session_id) if current_session_id else None
+    recovery_available = _recent_telegram_verification(session)
+    if current_user.password_hash and not recovery_available:
         try:
             current_valid = bool(payload.current_password) and password_context.verify(payload.current_password, current_user.password_hash)
         except Exception:
@@ -293,10 +322,6 @@ async def update_credentials(
         current_user.login_locked_until = None
         current_user.auth_version += 1
 
-    token = request.headers.get("authorization", "").removeprefix("Bearer ")
-    token_payload = verify_token_payload(token) if token else None
-    current_session_id = token_payload.get("sid") if token_payload else None
-    session = await db.get(AuthSession, current_session_id) if current_session_id else None
     if session is None or session.user_id != current_user.id:
         session = await _session_for_device(db, request, current_user)
         db.add(session)
@@ -316,6 +341,68 @@ async def update_credentials(
         await db.rollback()
         raise HTTPException(status_code=409, detail="این نام کاربری قبلاً انتخاب شده است.")
     return _auth_response(current_user, session)
+
+
+@router.post("/2fa/setup", response_model=TwoFactorSetupResponse)
+async def setup_two_factor(current_user: User = Depends(get_current_user)):
+    secret = new_totp_secret()
+    account = current_user.login_username or str(current_user.telegram_id)
+    return TwoFactorSetupResponse(
+        secret=secret,
+        provisioning_uri=provisioning_uri(secret, account),
+        setup_token=setup_token(secret),
+    )
+
+
+@router.post("/2fa/enable")
+async def enable_two_factor(
+    request: Request,
+    payload: TwoFactorEnableRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    session_id = _session_from_request(request, db)
+    session = await db.get(AuthSession, session_id) if session_id else None
+    password_ok = False
+    if current_user.password_hash and payload.current_password:
+        try: password_ok = password_context.verify(payload.current_password, current_user.password_hash)
+        except Exception: password_ok = False
+    if current_user.password_hash and not password_ok and not _recent_telegram_verification(session):
+        raise HTTPException(status_code=400, detail="برای فعال‌سازی، رمز فعلی را وارد کن یا دوباره با تلگرام وارد شو.")
+    secret = secret_from_setup_token(payload.setup_token)
+    if not secret or not verify_totp(secret, payload.code):
+        raise HTTPException(status_code=400, detail="کد برنامهٔ تأیید درست نیست یا زمان راه‌اندازی تمام شده است.")
+    current_user.totp_secret_encrypted = encrypt_secret(secret)
+    add_security_event(db, "two_factor_enabled", user_id=current_user.id, request=request, target_type="account", target_id=current_user.id)
+    await db.commit()
+    return {"enabled": True}
+
+
+@router.post("/2fa/disable")
+async def disable_two_factor(
+    request: Request,
+    payload: TwoFactorDisableRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    secret = decrypt_secret(current_user.totp_secret_encrypted)
+    if not secret:
+        return {"enabled": False}
+    password_ok = False
+    if current_user.password_hash and payload.current_password:
+        try: password_ok = password_context.verify(payload.current_password, current_user.password_hash)
+        except Exception: password_ok = False
+    session_id = _session_from_request(request, db)
+    session = await db.get(AuthSession, session_id) if session_id else None
+    recently_verified = _recent_telegram_verification(session)
+    if not password_ok and not recently_verified:
+        raise HTTPException(status_code=400, detail="رمز فعلی درست نیست.")
+    if not recently_verified and not verify_totp(secret, payload.code or ""):
+        raise HTTPException(status_code=400, detail="کد تأیید دومرحله‌ای درست نیست.")
+    current_user.totp_secret_encrypted = None
+    add_security_event(db, "two_factor_disabled", user_id=current_user.id, request=request, target_type="account", target_id=current_user.id)
+    await db.commit()
+    return {"enabled": False}
 
 
 @router.post("/refresh", response_model=Token)
@@ -499,6 +586,7 @@ async def login_from_telegram_webapp(
         raise HTTPException(status_code=403, detail="User account is inactive")
     new_device = await _is_new_device(db, request, user)
     session = await _session_for_device(db, request, user)
+    session.telegram_verified_at = datetime.utcnow()
     db.add(session)
     add_security_event(db, "login_success", user_id=user.id, request=request, suspicious=new_device, target_type="session", target_id=session.id, details={"source":"telegram_webapp","new_device":new_device})
     await db.commit()
@@ -594,6 +682,7 @@ async def verify_login_code(
         
     # Generate tokens
     session = await _session_for_device(db, request, user)
+    session.telegram_verified_at = datetime.utcnow()
     db.add(session)
     await db.flush()
     access_token = create_access_token(user.telegram_id, version=user.auth_version, session_id=session.id)

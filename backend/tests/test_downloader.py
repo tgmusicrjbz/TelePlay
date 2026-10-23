@@ -62,6 +62,18 @@ class LinkImportDurabilityTests(unittest.IsolatedAsyncioTestCase):
             persisted = await db.get(ProcessingJob, "recover-link")
             self.assertEqual(persisted.state, "queued")
 
+    async def test_cancel_all_only_cancels_jobs_owned_by_user(self):
+        service = LinkImportService()
+        service.statuses = {
+            "mine": {"id": "mine", "user_id": 1, "state": "queued"},
+            "other": {"id": "other", "user_id": 2, "state": "queued"},
+            "done": {"id": "done", "user_id": 1, "state": "done"},
+        }
+        service.controls = {"mine": {"paused": False, "cancelled": False}, "other": {"paused": False, "cancelled": False}}
+        self.assertEqual(service.cancel_all(1), 1)
+        self.assertEqual(service.statuses["mine"]["state"], "cancelled")
+        self.assertEqual(service.statuses["other"]["state"], "queued")
+
 
 if __name__ == "__main__":
     unittest.main()

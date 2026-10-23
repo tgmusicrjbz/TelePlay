@@ -163,7 +163,7 @@ export default function TTSSettingsPanel(){
     const [sttPostPrompts,setSttPostPrompts]=useState<string[]>([]);
     const [sttFolder,setSttFolder]=useState('default');
     const [sttOutput,setSttOutput]=useState<'temporary'|'save'>(()=>localStorage.getItem('komod-stt-output-mode')==='temporary'?'temporary':'save');
-    const [sttPanel,setSttPanel]=useState<'source'|'output'|'history'>('source');
+    const [sttPanel,setSttPanel]=useState<'source'|'output'|'history'>(()=>sttFileId?'output':'source');
     const [expandedSTTResults,setExpandedSTTResults]=useState<Set<string>>(()=>new Set());
     const [refineJob,setRefineJob]=useState<STTJobStatus|null>(null);
     const [fullscreenSTTJob,setFullscreenSTTJob]=useState<STTJobStatus|null>(null);

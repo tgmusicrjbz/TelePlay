@@ -273,6 +273,16 @@ class LinkImportService:
         self._persist_soon(job_id)
         return status
 
+    def cancel_all(self, user_id: int) -> int:
+        cancellable = [
+            job_id for job_id, status in self.statuses.items()
+            if status.get("user_id") == user_id
+            and status.get("state") not in {"done", "error", "cancelled"}
+        ]
+        for job_id in cancellable:
+            self.cancel(job_id, user_id)
+        return len(cancellable)
+
     def clear_finished(self, user_id: int) -> int:
         removable = [
             job_id for job_id, status in self.statuses.items()

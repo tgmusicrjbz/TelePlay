@@ -127,6 +127,8 @@ async def init_db():
         await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_login_username ON users (login_username)"))
         if "password_hash" not in user_columns:
             await conn.execute(text("ALTER TABLE users ADD COLUMN password_hash TEXT"))
+        if "totp_secret_encrypted" not in user_columns:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN totp_secret_encrypted TEXT"))
         if "vault_password_hash" not in user_columns:
             await conn.execute(text("ALTER TABLE users ADD COLUMN vault_password_hash TEXT"))
         if "failed_login_attempts" not in user_columns:
@@ -137,6 +139,11 @@ async def init_db():
             active_type = "BOOLEAN" if url.drivername.startswith("postgresql") else "INTEGER"
             active_default = "TRUE" if url.drivername.startswith("postgresql") else "1"
             await conn.execute(text(f"ALTER TABLE users ADD COLUMN is_active {active_type} NOT NULL DEFAULT {active_default}"))
+        auth_session_columns = await conn.run_sync(
+            lambda sync_conn: {column["name"] for column in inspect(sync_conn).get_columns("auth_sessions")}
+        )
+        if "telegram_verified_at" not in auth_session_columns:
+            await conn.execute(text("ALTER TABLE auth_sessions ADD COLUMN telegram_verified_at TIMESTAMP"))
         usage_columns = await conn.run_sync(
             lambda sync_conn: {column["name"] for column in inspect(sync_conn).get_columns("tts_usage")}
         )

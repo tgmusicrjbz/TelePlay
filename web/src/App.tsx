@@ -229,6 +229,8 @@ function LoginPage() {
     const [loginMode, setLoginMode] = useState<'password'|'telegram'>('password');
     const [loginUsername, setLoginUsername] = useState('');
     const [loginPassword, setLoginPassword] = useState('');
+    const [loginOtp, setLoginOtp] = useState('');
+    const [needsOtp, setNeedsOtp] = useState(false);
     const pollBusy = useRef(false);
 
     // Initial code generation
@@ -260,6 +262,11 @@ function LoginPage() {
                 cancelled = true;
                 saveAuthenticatedAccount(data);
                 setIsPolling(false);
+                if(sessionStorage.getItem('komod-password-recovery')==='1'){
+                    sessionStorage.removeItem('komod-password-recovery');
+                    localStorage.setItem('komod-settings-target','security');
+                    localStorage.setItem('komod-open-settings-after-login','1');
+                }
                 window.location.replace('/');
             } catch (pollError: any) {
                 if (cancelled) return;
@@ -294,6 +301,11 @@ function LoginPage() {
         loginByCode(code, {
             onSuccess: (data) => {
                 saveAuthenticatedAccount(data);
+                if(sessionStorage.getItem('komod-password-recovery')==='1'){
+                    sessionStorage.removeItem('komod-password-recovery');
+                    localStorage.setItem('komod-settings-target','security');
+                    localStorage.setItem('komod-open-settings-after-login','1');
+                }
                 window.location.href = '/';
             },
             onError: (err: any) => {
@@ -305,13 +317,17 @@ function LoginPage() {
     const handlePasswordLogin = (event: React.FormEvent) => {
         event.preventDefault();
         setError(null);
-        passwordLogin.mutate({ username: loginUsername.trim(), password: loginPassword }, {
+        passwordLogin.mutate({ username: loginUsername.trim(), password: loginPassword, otp: needsOtp ? loginOtp : undefined }, {
             onSuccess: data => {
                 saveAuthenticatedAccount(data);
                 localStorage.setItem('komod-manual-account', String(data.user.telegram_id));
                 window.location.href = '/';
             },
-            onError: (err: any) => setError(err.response?.data?.detail || 'ورود انجام نشد.'),
+            onError: (err: any) => {
+                const detail=String(err.response?.data?.detail||'');
+                if(detail.includes('تأیید دومرحله‌ای')) setNeedsOtp(true);
+                setError(detail||'ورود انجام نشد.');
+            },
         });
     };
 
@@ -341,73 +357,29 @@ function LoginPage() {
                 </div>
 
                 <div className="space-y-6">
-                    {loginMode === 'password' && <div className="glass-card p-6 text-right"><h3 className="mb-4 text-center font-medium text-white">ورود به کمد</h3><form onSubmit={handlePasswordLogin} className="space-y-3"><input dir="rtl" autoComplete="username" value={loginUsername} onChange={event=>setLoginUsername(event.target.value)} className="input w-full text-right" placeholder="نام کاربری"/><input dir="rtl" type="password" autoComplete="current-password" value={loginPassword} onChange={event=>setLoginPassword(event.target.value)} className="input w-full text-right" placeholder="رمز عبور"/><button disabled={passwordLogin.isPending||loginUsername.trim().length<4||loginPassword.length<10} className="btn-primary min-h-11 w-full disabled:opacity-50">{passwordLogin.isPending?'در حال ورود…':'ورود'}</button>{error&&<p className="text-center text-sm text-red-300">{error}</p>}</form><button onClick={()=>setLoginMode('telegram')} className="mt-4 w-full text-center text-xs text-primary-300">اولین ورود یا بازیابی با تلگرام</button></div>}
-                    {/* Login Code Section */}
-                    <div className={`${loginMode === 'telegram' ? 'block' : 'hidden'} glass-card p-6`}>
-                        <h3 className="text-white font-medium mb-4 flex items-center justify-center gap-2">
+                    {loginMode === 'password' && <div className="glass-card p-6 text-right"><h3 className="mb-4 text-center font-medium text-white">ورود به کمد</h3><form onSubmit={handlePasswordLogin} className="space-y-3"><input dir="rtl" autoComplete="username" value={loginUsername} onChange={event=>setLoginUsername(event.target.value)} className="input w-full text-right" placeholder="نام کاربری"/><input dir="rtl" type="password" autoComplete="current-password" value={loginPassword} onChange={event=>setLoginPassword(event.target.value)} className="input w-full text-right" placeholder="رمز عبور"/>{needsOtp&&<input dir="ltr" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={loginOtp} onChange={event=>setLoginOtp(event.target.value.replace(/\D/g,'').slice(0,6))} className="input w-full text-center font-mono tracking-[.35em]" placeholder="کد ۶ رقمی"/>}<button disabled={passwordLogin.isPending||loginUsername.trim().length<4||loginPassword.length<10||(needsOtp&&loginOtp.length!==6)} className="btn-primary min-h-11 w-full disabled:opacity-50">{passwordLogin.isPending?'در حال ورود…':'ورود'}</button>{error&&<p className="text-center text-sm text-red-300">{error}</p>}</form><button onClick={()=>{sessionStorage.setItem('komod-password-recovery','1');setLoginMode('telegram');setError(null);}} className="mt-4 w-full text-center text-xs text-primary-300">رمزم را فراموش کرده‌ام</button></div>}
+                    <div className={`${loginMode === 'telegram' ? 'block' : 'hidden'} glass-card p-5 text-right sm:p-6`}>
+                        <h3 className="mb-2 flex items-center gap-2 font-semibold text-white">
                             <svg className="w-5 h-5 text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
                             </svg>
-                            ورود امن با کد
+                            ورود یا بازیابی با تلگرام
                         </h3>
-                        <form onSubmit={handleManualLogin} className="flex flex-col gap-3">
-                            <div className="relative">
-                                <input
-                                    type="text"
-                                    placeholder="کد ۶ رقمی"
-                                    value={code}
-                                    onChange={(e) => setCode(e.target.value.toUpperCase())}
-                                    maxLength={6}
-                                    className="w-full bg-dark-900/60 border border-white/[0.08] rounded-xl px-4 py-4 text-center text-xl tracking-[0.1em] sm:text-2xl sm:tracking-[0.3em] font-mono text-white placeholder:text-sm placeholder:tracking-normal placeholder:font-sans placeholder-dark-600 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500/50 transition-all duration-200 uppercase"
-                                />
-                                {isGenerating && (
-                                    <div className="absolute inset-0 flex items-center justify-center bg-dark-900/40 rounded-xl">
-                                        <div className="w-5 h-5 border-2 border-primary-500/30 border-t-primary-500 rounded-full animate-spin"></div>
-                                    </div>
-                                )}
-                            </div>
-                            <button
-                                type="submit"
-                                disabled={code.length < 6 || isVerifying}
-                                className="btn-primary w-full py-3 text-base disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                {isVerifying ? (
-                                    <span className="flex items-center justify-center gap-2">
-                                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                                        در حال بررسی…
-                                    </span>
-                                ) : 'ورود به کمد'}
-                            </button>
-                            {error && (
-                                <p className="text-red-400 text-sm mt-1">
-                                    {error}
-                                </p>
-                            )}
-                        </form>
-                        
-                        {isPolling && (
-                            <div className="flex items-center justify-center gap-2 mt-4 text-xs text-dark-400">
-                                <div className="w-2 h-2 bg-primary-500 rounded-full animate-pulse"></div>
-                                منتظر تأیید در تلگرام…
-                            </div>
-                        )}
-                        
-                        <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-dark-500">
-                            <span>این دستور را برای ربات بفرست:</span>
-                            <button type="button" dir="ltr" onClick={() => void navigator.clipboard.writeText(`/login ${code || 'CODE'}`)} className="rounded-lg bg-dark-800/70 px-2.5 py-1.5 font-mono text-primary-300 transition hover:bg-dark-700" title="کپی دستور ورود">/login {code || 'CODE'} · کپی</button>
+                        <p className="text-xs leading-6 text-dark-400">ربات هویتت را تأیید می‌کند و همین صفحه بعدش خودکار وارد کمد می‌شود.</p>
+                        <div className="mt-4 space-y-2 text-xs text-dark-300">
+                            <div className="flex items-center gap-2"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-primary-500/15 text-primary-200">۱</span><span>دکمهٔ زیر را بزن و ربات را باز کن.</span></div>
+                            <div className="flex items-center gap-2"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-primary-500/15 text-primary-200">۲</span><span>در تلگرام «شروع» یا تأیید ورود را بزن.</span></div>
+                            <div className="flex items-center gap-2"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-primary-500/15 text-primary-200">۳</span><span>به این صفحه برگرد؛ ورود خودکار انجام می‌شود.</span></div>
                         </div>
-                    </div>
-
-                    <div className={`${loginMode === 'telegram' ? 'block' : 'hidden'} relative`}>
-                        <div className="absolute inset-0 flex items-center">
-                            <div className="w-full border-t border-white/[0.06]"></div>
+                        <div className="mt-4"><BotLink code={code}/></div>
+                        <div className="mt-3 flex items-center gap-2 rounded-xl border border-white/[.07] bg-dark-950/45 p-2.5">
+                            <div className="min-w-0 flex-1"><span className="block text-[10px] text-dark-500">کد ورود</span><strong dir="ltr" className="mt-0.5 block font-mono text-lg tracking-[.2em] text-primary-200">{isGenerating?'••••••':code||'------'}</strong></div>
+                            <button type="button" disabled={!code} onClick={() => void navigator.clipboard.writeText(`/login ${code}`)} className="rounded-xl bg-white/[.06] px-3 py-2 text-xs text-dark-200 disabled:opacity-40">کپی دستور</button>
                         </div>
-                        <div className="relative flex justify-center text-xs uppercase">
-                            <span className="bg-dark-900/80 px-3 text-dark-500">یا مستقیم وارد ربات شو</span>
+                        {isPolling&&<div className="mt-3 flex items-center justify-center gap-2 text-xs text-dark-400"><div className="h-2 w-2 animate-pulse rounded-full bg-primary-500"/>منتظر تأیید در تلگرام…</div>}
+                        {error&&<p className="mt-3 rounded-xl bg-red-500/10 px-3 py-2 text-center text-xs leading-6 text-red-300">{error}</p>}
+                        <form onSubmit={handleManualLogin} className="mt-2 text-center"><button type="submit" disabled={code.length<6||isVerifying} className="px-3 py-2 text-[11px] text-dark-500 transition hover:text-primary-200 disabled:opacity-40">{isVerifying?'در حال بررسی…':'بررسی دوباره ورود'}</button></form>
                         </div>
-                    </div>
-
-                    {loginMode === 'telegram' && <BotLink code={code} />}
                 </div>
             </div>
         </div>

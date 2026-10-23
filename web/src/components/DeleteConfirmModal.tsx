@@ -48,7 +48,7 @@ export default function DeleteConfirmModal({ type, name, count = 1, onConfirm, o
                 </div>
 
                 <div className="grid gap-2 sm:grid-cols-2">
-                    <button onClick={() => confirm(true)} disabled={isDeleting} className="min-h-11 rounded-xl bg-red-600 px-4 py-2 font-medium transition-colors hover:bg-red-500 disabled:opacity-50">
+                    <button onClick={() => confirm(true)} disabled={isDeleting} className={`min-h-11 w-full rounded-xl bg-red-600 px-4 py-2 font-medium transition-colors hover:bg-red-500 disabled:opacity-50 ${includesFolder?'':'sm:col-span-2'}`}>
                         {isDeleting ? 'در حال حذف…' : includesFolder ? 'حذف کشو و محتویات' : 'حذف فایل'}
                     </button>
                     {includesFolder && <button onClick={() => confirm(false)} disabled={isDeleting} className="min-h-11 rounded-xl border border-white/10 bg-dark-800 px-4 py-2 font-medium hover:bg-dark-700 disabled:opacity-50">فقط حذف کشو</button>}

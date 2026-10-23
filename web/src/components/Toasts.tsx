@@ -7,7 +7,7 @@ export default function Toasts() {
     const playerVisible = isPlayerMinimized && previewFile && (previewFile.file_type === 'audio' || previewFile.file_type === 'video');
 
     return (
-        <div className={`fixed right-3 z-[160] flex max-w-[calc(100vw-1.5rem)] flex-col gap-2 pointer-events-none md:right-5 ${playerVisible ? 'bottom-[calc(env(safe-area-inset-bottom)+148px)] md:bottom-24' : 'bottom-[calc(env(safe-area-inset-bottom)+72px)] md:bottom-3'}`}>
+        <div className={`pointer-events-none fixed inset-x-3 top-[calc(env(safe-area-inset-top)+.75rem)] z-[320] mx-auto flex max-w-md flex-col gap-2 md:inset-x-auto md:left-5 md:top-auto md:w-[22rem] ${playerVisible ? 'md:bottom-24' : 'md:bottom-5'}`}>
             {toasts.map((toast) => (
                 <ToastItem key={toast.id} toast={toast} onDismiss={() => removeToast(toast.id)} />
             ))}
@@ -22,36 +22,36 @@ function ToastItem({ toast, onDismiss }: { toast: { id: string; message: string;
         setTimeout(onDismiss, 180);
     }, [onDismiss]);
     useEffect(() => {
-        const timer = setTimeout(dismiss, toast.type === 'error' ? 3200 : 2100);
+        const timer = setTimeout(dismiss, toast.type === 'error' ? 4800 : toast.type === 'info' ? 2800 : 2300);
 
         return () => clearTimeout(timer);
     }, [dismiss]);
 
     const getIcon = () => {
         switch (toast.type) {
-            case 'success': return <CheckCircle className="w-5 h-5 text-green-400" />;
-            case 'error': return <AlertCircle className="w-5 h-5 text-red-400" />;
-            default: return <Info className="w-5 h-5 text-blue-400" />;
+            case 'success': return <CheckCircle className="h-4 w-4 text-emerald-300" />;
+            case 'error': return <AlertCircle className="h-4 w-4 text-red-300" />;
+            default: return <Info className="h-4 w-4 text-sky-300" />;
         }
     };
 
     const getBgColor = () => {
          switch (toast.type) {
-            case 'success': return 'border-green-500/20 bg-dark-900/90 shadow-green-900/10';
-            case 'error': return 'border-red-500/20 bg-dark-900/90 shadow-red-900/10';
-            default: return 'border-blue-500/20 bg-dark-900/90 shadow-blue-900/10';
+            case 'success': return 'border-emerald-400/20 bg-dark-900/95';
+            case 'error': return 'border-red-400/25 bg-dark-900/95';
+            default: return 'border-sky-400/20 bg-dark-900/95';
         }
     };
 
     return (
-        <div className={`pointer-events-auto flex items-center gap-3 pl-4 pr-3 py-3 rounded-xl border shadow-xl backdrop-blur-md sm:min-w-[300px] max-w-md transition-all duration-200 ease-out ${leaving ? 'translate-y-2 opacity-0 scale-[.98]' : 'animate-slide-up opacity-100'} ${getBgColor()}`}>
-            {getIcon()}
-            <p className="flex-1 text-sm font-medium text-white">{toast.message}</p>
+        <div dir="rtl" className={`pointer-events-auto flex min-h-12 items-center gap-2.5 rounded-2xl border px-3 py-2.5 shadow-2xl shadow-black/25 backdrop-blur-xl transition-all duration-200 ease-out ${leaving ? '-translate-y-2 opacity-0 scale-[.98] md:translate-y-2' : 'animate-slide-up opacity-100'} ${getBgColor()}`}>
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white/[.05]">{getIcon()}</span>
+            <p className="min-w-0 flex-1 text-right text-xs font-medium leading-6 text-dark-100">{toast.message}</p>
             <button 
                 onClick={dismiss}
-                className="p-1 rounded-lg hover:bg-white/10 text-dark-400 hover:text-white transition-colors"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-dark-500 transition-colors hover:bg-white/[.06] hover:text-white"
             >
-                <X className="w-4 h-4" />
+                <X className="h-3.5 w-3.5" />
             </button>
         </div>
     );

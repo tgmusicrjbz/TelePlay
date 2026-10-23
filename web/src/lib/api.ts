@@ -239,7 +239,8 @@ export interface AuthResponse {
     refresh_token: string;
     user: User;
 }
-export interface CredentialsStatus { enabled: boolean; username?: string | null; }
+export interface CredentialsStatus { enabled: boolean; username?: string | null; two_factor_enabled: boolean; recovery_available: boolean; }
+export interface TwoFactorSetup { secret:string; provisioning_uri:string; setup_token:string; }
 
 export function getKomodDeviceId(): string {
     const storageKey = 'komod-device-id';
@@ -1016,7 +1017,7 @@ export const useLogoutOthers = () => {
 };
 
 export const usePasswordLogin = () => useMutation({
-    mutationFn: async (payload: { username: string; password: string }) => (await api.post<AuthResponse>('/auth/password/login', payload)).data,
+    mutationFn: async (payload: { username: string; password: string; otp?:string }) => (await api.post<AuthResponse>('/auth/password/login', payload)).data,
 });
 
 export const useCredentials = () => useQuery({
@@ -1037,6 +1038,20 @@ export const useUpdateCredentials = () => {
             queryClient.invalidateQueries({ queryKey: ['sessions'] });
         },
     });
+};
+
+export const useSetupTwoFactor = () => useMutation({
+    mutationFn: async () => (await api.post<TwoFactorSetup>('/auth/2fa/setup')).data,
+});
+
+export const useEnableTwoFactor = () => {
+    const queryClient=useQueryClient();
+    return useMutation({mutationFn:async(payload:{setup_token:string;code:string;current_password?:string})=>(await api.post('/auth/2fa/enable',payload)).data,onSuccess:()=>queryClient.invalidateQueries({queryKey:['credentials']})});
+};
+
+export const useDisableTwoFactor = () => {
+    const queryClient=useQueryClient();
+    return useMutation({mutationFn:async(payload:{code?:string;current_password?:string})=>(await api.post('/auth/2fa/disable',payload)).data,onSuccess:()=>queryClient.invalidateQueries({queryKey:['credentials']})});
 };
 
 export const useImportLink = () => useMutation({

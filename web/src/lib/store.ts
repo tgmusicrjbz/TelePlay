@@ -380,8 +380,9 @@ export const useAppStore = create<AppState>((set) => ({
     // Toast Notifications
     toasts: [],
     addToast: (message, type = 'success') => set((state) => {
+        if (state.toasts.some(toast => toast.message === message && toast.type === type)) return state;
         const id = Math.random().toString(36).substring(2, 9);
-        return { toasts: [...state.toasts.slice(-2), { id, message, type }] };
+        return { toasts: [...state.toasts.slice(-1), { id, message, type }] };
     }),
     removeToast: (id) => set((state) => ({
         toasts: state.toasts.filter((t) => t.id !== id),

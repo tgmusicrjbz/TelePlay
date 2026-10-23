@@ -601,20 +601,23 @@ async def import_link(
         raise HTTPException(status_code=503, detail="دانلود از لینک هنوز روی سرور تنظیم نشده است.")
     folder_id = payload.folder_id
     scoped_new_folder = bool(payload.new_folder_name and payload.new_folder_name.strip())
+    if folder_id is not None:
+        folder = (await db.execute(select(Folder).where(Folder.id == folder_id, Folder.user_id == current_user.id))).scalar_one_or_none()
+        if folder is None:
+            # A destination stored by the PWA can outlive a deleted folder. Falling
+            # back here keeps link imports usable on a new or recently cleaned account.
+            folder_id = (await ensure_default_folder(db, current_user.id)).id
+            await db.commit()
     if scoped_new_folder:
-        require_scoped_folder(request, payload.folder_id)
+        require_scoped_folder(request, folder_id)
     if payload.new_folder_name and payload.new_folder_name.strip():
         name = payload.new_folder_name.strip()
-        folder = Folder(user_id=current_user.id, parent_id=payload.folder_id, name=name)
+        folder = Folder(user_id=current_user.id, parent_id=folder_id, name=name)
         db.add(folder)
         await db.commit()
         await db.refresh(folder)
         folder_id = folder.id
-    elif folder_id is not None:
-        folder = (await db.execute(select(Folder).where(Folder.id == folder_id, Folder.user_id == current_user.id))).scalar_one_or_none()
-        if folder is None:
-            raise HTTPException(status_code=404, detail="کشوی مقصد پیدا نشد.")
-    else:
+    elif folder_id is None:
         folder_id = (await ensure_default_folder(db, current_user.id)).id
         await db.commit()
     if not scoped_new_folder:
@@ -654,6 +657,11 @@ async def cancel_import_link(job_id: str, current_user: User = Depends(get_curre
     return status
 
 
+@router.post("/import-link/cancel-all")
+async def cancel_all_import_links(current_user: User = Depends(get_current_user)):
+    return {"cancelled": link_importer.cancel_all(current_user.id)}
+
+
 @router.post("/import-link/status/{job_id}/retry", status_code=202)
 async def retry_import_link(job_id: str, current_user: User = Depends(get_current_user)):
     previous = link_importer.status(job_id, current_user.id)
@@ -691,7 +699,9 @@ async def import_from_google_drive(
         await db.commit()
     else:
         folder=(await db.execute(select(Folder).where(Folder.id==folder_id,Folder.user_id==current_user.id))).scalar_one_or_none()
-        if folder is None: raise HTTPException(status_code=404,detail="کشوی مقصد پیدا نشد.")
+        if folder is None:
+            folder_id=(await ensure_default_folder(db,current_user.id)).id
+            await db.commit()
     require_scoped_folder(request,folder_id)
     job_id=await drive_importer.enqueue(url=payload.url.strip(),file_id=drive_file_id,user_id=current_user.id,folder_id=folder_id)
     return {"job_id":job_id,"message":"انتقال از گوگل درایو شروع شد."}
@@ -770,7 +780,9 @@ async def import_selected_google_drive(payload:DriveSelectionImportRequest,reque
     if folder_id is None: folder_id=(await ensure_default_folder(db,current_user.id)).id; await db.commit()
     else:
         folder=(await db.execute(select(Folder).where(Folder.id==folder_id,Folder.user_id==current_user.id))).scalar_one_or_none()
-        if folder is None: raise HTTPException(status_code=404,detail="کشوی مقصد پیدا نشد.")
+        if folder is None:
+            folder_id=(await ensure_default_folder(db,current_user.id)).id
+            await db.commit()
     require_scoped_folder(request,folder_id)
     if not current_user.google_drive_credentials_encrypted: raise HTTPException(status_code=401,detail="اول حساب گوگل را متصل کن.")
     jobs=[]
@@ -799,6 +811,11 @@ async def cancel_google_drive_import(job_id: str,current_user: User = Depends(ge
     if status is None: raise HTTPException(status_code=404,detail="وضعیت این انتقال پیدا نشد.")
     await update_job(job_id,status)
     return status
+
+
+@router.post("/import-drive/cancel-all")
+async def cancel_all_google_drive_imports(current_user: User = Depends(get_current_user)):
+    return {"cancelled":await drive_importer.cancel_all(current_user.id)}
 
 
 @router.delete("/import-drive/status")
