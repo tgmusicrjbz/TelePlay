@@ -210,9 +210,9 @@ export default function GlobalContextMenu() {
 
     const file = activeContextMenu.type === 'file' ? activeContextMenu.item as TelegramFile : null;
     const folder = activeContextMenu.type === 'folder' ? activeContextMenu.item as Folder : null;
-    const previewable = Boolean(file && (file.file_type === 'image' || canPreviewText(file)));
+    const previewable = Boolean(file && (file.file_type === 'image' || file.file_type === 'document' || canPreviewText(file)));
     const playable = Boolean(file && (file.file_type === 'video' || file.file_type === 'audio'));
-    const previewLabel = file?.file_type === 'image' ? 'نمایش عکس' : 'پیش‌نمایش';
+    const previewLabel = file?.file_type === 'image' ? 'نمایش عکس' : file?.file_type === 'document' ? 'باز کردن فایل' : 'پیش‌نمایش';
 
     return <>
         <div className={`fixed inset-0 z-[99998] ${isMobile ? 'bg-black/60 backdrop-blur-sm' : ''}`} onClick={event => { event.stopPropagation(); setActiveContextMenu(null); }}/>

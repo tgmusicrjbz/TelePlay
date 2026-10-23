@@ -803,7 +803,7 @@ export default function FileBrowser() {
             const queue = (displayFiles || []).filter(item => item.file_type === 'video' || item.file_type === 'audio');
             const index = queue.findIndex(item => item.id === file.id);
             startQueue(queue.length ? queue : [file], Math.max(0, index));
-        } else if (file.file_type === 'image' || canPreviewText(file)) {
+        } else if (file.file_type === 'image' || file.file_type === 'document' || canPreviewText(file)) {
             setContentPreviewFile(file);
         }
     };

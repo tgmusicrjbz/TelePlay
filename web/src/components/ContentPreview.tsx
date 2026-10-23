@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlignCenter, AlignJustify, AlignLeft, AlignRight, ArrowRight, Bold, BookOpen, Braces, Check, ChevronLeft, ChevronRight, Code2, Copy, Heading1, Image as ImageIcon, Italic, Link, Link2, List, ListChecks, ListOrdered, Maximize2, Minimize2, Minus, Moon, MoveHorizontal, Pencil, Plus, Quote, Redo2, Settings2, Sigma, Sparkles, Strikethrough, Sun, Table2, Underline, Undo2, Wand2, WrapText, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { AlignCenter, AlignJustify, AlignLeft, AlignRight, ArrowRight, Bold, BookOpen, Braces, Check, ChevronLeft, ChevronRight, Code2, Copy, Download, ExternalLink, FileBox, Heading1, Image as ImageIcon, Italic, Link, Link2, List, ListChecks, ListOrdered, Maximize2, Minimize2, Minus, Moon, MoveHorizontal, Pencil, Plus, Quote, Redo2, Settings2, Share2, Sigma, Sparkles, Strikethrough, Sun, Table2, Underline, Undo2, Wand2, WrapText, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { api, canPreviewText, useFiles, useRefineSTTText } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { cacheTextFile, getOfflineText, updateOfflineTextDraft } from '../lib/offline';
@@ -25,6 +25,7 @@ export default function ContentPreview() {
     const [imageScale, setImageScale] = useState(1);
     const [imageQuality,setImageQuality]=useState<'optimized'|'original'>('optimized');
     const [imageDescriptionExpanded, setImageDescriptionExpanded] = useState(false);
+    const [openingExternal,setOpeningExternal]=useState(false);
     const [readerFullscreen, setReaderFullscreen] = useState(false);
     const initialMarkdown=useRef<MarkdownSettings>(getMarkdownSettings());
     const [readerFontSize, setReaderFontSize] = useState(initialMarkdown.current.fontSize);
@@ -49,7 +50,7 @@ export default function ContentPreview() {
     const editorRef = useRef<HTMLTextAreaElement>(null);
     // A delayed initial fetch must never replace a locally saved version.
     const textLoadVersionRef = useRef(0);
-    const show = !!file && (file.file_type === 'image' || canPreviewText(file));
+    const show = !!file && file.file_type !== 'audio' && file.file_type !== 'video';
     const {data:imageLibrary}=useFiles(undefined,'image','',1,'created:desc');
     const imageItems=imageLibrary?.files||[];
     const imageIndex=file?.file_type==='image'?imageItems.findIndex(item=>item.id===file.id):-1;
@@ -83,7 +84,7 @@ export default function ContentPreview() {
     }, []);
 
     useEffect(() => {
-        if (!show || !file || file.file_type === 'image') return;
+        if (!show || !file || !canPreviewText(file)) return;
         let cancelled = false;
         const loadVersion = ++textLoadVersionRef.current;
         setLoading(true);
@@ -138,6 +139,30 @@ export default function ContentPreview() {
     const url = imageRetry && !isBlob ? `${authorizedUrl}&retry=${imageRetry}` : authorizedUrl;
     const thumbnailUrl=file.thumbnail_url?(file.thumbnail_url.startsWith('blob:')?file.thumbnail_url:`${file.thumbnail_url}${file.thumbnail_url.includes('?')?'&':'?'}token=${encodeURIComponent(token||'')}`):'';
     const selectedImageUrl=imageQuality==='original'||!thumbnailUrl?url:thumbnailUrl;
+    const downloadExternalFile=()=>{
+        const anchor=document.createElement('a');
+        anchor.href=`${authorizedUrl}${authorizedUrl.includes('?')?'&':'?'}download=1`;
+        anchor.download=file.file_name;
+        anchor.target='_blank';
+        anchor.rel='noopener noreferrer';
+        document.body.appendChild(anchor);anchor.click();anchor.remove();
+    };
+    const openExternalFile=()=>window.open(authorizedUrl,'_blank','noopener,noreferrer');
+    const openWithDevice=async()=>{
+        setOpeningExternal(true);
+        try{
+            const response=await fetch(authorizedUrl);
+            if(!response.ok)throw new Error('دریافت فایل انجام نشد.');
+            const blob=await response.blob();
+            const sharedFile=new File([blob],file.file_name,{type:file.mime_type||blob.type||'application/octet-stream'});
+            const sharePayload={files:[sharedFile],title:file.file_name};
+            if(navigator.share&&(!navigator.canShare||navigator.canShare(sharePayload))){await navigator.share(sharePayload);return;}
+            openExternalFile();
+            addToast('فایل در مرورگر باز شد؛ از منوی مرورگر برنامهٔ موردنظرت را انتخاب کن.','info');
+        }catch(reason:any){
+            if(reason?.name!=='AbortError'){openExternalFile();addToast(reason?.message||'انتخاب برنامه انجام نشد؛ فایل در مرورگر باز شد.','info');}
+        }finally{setOpeningExternal(false)}
+    };
     const saveText = async () => {
         setSaving(true);
         try {
@@ -207,7 +232,7 @@ export default function ContentPreview() {
                     </div>
                     <div className="flex shrink-0 items-center gap-1">
                         {contentPreviewHistory.length>0&&<button onClick={goBackContentPreview} className="flex min-h-9 items-center gap-1.5 rounded-xl bg-primary-500/12 px-2.5 text-xs text-primary-200" title="برگشت به متن قبلی"><ArrowRight className="h-4 w-4"/><span className="hidden sm:inline">برگشت به متن</span></button>}
-                        {file.file_type !== 'image' && <><button onClick={openAIEditor} disabled={file.id<0||loading} className="btn-icon text-primary-200 disabled:opacity-30" title="ویرایش با هوش مصنوعی"><Sparkles className="h-5 w-5"/></button><button onClick={()=>setReaderToolsVisible(value=>!value)} className={`btn-icon ${readerToolsVisible?'text-primary-200':''}`} title={readerToolsVisible?'مخفی‌کردن تنظیمات مطالعه':'نمایش تنظیمات مطالعه'}><Settings2 className="h-5 w-5"/></button><button onClick={async () => { await navigator.clipboard.writeText(editing ? draft : content); addToast('متن کپی شد 📋'); }} className="btn-icon" title="کپی متن"><Copy className="h-5 w-5" /></button><button onClick={() => setEditing(value => !value)} className={`btn-secondary flex shrink-0 items-center gap-2 px-3 py-2 text-xs ${editing?'text-primary-200':''}`} title={editing?'حالت مطالعه':'ویرایش متن'}>{editing?<BookOpen className="h-4 w-4"/>:<Pencil className="h-4 w-4"/>}<span className="hidden sm:inline">{editing?'مطالعه':'ویرایش'}</span></button><button onClick={() => void toggleReaderFullscreen()} className="btn-icon" title={readerFullscreen ? 'خروج از تمام‌صفحه' : 'مطالعه در تمام‌صفحه'}>{readerFullscreen ? <Minimize2 className="h-5 w-5"/> : <Maximize2 className="h-5 w-5"/>}</button></>}
+                        {canPreviewText(file) && <><button onClick={openAIEditor} disabled={file.id<0||loading} className="btn-icon text-primary-200 disabled:opacity-30" title="ویرایش با هوش مصنوعی"><Sparkles className="h-5 w-5"/></button><button onClick={()=>setReaderToolsVisible(value=>!value)} className={`btn-icon ${readerToolsVisible?'text-primary-200':''}`} title={readerToolsVisible?'مخفی‌کردن تنظیمات مطالعه':'نمایش تنظیمات مطالعه'}><Settings2 className="h-5 w-5"/></button><button onClick={async () => { await navigator.clipboard.writeText(editing ? draft : content); addToast('متن کپی شد 📋'); }} className="btn-icon" title="کپی متن"><Copy className="h-5 w-5" /></button><button onClick={() => setEditing(value => !value)} className={`btn-secondary flex shrink-0 items-center gap-2 px-3 py-2 text-xs ${editing?'text-primary-200':''}`} title={editing?'حالت مطالعه':'ویرایش متن'}>{editing?<BookOpen className="h-4 w-4"/>:<Pencil className="h-4 w-4"/>}<span className="hidden sm:inline">{editing?'مطالعه':'ویرایش'}</span></button><button onClick={() => void toggleReaderFullscreen()} className="btn-icon" title={readerFullscreen ? 'خروج از تمام‌صفحه' : 'مطالعه در تمام‌صفحه'}>{readerFullscreen ? <Minimize2 className="h-5 w-5"/> : <Maximize2 className="h-5 w-5"/>}</button></>}
                         <button onClick={() => setContentPreviewFile(null)} className="btn-icon" title="بستن"><X className="w-5 h-5" /></button>
                     </div>
                 </header>
@@ -216,7 +241,7 @@ export default function ContentPreview() {
                         {imageFailed ? <div className="mx-auto rounded-2xl border border-dashed border-white/10 p-8 text-center"><p className="text-sm text-dark-400">نمایش عکس انجام نشد.</p><button className="btn-secondary mt-4" onClick={() => { setImageFailed(false); setImageRetry(Date.now()); }}>تلاش دوباره</button></div> : <div className="h-full min-h-[45vh] w-full"><ZoomableImage key={selectedImageUrl} src={selectedImageUrl} previewSrc={imageQuality==='original'?thumbnailUrl:''} alt={file.file_name} scale={imageScale} onScaleChange={setImageScale}/></div>}
                         <div className="absolute inset-x-2 bottom-2 mx-auto w-auto max-w-2xl overflow-hidden rounded-2xl border border-white/10 bg-dark-900/90 p-2 shadow-2xl backdrop-blur-xl sm:inset-x-4"><div className="overflow-hidden"><div className="mx-auto flex min-w-0 items-center justify-center gap-0.5">{imageItems.length>1&&<button disabled={imageIndex<=0} onClick={()=>showImageAt(imageIndex-1)} className="btn-icon shrink-0 disabled:opacity-25" title="عکس قبلی"><ChevronRight className="h-5 w-5"/></button>}<button onClick={()=>setImageScale(value=>Math.max(1,Number((value-.25).toFixed(2))))} className="btn-icon shrink-0" title="کوچک‌نمایی"><ZoomOut className="h-5 w-5"/></button><span dir="ltr" className="min-w-12 shrink-0 text-center text-xs text-dark-300">{Math.round(imageScale*100)}%</span><button onClick={()=>setImageScale(value=>Math.min(6,Number((value+.25).toFixed(2))))} className="btn-icon shrink-0" title="بزرگ‌نمایی"><ZoomIn className="h-5 w-5"/></button>{thumbnailUrl&&<button onClick={()=>{setImageFailed(false);setImageScale(1);setImageQuality(value=>value==='original'?'optimized':'original')}} className={`btn-icon h-8 w-8 shrink-0 ${imageQuality==='original'?'bg-primary-500/15 text-primary-200':'text-dark-300'}`} title={imageQuality==='original'?'نمایش نسخه بهینه':'نمایش کیفیت اصلی'}><ImageIcon className="h-4 w-4"/></button>}<button onClick={() => void toggleReaderFullscreen()} className="btn-icon shrink-0" title={readerFullscreen?'خروج از تمام‌صفحه':'تمام‌صفحه'}>{readerFullscreen?<Minimize2 className="h-5 w-5"/>:<Maximize2 className="h-5 w-5"/>}</button>{imageItems.length>1&&<button disabled={imageIndex<0||imageIndex>=imageItems.length-1} onClick={()=>showImageAt(imageIndex+1)} className="btn-icon shrink-0 disabled:opacity-25" title="عکس بعدی"><ChevronLeft className="h-5 w-5"/></button>}</div></div>{file.description&&<button dir="auto" onClick={()=>setImageDescriptionExpanded(true)} className="mt-1 w-full border-t border-white/[.07] px-2 pt-2 text-right text-xs leading-6 text-dark-300"><span className="line-clamp-2"><MarkdownInline content={file.description}/></span><span className="mr-1 text-primary-300">بیشتر</span></button>}</div>
                     </div>
-                ) : (
+                ) : canPreviewText(file) ? (
                     <>
                         {readerToolsVisible&&<div className="flex shrink-0 items-center gap-2 overflow-x-auto overscroll-x-contain border-b border-white/[.06] bg-dark-950/70 px-3 py-2 sm:flex-wrap sm:px-5">
                             <div className="min-w-40 shrink-0"><CustomSelect value={readerFont} onChange={setReaderFont} options={readerFonts}/></div>
@@ -241,6 +266,20 @@ export default function ContentPreview() {
                             {loading ? <p className="text-dark-400">در حال بارگذاری متن…</p> : error ? <p className="text-red-400">{error}</p> : editing ? <div className={`mx-auto ${readerWide?'max-w-none':'max-w-5xl'}`}><div className="markdown-editor-toolbar mb-2 grid grid-cols-6 gap-1 rounded-2xl border p-1.5 sm:flex sm:flex-wrap"><EditorTool title="سرتیتر" onClick={()=>insertMarkdown('# ','','عنوان',true)}><Heading1/></EditorTool><EditorTool title="بولد" onClick={()=>insertMarkdown('**','**')}><Bold/></EditorTool><EditorTool title="ایتالیک" onClick={()=>insertMarkdown('*','*')}><Italic/></EditorTool><EditorTool title="زیرخط" onClick={()=>insertMarkdown('<u>','</u>')}><Underline/></EditorTool><EditorTool title="خط‌خورده" onClick={()=>insertMarkdown('~~','~~')}><Strikethrough/></EditorTool><EditorTool title="کد کوتاه" onClick={()=>insertMarkdown('`','`','code')}><Code2/></EditorTool><EditorTool title="کدبلاک" onClick={()=>insertMarkdown('```\n','\n```','code',true)}><Code2/></EditorTool><EditorTool title="فرمول ریاضی" onClick={()=>insertMarkdown('$','$','x^2 + y^2')}><Sigma/></EditorTool><EditorTool title="متغیر" onClick={()=>insertMarkdown('{{','}}','نام_متغیر')}><Braces/></EditorTool><EditorTool title="لینک وب" onClick={()=>insertMarkdown('[','](https://)','عنوان لینک')}><Link/></EditorTool><EditorTool title="لینک به فایل کمد" onClick={()=>setShowInternalLinkPicker(true)}><Link2/></EditorTool><EditorTool title="تصویر" onClick={()=>insertMarkdown('![','](https://)','توضیح تصویر')}><ImageIcon/></EditorTool><EditorTool title="نقل‌قول" onClick={()=>insertMarkdown('> ','','متن نقل‌قول',true)}><Quote/></EditorTool><EditorTool title="فهرست" onClick={()=>insertMarkdown('- ','','مورد',true)}><List/></EditorTool><EditorTool title="فهرست شماره‌ای" onClick={()=>insertMarkdown('1. ','','مورد',true)}><ListOrdered/></EditorTool><EditorTool title="چک‌لیست" onClick={()=>insertMarkdown('- [ ] ','','کار',true)}><ListChecks/></EditorTool><EditorTool title="خط جداکننده" onClick={()=>insertTemplate('---\n')}><Minus/></EditorTool><EditorTool title="جدول" onClick={()=>insertTemplate('| ستون ۱ | ستون ۲ |\n| --- | --- |\n| مقدار ۱ | مقدار ۲ |\n')}><Table2/></EditorTool></div><textarea ref={editorRef} dir="auto" value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='b'){event.preventDefault();insertMarkdown('**','**')}if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='i'){event.preventDefault();insertMarkdown('*','*')}}} className={`markdown-editor markdown-font--${readerFont} min-h-[65vh] w-full resize-y rounded-2xl border p-4 caret-primary-300 outline-none selection:bg-primary-500/30 focus:border-primary-400`} style={{ fontSize: readerFontSize, lineHeight: readerLineHeight }}/><div className="mt-3 flex justify-end gap-2"><button className="btn-secondary" onClick={() => { setDraft(content); setEditing(false); }}>لغو</button><button disabled={saving} className="btn-primary flex items-center gap-2" onClick={() => void saveText()}><Check className="h-4 w-4"/> {saving ? 'در حال ذخیره…' : 'ذخیره متن'}</button></div></div> : <MarkdownContent content={content} fontSize={readerFontSize} lineHeight={readerLineHeight} theme={readerTone} fontFamily={readerFont} wrap={readerWrap} wide={readerWide} align={readerAlign} />}
                         </div>
                     </>
+                ) : (
+                    <div className="flex min-h-[26rem] flex-1 items-center justify-center overflow-y-auto p-4 sm:p-8" dir="rtl">
+                        <div className="w-full max-w-lg rounded-3xl border border-white/[.08] bg-dark-950/35 p-5 text-center shadow-inner sm:p-8">
+                            <span className="mx-auto flex h-20 w-20 items-center justify-center rounded-3xl border border-primary-400/20 bg-primary-500/10 text-primary-200"><FileBox className="h-10 w-10"/></span>
+                            <h3 dir="auto" className="mt-5 break-words text-lg font-bold">{file.file_name}</h3>
+                            <p className="mt-2 text-sm leading-7 text-dark-400">این فایل داخل مرورگر پیش‌نمایش مستقیمی ندارد. می‌توانی آن را با برنامه‌های نصب‌شده روی دستگاه باز کنی.</p>
+                            <div className="mt-6 grid gap-2 sm:grid-cols-2">
+                                <button disabled={openingExternal} onClick={()=>void openWithDevice()} className="btn-primary flex min-h-12 items-center justify-center gap-2 disabled:opacity-50"><Share2 className="h-4 w-4"/>{openingExternal?'در حال آماده‌سازی…':'باز کردن با برنامه دستگاه'}</button>
+                                <button onClick={openExternalFile} className="btn-secondary flex min-h-12 items-center justify-center gap-2"><ExternalLink className="h-4 w-4"/>باز کردن در مرورگر</button>
+                                <button onClick={downloadExternalFile} className="btn-secondary flex min-h-11 items-center justify-center gap-2 sm:col-span-2"><Download className="h-4 w-4"/>دانلود فایل</button>
+                            </div>
+                            <p className="mt-4 text-[11px] leading-6 text-dark-500">نمایش فهرست برنامه‌ها به مرورگر و سیستم‌عامل دستگاه بستگی دارد.</p>
+                        </div>
+                    </div>
                 )}
             </section>
             {showInternalLinkPicker&&<InternalFileLinkPicker onClose={()=>setShowInternalLinkPicker(false)} onSelect={linkedFile=>{insertMarkdown('[',`](komod://file/${linkedFile.id})`,linkedFile.file_name);setShowInternalLinkPicker(false)}}/>}

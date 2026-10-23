@@ -50,6 +50,16 @@
 .markdown-font--mono { font-family: "JetBrains Mono", Consolas, monospace !important; }
 .markdown-editor-toolbar { border-color: rgb(255 255 255 / .08); background: #121722; }
 .markdown-editor { border-color: rgb(255 255 255 / .1); background: #0f131c; color: #f1f5f9; }
+.syntax-highlight .syntax-comment { color: #6a9955; font-style: italic; }
+.syntax-highlight .syntax-keyword { color: #c586c0; font-weight: 600; }
+.syntax-highlight .syntax-string { color: #ce9178; }
+.syntax-highlight .syntax-number { color: #b5cea8; }
+.syntax-highlight .syntax-constant { color: #569cd6; }
+.syntax-highlight .syntax-function { color: #dcdcaa; }
+.syntax-highlight .syntax-property { color: #9cdcfe; }
+.syntax-highlight .syntax-tag { color: #569cd6; }
+.syntax-highlight .syntax-attribute { color: #9cdcfe; }
+.syntax-highlight .syntax-operator { color: #d4d4d4; }
 
 @keyframes pack-swipe-next {
   from { opacity: 0; transform: translateX(-12%) scale(.975); filter: blur(2px); }
