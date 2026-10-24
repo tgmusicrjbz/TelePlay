@@ -14,6 +14,7 @@ _PLACEHOLDER_ALIASES = {
     "پلتفرم": "platform", "platform": "platform",
     "نوع": "media_type", "نوع فایل": "media_type", "type": "media_type",
     "کیفیت": "quality", "quality": "quality",
+    "توضیحات": "description", "متن": "description", "caption": "description", "description": "description",
 }
 
 

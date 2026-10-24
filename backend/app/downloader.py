@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import logging
 from pathlib import Path
@@ -22,7 +22,7 @@ from sqlalchemy import select
 from .auth import create_access_token
 from .config import get_settings
 from .database import async_session
-from .models import File, Folder, User
+from .models import AppSetting, File, Folder, TelegramDestination, User
 from .link_captions import render_link_caption
 from .processing_jobs import create_job, delete_finished_jobs, delete_job, load_jobs, update_job
 from .services import sanitize_filename, select_best_thumbnail
@@ -47,29 +47,50 @@ class ImportJob:
     default_folder: bool = False
     save_to_library: bool = True
     send_to_telegram: bool = False
+    destination_ids: list[int] = field(default_factory=list)
     retry_count: int = 0
     id: str = ""
 
 
+def _clean_source_author(value: object) -> str | None:
+    author = re.sub(r"\s+", " ", str(value or "")).strip(" -–—|\n\r\t")
+    lowered = author.casefold().lstrip("@")
+    if not author or any(marker in lowered for marker in ("allsaver", "all saver", "download bot")):
+        return None
+    return author[:180]
+
+
 def _oembed_metadata(url: str) -> tuple[str, str | None]:
-    if "youtu" not in url.lower():
-        return "instagram", None
-    endpoints = (
-        "https://www.youtube.com/oembed?" + urlencode({"url": url, "format": "json"}),
-        "https://noembed.com/embed?" + urlencode({"url": url}),
-    )
+    is_youtube = "youtu" in url.lower()
+    endpoints = ["https://noembed.com/embed?" + urlencode({"url": url})]
+    if is_youtube:
+        endpoints.insert(0, "https://www.youtube.com/oembed?" + urlencode({"url": url, "format": "json"}))
     for endpoint in endpoints:
         try:
             request = Request(endpoint, headers={"User-Agent": "Mozilla/5.0 Komod/1.0", "Accept": "application/json"})
             with urlopen(request, timeout=10) as response:
                 payload = json.loads(response.read().decode("utf-8"))
                 title = str(payload.get("title") or "").strip()
-                author = str(payload.get("author_name") or "").strip() or None
+                author = _clean_source_author(payload.get("author_name"))
                 if title:
                     return title, author
         except Exception:
-            logger.debug("Could not resolve YouTube title from %s", endpoint, exc_info=True)
-    return "youtube", None
+            logger.debug("Could not resolve link metadata from %s", endpoint, exc_info=True)
+    # yt-dlp exposes the real uploader/channel for both YouTube and many
+    # Instagram URLs. It is deliberately metadata-only and downloads no file.
+    try:
+        from yt_dlp import YoutubeDL
+        with YoutubeDL({"quiet": True, "no_warnings": True, "skip_download": True, "extract_flat": True}) as downloader:
+            info = downloader.extract_info(url, download=False) or {}
+        title = str(info.get("title") or info.get("description") or "").strip().splitlines()[0][:300]
+        author = _clean_source_author(
+            info.get("uploader") or info.get("channel") or info.get("creator") or info.get("uploader_id")
+        )
+        if title:
+            return title, author
+    except Exception:
+        logger.debug("Could not resolve metadata with yt-dlp for %s", url, exc_info=True)
+    return ("youtube" if is_youtube else "instagram"), None
 
 
 def _youtube_playlist_entries(url: str) -> tuple[str | None, list[dict[str, str]]]:
@@ -175,6 +196,7 @@ class LinkImportService:
                 default_folder=bool(payload.get("default_folder", False)),
                 save_to_library=bool(payload.get("save_to_library", True)),
                 send_to_telegram=bool(payload.get("send_to_telegram", False)),
+                destination_ids=[int(value) for value in payload.get("destination_ids", []) if str(value).isdigit()],
                 retry_count=int(status.get("retry_count") or 0), id=job_id,
             )
             status.update(state="queued", message="ادامه پس از راه‌اندازی دوباره", progress=0)
@@ -206,7 +228,8 @@ class LinkImportService:
             payload={"id": job.id, "url": job.url, "user_id": job.user_id,
                      "telegram_id": job.telegram_id, "folder_id": job.folder_id,
                      "quality": job.quality, "notify": job.notify, "default_folder": job.default_folder,
-                     "save_to_library": job.save_to_library, "send_to_telegram": job.send_to_telegram},
+                     "save_to_library": job.save_to_library, "send_to_telegram": job.send_to_telegram,
+                     "destination_ids": job.destination_ids},
             status=self.statuses[job.id],
         )
         self.durable_job_ids.add(job.id)
@@ -461,8 +484,9 @@ class LinkImportService:
                     inferred_author = source_author
                     if not inferred_author and caption:
                         first_line = caption.splitlines()[0].strip()
-                        if first_line and len(first_line) <= 120 and not first_line.startswith("http"):
-                            inferred_author = first_line
+                        candidate = _clean_source_author(first_line)
+                        if candidate and len(candidate) <= 120 and not candidate.startswith("http"):
+                            inferred_author = candidate
                     found.append({"message": message, "title": title, "type": kind, "author": inferred_author})
                     received_now += 1
             if received_now:
@@ -602,7 +626,12 @@ class LinkImportService:
                 if media is None:
                     continue
                 is_youtube = "youtu" in (item.get("source_url") or job.url).lower()
-                caption_template = user.youtube_caption_template if is_youtube else user.instagram_caption_template
+                global_key = "caption_template_youtube" if is_youtube else "caption_template_instagram"
+                global_template = await db.get(AppSetting, global_key)
+                caption_template = (
+                    global_template.value if global_template and global_template.value.strip()
+                    else user.youtube_caption_template if is_youtube else user.instagram_caption_template
+                )
                 description = render_link_caption(
                     caption_template,
                     title=item.get("title"), author=item.get("author"),
@@ -636,12 +665,34 @@ class LinkImportService:
     async def _send_to_user(self, job: ImportJob, files: list[File]) -> None:
         if telegram.tg_client is None:
             raise RuntimeError("ربات برای ارسال فایل در دسترس نیست")
+        chat_ids: list[int] = []
+        if job.destination_ids:
+            async with async_session() as db:
+                destinations = (await db.execute(select(TelegramDestination).where(
+                    TelegramDestination.id.in_(job.destination_ids),
+                    TelegramDestination.user_id == job.user_id,
+                    TelegramDestination.enabled.is_(True),
+                ))).scalars().all()
+                chat_ids = [destination.chat_id for destination in destinations]
+        elif job.send_to_telegram:
+            async with async_session() as db:
+                destination = (await db.execute(select(TelegramDestination).where(
+                    TelegramDestination.user_id == job.user_id,
+                    TelegramDestination.enabled.is_(True),
+                    TelegramDestination.is_default.is_(True),
+                ))).scalars().first()
+                if destination is not None:
+                    chat_ids = [destination.chat_id]
+        if not chat_ids:
+            chat_ids = [job.telegram_id]
         for file in files:
-            await telegram.tg_client.copy_message(
-                chat_id=job.telegram_id,
-                from_chat_id=file.storage_channel_id,
-                message_id=file.channel_message_id,
-            )
+            for chat_id in dict.fromkeys(chat_ids):
+                await telegram.copy_message_balanced(
+                    chat_id=chat_id,
+                    from_chat_id=file.storage_channel_id,
+                    message_id=file.channel_message_id,
+                    caption=file.description or "",
+                )
 
     async def _discard_library_copies(self, files: list[File]) -> None:
         """Remove temporary storage records after Telegram-only delivery."""

@@ -104,6 +104,65 @@ class BotUserState(Base):
     )
 
 
+class AppSetting(Base):
+    """Small server-wide settings editable by administrators."""
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(120), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
+class TelegramDestination(Base):
+    """A reusable Telegram person, group, or channel destination."""
+    __tablename__ = "telegram_destinations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    chat_type: Mapped[str] = mapped_column(String(24), default="unknown", nullable=False)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "chat_id", name="uq_telegram_destination_user_chat"),
+    )
+
+
+class SourceMonitor(Base):
+    """A scheduled source check that can route new entries to Telegram."""
+    __tablename__ = "source_monitors"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    source_type: Mapped[str] = mapped_column(String(24), nullable=False)
+    source_url: Mapped[str] = mapped_column(Text, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    interval_minutes: Mapped[int] = mapped_column(Integer, default=60, nullable=False)
+    run_at: Mapped[Optional[str]] = mapped_column(String(5))
+    filters_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    actions_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    last_cursor: Mapped[Optional[str]] = mapped_column(Text)
+    last_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    last_error: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
 class TTSVoicePreview(Base):
     """A server-wide cached voice sample shared by every user."""
     __tablename__ = "tts_voice_previews"

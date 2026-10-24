@@ -20,7 +20,8 @@ from sqlalchemy.orm import selectinload
 
 from .config import get_settings
 from .database import async_session
-from .models import File, User
+from .models import AppSetting, File, User
+from .link_captions import render_link_caption
 from .processing_jobs import create_job, delete_finished_jobs, delete_job, update_job
 from .services import sanitize_filename, select_best_thumbnail
 from . import telegram
@@ -186,11 +187,13 @@ class GoogleDriveImporter:
                     user=await db.get(User,user_id)
                     if user is None: raise RuntimeError("حساب کاربر پیدا نشد.")
                     duplicate=(await db.execute(select(File).where(File.user_id==user_id,File.content_hash==digest).order_by(File.id))).scalars().first()
+                    template_row=await db.get(AppSetting,"caption_template_drive")
+                    description=render_link_caption(template_row.value if template_row else "☁️ [عنوان]",title=Path(filename).stem,platform="گوگل درایو",media_type=file_type) or "☁️ افزوده‌شده از گوگل درایو"
                     if duplicate is not None:
-                        stored=File(user_id=user_id,folder_id=folder_id,file_id=duplicate.file_id,file_unique_id=duplicate.file_unique_id,channel_message_id=duplicate.channel_message_id,storage_channel_id=duplicate.storage_channel_id,file_name=filename,description="☁️ افزوده‌شده از گوگل درایو",search_text=duplicate.search_text,content_hash=digest,is_shortcut=True,file_size=duplicate.file_size,mime_type=duplicate.mime_type,file_type=duplicate.file_type,duration=duplicate.duration,width=duplicate.width,height=duplicate.height,thumbnail_file_id=duplicate.thumbnail_file_id,audio_variant_file_id=duplicate.audio_variant_file_id,audio_variant_unique_id=duplicate.audio_variant_unique_id,audio_variant_message_id=duplicate.audio_variant_message_id,audio_variant_storage_channel_id=duplicate.audio_variant_storage_channel_id,audio_variant_size=duplicate.audio_variant_size,compatible_video_file_id=duplicate.compatible_video_file_id,compatible_video_unique_id=duplicate.compatible_video_unique_id,compatible_video_message_id=duplicate.compatible_video_message_id,compatible_video_storage_channel_id=duplicate.compatible_video_storage_channel_id,compatible_video_size=duplicate.compatible_video_size)
+                        stored=File(user_id=user_id,folder_id=folder_id,file_id=duplicate.file_id,file_unique_id=duplicate.file_unique_id,channel_message_id=duplicate.channel_message_id,storage_channel_id=duplicate.storage_channel_id,file_name=filename,description=description,search_text=duplicate.search_text,content_hash=digest,is_shortcut=True,file_size=duplicate.file_size,mime_type=duplicate.mime_type,file_type=duplicate.file_type,duration=duplicate.duration,width=duplicate.width,height=duplicate.height,thumbnail_file_id=duplicate.thumbnail_file_id,audio_variant_file_id=duplicate.audio_variant_file_id,audio_variant_unique_id=duplicate.audio_variant_unique_id,audio_variant_message_id=duplicate.audio_variant_message_id,audio_variant_storage_channel_id=duplicate.audio_variant_storage_channel_id,audio_variant_size=duplicate.audio_variant_size,compatible_video_file_id=duplicate.compatible_video_file_id,compatible_video_unique_id=duplicate.compatible_video_unique_id,compatible_video_message_id=duplicate.compatible_video_message_id,compatible_video_storage_channel_id=duplicate.compatible_video_storage_channel_id,compatible_video_size=duplicate.compatible_video_size)
                     else:
                         target_channel=user.storage_channel_id or settings.telegram_storage_channel_id
-                        common={"chat_id":target_channel,"caption":"☁️ افزوده‌شده از گوگل درایو","parse_mode":None}
+                        common={"chat_id":target_channel,"caption":description,"parse_mode":None}
                         try:
                             if file_type=="video": sent=await telegram.tg_client.send_video(video=path,supports_streaming=True,**common)
                             elif file_type=="audio": sent=await telegram.tg_client.send_audio(audio=path,**common)
@@ -202,7 +205,7 @@ class GoogleDriveImporter:
                         if media is None: raise RuntimeError("ذخیره فایل در کمد کامل نشد.")
                         thumb=select_best_thumbnail(getattr(media,"thumbs",None))
                         search_text=Path(path).read_text("utf-8",errors="replace") if file_type=="text" and file_size<=1024*1024 else None
-                        stored=File(user_id=user_id,folder_id=folder_id,file_id=media.file_id,file_unique_id=media.file_unique_id,channel_message_id=sent.id,storage_channel_id=target_channel,file_name=filename,description="☁️ افزوده‌شده از گوگل درایو",search_text=search_text,content_hash=digest,file_size=media.file_size or file_size,mime_type=getattr(media,"mime_type",None) or mime,file_type=file_type,duration=getattr(media,"duration",None),width=getattr(media,"width",None),height=getattr(media,"height",None),thumbnail_file_id=thumb.file_id if thumb else None)
+                        stored=File(user_id=user_id,folder_id=folder_id,file_id=media.file_id,file_unique_id=media.file_unique_id,channel_message_id=sent.id,storage_channel_id=target_channel,file_name=filename,description=description,search_text=search_text,content_hash=digest,file_size=media.file_size or file_size,mime_type=getattr(media,"mime_type",None) or mime,file_type=file_type,duration=getattr(media,"duration",None),width=getattr(media,"width",None),height=getattr(media,"height",None),thumbnail_file_id=thumb.file_id if thumb else None)
                     db.add(stored); await db.commit(); await db.refresh(stored)
                     self._set(job_id,state="done",message=f"{filename} به کمد اضافه شد",progress=100,file_id=stored.id,finished_at=datetime.utcnow().isoformat())
         except asyncio.CancelledError:

@@ -475,6 +475,7 @@ class TTSJob:
     folder_id: int | None
     preferences: dict
     output_mode: str = "save"
+    output_chat_id: int | None = None
     api_keys: list[str] | None = None
     id: str = ""
 
@@ -532,6 +533,7 @@ class TTSQueue:
                 folder_id=payload.get("folder_id"),
                 preferences=dict(payload.get("preferences") or {}),
                 output_mode=str(payload.get("output_mode") or "save"),
+                output_chat_id=payload.get("output_chat_id"),
                 api_keys=decrypt_user_keys(user.gemini_api_keys_encrypted),
                 id=job_id,
             )
@@ -574,6 +576,7 @@ class TTSQueue:
                 "id": job.id, "user_id": job.user_id, "telegram_id": job.telegram_id,
                 "text": job.text, "title": job.title, "folder_id": job.folder_id,
                 "preferences": job.preferences, "output_mode": job.output_mode,
+                "output_chat_id": job.output_chat_id,
             },
             status=self.statuses[job.id],
         )
@@ -743,9 +746,9 @@ class TTSQueue:
             self.statuses[job.id].update(state="uploading", message="ارسال به تلگرام", progress=90)
             await self._persist_status(job.id)
             if output_path.suffix == ".ogg":
-                await telegram.tg_client.send_voice(job.telegram_id, str(output_path), caption=job.title[:1024])
+                await telegram.tg_client.send_voice(job.output_chat_id or job.telegram_id, str(output_path), caption=job.title[:1024])
             else:
-                await telegram.tg_client.send_audio(job.telegram_id, str(output_path), caption=job.title[:1024])
+                await telegram.tg_client.send_audio(job.output_chat_id or job.telegram_id, str(output_path), caption=job.title[:1024])
 
     async def _store(self, job: TTSJob, wav_data: bytes) -> File:
         with tempfile.TemporaryDirectory(prefix="komod-tts-") as temporary_dir:

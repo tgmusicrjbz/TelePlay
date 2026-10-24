@@ -26,7 +26,7 @@ from slowapi.util import get_remote_address
 from urllib.parse import urlparse
 
 from ..database import get_db
-from ..models import File, User, WatchProgress, Folder, Playlist, Pack, PackItem
+from ..models import File, User, WatchProgress, Folder, Playlist, Pack, PackItem, TelegramDestination
 from ..schemas import ActivityResponse, BatchFileUpdate, FileResponse, FileListResponse, FileUpdate, PlayerStateResponse, PlayerStateUpdate, PublicShareCreate, WatchProgressUpdate
 from ..auth import get_current_user, has_vault_access, require_scoped_folder, require_vault_access, workspace_scope
 from ..telegram import delete_from_storage_channel, get_message_from_channel
@@ -424,6 +424,9 @@ class LinkImportRequest(BaseModel):
     folder_id: Optional[int] = None
     new_folder_name: Optional[str] = Field(default=None, max_length=255)
     quality: Optional[str] = Field(default="480", pattern="^(auto|audio|480|720|1080)$")
+    save_to_library: bool = True
+    send_to_telegram: bool = False
+    destination_ids: list[int] = Field(default_factory=list, max_length=20)
 
 
 class DriveImportRequest(BaseModel):
@@ -443,6 +446,7 @@ class DriveAccountRequest(BaseModel):
 
 class SendToTelegramRequest(BaseModel):
     ids: list[int] = Field(min_length=1, max_length=50)
+    destination_ids: list[int] = Field(default_factory=list, max_length=20)
 
 
 class OfflineManifestUpdate(BaseModel):
@@ -623,7 +627,12 @@ async def import_link(
     if not scoped_new_folder:
         require_scoped_folder(request, folder_id)
     quality = "auto" if host == "instagram.com" or host.endswith(".instagram.com") else (payload.quality or "480")
-    job = ImportJob(url=payload.url.strip(), user_id=current_user.id, telegram_id=current_user.telegram_id, folder_id=folder_id, quality=quality, notify=True)
+    job = ImportJob(
+        url=payload.url.strip(), user_id=current_user.id, telegram_id=current_user.telegram_id,
+        folder_id=folder_id, quality=quality, notify=True,
+        save_to_library=payload.save_to_library, send_to_telegram=payload.send_to_telegram,
+        destination_ids=payload.destination_ids,
+    )
     position = await link_importer.enqueue(job)
     return {"message": "لینک رفت توی صف؛ وضعیتش همین‌جا هم به‌روز می‌شه.", "queue_position": position, "job_id": job.id}
 
@@ -1708,6 +1717,24 @@ async def send_files_to_telegram(
     if any(item.is_hidden for item in files):
         require_vault_access(request, current_user)
     signed_in_user = getattr(request.state, "signed_in_user", current_user)
+    chat_ids: list[int] = []
+    if payload.destination_ids:
+        destinations = (await db.execute(select(TelegramDestination).where(
+            TelegramDestination.id.in_(payload.destination_ids),
+            TelegramDestination.user_id == current_user.id,
+            TelegramDestination.enabled.is_(True),
+        ))).scalars().all()
+        chat_ids = [destination.chat_id for destination in destinations]
+    else:
+        default_destination = (await db.execute(select(TelegramDestination).where(
+            TelegramDestination.user_id == current_user.id,
+            TelegramDestination.enabled.is_(True),
+            TelegramDestination.is_default.is_(True),
+        ))).scalars().first()
+        if default_destination is not None:
+            chat_ids = [default_destination.chat_id]
+    if not chat_ids:
+        chat_ids = [signed_in_user.telegram_id]
     by_id = {item.id: item for item in files}
     sent = 0
     failed: list[int] = []
@@ -1717,12 +1744,14 @@ async def send_files_to_telegram(
             failed.append(file_id)
             continue
         try:
-            await telegram.tg_client.copy_message(
-                signed_in_user.telegram_id,
-                item.storage_channel_id or settings.telegram_storage_channel_id,
-                item.channel_message_id,
-            )
-            sent += 1
+            for chat_id in dict.fromkeys(chat_ids):
+                await telegram.copy_message_balanced(
+                    chat_id=chat_id,
+                    from_chat_id=item.storage_channel_id or settings.telegram_storage_channel_id,
+                    message_id=item.channel_message_id,
+                    caption=item.description or "",
+                )
+                sent += 1
         except Exception:
             logger.warning("Could not send file %s to Telegram user %s", item.id, signed_in_user.telegram_id, exc_info=True)
             failed.append(item.id)

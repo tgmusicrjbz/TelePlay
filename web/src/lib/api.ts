@@ -1485,5 +1485,5 @@ export const useRefineSTTText = () => useMutation({
     },
 });
 
-export const sendFilesToTelegram = async (ids:number[]) =>
-    (await api.post<{sent:number;failed:number[]}>('/files/send-to-telegram', {ids})).data;
+export const sendFilesToTelegram = async (ids:number[], destinationIds:number[] = []) =>
+    (await api.post<{sent:number;failed:number[]}>('/files/send-to-telegram', {ids,destination_ids:destinationIds})).data;

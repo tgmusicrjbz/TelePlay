@@ -9,7 +9,7 @@ import { getMarkdownPalette, MarkdownPalette } from '../lib/markdownSettings';
 type ReaderTone = string;
 function inlineMarkdown(text: string) {
     return text.split(/(!\[[^\]]*\]\([^)]+\)|\[[^\]]+\]\([^)]+\)|<a\s+href=["'][^"']+["'][^>]*>.*?<\/a>|<(?:strong|b)>.*?<\/(?:strong|b)>|<(?:em|i)>.*?<\/(?:em|i)>|https?:\/\/[^\s<]+|\{\{[^{}]+\}\}|\$[^$\n]+\$|\*\*[^*]+\*\*|__[^_]+__|<u>.*?<\/u>|~~[^~]+~~|`[^`]+`|\*[^*]+\*)/gi).map((part, index) => {
-        const image = part.match(/^!\[([^\]]*)\]\(([^)]+)\)$/); if (image) return <img key={index} src={image[2]} alt={image[1]} loading="lazy" className="my-4 max-h-[70vh] max-w-full rounded-2xl border border-white/[.07] object-contain shadow-xl"/>;
+        const image = part.match(/^!\[([^\]]*)\]\(([^)]+)\)$/); if (image) { const token=localStorage.getItem('access_token')||''; const source=image[2].startsWith('/api/')?`${image[2]}${image[2].includes('?')?'&':'?'}token=${encodeURIComponent(token)}`:image[2]; return <img key={index} src={source} alt={image[1]} loading="lazy" className="my-4 max-h-[70vh] max-w-full rounded-2xl border border-white/[.07] object-contain shadow-xl"/>; }
         const link = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/); if (link) {
             const internal=link[2].match(/^komod:\/\/file\/(\d+)$/i);
             if(internal)return <button type="button" key={index} onClick={()=>void openInternalFile(Number(internal[1]))} className="inline-flex max-w-full items-center gap-1 break-words font-medium text-primary-200 underline decoration-primary-400/40 underline-offset-4 transition hover:text-primary-100">{link[1]}</button>;

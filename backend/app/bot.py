@@ -23,7 +23,7 @@ from sqlalchemy.orm import selectinload
 from .telegram import tg_client, forward_to_storage_channel, delete_from_storage_channel
 from .routers.folders import ensure_default_folder
 from .database import async_session
-from .models import User, File, Folder, LoginCode, Playlist, PlaylistItem, BotUserState
+from .models import User, File, Folder, LoginCode, Playlist, PlaylistItem, BotUserState, TelegramDestination, AppSetting
 from .config import get_settings
 from .auth import create_access_token
 from .services import escape_like, select_best_thumbnail, telegram_text_with_links, unreferenced_audio_variant_messages, unreferenced_storage_messages
@@ -32,6 +32,7 @@ from .downloader import ImportJob, link_importer
 from .tts import TTSJob, VOICE_OPTIONS, consume_tts_quota, load_tts_settings, tts_queue
 from .stt import STTJob, consume_stt_quota, stt_queue
 from .gemini_keys import decrypt_user_keys
+from .link_captions import render_link_caption
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -1521,6 +1522,33 @@ async def logout_all_command(client, message: Message):
 
 # ============== File Handler ==============
 
+async def create_text_first_companion(db, media_file: File, clean_caption: str | None) -> File | None:
+    """Create a readable Markdown card when a post's caption is the main content."""
+    content = str(clean_caption or "").strip()
+    # Short captions remain ordinary media descriptions. A deliberate marker
+    # lets users force text-first rendering for shorter posts as well.
+    forced = "#متن‌محور" in content or "[نمایش: متن]" in content
+    content = content.replace("#متن‌محور", "").replace("[نمایش: متن]", "").strip()
+    if not forced and len(content) < 220:
+        return None
+    first_line = next((line.strip() for line in content.splitlines() if line.strip()), "یادداشت پیوست")
+    attachment = (
+        f"\n\n![تصویر پیوست](/api/stream/{media_file.id})" if media_file.file_type == "image"
+        else f"\n\n[باز کردن { {'video':'ویدیو','audio':'صدا','document':'فایل'}.get(media_file.file_type, 'پیوست') }](komod://file/{media_file.id})"
+    )
+    note = File(
+        user_id=media_file.user_id, folder_id=media_file.folder_id,
+        channel_message_id=media_file.channel_message_id, storage_channel_id=media_file.storage_channel_id,
+        file_id=f"text-post:{media_file.id}", file_unique_id=f"text-post:{media_file.file_unique_id}:{media_file.id}",
+        file_name=sanitize_filename(f"{first_line[:90]}.md"), description=first_line[:240],
+        search_text=f"{content}{attachment}", tags_json=media_file.tags_json,
+        file_size=len((content + attachment).encode("utf-8")), mime_type="text/markdown; charset=utf-8",
+        file_type="text", thumbnail_file_id=media_file.thumbnail_file_id,
+    )
+    db.add(note)
+    await db.flush()
+    return note
+
 async def _handle_file_impl(client, message: Message, status_msg: Message):
     """Handle uploaded files - forward to channel and save to DB."""
     # Get or create user
@@ -1656,6 +1684,21 @@ async def _handle_file_impl(client, message: Message, status_msg: Message):
             "description": caption_meta["description"],
             "tags_json": json.dumps(caption_meta["tags"], ensure_ascii=False),
         }
+
+        # A server-wide template replaces service/bot signatures with stable,
+        # admin-controlled metadata. Forwarded author data is preferred over
+        # the bot account that happened to deliver the message.
+        async with async_session() as db:
+            template_row = await db.get(AppSetting, "caption_template_telegram")
+        if template_row and template_row.value.strip():
+            origin = getattr(message, "forward_from_chat", None) or getattr(message, "sender_chat", None) or getattr(message, "forward_from", None)
+            author = getattr(origin, "title", None) or getattr(origin, "username", None) or getattr(origin, "first_name", None)
+            file_info["description"] = render_link_caption(
+                template_row.value, title=Path(file_info["file_name"]).stem,
+                author=author, url=getattr(message, "link", None), platform="تلگرام",
+                media_type={"video":"ویدیو","audio":"صدا","image":"عکس","document":"فایل"}.get(file_type,"فایل"),
+                description=caption_meta.get("description") or caption_meta.get("clean_caption"),
+            )
         
         # Save to database
         async with async_session() as db:
@@ -1670,6 +1713,8 @@ async def _handle_file_impl(client, message: Message, status_msg: Message):
                 **file_info
             )
             db.add(file)
+            await db.flush()
+            await create_text_first_companion(db, file, caption_meta.get("clean_caption"))
             await db.commit()
             await db.refresh(file)
         
@@ -1807,6 +1852,9 @@ async def import_personal_channel_post(message: Message) -> None:
                 thumbnail_file_id=media.file_id if is_photo else (select_best_thumbnail(getattr(media, "thumbs", None)).file_id if select_best_thumbnail(getattr(media, "thumbs", None)) else None),
             )
         db.add(record)
+        await db.flush()
+        if record.file_type != "text":
+            await create_text_first_companion(db, record, caption_meta.get("clean_caption"))
         await db.commit()
         logger.info("Indexed manual channel post channel=%s message=%s user=%s", channel_id, message.id, user.id)
 
@@ -1819,10 +1867,64 @@ async def handle_personal_channel_post(client, message: Message):
     asyncio.create_task(import_personal_channel_post(message))
 
 
-@tg_client.on_message(filters.private & filters.regex(r"https?://(?:www\.)?(?:youtube\.com|youtu\.be|instagram\.com)/"), group=-1)
+@tg_client.on_message(filters.command("connect_here") & ~filters.private)
+async def connect_current_chat(client, message: Message):
+    """Connect a group/channel as a reusable Komod output destination."""
+    if not message.from_user:
+        await message.reply_text("این دستور را یکی از مدیرهای گروه بفرستد.")
+        return
+    try:
+        member = await client.get_chat_member(message.chat.id, message.from_user.id)
+        status = str(getattr(member, "status", "")).lower()
+        if not any(value in status for value in ("owner", "administrator")):
+            await message.reply_text("فقط مدیر گروه یا کانال می‌تواند این مقصد را وصل کند.")
+            return
+    except Exception:
+        await message.reply_text("بررسی دسترسی انجام نشد؛ ربات را مدیر این گفت‌وگو کن.")
+        return
+    async with async_session() as db:
+        owner = (await db.execute(select(User).where(
+            User.telegram_id == message.from_user.id, User.is_active.is_(True)
+        ))).scalar_one_or_none()
+        if owner is None:
+            await message.reply_text("اول در گفت‌وگوی خصوصی ربات، کمدت را فعال کن.")
+            return
+        destination = (await db.execute(select(TelegramDestination).where(
+            TelegramDestination.user_id == owner.id,
+            TelegramDestination.chat_id == message.chat.id,
+        ))).scalar_one_or_none()
+        if destination is None:
+            destination = TelegramDestination(
+                user_id=owner.id, chat_id=message.chat.id,
+                name=str(message.chat.title or "گفت‌وگوی تلگرام")[:120],
+                chat_type=str(message.chat.type).split(".")[-1].lower(), enabled=True,
+            )
+            db.add(destination)
+        else:
+            destination.enabled = True
+            destination.name = str(message.chat.title or destination.name)[:120]
+        await db.commit()
+    await message.reply_text("✅ اینجا به مقصدهای کمد اضافه شد. حالا لینک یوتیوب یا اینستاگرام را همین‌جا بفرست.")
+
+
+@tg_client.on_message(filters.regex(r"https?://(?:www\.)?(?:youtube\.com|youtu\.be|instagram\.com)/"), group=-1)
 async def handle_import_link(client, message: Message):
     """Queue supported social links without blocking the bot conversation."""
-    user = await get_or_create_user(message.from_user.id, message.from_user.username, message.from_user.first_name, message.from_user.last_name)
+    destination_id = None
+    if message.chat.type != enums.ChatType.PRIVATE:
+        async with async_session() as db:
+            destination = (await db.execute(select(TelegramDestination).where(
+                TelegramDestination.chat_id == message.chat.id,
+                TelegramDestination.enabled.is_(True),
+            ))).scalars().first()
+            if destination is None:
+                return
+            user = await db.get(User, destination.user_id)
+            destination_id = destination.id
+        if user is None or not user.is_active:
+            return
+    else:
+        user = await get_or_create_user(message.from_user.id, message.from_user.username, message.from_user.first_name, message.from_user.last_name)
     if not link_importer.available:
         await message.reply("⚙️ دانلود از لینک هنوز روی سرور تنظیم نشده. متغیر TELEGRAM_WORKER_SESSION باید اضافه شود.")
         message.stop_propagation()
@@ -1836,8 +1938,9 @@ async def handle_import_link(client, message: Message):
         return
     try:
         positions: list[int] = []
-        await load_user_ui_state(message.from_user.id)
-        delivery_mode = link_delivery_modes.get(message.from_user.id, "both")
+        if destination_id is None:
+            await load_user_ui_state(message.from_user.id)
+        delivery_mode = "both" if destination_id is not None else link_delivery_modes.get(message.from_user.id, "both")
         for raw_url in matches:
             url = raw_url.rstrip(".,;!?)]}>'\"")
             positions.append(await link_importer.enqueue(ImportJob(
@@ -1845,6 +1948,7 @@ async def handle_import_link(client, message: Message):
                 notify=True, default_folder=True,
                 save_to_library=delivery_mode != "telegram",
                 send_to_telegram=delivery_mode != "library",
+                destination_ids=[destination_id] if destination_id is not None else [],
             )))
         count = to_persian_digits(str(len(matches)))
         first_position = min(positions) if positions else 1

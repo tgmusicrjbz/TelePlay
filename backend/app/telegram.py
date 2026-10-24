@@ -26,6 +26,7 @@ def get_session_name(index: int) -> str:
 clients: list[Client] = []
 tg_client: Client | None = None
 _background_tasks: set[asyncio.Task] = set()
+_send_index = 0
 
 
 def build_clients() -> None:
@@ -189,6 +190,31 @@ async def get_message_from_channel(message_id: int, channel_id: int | None = Non
 async def forward_to_storage_channel(message: Message, channel_id: int | None = None) -> Message:
     """Forward a message to the storage channel."""
     return await message.copy(storage_channel(channel_id))
+
+
+async def copy_message_balanced(*, chat_id: int, from_chat_id: int, message_id: int, caption: str | None = None):
+    """Use helper bots for outbound copies when they can access both chats.
+
+    A helper may not have been started by a private user or added to a channel;
+    those expected permission failures transparently fall back to the main bot.
+    """
+    global _send_index
+    available = [client for client in clients if getattr(client, "is_connected", False)]
+    if not available:
+        raise RuntimeError("ربات تلگرام در دسترس نیست")
+    ordered = available[_send_index % len(available):] + available[:_send_index % len(available)]
+    _send_index = (_send_index + 1) % max(1, len(available))
+    last_error = None
+    for client in ordered:
+        try:
+            kwargs = dict(chat_id=chat_id, from_chat_id=from_chat_id, message_id=message_id)
+            if caption is not None:
+                kwargs["caption"] = caption
+            return await client.copy_message(**kwargs)
+        except Exception as error:
+            last_error = error
+            logger.debug("Telegram sender %s could not copy to %s", getattr(client, "pool_index", 0), chat_id, exc_info=True)
+    raise last_error or RuntimeError("ارسال فایل به تلگرام انجام نشد")
 
 
 

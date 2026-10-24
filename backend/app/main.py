@@ -26,7 +26,9 @@ from .telegram import start_telegram_client, stop_telegram_client
 from .downloader import link_importer
 from .tts import tts_queue
 from .stt import stt_queue
+from .monitoring import source_monitor_service
 from .routers import files_router, folders_router, streaming_router, auth_router, tv_router, playlists_router, accounts_router, tts_router, stt_router, packs_router
+from .routers.delivery import router as delivery_router
 
 settings = get_settings()
 
@@ -103,10 +105,12 @@ async def lifespan(app: FastAPI):
     # Recovery also supports users who configured only personal Gemini keys.
     await tts_queue.start()
     await stt_queue.start()
+    await source_monitor_service.start()
     
     yield
     
     logger.info("Shutting down...")
+    await source_monitor_service.stop()
     await link_importer.stop()
     await tts_queue.stop()
     await stt_queue.stop()
@@ -209,6 +213,7 @@ app.include_router(accounts_router, prefix="/api")
 app.include_router(tts_router, prefix="/api")
 app.include_router(stt_router, prefix="/api")
 app.include_router(packs_router, prefix="/api")
+app.include_router(delivery_router, prefix="/api")
 
 
 
