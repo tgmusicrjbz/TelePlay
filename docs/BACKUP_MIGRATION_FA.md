@@ -30,6 +30,14 @@ python scripts/backup_restore.py import --input komod-backup.json.gz --dry-run
 python scripts/backup_restore.py import --input komod-backup.json.gz
 ```
 
+پیش از هر بازیابی واقعی، ابزار به‌صورت خودکار یک نسخه از وضعیت فعلی دیتابیس با نامی شبیه `komod-before-restore-20261024-153000.json.gz` می‌سازد. مسیر دلخواه را می‌توانی مشخص کنی:
+
+```bash
+python scripts/backup_restore.py import --input komod-backup.json.gz --safety-output before-restore.json.gz
+```
+
+فقط وقتی خودت جداگانه نسخه امن گرفته‌ای، می‌توانی با `--no-safety-backup` این مرحله را رد کنی.
+
 اگر دیتابیس مقصد دادهٔ آزمایشی دارد و می‌خواهی کاملاً جایگزین شود، فقط پس از اطمینان از آدرس دیتابیس از `--clear` استفاده کن.
 
 بعد از انتقال، دسترسی ربات به کانال‌های ذخیره‌سازی و مقدارهای `TELEGRAM_*`، `JWT_SECRET` و کلید رمزگذاری Gemini را نیز بررسی کن. تغییر `JWT_SECRET` نشست‌های قبلی را از اعتبار می‌اندازد.

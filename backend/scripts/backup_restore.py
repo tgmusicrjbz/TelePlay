@@ -106,7 +106,7 @@ async def export_database(output: Path):
     print(f"Backup written: {output} ({sum(map(len, payload['tables'].values()))} rows)")
 
 
-async def import_database(source: Path, clear: bool, dry_run: bool):
+async def import_database(source: Path, clear: bool, dry_run: bool, safety_output: Path | None = None, skip_safety_backup: bool = False):
     try:
         payload, tables, count = read_backup(source)
     except (OSError, json.JSONDecodeError, ValueError) as error:
@@ -114,6 +114,12 @@ async def import_database(source: Path, clear: bool, dry_run: bool):
     print(f"Validated {count} rows from {source}")
     if dry_run:
         return
+    if not skip_safety_backup:
+        safety_output = safety_output or Path.cwd() / f"komod-before-restore-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.json.gz"
+        if safety_output.resolve() == source.resolve():
+            raise SystemExit("Safety backup path must differ from the imported backup")
+        print(f"Creating safety backup of the current database: {safety_output}")
+        await export_database(safety_output)
     async with engine.begin() as connection:
         if clear:
             for table in reversed(Base.metadata.sorted_tables):
@@ -145,6 +151,8 @@ async def main():
     restore.add_argument("--input", required=True, type=Path)
     restore.add_argument("--clear", action="store_true", help="Delete current data before importing")
     restore.add_argument("--dry-run", action="store_true")
+    restore.add_argument("--safety-output", type=Path, help="Path for the automatic pre-restore backup")
+    restore.add_argument("--no-safety-backup", action="store_true", help="Skip the automatic current-database backup")
     validate = commands.add_parser("validate")
     validate.add_argument("--input", required=True, type=Path)
     args = parser.parse_args()
@@ -157,7 +165,7 @@ async def main():
             raise SystemExit(f"Backup validation failed: {error}") from error
         print(f"Backup is valid: {args.input} ({count} rows)")
     else:
-        await import_database(args.input, args.clear, args.dry_run)
+        await import_database(args.input, args.clear, args.dry_run, args.safety_output, args.no_safety_backup)
     await engine.dispose()
 
 

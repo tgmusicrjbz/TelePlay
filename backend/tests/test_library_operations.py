@@ -29,7 +29,7 @@ from sqlalchemy.orm import selectinload
 from app.database import Base, async_session, engine
 from app.models import AuthSession, BotUserState, ErrorLog, File, Folder, Pack, PackItem, Playlist, PlaylistItem, ProcessingJob, SecurityEvent, TTSUsage, User, WatchProgress
 from app.routers.auth import _session_for_device, password_login, update_credentials
-from app.routers.accounts import admin_error_logs, admin_health, delete_tag_definition, delete_tag_definitions_batch, export_account_data, get_saved_filters, get_tag_settings, import_account_data, resolve_admin_error, update_saved_filters, update_tag_settings
+from app.routers.accounts import admin_error_logs, admin_health, delete_tag_definition, delete_tag_definitions_batch, export_account_data, get_saved_filters, get_tag_settings, import_account_data, report_client_error, resolve_admin_error, update_saved_filters, update_tag_settings
 from app.stt import consume_stt_quota
 from app.routers.files import (
     batch_update_files,
@@ -187,6 +187,20 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("traceback", rows[0])
             result = await resolve_admin_error("abc123def456", user, db)
             self.assertTrue(result["resolved"])
+
+    async def test_client_crash_is_saved_with_the_visible_tracking_code(self):
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            result = await report_client_error(
+                self.auth_request(),
+                {"error_id":"UI-ABC12345", "message":"render failed", "path":"/settings", "stack":"private component stack"},
+                user,
+                db,
+            )
+            self.assertEqual(result["error_id"], "UI-ABC12345")
+            row = (await db.execute(select(ErrorLog).where(ErrorLog.error_id == "UI-ABC12345"))).scalar_one()
+            self.assertEqual((row.method, row.message), ("CLIENT", "render failed"))
+            self.assertIn("/settings", row.path)
 
     async def test_password_credentials_can_be_enabled_and_used(self):
         async with async_session() as db:

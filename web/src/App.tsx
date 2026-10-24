@@ -11,12 +11,29 @@ import { syncOfflineMutations } from './lib/offlineMutations';
 import { useAppStore } from './lib/store';
 import { checkServerReachability, isEffectivelyOnline, useConnectivity } from './lib/connectivity';
 
-const GlobalContextMenu = lazy(() => import('./components/GlobalContextMenu'));
-const MediaPlayer = lazy(() => import('./components/MediaPlayer'));
-const ContentPreview = lazy(() => import('./components/ContentPreview'));
-const AddToPlaylistDialog = lazy(() => import('./components/AddToPlaylistDialog'));
-const FileDetailsSheet = lazy(() => import('./components/FileDetailsSheet'));
-const PublicSharePage = lazy(() => import('./components/PublicSharePage'));
+function lazyWithRecovery(loader:()=>Promise<{default:()=>JSX.Element}>,key:string){
+    return lazy(async()=>{
+        const marker=`komod-lazy-retry:${key}`;
+        try{const module=await loader();sessionStorage.removeItem(marker);return module}
+        catch(error){
+            if(navigator.onLine&&!sessionStorage.getItem(marker)){
+                sessionStorage.setItem(marker,'1');
+                const registrations=await navigator.serviceWorker?.getRegistrations().catch(()=>[])||[];
+                await Promise.all(registrations.map(registration=>registration.update().catch(()=>undefined)));
+                window.location.reload();
+            }
+            throw error;
+        }
+    });
+}
+const GlobalContextMenu = lazyWithRecovery(() => import('./components/GlobalContextMenu'),'context-menu');
+const MediaPlayer = lazyWithRecovery(() => import('./components/MediaPlayer'),'player');
+const ContentPreview = lazyWithRecovery(() => import('./components/ContentPreview'),'preview');
+const AddToPlaylistDialog = lazyWithRecovery(() => import('./components/AddToPlaylistDialog'),'playlist-dialog');
+const FileDetailsSheet = lazyWithRecovery(() => import('./components/FileDetailsSheet'),'details');
+const PublicSharePage = lazyWithRecovery(() => import('./components/PublicSharePage'),'public-share');
+
+function LazyFallback(){return <div dir="rtl" className="fixed inset-x-0 bottom-5 z-[400] mx-auto flex w-fit items-center gap-2 rounded-2xl border border-white/10 bg-dark-900/95 px-4 py-3 text-xs text-dark-200 shadow-2xl"><span className="h-4 w-4 animate-spin rounded-full border-2 border-primary-300 border-t-transparent"/>در حال آماده‌سازی…</div>}
 
 function DeferredOverlays() {
     const previewFile = useAppStore(state => state.previewFile);
@@ -25,7 +42,7 @@ function DeferredOverlays() {
     const contextMenu = useAppStore(state => state.activeContextMenu);
     const playlistFile = useAppStore(state => state.playlistFile);
     const playlistFiles = useAppStore(state => state.playlistFiles);
-    return <Suspense fallback={null}>
+    return <Suspense fallback={<LazyFallback/>}>
         {contextMenu && <GlobalContextMenu />}
         {previewFile && <MediaPlayer />}
         {contentPreviewFile && <ContentPreview />}
@@ -480,7 +497,7 @@ function App() {
             <Routes>
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/auth" element={<AuthCallback />} />
-                <Route path="/s/:publicHash" element={<Suspense fallback={null}><PublicSharePage /></Suspense>} />
+                <Route path="/s/:publicHash" element={<Suspense fallback={<LazyFallback/>}><PublicSharePage /></Suspense>} />
                 <Route
                     path="/*"
                     element={

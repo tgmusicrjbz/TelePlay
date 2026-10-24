@@ -337,10 +337,11 @@ api.interceptors.response.use(
     async (error) => {
         const originalRequest = error.config;
 
-        const errorId = String(error.response?.data?.error_id || '').trim();
+        const errorId = String(error.response?.data?.error_id || error.response?.headers?.['x-request-id'] || '').trim();
         if (errorId && error.response?.status >= 500) {
-            const detail = String(error.response.data.detail || 'یک خطای پیش‌بینی‌نشده رخ داد.');
-            if (!detail.includes(errorId)) error.response.data.detail = `${detail} کد پیگیری: ${errorId}`;
+            const responseData=error.response?.data;
+            const detail = String(responseData&&typeof responseData==='object'&&responseData.detail ? responseData.detail : 'یک خطای پیش‌بینی‌نشده رخ داد.');
+            if (!detail.includes(errorId)) error.response.data = {...(responseData&&typeof responseData==='object'?responseData:{}),detail:`${detail} کد پیگیری: ${errorId}`,error_id:errorId};
         }
 
         if (!error.response && error.code !== 'ERR_CANCELED') {

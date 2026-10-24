@@ -9,8 +9,17 @@ export default class AppErrorBoundary extends React.Component<React.PropsWithChi
         return { failed: true, errorId: `UI-${Date.now().toString(36).toUpperCase()}` };
     }
 
-    componentDidCatch(error: unknown) {
+    componentDidCatch(error: unknown, info: React.ErrorInfo) {
         console.error('[Komod] UI recovery boundary', error);
+        const token=localStorage.getItem('access_token');
+        if(!token)return;
+        const value=error instanceof Error?error:new Error(String(error));
+        void fetch('/api/accounts/client-errors',{
+            method:'POST',
+            headers:{'Authorization':`Bearer ${token}`,'Content-Type':'application/json'},
+            body:JSON.stringify({error_id:this.state.errorId,message:value.message,path:window.location.pathname,stack:`${value.stack||''}\n${info.componentStack||''}`}),
+            keepalive:true,
+        }).then(async response=>{if(!response.ok)return;const data=await response.json();if(data.error_id&&data.error_id!==this.state.errorId)this.setState({errorId:data.error_id})}).catch(()=>undefined);
     }
 
     render() {

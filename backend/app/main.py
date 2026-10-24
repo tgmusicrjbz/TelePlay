@@ -40,6 +40,22 @@ limiter = Limiter(key_func=get_remote_address)
 logger = logging.getLogger(__name__)
 
 
+async def persist_error_log(request_id: str, method: str, path: str, message: str, trace: str | None = None):
+    """Best-effort persistence that must never hide the original response."""
+    try:
+        from .database import async_session
+        from .models import ErrorLog
+        async with async_session() as db:
+            db.add(ErrorLog(
+                error_id=request_id[:16], method=method[:12], path=path[:512],
+                message=message[:2000] or "Unknown server error",
+                traceback=trace[-12000:] if trace else None,
+            ))
+            await db.commit()
+    except Exception:
+        logger.exception("Could not persist request error [%s]", request_id)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan - start/stop Telegram client and init DB."""
@@ -145,23 +161,15 @@ async def track_unexpected_errors(request: Request, call_next):
         response = await call_next(request)
     except Exception as error:
         logger.exception("Unhandled request error [%s] %s %s", request_id, request.method, request.url.path)
-        try:
-            from .database import async_session
-            from .models import ErrorLog
-            async with async_session() as db:
-                db.add(ErrorLog(
-                    error_id=request_id, method=request.method[:12], path=request.url.path[:512],
-                    message=str(error)[:2000] or error.__class__.__name__,
-                    traceback=traceback.format_exc()[-12000:],
-                ))
-                await db.commit()
-        except Exception:
-            logger.exception("Could not persist request error [%s]", request_id)
+        await persist_error_log(request_id, request.method, request.url.path, str(error) or error.__class__.__name__, traceback.format_exc())
         return JSONResponse(
             status_code=500,
             content={"detail": "یک خطای پیش‌بینی‌نشده رخ داد.", "error_id": request_id},
             headers={"X-Request-ID": request_id},
         )
+    if response.status_code >= 500:
+        logger.error("Server error response [%s] %s %s -> %s", request_id, request.method, request.url.path, response.status_code)
+        await persist_error_log(request_id, request.method, request.url.path, f"HTTP {response.status_code} response")
     response.headers["X-Request-ID"] = request_id
     return response
 

@@ -1,6 +1,8 @@
 """Account switching, shared spaces and administrator controls."""
 import json
 import hashlib
+import re
+import secrets
 import time
 from datetime import datetime, timedelta
 
@@ -1009,6 +1011,38 @@ async def update_admin_user(user_id: int, payload: AdminUserUpdate, admin: User 
         "stt_total_jobs": usage.stt_total_jobs if usage else 0,
         "stt_total_seconds": usage.stt_total_seconds if usage else 0,
     })
+
+
+@router.post("/accounts/client-errors")
+@limiter.limit("20/minute")
+async def report_client_error(
+    request: Request,
+    payload: dict = Body(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Record a bounded browser crash so its visible code is useful to admins."""
+    from ..models import ErrorLog
+    proposed = str(payload.get("error_id") or "").strip().upper()
+    error_id = proposed if re.fullmatch(r"UI-[A-Z0-9]{4,13}", proposed) else f"UI-{secrets.token_hex(5).upper()}"
+    message = str(payload.get("message") or "خطای رابط کاربری")[:1500]
+    stack = str(payload.get("stack") or "")[-8000:] or None
+    client_path = str(payload.get("path") or request.headers.get("referer") or "/")[:420]
+    db.add(ErrorLog(
+        error_id=error_id,
+        method="CLIENT",
+        path=f"user:{current_user.id} {client_path}"[:512],
+        message=message,
+        traceback=stack,
+    ))
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        error_id = f"UI-{secrets.token_hex(5).upper()}"
+        db.add(ErrorLog(error_id=error_id, method="CLIENT", path=f"user:{current_user.id} {client_path}"[:512], message=message, traceback=stack))
+        await db.commit()
+    return {"error_id": error_id}
 
 
 @router.get("/admin/errors")

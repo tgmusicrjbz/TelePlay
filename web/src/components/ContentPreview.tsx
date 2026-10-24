@@ -7,10 +7,9 @@ import CustomSelect from './CustomSelect';
 import MarkdownContent, { MarkdownInline } from './MarkdownContent';
 import InternalFileLinkPicker from './InternalFileLinkPicker';
 import ZoomableImage from './ZoomableImage';
-import { getMarkdownCustomThemes, getMarkdownSettings, markdownBuiltInThemes, markdownFonts, MarkdownSettings } from '../lib/markdownSettings';
+import { getMarkdownSettings, getMarkdownThemeOptions, markdownFonts, MarkdownSettings } from '../lib/markdownSettings';
 
 const readerFonts=markdownFonts;
-const readerTones=markdownBuiltInThemes;
 
 export default function ContentPreview() {
     const { contentPreviewFile: file, contentPreviewHistory, setContentPreviewFile, goBackContentPreview, addToast } = useAppStore();
@@ -36,6 +35,7 @@ export default function ContentPreview() {
     const [readerWide, setReaderWide] = useState(initialMarkdown.current.wide);
     const [readerAlign, setReaderAlign] = useState<'right' | 'left' | 'center' | 'justify'>(initialMarkdown.current.align);
     const [readerToolsVisible,setReaderToolsVisible]=useState(initialMarkdown.current.showToolbar);
+    const [readerToneOptions,setReaderToneOptions]=useState(getMarkdownThemeOptions);
     const [showInternalLinkPicker,setShowInternalLinkPicker]=useState(false);
     const [showAIEditor,setShowAIEditor]=useState(false);
     const [aiVersions,setAIVersions]=useState<string[]>([]);
@@ -45,7 +45,6 @@ export default function ContentPreview() {
     const [aiStatus,setAIStatus]=useState('');
     const [aiError,setAIError]=useState('');
     const refineText=useRefineSTTText();
-    const readerToneOptions=[...readerTones.map(item=>({value:item.value,label:item.label})),...getMarkdownCustomThemes().map(item=>({value:`custom:${item.id}`,label:`🎨 ${item.name}`}))];
     const previewRef = useRef<HTMLElement>(null);
     const editorRef = useRef<HTMLTextAreaElement>(null);
     // A delayed initial fetch must never replace a locally saved version.
@@ -57,6 +56,7 @@ export default function ContentPreview() {
     const showImageAt=(index:number)=>{const next=imageItems[index];if(next)setContentPreviewFile(next)};
 
     useEffect(() => { setImageFailed(false); setImageRetry(0); setImageScale(1); setImageQuality('optimized'); setImageDescriptionExpanded(false); setReaderFullscreen(false); setEditing(false); }, [file?.id]);
+    useEffect(()=>{const sync=()=>setReaderToneOptions(getMarkdownThemeOptions());window.addEventListener('komod-markdown-themes-changed',sync);return()=>window.removeEventListener('komod-markdown-themes-changed',sync)},[]);
 
     useEffect(()=>{
         const startEditing=(event:Event)=>{const requested=(event as CustomEvent<{fileId?:number}>).detail?.fileId;if(file&&canPreviewText(file)&&(!requested||requested===file.id))setEditing(true)};

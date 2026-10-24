@@ -37,7 +37,12 @@ engine_options = {
 is_supabase_pooler = url.drivername == "postgresql+asyncpg" and (
     url.port == 6543 or (url.host or "").endswith(".pooler.supabase.com")
 )
-if is_supabase_pooler:
+if url.drivername == "sqlite+aiosqlite":
+    # Async unittest cases and local reloads create fresh event loops. Reusing
+    # SQLite connections across those loops can leave schema operations with a
+    # stale connection and make the full CI suite fail nondeterministically.
+    engine_options.update(poolclass=NullPool)
+elif is_supabase_pooler:
     # Supavisor's session endpoint (usually port 5432) has the same small
     # client budget as its transaction endpoint. Holding an application pool
     # on Railway can exhaust that budget during overlapping deployments.

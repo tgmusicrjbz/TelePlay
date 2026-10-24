@@ -37,15 +37,15 @@ export default function LinkCaptionSettings() {
             addToast('قالب توضیحات لینک‌ها ذخیره شد.','success');
         } catch { addToast('ذخیره قالب انجام نشد.','error'); }
     };
-    return <section id="files-link-caption" className="rounded-2xl border border-white/[.07] bg-dark-900/70 p-5">
+    return <section id="files-link-caption" className="min-w-0 overflow-hidden rounded-2xl border border-white/[.07] bg-dark-900/70 p-4 sm:p-5">
         <div className="flex items-center gap-3"><span className="text-primary-300"><Braces className="h-5 w-5"/></span><div><h2 className="font-bold">توضیحات فایل‌های لینک‌شده</h2><p className="mt-1 text-xs text-dark-400">متن زیر فایل‌های یوتیوب و اینستاگرام را خودت بچین.</p></div></div>
         <div className="mt-4 grid grid-cols-2 gap-1 rounded-xl border border-white/[.07] bg-dark-950/50 p-1">
             <button onClick={()=>setPlatform('youtube')} className={`min-h-10 rounded-lg text-sm transition ${platform==='youtube'?'bg-primary-500 text-white':'text-dark-400 hover:bg-white/[.04]'}`}>یوتیوب</button>
             <button onClick={()=>setPlatform('instagram')} className={`min-h-10 rounded-lg text-sm transition ${platform==='instagram'?'bg-primary-500 text-white':'text-dark-400 hover:bg-white/[.04]'}`}>اینستاگرام</button>
         </div>
-        <textarea ref={editor} dir="rtl" value={value} onChange={event=>setValue(event.target.value)} className="input mt-3 min-h-32 resize-none text-right leading-7" maxLength={1000} placeholder="قالب توضیحات را راست‌چین بنویس…"/>
+        <textarea ref={editor} dir="rtl" value={value} onChange={event=>setValue(event.target.value)} className="input mt-3 min-h-52 w-full max-w-full resize-y text-right leading-7 sm:min-h-64" maxLength={1000} placeholder="قالب توضیحات را راست‌چین بنویس…"/>
         <div className="mt-3 flex flex-wrap justify-start gap-2" dir="rtl">{variables.map(item=><button key={item} type="button" onClick={()=>insert(item)} className="rounded-lg border border-primary-400/15 bg-primary-500/[.08] px-2.5 py-1.5 text-xs text-primary-100 transition hover:bg-primary-500/15">{item}</button>)}</div>
         <p className="mt-3 text-xs leading-6 text-dark-500">می‌توانی قبل و بعد متغیرها هر متن یا ایموجی دلخواهی بنویسی. اطلاعات خالی از خروجی حذف می‌شوند.</p>
-        <div className="mt-4 flex flex-wrap justify-start gap-2" dir="rtl"><button type="button" onClick={()=>setValue(defaults[platform])} className="btn-secondary inline-flex min-h-9 items-center gap-1.5 px-3 text-xs"><RotateCcw className="h-3.5 w-3.5"/>بازنشانی</button><button type="button" disabled={update.isPending} onClick={()=>void save()} className="btn-primary inline-flex min-h-9 items-center gap-1.5 px-3 text-xs"><Check className="h-3.5 w-3.5"/>{update.isPending?'در حال ذخیره…':'ذخیره قالب'}</button></div>
+        <div className="mt-4 grid grid-cols-2 gap-2 sm:flex sm:justify-start" dir="rtl"><button type="button" onClick={()=>setValue(defaults[platform])} className="btn-secondary inline-flex min-h-10 items-center justify-center gap-1.5 px-3 text-xs"><RotateCcw className="h-3.5 w-3.5"/>بازنشانی</button><button type="button" disabled={update.isPending} onClick={()=>void save()} className="btn-primary inline-flex min-h-10 items-center justify-center gap-1.5 px-3 text-xs"><Check className="h-3.5 w-3.5"/>{update.isPending?'در حال ذخیره…':'ذخیره قالب'}</button></div>
     </section>;
 }

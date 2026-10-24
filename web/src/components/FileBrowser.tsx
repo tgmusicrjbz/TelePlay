@@ -309,7 +309,7 @@ export default function FileBrowser() {
     const { data: folderTree, isLoading: folderTreeLoading, error: folderTreeError } = useFolderTree(showHidden);
     const importFolderOptions = useMemo(() => {
         const result:{value:string;label:string}[]=[];
-        const walk=(items:Folder[]|undefined,depth=0)=>items?.forEach(folder=>{result.push({value:String(folder.id),label:`${'— '.repeat(depth)}🗂️ ${folder.name}`});walk(folder.children,depth+1)});
+        const walk=(items:Folder[]|undefined,depth=0)=>items?.forEach(folder=>{result.push({value:String(folder.id),label:`${depth?`${'   '.repeat(Math.max(0,depth-1))}└─ `:''}🗂️ ${folder.name}`});walk(folder.children,depth+1)});
         walk(folderTree);
         return result;
     },[folderTree]);

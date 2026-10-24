@@ -7,12 +7,12 @@ import MarkdownContent from './MarkdownContent';
 import { InlineMediaPlayer } from './MediaPlayer';
 import InternalFileLinkPicker from './InternalFileLinkPicker';
 import ZoomableImage from './ZoomableImage';
-import { getMarkdownCustomThemes, getMarkdownSettings, markdownBuiltInThemes, markdownFonts } from '../lib/markdownSettings';
+import { getMarkdownSettings, getMarkdownThemeOptions, markdownFonts } from '../lib/markdownSettings';
 
 const packTextPreviewCache = new Map<number,string>();
 const packReaderFonts=markdownFonts;
 
-function flattenFolders(items:Folder[],depth=0):Array<{value:number|null;label:string}>{return items.flatMap(folder=>[{value:folder.id,label:`${'— '.repeat(depth)}${folder.name}`},...flattenFolders(folder.children||[],depth+1)])}
+function flattenFolders(items:Folder[],depth=0):Array<{value:number|null;label:string}>{return items.flatMap(folder=>[{value:folder.id,label:`${depth?`${'   '.repeat(Math.max(0,depth-1))}└─ `:''}🗂️ ${folder.name}`},...flattenFolders(folder.children||[],depth+1)])}
 
 function FilePlaceholder({type,className=''}:{type:string;className?:string}) {
     const icon=type==='audio'?'🎵':type==='video'?'🎬':type==='image'?'🖼️':type==='text'?'📝':'📄';
@@ -90,7 +90,7 @@ function PackContent({file,onRead,expanded=false}:{file:TelegramFile;onRead:()=>
     if(file.file_type==='image') return <PackImage file={file}/>;
     if(file.file_type==='video'||file.file_type==='audio') return <InlineMediaPlayer file={file} expanded={expanded}/>;
     if(canPreviewText(file)) {
-        const toneOptions=[...markdownBuiltInThemes.map(item=>({value:item.value,label:item.label})),...getMarkdownCustomThemes().map(item=>({value:`custom:${item.id}`,label:`🎨 ${item.name}`}))];
+        const toneOptions=getMarkdownThemeOptions();
         const save=async()=>{setSaving(true);try{const {data}=await api.patch<{content:string}>(`/files/${file.id}/text`,{content:draft});packTextPreviewCache.set(file.id,data.content);textLoadVersionRef.current+=1;setText(data.content);setDraft(data.content);setEditing(false);addToast('تغییرات متن ذخیره شد.')}catch(error:any){addToast(error?.response?.data?.detail||'ذخیره متن انجام نشد. دوباره تلاش کن.','error')}finally{setSaving(false)}};
         const insert=(before:string,after='',sample='متن')=>{const input=editorRef.current;if(!input)return;const start=input.selectionStart,end=input.selectionEnd,selected=draft.slice(start,end)||sample;const next=`${draft.slice(0,start)}${before}${selected}${after}${draft.slice(end)}`;setDraft(next);requestAnimationFrame(()=>{input.focus();input.setSelectionRange(start+before.length,start+before.length+selected.length)})};
         const tools=[['عنوان',Heading2,()=>insert('## ','','عنوان')],['ضخیم',Bold,()=>insert('**','**')],['کج',Italic,()=>insert('_','_')],['پیوند وب',Link2,()=>insert('[','](https://)')],['فهرست',ListChecks,()=>insert('- ','','مورد')],['نقل‌قول',Quote,()=>insert('> ','','نقل‌قول')],['کد',Code2,()=>insert('```\n','\n```','code')],['جدول',Table2,()=>insert('| عنوان | مقدار |\n| --- | --- |\n| ',' |','متن')]] as const;

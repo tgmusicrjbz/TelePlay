@@ -18,3 +18,14 @@ if (size > maximumBytes) {
 }
 
 console.log(`Application entry chunk: ${(size / 1024).toFixed(1)} KiB (limit ${maximumBytes / 1024} KiB).`);
+
+const measured = await Promise.all(entries.filter(name=>/\.(?:js|css)$/.test(name)).map(async name=>({name,size:(await stat(path.join(assetsDirectory,name))).size})));
+const limits = {js:350*1024,css:180*1024};
+const oversized = measured.filter(item=>item.size>limits[item.name.endsWith('.css')?'css':'js']);
+if(oversized.length){
+    throw new Error(`Oversized lazy/vendor assets:\n${oversized.map(item=>`${item.name}: ${(item.size/1024).toFixed(1)} KiB`).join('\n')}`);
+}
+const totalBytes=measured.reduce((sum,item)=>sum+item.size,0);
+const totalLimit=1.5*1024*1024;
+if(totalBytes>totalLimit)throw new Error(`Total JS/CSS bundle is ${(totalBytes/1024).toFixed(1)} KiB; limit is ${(totalLimit/1024).toFixed(0)} KiB.`);
+console.log(`All ${measured.length} JS/CSS assets are within per-file limits; total ${(totalBytes/1024).toFixed(1)} KiB.`);
