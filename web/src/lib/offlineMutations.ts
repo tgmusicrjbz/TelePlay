@@ -1,4 +1,5 @@
 import { cachedCurrentUser } from './accounts';
+import { isEffectivelyOnline } from './connectivity';
 
 export type OfflineEntity = 'folder'|'tag'|'playlist';
 export type OfflineMutation = {
@@ -36,7 +37,7 @@ export function queueOfflineMutation(input:Omit<OfflineMutation,'id'|'userId'|'c
     const items=readAll();items.push(item);writeAll(items);return item;
 }
 
-export const shouldQueueOffline=(error:unknown)=>!navigator.onLine||!(error as any)?.response;
+export const shouldQueueOffline=(error:unknown)=>!isEffectivelyOnline()||!(error as any)?.response;
 
 function resolveValue(value:unknown,map:Record<string,number>):unknown{
     if(typeof value==='number'&&value<0)return map[String(value)]??value;
@@ -49,7 +50,7 @@ function resolveUrl(url:string,map:Record<string,number>){return url.replace(/\/
 /** Flush queued metadata changes in order. Newer server edits win conflicts. */
 type MutationRequester=(config:{method:string;url:string;data?:unknown})=>Promise<{data:any}>;
 export async function syncOfflineMutations(request:MutationRequester):Promise<{synced:number;conflicts:number;failed:number}>{
-    if(syncing||!navigator.onLine)return{synced:0,conflicts:0,failed:0};
+    if(syncing||!isEffectivelyOnline())return{synced:0,conflicts:0,failed:0};
     const userId=cachedCurrentUser()?.id;if(!userId)return{synced:0,conflicts:0,failed:0};
     syncing=true;let synced=0,conflicts=0,failed=0;
     try{

@@ -10,6 +10,7 @@ import asyncio
 import base64
 import gzip
 import json
+import os
 from datetime import date, datetime
 from pathlib import Path
 import sys
@@ -47,6 +48,43 @@ def open_text(path: Path, mode: str):
     return gzip.open(path, mode + "t", encoding="utf-8") if path.suffix == ".gz" else path.open(mode, encoding="utf-8")
 
 
+def validate_payload(payload: object):
+    """Validate a backup completely before any destructive restore starts."""
+    if not isinstance(payload, dict) or payload.get("format") != "komod-db-backup" or payload.get("version") != 1:
+        raise ValueError("Unsupported backup format")
+    raw_tables = payload.get("tables")
+    if not isinstance(raw_tables, dict):
+        raise ValueError("Backup tables must be an object")
+    tables = {table.name: table for table in Base.metadata.sorted_tables}
+    unknown = set(raw_tables) - set(tables)
+    if unknown:
+        raise ValueError(f"Backup contains unknown tables: {', '.join(sorted(unknown))}")
+    count = 0
+    for table_name, rows in raw_tables.items():
+        if not isinstance(rows, list):
+            raise ValueError(f"Rows for table {table_name} must be a list")
+        allowed_columns = set(tables[table_name].c.keys())
+        for index, row in enumerate(rows):
+            if not isinstance(row, dict):
+                raise ValueError(f"Invalid row {index} in table {table_name}")
+            unknown_columns = set(row) - allowed_columns
+            if unknown_columns:
+                raise ValueError(
+                    f"Unknown columns in {table_name}: {', '.join(sorted(unknown_columns))}"
+                )
+            for value in row.values():
+                decode_value(value)
+        count += len(rows)
+    return tables, count
+
+
+def read_backup(source: Path):
+    with open_text(source, "r") as handle:
+        payload = json.load(handle)
+    tables, count = validate_payload(payload)
+    return payload, tables, count
+
+
 async def export_database(output: Path):
     payload = {"format": "komod-db-backup", "version": 1, "created_at": datetime.utcnow().isoformat(), "tables": {}}
     async with engine.connect() as connection:
@@ -56,21 +94,23 @@ async def export_database(output: Path):
                 {key: encode_value(value) for key, value in row.items()} for row in rows
             ]
     output.parent.mkdir(parents=True, exist_ok=True)
-    with open_text(output, "w") as target:
-        json.dump(payload, target, ensure_ascii=False, separators=(",", ":"))
+    temporary = output.with_name(f".{output.stem}.tmp{output.suffix}")
+    try:
+        with open_text(temporary, "w") as target:
+            json.dump(payload, target, ensure_ascii=False, separators=(",", ":"))
+        temporary.replace(output)
+        if os.name != "nt":
+            output.chmod(0o600)
+    finally:
+        temporary.unlink(missing_ok=True)
     print(f"Backup written: {output} ({sum(map(len, payload['tables'].values()))} rows)")
 
 
 async def import_database(source: Path, clear: bool, dry_run: bool):
-    with open_text(source, "r") as handle:
-        payload = json.load(handle)
-    if payload.get("format") != "komod-db-backup" or payload.get("version") != 1:
-        raise SystemExit("Unsupported backup format")
-    tables = {table.name: table for table in Base.metadata.sorted_tables}
-    unknown = set(payload.get("tables", {})) - set(tables)
-    if unknown:
-        raise SystemExit(f"Backup contains unknown tables: {', '.join(sorted(unknown))}")
-    count = sum(len(rows) for rows in payload["tables"].values())
+    try:
+        payload, tables, count = read_backup(source)
+    except (OSError, json.JSONDecodeError, ValueError) as error:
+        raise SystemExit(f"Backup validation failed: {error}") from error
     print(f"Validated {count} rows from {source}")
     if dry_run:
         return
@@ -105,9 +145,17 @@ async def main():
     restore.add_argument("--input", required=True, type=Path)
     restore.add_argument("--clear", action="store_true", help="Delete current data before importing")
     restore.add_argument("--dry-run", action="store_true")
+    validate = commands.add_parser("validate")
+    validate.add_argument("--input", required=True, type=Path)
     args = parser.parse_args()
     if args.command == "export":
         await export_database(args.output)
+    elif args.command == "validate":
+        try:
+            _, _, count = read_backup(args.input)
+        except (OSError, json.JSONDecodeError, ValueError) as error:
+            raise SystemExit(f"Backup validation failed: {error}") from error
+        print(f"Backup is valid: {args.input} ({count} rows)")
     else:
         await import_database(args.input, args.clear, args.dry_run)
     await engine.dispose()

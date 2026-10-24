@@ -8,6 +8,7 @@
         "build": "vite build",
         "preview": "vite preview",
         "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+        "verify:bundle": "node scripts/verify-bundle-size.mjs",
         "verify:offline": "node scripts/verify-offline-build.mjs"
     },
     "dependencies": {

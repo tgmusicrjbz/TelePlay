@@ -42,6 +42,9 @@ from app.routers.files import (
     save_player_state,
     save_offline_manifest,
     share_file,
+    list_public_shares,
+    revoke_public_shares,
+    PublicShareRevokeBatch,
     get_storage_stats,
     get_text_preview,
     list_files,
@@ -693,6 +696,28 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             events = (await db.execute(select(SecurityEvent).where(SecurityEvent.user_id == user.id))).scalars().all()
             self.assertIn("public_link_created", {event.event_type for event in events})
             self.assertIn("public_link_unlocked", {event.event_type for event in events})
+
+    async def test_public_share_center_lists_and_revokes_selected_links(self):
+        async with async_session() as db:
+            item = self.make_file(self.user_id, None, 920); item.file_type = "document"
+            db.add(item); await db.commit()
+            user = await db.get(User, self.user_id)
+            request = Request({"type":"http","method":"POST","path":"/api/files/public-shares/revoke","headers":[(b"user-agent",b"Komod Test")],"client":("127.0.0.1",1234)})
+            await share_file(item.id, request, PublicShareCreate(expires_in_hours=24, allow_download=True), db, user)
+            request.state.signed_in_user = SimpleNamespace(id=user.id + 100)
+            with self.assertRaises(HTTPException) as denied:
+                await list_public_shares(request, db, user)
+            self.assertEqual(denied.exception.status_code, 403)
+            request.state.signed_in_user = user
+            shares = await list_public_shares(request, db, user)
+            listed = next(value for value in shares if value["file_id"] == item.id)
+            self.assertEqual(listed["file_name"], item.file_name)
+            self.assertFalse(listed["expired"])
+            result = await revoke_public_shares(PublicShareRevokeBatch(file_ids=[item.id]), request, db, user)
+            self.assertEqual(result["revoked"], 1)
+            self.assertFalse(any(value["file_id"] == item.id for value in await list_public_shares(request, db, user)))
+            events = (await db.execute(select(SecurityEvent).where(SecurityEvent.user_id == user.id))).scalars().all()
+            self.assertIn("public_links_revoked", {event.event_type for event in events})
 
     async def test_account_export_excludes_secrets_and_keeps_library_metadata(self):
         async with async_session() as db:

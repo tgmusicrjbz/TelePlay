@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Download, PlusSquare, RefreshCw, Share, WifiOff, X } from 'lucide-react';
+import { useConnectivity } from '../lib/connectivity';
 
 interface InstallPromptEvent extends Event {
     prompt: () => Promise<void>;
@@ -10,7 +11,8 @@ const isStandalone = () => window.matchMedia('(display-mode: standalone)').match
     || (navigator as Navigator & { standalone?: boolean }).standalone === true;
 
 export default function PwaManager() {
-    const [online, setOnline] = useState(navigator.onLine);
+    const connectivity = useConnectivity();
+    const online = connectivity !== 'offline';
     const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
     const [installed, setInstalled] = useState(isStandalone());
     const [waitingWorker, setWaitingWorker] = useState<ServiceWorker | null>(null);
@@ -20,20 +22,14 @@ export default function PwaManager() {
         || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1), []);
 
     useEffect(() => {
-        const wentOnline = () => setOnline(true);
-        const wentOffline = () => setOnline(false);
         const beforeInstall = (event: Event) => {
             event.preventDefault();
             setInstallPrompt(event as InstallPromptEvent);
         };
         const appInstalled = () => { setInstalled(true); setInstallPrompt(null); };
-        window.addEventListener('online', wentOnline);
-        window.addEventListener('offline', wentOffline);
         window.addEventListener('beforeinstallprompt', beforeInstall);
         window.addEventListener('appinstalled', appInstalled);
         return () => {
-            window.removeEventListener('online', wentOnline);
-            window.removeEventListener('offline', wentOffline);
             window.removeEventListener('beforeinstallprompt', beforeInstall);
             window.removeEventListener('appinstalled', appInstalled);
         };

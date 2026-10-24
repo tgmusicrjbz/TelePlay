@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import json
@@ -25,7 +26,7 @@ from .config import get_settings
 from .database import async_session
 from .models import File, Folder, TTSUsage, User
 from .gemini_keys import decrypt_user_keys
-from .processing_jobs import create_job, delete_job, load_jobs, update_job
+from .processing_jobs import create_job, delete_finished_jobs, delete_job, load_jobs, update_job
 from .services import sanitize_filename
 from .tts import GeminiRequestError
 
@@ -387,7 +388,8 @@ class STTQueue:
                 text_model=str(payload.get("text_model") or "gemini-3.8-flash"),
                 stt_mode=str(payload.get("stt_mode") or "verbatim"),
             )
-            status.update(state="queued", message="ادامه پس از راه‌اندازی دوباره", progress=0, output_mode=job.output_mode)
+            status.update(state="queued", message="ادامه پس از راه‌اندازی دوباره", progress=0, output_mode=job.output_mode,
+                          fingerprint=payload.get("fingerprint") or status.get("fingerprint"))
             self.statuses[job_id] = status
             self.controls[job_id] = False
             self.durable_job_ids.add(job_id)
@@ -411,9 +413,24 @@ class STTQueue:
             self.task = self.tasks[0]
         else:
             await self.start()
+        fingerprint = hashlib.sha256(json.dumps({
+            "user_id": job.user_id,
+            "source_file_id": job.source_file_id,
+            "folder_id": job.folder_id,
+            "prompt": job.prompt,
+            "post_prompts": job.post_prompts or [],
+            "output_mode": job.output_mode,
+            "stt_model": job.stt_model,
+            "text_model": job.text_model,
+            "stt_mode": job.stt_mode,
+        }, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+        for existing_id, status in self.statuses.items():
+            if status.get("user_id") == job.user_id and status.get("fingerprint") == fingerprint and status.get("state") not in TERMINAL_STATES:
+                job.id = existing_id
+                return 1 + sum(1 for item in self.statuses.values() if item.get("state") not in TERMINAL_STATES and item.get("created_at", "") < status.get("created_at", ""))
         position = 1 + sum(1 for status in self.statuses.values() if status.get("state") not in {"done", "error", "cancelled"})
         job.id = job.id or uuid.uuid4().hex
-        self.statuses[job.id] = {"id": job.id, "user_id": job.user_id, "source_file_id": job.source_file_id, "title": job.title, "output_mode": job.output_mode, "model": job.stt_model or settings.gemini_stt_model, "state": "queued", "message": "منتظر نوبت", "progress": 0, "created_at": datetime.utcnow().isoformat()}
+        self.statuses[job.id] = {"id": job.id, "user_id": job.user_id, "source_file_id": job.source_file_id, "title": job.title, "output_mode": job.output_mode, "model": job.stt_model or settings.gemini_stt_model, "fingerprint": fingerprint, "state": "queued", "message": "منتظر نوبت", "progress": 0, "created_at": datetime.utcnow().isoformat()}
         self.controls[job.id] = False
         await create_job(
             job_id=job.id, user_id=job.user_id, kind="stt", title=job.title,
@@ -421,7 +438,7 @@ class STTQueue:
                      "title": job.title, "folder_id": job.folder_id, "prompt": job.prompt, "post_prompts": job.post_prompts or [],
                      "output_mode": job.output_mode, "telegram_id": job.telegram_id,
                      "cleanup_source": job.cleanup_source, "stt_model": job.stt_model,
-                     "text_model": job.text_model, "stt_mode": job.stt_mode},
+                     "text_model": job.text_model, "stt_mode": job.stt_mode, "fingerprint": fingerprint},
             status=self.statuses[job.id],
         )
         self.durable_job_ids.add(job.id)
@@ -455,6 +472,22 @@ class STTQueue:
             item.update(state="cancelled", message="لغو شد", finished_at=datetime.utcnow().isoformat())
             self._persist_soon(job_id)
         return dict(item)
+
+    def cancel_all(self,user_id:int) -> int:
+        job_ids=[job_id for job_id,item in self.statuses.items() if item.get("user_id")==user_id and item.get("state") not in TERMINAL_STATES]
+        for job_id in job_ids:
+            self.cancel(job_id,user_id)
+        return len(job_ids)
+
+    def clear_finished(self,user_id:int) -> int:
+        job_ids=[job_id for job_id,item in self.statuses.items() if item.get("user_id")==user_id and item.get("state") in TERMINAL_STATES]
+        for job_id in job_ids:
+            self.statuses.pop(job_id,None); self.controls.pop(job_id,None); self.durable_job_ids.discard(job_id)
+        try:
+            asyncio.get_running_loop().create_task(delete_finished_jobs("stt",user_id))
+        except RuntimeError:
+            pass
+        return len(job_ids)
 
     def dismiss(self, job_id: str, user_id: int) -> bool:
         item = self.statuses.get(job_id)

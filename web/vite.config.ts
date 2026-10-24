@@ -36,6 +36,19 @@ function injectOfflineBuildAssets() {
 
 export default defineConfig({
     plugins: [react(), injectOfflineBuildAssets()],
+    build: {
+        rollupOptions: {
+            output: {
+                manualChunks: {
+                    'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+                    'data-vendor': ['axios', '@tanstack/react-query', 'zustand'],
+                    'interaction-vendor': ['@dnd-kit/core', '@dnd-kit/sortable', '@dnd-kit/utilities'],
+                    'markdown-vendor': ['katex'],
+                    'icons-vendor': ['lucide-react'],
+                },
+            },
+        },
+    },
     server: {
         port: 3000,
         proxy: {

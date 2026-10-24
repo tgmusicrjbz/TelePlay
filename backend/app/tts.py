@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import io
@@ -537,7 +538,8 @@ class TTSQueue:
                 api_keys=decrypt_user_keys(user.gemini_api_keys_encrypted),
                 id=job_id,
             )
-            status.update(state="queued", message="ادامه پس از راه‌اندازی دوباره", progress=0)
+            status.update(state="queued", message="ادامه پس از راه‌اندازی دوباره", progress=0,
+                          fingerprint=payload.get("fingerprint") or status.get("fingerprint"))
             self.statuses[job_id] = status
             self.controls[job_id] = {"paused": False, "cancelled": False}
             self.durable_job_ids.add(job_id)
@@ -561,13 +563,27 @@ class TTSQueue:
             self.task = self.tasks[0]
         else:
             await self.start()
+        fingerprint = hashlib.sha256(json.dumps({
+            "user_id": job.user_id,
+            "text": job.text,
+            "title": job.title,
+            "folder_id": job.folder_id,
+            "preferences": job.preferences,
+            "output_mode": job.output_mode,
+            "output_chat_id": job.output_chat_id,
+        }, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+        for existing_id, status in self.statuses.items():
+            if status.get("user_id") == job.user_id and status.get("fingerprint") == fingerprint and status.get("state") not in TERMINAL_STATES:
+                job.id = existing_id
+                return 1 + sum(1 for item in self.statuses.values() if item.get("state") not in TERMINAL_STATES and item.get("created_at", "") < status.get("created_at", ""))
         position = 1 + sum(1 for status in self.statuses.values() if status.get("state") not in {"done", "error", "cancelled"})
         job.id = job.id or uuid.uuid4().hex
         chunks = split_long_text(job.text)
         self.statuses[job.id] = {
             "id": job.id, "user_id": job.user_id, "state": "queued", "message": "منتظر نوبت",
             "progress": 0, "chunks_total": len(chunks), "chunks_done": 0,
-            "title": job.title, "model": job.preferences.get("model"), "created_at": datetime.utcnow().isoformat(),
+            "title": job.title, "model": job.preferences.get("model"), "fingerprint": fingerprint,
+            "created_at": datetime.utcnow().isoformat(),
         }
         self.controls[job.id] = {"paused": False, "cancelled": False}
         await create_job(
@@ -577,6 +593,7 @@ class TTSQueue:
                 "text": job.text, "title": job.title, "folder_id": job.folder_id,
                 "preferences": job.preferences, "output_mode": job.output_mode,
                 "output_chat_id": job.output_chat_id,
+                "fingerprint": fingerprint,
             },
             status=self.statuses[job.id],
         )
@@ -665,6 +682,12 @@ class TTSQueue:
         item.update(state="cancelled", message="لغو شد", finished_at=datetime.utcnow().isoformat())
         self._persist_soon(job_id)
         return dict(item)
+
+    def cancel_all(self,user_id:int) -> int:
+        job_ids=[job_id for job_id,item in self.statuses.items() if item.get("user_id")==user_id and item.get("state") not in TERMINAL_STATES]
+        for job_id in job_ids:
+            self.cancel(job_id,user_id)
+        return len(job_ids)
 
     async def _checkpoint(self, job: TTSJob) -> bool:
         control = self.controls[job.id]

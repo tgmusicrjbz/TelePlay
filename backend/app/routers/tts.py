@@ -211,6 +211,11 @@ async def clear_finished_tts_jobs(current_user: User = Depends(get_current_user)
     return {"removed": tts_queue.clear_finished(current_user.id)}
 
 
+@router.post("/jobs/cancel-all")
+async def cancel_all_tts_jobs(current_user:User=Depends(get_current_user)):
+    return {"cancelled":tts_queue.cancel_all(current_user.id)}
+
+
 @router.get("/jobs/{job_id}")
 async def get_tts_job(job_id: str, current_user: User = Depends(get_current_user)):
     status = tts_queue.status(job_id, current_user.id)

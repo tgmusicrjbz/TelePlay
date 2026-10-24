@@ -1,4 +1,4 @@
-const CACHE_NAME = 'komod-shell-v17';
+const CACHE_NAME = 'komod-shell-v18';
 const COVER_CACHE = 'komod-covers-v3';
 const CORE_ASSETS = ['/', '/index.html', '/offline.html', '/manifest.webmanifest', '/komod.svg'];
 // Replaced with every emitted JS/CSS chunk by the Vite build plugin. Keeping
@@ -13,17 +13,16 @@ self.addEventListener('install', event => {
       if (!response.ok) throw new Error('Unable to cache the application shell');
       const html = await response.clone().text();
       const assetPaths = [...html.matchAll(/(?:src|href)="(\/assets\/[^\"]+)"/g)].map(match => match[1]);
-      const requiredAssets = [...new Set([
-        ...CORE_ASSETS.filter(asset => asset !== '/' && asset !== '/index.html'),
-        ...BUILD_ASSETS,
-        ...assetPaths,
-      ])];
+      const requiredAssets = [...new Set([...BUILD_ASSETS, ...assetPaths])];
       // addAll intentionally rejects the installation if even one required
       // chunk is missing. The previous working worker/cache then stays active.
       await cache.addAll(requiredAssets);
       await Promise.all([
         cache.put('/index.html', response.clone()),
         cache.put('/', response.clone()),
+        ...CORE_ASSETS.filter(asset => asset !== '/' && asset !== '/index.html').map(asset =>
+          fetch(asset, { cache: 'no-store' }).then(optional => optional.ok ? cache.put(asset, optional) : undefined).catch(() => undefined)
+        ),
       ]);
     }).then(() => self.skipWaiting())
   );
@@ -103,7 +102,7 @@ self.addEventListener('fetch', event => {
       try {
         return await fetch(request, { cache: 'no-store', signal: controller.signal });
       } catch {
-        return (await caches.match('/offline.html')) || new Response('Offline', { status: 503 });
+        return (await caches.match('/offline.html')) || new Response(`<!doctype html><html lang="fa" dir="rtl"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="theme-color" content="#7c3aed"><title>کمد آفلاین است</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#070b16;color:#f8fafc;font-family:system-ui;padding:24px;box-sizing:border-box}.c{max-width:360px;text-align:center;border:1px solid #ffffff18;background:#111827;padding:28px;border-radius:24px}button{border:0;border-radius:14px;padding:12px 18px;background:#7c3aed;color:white;font:inherit}</style><div class="c"><h1>کمد آفلاین است</h1><p>پوستهٔ آفلاین هنوز روی این دستگاه آماده نشده. پس از اولین بازشدن کامل با اینترنت، بدون اینترنت هم در دسترس خواهد بود.</p><button onclick="location.reload()">تلاش دوباره</button></div></html>`, { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
       } finally {
         clearTimeout(timeout);
       }

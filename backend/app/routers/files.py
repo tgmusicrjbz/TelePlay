@@ -72,8 +72,18 @@ _folder_suggestion_cache: dict[tuple[int, int, str, str, str], tuple[datetime, l
 _file_question_cache: dict[tuple[int, int, str, str, str], tuple[datetime, str]] = {}
 
 
+def _require_public_share_owner(request: Request, current_user: User) -> None:
+    signed_in_user = getattr(request.state, "signed_in_user", current_user)
+    if signed_in_user.id != current_user.id:
+        raise HTTPException(status_code=403, detail="فقط صاحب کمد می‌تواند پیوند عمومی را مدیریت کند.")
+
+
 class TextContentUpdate(BaseModel):
     content: str = Field(min_length=1, max_length=1_000_000)
+
+
+class PublicShareRevokeBatch(BaseModel):
+    file_ids: list[int] = Field(min_length=1, max_length=200)
 
 
 class SmartSearchRequest(BaseModel):
@@ -432,12 +442,16 @@ class LinkImportRequest(BaseModel):
 class DriveImportRequest(BaseModel):
     url: str = Field(min_length=20, max_length=2048)
     folder_id: Optional[int] = None
+    send_to_telegram: bool = False
+    destination_ids: list[int] = Field(default_factory=list, max_length=20)
 
 class DriveSelectionImportRequest(BaseModel):
     file_ids: list[str] = Field(min_length=1,max_length=50)
     file_names: dict[str,str] = Field(default_factory=dict)
     mime_types: dict[str,str] = Field(default_factory=dict)
     folder_id: Optional[int] = None
+    send_to_telegram: bool = False
+    destination_ids: list[int] = Field(default_factory=list, max_length=20)
 
 class DriveAccountRequest(BaseModel):
     email: str = Field(min_length=3,max_length=255)
@@ -712,7 +726,7 @@ async def import_from_google_drive(
             folder_id=(await ensure_default_folder(db,current_user.id)).id
             await db.commit()
     require_scoped_folder(request,folder_id)
-    job_id=await drive_importer.enqueue(url=payload.url.strip(),file_id=drive_file_id,user_id=current_user.id,folder_id=folder_id)
+    job_id=await drive_importer.enqueue(url=payload.url.strip(),file_id=drive_file_id,user_id=current_user.id,folder_id=folder_id,send_to_telegram=payload.send_to_telegram,destination_ids=payload.destination_ids)
     return {"job_id":job_id,"message":"انتقال از گوگل درایو شروع شد."}
 
 @router.get("/drive/status")
@@ -797,7 +811,7 @@ async def import_selected_google_drive(payload:DriveSelectionImportRequest,reque
     jobs=[]
     for file_id in payload.file_ids:
         if not re.fullmatch(r"[A-Za-z0-9_-]{10,}",file_id): continue
-        jobs.append(await drive_importer.enqueue(url=f"drive://{file_id}",file_id=file_id,user_id=current_user.id,folder_id=folder_id,authenticated=True,file_name=payload.file_names.get(file_id),mime_type=payload.mime_types.get(file_id)))
+        jobs.append(await drive_importer.enqueue(url=f"drive://{file_id}",file_id=file_id,user_id=current_user.id,folder_id=folder_id,authenticated=True,file_name=payload.file_names.get(file_id),mime_type=payload.mime_types.get(file_id),send_to_telegram=payload.send_to_telegram,destination_ids=payload.destination_ids))
     if not jobs: raise HTTPException(status_code=400,detail="فایل معتبری انتخاب نشده است.")
     return {"job_ids":jobs,"message":f"{len(jobs)} فایل به صف انتقال اضافه شد."}
 
@@ -820,6 +834,14 @@ async def cancel_google_drive_import(job_id: str,current_user: User = Depends(ge
     if status is None: raise HTTPException(status_code=404,detail="وضعیت این انتقال پیدا نشد.")
     await update_job(job_id,status)
     return status
+
+
+@router.post("/import-drive/status/{job_id}/retry",status_code=202)
+async def retry_google_drive_import(job_id:str,current_user:User=Depends(get_current_user)):
+    new_job_id=await drive_importer.retry(job_id,current_user.id)
+    if new_job_id is None:
+        raise HTTPException(status_code=409,detail="این انتقال قابل تلاش دوباره نیست.")
+    return {"job_id":new_job_id,"status":drive_importer.status(new_job_id,current_user.id)}
 
 
 @router.post("/import-drive/cancel-all")
@@ -1537,6 +1559,66 @@ async def get_storage_stats(
     }
 
 
+@router.get("/public-shares")
+async def list_public_shares(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List every public link owned by the signed-in user."""
+    _require_public_share_owner(request, current_user)
+    files = (await db.execute(select(File).where(
+        File.user_id == current_user.id,
+        File.public_hash.is_not(None),
+    ).order_by(desc(File.updated_at)).limit(500))).scalars().all()
+    now = datetime.utcnow()
+    return [{
+        "file_id": item.id,
+        "file_name": item.file_name,
+        "file_type": item.file_type,
+        "file_size": item.file_size,
+        "public_hash": item.public_hash,
+        "expires_at": item.public_expires_at,
+        "expired": bool(item.public_expires_at and item.public_expires_at <= now),
+        "password_protected": bool(item.public_password_hash),
+        "allow_download": item.public_allow_download,
+        "view_limit": item.public_view_limit,
+        "view_count": item.public_view_count,
+        "created_at": item.updated_at,
+    } for item in files]
+
+
+@router.post("/public-shares/revoke")
+@limiter.limit("20/minute")
+async def revoke_public_shares(
+    payload: PublicShareRevokeBatch,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Revoke selected public links without touching the underlying files."""
+    _require_public_share_owner(request, current_user)
+    unique_ids = list(dict.fromkeys(payload.file_ids))
+    files = (await db.execute(select(File).where(
+        File.user_id == current_user.id,
+        File.id.in_(unique_ids),
+        File.public_hash.is_not(None),
+    ))).scalars().all()
+    for item in files:
+        item.public_hash = None
+        item.public_expires_at = None
+        item.public_password_hash = None
+        item.public_view_limit = None
+        item.public_view_count = 0
+    if files:
+        add_security_event(
+            db, "public_links_revoked", user_id=current_user.id, request=request,
+            target_type="file", details={"count": len(files), "file_ids": [item.id for item in files]},
+        )
+        await db.commit()
+    return {"revoked": len(files)}
+
+
 @router.get("/{file_id}", response_model=FileResponse)
 async def get_file(
     file_id: int,
@@ -1958,6 +2040,7 @@ async def share_file(
     
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
+    _require_public_share_owner(request, current_user)
     if file.is_hidden:
         raise HTTPException(status_code=409, detail="فایل مخفی را نمی‌توان عمومی کرد")
     
@@ -2001,6 +2084,7 @@ async def revoke_share(
     
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
+    _require_public_share_owner(request, current_user)
     
     file.public_hash = None
     file.public_expires_at = None

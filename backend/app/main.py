@@ -24,6 +24,7 @@ from .config import get_settings
 from .database import init_db, engine
 from .telegram import start_telegram_client, stop_telegram_client
 from .downloader import link_importer
+from .drive_importer import drive_importer
 from .tts import tts_queue
 from .stt import stt_queue
 from .monitoring import source_monitor_service
@@ -102,6 +103,7 @@ async def lifespan(app: FastAPI):
             await link_importer.start()
         except Exception:
             logger.exception("Background link importer could not start; the rest of the app remains available")
+    await drive_importer.start()
     # Recovery also supports users who configured only personal Gemini keys.
     await tts_queue.start()
     await stt_queue.start()
@@ -111,6 +113,7 @@ async def lifespan(app: FastAPI):
     
     logger.info("Shutting down...")
     await source_monitor_service.stop()
+    await drive_importer.stop()
     await link_importer.stop()
     await tts_queue.stop()
     await stt_queue.stop()

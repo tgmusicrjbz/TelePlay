@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import mimetypes
 import re
@@ -20,9 +21,9 @@ from sqlalchemy.orm import selectinload
 
 from .config import get_settings
 from .database import async_session
-from .models import AppSetting, File, User
+from .models import AppSetting, File, ProcessingJob, TelegramDestination, User
 from .link_captions import render_link_caption
-from .processing_jobs import create_job, delete_finished_jobs, delete_job, update_job
+from .processing_jobs import create_job, delete_finished_jobs, delete_job, load_jobs, update_job
 from .services import sanitize_filename, select_best_thumbnail
 from . import telegram
 
@@ -83,13 +84,66 @@ class GoogleDriveImporter:
         self.statuses: dict[str, dict] = {}
         self.tasks: dict[str, asyncio.Task] = {}
         self.cancelled: set[str] = set()
+        self.durable_job_ids: set[str] = set()
+        self._persist_tasks: dict[str,asyncio.Task] = {}
+        self._persist_dirty: set[str] = set()
+        self._recovered = False
+        self._stopping = False
+        self._semaphore = asyncio.Semaphore(2)
 
-    async def enqueue(self, *, url: str, file_id: str, user_id: int, folder_id: int, authenticated: bool=False, file_name: str|None=None, mime_type: str|None=None) -> str:
+    async def start(self) -> None:
+        """Restore unfinished transfers after a deploy or process restart."""
+        self._stopping = False
+        if self._recovered:
+            return
+        recovered_jobs=await load_jobs("drive",recent_for=timedelta(seconds=45))
+        self._recovered = True
+        for payload,status in recovered_jobs:
+            if not payload or not status:
+                continue
+            job_id=str(status.get("id") or payload.get("id") or "")
+            if not job_id or job_id in self.statuses:
+                continue
+            self.statuses[job_id]=status
+            self.durable_job_ids.add(job_id)
+            if status.get("state") in {"done","error","cancelled"}:
+                continue
+            try:
+                destination_ids=[int(value) for value in payload.get("destination_ids",[]) if str(value).isdigit()]
+                status.update(state="queued",message="ادامه انتقال پس از راه‌اندازی دوباره",progress=0)
+                await update_job(job_id,status)
+                self.tasks[job_id]=asyncio.create_task(self._run(
+                    job_id,str(payload["file_id"]),int(payload["user_id"]),int(payload["folder_id"]),
+                    bool(payload.get("authenticated",False)),payload.get("file_name"),payload.get("mime_type"),
+                    bool(payload.get("send_to_telegram",False)),destination_ids,
+                ),name=f"drive-import-{job_id[:8]}")
+            except (KeyError,TypeError,ValueError):
+                logger.warning("Could not recover malformed Drive job %s",job_id,exc_info=True)
+                status.update(state="error",message="اطلاعات انتقال قبلی ناقص بود؛ دوباره آن را ثبت کن.",progress=0,finished_at=datetime.utcnow().isoformat())
+                await update_job(job_id,status)
+
+    async def stop(self) -> None:
+        """Checkpoint active transfers without treating a deploy as user cancellation."""
+        self._stopping = True
+        active=list(self.tasks.values())
+        for task in active:
+            task.cancel()
+        if active:
+            await asyncio.gather(*active,return_exceptions=True)
+        self.tasks.clear()
+
+    async def enqueue(self, *, url: str, file_id: str, user_id: int, folder_id: int, authenticated: bool=False, file_name: str|None=None, mime_type: str|None=None, send_to_telegram: bool=False, destination_ids: list[int]|None=None) -> str:
+        await self.start()
+        for existing_id,item in self.statuses.items():
+            if item.get("user_id")==user_id and item.get("drive_file_id")==file_id and item.get("folder_id")==folder_id and item.get("state") not in {"done","error","cancelled"}:
+                return existing_id
         job_id = uuid.uuid4().hex
-        status = {"id":job_id,"source":"drive","url":url,"user_id":user_id,"folder_id":folder_id,"state":"queued","message":"در صف دریافت از گوگل درایو","progress":1,"created_at":datetime.utcnow().isoformat()}
+        status = {"id":job_id,"source":"drive","url":url,"drive_file_id":file_id,"user_id":user_id,"folder_id":folder_id,"state":"queued","message":"در صف دریافت از گوگل درایو","progress":1,"created_at":datetime.utcnow().isoformat()}
         self.statuses[job_id] = status
-        await create_job(job_id=job_id,user_id=user_id,kind="drive",title="Google Drive",payload={"url":url,"file_id":file_id,"folder_id":folder_id,"authenticated":authenticated,"file_name":file_name,"mime_type":mime_type},status=status)
-        self.tasks[job_id] = asyncio.create_task(self._run(job_id, file_id, user_id, folder_id,authenticated,file_name,mime_type))
+        destination_ids=list(dict.fromkeys(destination_ids or []))
+        await create_job(job_id=job_id,user_id=user_id,kind="drive",title=file_name or "Google Drive",payload={"id":job_id,"url":url,"file_id":file_id,"user_id":user_id,"folder_id":folder_id,"authenticated":authenticated,"file_name":file_name,"mime_type":mime_type,"send_to_telegram":send_to_telegram,"destination_ids":destination_ids},status=status)
+        self.durable_job_ids.add(job_id)
+        self.tasks[job_id] = asyncio.create_task(self._run(job_id, file_id, user_id, folder_id,authenticated,file_name,mime_type,send_to_telegram,destination_ids),name=f"drive-import-{job_id[:8]}")
         return job_id
 
     def list(self, user_id: int) -> list[dict]:
@@ -131,8 +185,44 @@ class GoogleDriveImporter:
         await delete_finished_jobs("drive",user_id)
         return len(ids)
 
+    async def retry(self,job_id:str,user_id:int) -> str|None:
+        async with async_session() as db:
+            record=await db.get(ProcessingJob,job_id)
+            if record is None or record.user_id!=user_id or record.kind!="drive" or record.state not in {"error","cancelled"}:
+                return None
+            try:
+                payload=json.loads(record.payload_json or "{}")
+            except (TypeError,ValueError,json.JSONDecodeError):
+                return None
+        return await self.enqueue(
+            url=str(payload.get("url") or f"drive://{payload.get('file_id','')}"),file_id=str(payload["file_id"]),
+            user_id=user_id,folder_id=int(payload["folder_id"]),authenticated=bool(payload.get("authenticated",False)),
+            file_name=payload.get("file_name"),mime_type=payload.get("mime_type"),send_to_telegram=bool(payload.get("send_to_telegram",False)),
+            destination_ids=[int(value) for value in payload.get("destination_ids",[]) if str(value).isdigit()],
+        )
+
     def _set(self, job_id: str, **changes) -> None:
-        if job_id in self.statuses: self.statuses[job_id].update(changes)
+        if job_id in self.statuses:
+            self.statuses[job_id].update(changes)
+            try:
+                if job_id in self.durable_job_ids:
+                    self._persist_dirty.add(job_id)
+                    task=self._persist_tasks.get(job_id)
+                    if task is None or task.done():
+                        self._persist_tasks[job_id]=asyncio.get_running_loop().create_task(self._flush_status(job_id))
+            except RuntimeError:
+                # Progress callbacks can run inside asyncio.to_thread(). The
+                # surrounding coroutine persists the next checkpoint.
+                pass
+
+    async def _flush_status(self,job_id:str) -> None:
+        """Coalesce rapid progress changes and persist only ordered snapshots."""
+        while job_id in self._persist_dirty:
+            self._persist_dirty.discard(job_id)
+            await asyncio.sleep(.05)
+            status=self.statuses.get(job_id)
+            if status is not None:
+                await update_job(job_id,dict(status))
 
     def _download(self, job_id: str, file_id: str, target_dir: str, access_token: str|None=None, preferred_name: str|None=None, preferred_mime: str|None=None) -> tuple[str,str|None]:
         exports={"application/vnd.google-apps.document":("application/pdf",".pdf"),"application/vnd.google-apps.spreadsheet":("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",".xlsx"),"application/vnd.google-apps.presentation":("application/vnd.openxmlformats-officedocument.presentationml.presentation",".pptx"),"application/vnd.google-apps.drawing":("application/pdf",".pdf")}
@@ -166,7 +256,15 @@ class GoogleDriveImporter:
                 raise RuntimeError("فایل عمومی نیست. دسترسی را روی «هرکس لینک را دارد» بگذار.")
             return target, content_type
 
-    async def _run(self, job_id: str, drive_file_id: str, user_id: int, folder_id: int, authenticated: bool=False, file_name: str|None=None, mime_type: str|None=None) -> None:
+    async def _run(self, job_id: str, drive_file_id: str, user_id: int, folder_id: int, authenticated: bool=False, file_name: str|None=None, mime_type: str|None=None, send_to_telegram: bool=False, destination_ids: list[int]|None=None) -> None:
+        if job_id in self.cancelled:
+            return
+        async with self._semaphore:
+            if job_id in self.cancelled:
+                return
+            await self._execute(job_id,drive_file_id,user_id,folder_id,authenticated,file_name,mime_type,send_to_telegram,destination_ids)
+
+    async def _execute(self, job_id: str, drive_file_id: str, user_id: int, folder_id: int, authenticated: bool=False, file_name: str|None=None, mime_type: str|None=None, send_to_telegram: bool=False, destination_ids: list[int]|None=None) -> None:
         sent=None; target_channel=None
         try:
             self._set(job_id,state="downloading",message="در حال اتصال به گوگل درایو",progress=3)
@@ -207,9 +305,36 @@ class GoogleDriveImporter:
                         search_text=Path(path).read_text("utf-8",errors="replace") if file_type=="text" and file_size<=1024*1024 else None
                         stored=File(user_id=user_id,folder_id=folder_id,file_id=media.file_id,file_unique_id=media.file_unique_id,channel_message_id=sent.id,storage_channel_id=target_channel,file_name=filename,description=description,search_text=search_text,content_hash=digest,file_size=media.file_size or file_size,mime_type=getattr(media,"mime_type",None) or mime,file_type=file_type,duration=getattr(media,"duration",None),width=getattr(media,"width",None),height=getattr(media,"height",None),thumbnail_file_id=thumb.file_id if thumb else None)
                     db.add(stored); await db.commit(); await db.refresh(stored)
-                    self._set(job_id,state="done",message=f"{filename} به کمد اضافه شد",progress=100,file_id=stored.id,finished_at=datetime.utcnow().isoformat())
+                    # The library copy is durable from this point onward. An
+                    # optional delivery failure must never delete that source.
+                    sent=None
+                    delivery_failures=0
+                    if send_to_telegram:
+                        chat_ids:list[int]=[]
+                        if destination_ids:
+                            destinations=(await db.execute(select(TelegramDestination).where(TelegramDestination.id.in_(destination_ids),TelegramDestination.user_id==user_id,TelegramDestination.enabled.is_(True)))).scalars().all()
+                            chat_ids=[item.chat_id for item in destinations]
+                        else:
+                            default_destination=(await db.execute(select(TelegramDestination).where(TelegramDestination.user_id==user_id,TelegramDestination.enabled.is_(True),TelegramDestination.is_default.is_(True)))).scalars().first()
+                            chat_ids=[default_destination.chat_id] if default_destination else [user.telegram_id]
+                        if not chat_ids:
+                            chat_ids=[user.telegram_id]
+                        self._set(job_id,state="saving",message="در حال ارسال به تلگرام",progress=92)
+                        for chat_id in dict.fromkeys(chat_ids):
+                            try:
+                                await telegram.copy_message_balanced(chat_id=chat_id,from_chat_id=stored.storage_channel_id,message_id=stored.channel_message_id,caption=stored.description or "")
+                            except Exception:
+                                delivery_failures+=1
+                                logger.warning("Could not deliver Drive import %s to %s",stored.id,chat_id,exc_info=True)
+                    message=f"{filename} به کمد اضافه شد"
+                    if send_to_telegram:
+                        message += " و در تلگرام فرستاده شد" if not delivery_failures else f"؛ ارسال به {delivery_failures} مقصد انجام نشد"
+                    self._set(job_id,state="done",message=message,progress=100,file_id=stored.id,delivery_failures=delivery_failures,finished_at=datetime.utcnow().isoformat())
         except asyncio.CancelledError:
-            self._set(job_id,state="cancelled",message="انتقال لغو شد",progress=0,finished_at=datetime.utcnow().isoformat())
+            if self._stopping and job_id not in self.cancelled:
+                self._set(job_id,state="queued",message="پس از راه‌اندازی دوباره ادامه پیدا می‌کند",progress=0,finished_at=None)
+            else:
+                self._set(job_id,state="cancelled",message="انتقال لغو شد",progress=0,finished_at=datetime.utcnow().isoformat())
         except Exception as error:
             logger.exception("Google Drive import failed")
             if sent is not None:

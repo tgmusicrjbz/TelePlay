@@ -9,6 +9,7 @@ import { restoreSavedSession, saveAuthenticatedAccount } from './lib/accounts';
 import { syncOfflineTextOutbox } from './lib/offline';
 import { syncOfflineMutations } from './lib/offlineMutations';
 import { useAppStore } from './lib/store';
+import { checkServerReachability, isEffectivelyOnline, useConnectivity } from './lib/connectivity';
 
 const GlobalContextMenu = lazy(() => import('./components/GlobalContextMenu'));
 const MediaPlayer = lazy(() => import('./components/MediaPlayer'));
@@ -118,7 +119,7 @@ function AuthCallback() {
 }
 
 function TelegramWebAppBootstrap({ children }: { children: React.ReactNode }) {
-    const [ready, setReady] = useState(false);
+    const [ready, setReady] = useState(() => Boolean(localStorage.getItem('access_token')));
     useEffect(() => {
         let cancelled = false;
         let syncing = false;
@@ -133,7 +134,7 @@ function TelegramWebAppBootstrap({ children }: { children: React.ReactNode }) {
             } catch { return null; }
         };
         const sync = async () => {
-            if (!navigator.onLine || localStorage.getItem('komod-force-offline') === '1') { if (!cancelled) setReady(true); return; }
+            if (!await checkServerReachability()) { if (!cancelled) setReady(true); return; }
             const identity = telegramIdentity();
             if (!identity) { if (!cancelled) setReady(true); return; }
             const currentId = localStorage.getItem('komod-telegram-user-id');
@@ -160,7 +161,7 @@ function TelegramWebAppBootstrap({ children }: { children: React.ReactNode }) {
             // Keep the last working account until Telegram authentication for the
             // newly detected account succeeds. This makes transient/offline opens
             // safe instead of leaving the app without a usable local session.
-            if (!cancelled) setReady(false);
+            if (!cancelled && !localStorage.getItem('access_token')) setReady(false);
             const controller = new AbortController();
             const timeout = window.setTimeout(() => controller.abort(), 12000);
             try {
@@ -206,14 +207,15 @@ function OfflineTextSync() {
     const addToast = useAppStore(state=>state.addToast);
     const queryClient=useQueryClient();
     useEffect(() => {
-        const sync = () => { if (navigator.onLine && localStorage.getItem('komod-force-offline') !== '1') { void syncOfflineTextOutbox(); void syncOfflineMutations(config=>api.request(config)); } };
+        const sync = () => { if (isEffectivelyOnline()) { void syncOfflineTextOutbox(); void syncOfflineMutations(config=>api.request(config)); } };
         const finished=(event:Event)=>{const result=(event as CustomEvent<{synced:number;conflicts:number}>).detail;if(result?.synced){addToast(`${result.synced.toLocaleString('fa-IR')} تغییر آفلاین همگام شد.`);void queryClient.invalidateQueries()}if(result?.conflicts)addToast(`${result.conflicts.toLocaleString('fa-IR')} تغییر به‌خاطر نسخه جدیدتر آنلاین اعمال نشد.`,'error')};
         sync();
         const timer = window.setInterval(sync, 30000);
         window.addEventListener('online', sync);
+        window.addEventListener('komod-connectivity-changed', sync);
         window.addEventListener('komod-offline-sync-finished',finished);
         document.addEventListener('visibilitychange', sync);
-        return () => { window.clearInterval(timer); window.removeEventListener('online', sync); window.removeEventListener('komod-offline-sync-finished',finished); document.removeEventListener('visibilitychange', sync); };
+        return () => { window.clearInterval(timer); window.removeEventListener('online', sync); window.removeEventListener('komod-connectivity-changed', sync); window.removeEventListener('komod-offline-sync-finished',finished); document.removeEventListener('visibilitychange', sync); };
     }, [addToast,queryClient]);
     return null;
 }
@@ -411,20 +413,9 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     restoreSavedSession();
     const { isLoading, error } = useCurrentUser();
     const token = localStorage.getItem('access_token');
-    const [online, setOnline] = useState(navigator.onLine && localStorage.getItem('komod-force-offline') !== '1');
+    const connectivity = useConnectivity();
+    const online = connectivity !== 'offline';
     const [authWaitExpired, setAuthWaitExpired] = useState(false);
-
-    useEffect(() => {
-        const update = () => setOnline(navigator.onLine && localStorage.getItem('komod-force-offline') !== '1');
-        window.addEventListener('online', update);
-        window.addEventListener('offline', update);
-        window.addEventListener('komod-connectivity-mode', update);
-        return () => {
-            window.removeEventListener('online', update);
-            window.removeEventListener('offline', update);
-            window.removeEventListener('komod-connectivity-mode', update);
-        };
-    }, []);
 
     useEffect(() => {
         if (!isLoading) { setAuthWaitExpired(false); return; }

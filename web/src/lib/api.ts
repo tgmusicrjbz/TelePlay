@@ -5,6 +5,7 @@ import axios from 'axios';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { cachedCurrentUser, clearCurrentAccountSession, updateCurrentAccountTokens } from './accounts';
 import { queueOfflineMutation, shouldQueueOffline } from './offlineMutations';
+import { isEffectivelyOnline, markServerReachable, markServerUnreachable } from './connectivity';
 
 const normalizeServerOrigin = (value?: string | null) => {
     const trimmed = String(value || '').trim().replace(/\/+$/, '');
@@ -288,7 +289,7 @@ api.interceptors.request.use((config) => {
     const vaultToken = sessionStorage.getItem('komod-vault-token');
     if (vaultToken) config.headers['X-Komod-Vault-Token'] = vaultToken;
     const workspace = localStorage.getItem('komod-active-workspace');
-    if (workspace && !String(config.url || '').startsWith('/auth') && !String(config.url || '').startsWith('/accounts') && !String(config.url || '').startsWith('/admin')) {
+    if (workspace && !String(config.url || '').startsWith('/auth') && !String(config.url || '').startsWith('/accounts') && !String(config.url || '').startsWith('/admin') && !String(config.url || '').startsWith('/files/public-shares')) {
         config.headers['X-Workspace-User'] = workspace;
     }
     const method = String(config.method || 'get').toLowerCase();
@@ -322,6 +323,7 @@ const processQueue = (error: any, token: string | null = null) => {
 api.interceptors.response.use(
     (response) => {
         consecutiveNetworkFailures = 0;
+        markServerReachable();
         window.dispatchEvent(new Event('komod-server-reachable'));
         resolveResponseMediaUrls(response.data);
         return response;
@@ -329,11 +331,18 @@ api.interceptors.response.use(
     async (error) => {
         const originalRequest = error.config;
 
+        const errorId = String(error.response?.data?.error_id || '').trim();
+        if (errorId && error.response?.status >= 500) {
+            const detail = String(error.response.data.detail || 'یک خطای پیش‌بینی‌نشده رخ داد.');
+            if (!detail.includes(errorId)) error.response.data.detail = `${detail} کد پیگیری: ${errorId}`;
+        }
+
         if (!error.response && error.code !== 'ERR_CANCELED') {
             consecutiveNetworkFailures += 1;
             // A single slow request, especially a large media transfer, does
             // not mean that the whole device is offline.
             if (!navigator.onLine || consecutiveNetworkFailures >= 3) {
+                markServerUnreachable();
                 window.dispatchEvent(new Event('komod-server-unreachable'));
             }
         }
@@ -425,7 +434,7 @@ async function runOrQueueMetadataMutation<T>(
     fallback:()=>T,
 ):Promise<T>{
     if(localStorage.getItem('komod-active-workspace-permission')==='read')throw new Error('این کمد فقط قابل مشاهده است.');
-    if(!navigator.onLine||localStorage.getItem('komod-force-offline')==='1'){
+    if(!isEffectivelyOnline()){
         queueOfflineMutation(queued);return fallback();
     }
     try{return await request()}catch(error){if(!shouldQueueOffline(error))throw error;queueOfflineMutation(queued);return fallback()}
@@ -885,7 +894,7 @@ export const usePacks = (parentFolderId: number | null, allFolders = false) => {
         staleTime:30_000,
         queryFn: async () => {
             const cached=readPackCache(cacheKey);
-            if(!navigator.onLine)return cached||[];
+            if(!isEffectivelyOnline())return cached||[];
             try { const data=(await api.get<PackSummary[]>('/packs',{params:{parent_folder_id:parentFolderId??undefined,all_folders:allFolders||undefined}})).data;try{localStorage.setItem(cacheKey,JSON.stringify(data))}catch{/* storage unavailable */}return data }
             catch(error){if(cached)return cached;throw error}
         },
@@ -965,7 +974,7 @@ const cachePlaylist = (playlist: Playlist) => {
         ? catalog.map(item => item.id === playlist.id ? summary : item)
         : [summary, ...catalog]);
 };
-const offlineRequested = () => !navigator.onLine || localStorage.getItem('komod-force-offline') === '1';
+const offlineRequested = () => !isEffectivelyOnline();
 
 export const usePlaylists = () => useQuery<PlaylistSummary[]>({
     queryKey: ['playlists'],
@@ -1055,7 +1064,7 @@ export const useDisableTwoFactor = () => {
 };
 
 export const useImportLink = () => useMutation({
-    mutationFn: async (payload: { url: string; folder_id?: number | null; new_folder_name?: string; quality?: 'auto' | 'audio' | '480' | '720' | '1080' }) =>
+    mutationFn: async (payload: { url: string; folder_id?: number | null; new_folder_name?: string; quality?: 'auto' | 'audio' | '480' | '720' | '1080'; save_to_library?:boolean; send_to_telegram?:boolean; destination_ids?:number[] }) =>
         (await api.post<{ message: string; queue_position: number; job_id: string }>('/files/import-link', payload)).data,
 });
 
@@ -1324,6 +1333,32 @@ export interface SecurityEvent {
     device?: string | null;
     created_at: string;
 }
+export interface PublicShareItem {
+    file_id:number;
+    file_name:string;
+    file_type:TelegramFile['file_type'];
+    file_size:number;
+    public_hash:string;
+    expires_at?:string|null;
+    expired:boolean;
+    password_protected:boolean;
+    allow_download:boolean;
+    view_limit?:number|null;
+    view_count:number;
+    created_at:string;
+}
+export const usePublicShares = () => useQuery({
+    queryKey:['public-shares'],
+    queryFn:async()=>(await api.get<PublicShareItem[]>('/files/public-shares')).data,
+});
+export const useRevokePublicShares = () => { const queryClient=useQueryClient(); return useMutation({
+    mutationFn:async(fileIds:number[])=>(await api.post<{revoked:number}>('/files/public-shares/revoke',{file_ids:fileIds})).data,
+    onSuccess:()=>{
+        queryClient.invalidateQueries({queryKey:['public-shares']});
+        queryClient.invalidateQueries({queryKey:['files']});
+        queryClient.invalidateQueries({queryKey:['security-events']});
+    },
+}); };
 export const useSecurityEvents = () => useQuery({
     queryKey: ['security-events'],
     queryFn: async () => (await api.get<SecurityEvent[]>('/accounts/security-events?limit=30')).data,

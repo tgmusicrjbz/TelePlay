@@ -1,6 +1,7 @@
 import { api, Pack, Playlist, TelegramFile } from './api';
 import { cachedCurrentUser } from './accounts';
 import { publishLocalTransfer } from './transfers';
+import { isEffectivelyOnline } from './connectivity';
 
 const DB_NAME = 'komod-offline';
 const DB_VERSION = 4;
@@ -34,7 +35,7 @@ export const offlineDeviceSyncEnabled = () => localStorage.getItem('komod-offlin
 export const setOfflineDeviceSyncEnabled = (enabled:boolean) => localStorage.setItem('komod-offline-device-sync', enabled ? '1' : '0');
 
 function scheduleOfflineManifestSync() {
-    if (!offlineDeviceSyncEnabled() || !navigator.onLine) return;
+    if (!offlineDeviceSyncEnabled() || !isEffectivelyOnline()) return;
     if (manifestTimer) window.clearTimeout(manifestTimer);
     manifestTimer = window.setTimeout(() => { void pushOfflineManifest(); }, 700);
 }
@@ -140,7 +141,7 @@ export async function removeOfflineFolder(id: string): Promise<void> {
 }
 
 async function performFileOffline(file: TelegramFile, onProgress?: (loaded: number, total: number) => void, options?: OfflineSaveOptions): Promise<void> {
-    if (!navigator.onLine) throw new Error('برای ذخیره اولیه باید آنلاین باشی.');
+    if (!isEffectivelyOnline()) throw new Error('برای ذخیره اولیه باید آنلاین باشی.');
     const jobId = `file-${file.id}`;
     if (!options?.silentProgress) emitProgress({ id: jobId, kind: 'file', title: file.file_name, state: 'downloading', done: 0, total: 1, failed: 0, currentName: file.file_name, loaded: 0, size: file.file_size });
     await navigator.storage?.persist?.();
@@ -401,7 +402,7 @@ export async function cacheTextFile(file: TelegramFile, content?: string): Promi
 }
 
 export async function pushOfflineManifest(): Promise<number> {
-    if (!navigator.onLine) return 0;
+    if (!isEffectivelyOnline()) return 0;
     const [media,texts]=await Promise.all([listOfflineMedia(),listOfflineTexts()]);
     const fileIds=[...new Set([...media.map(item=>item.id),...texts.map(item=>item.id)].filter(id=>id>0))];
     await api.put('/files/offline-manifest',{file_ids:fileIds});
@@ -409,7 +410,7 @@ export async function pushOfflineManifest(): Promise<number> {
 }
 
 export async function pullOfflineManifest(onProgress?: (done:number,total:number)=>void): Promise<{downloaded:number;failed:number}> {
-    if (!navigator.onLine) throw new Error('برای همگام‌سازی باید آنلاین باشی.');
+    if (!isEffectivelyOnline()) throw new Error('برای همگام‌سازی باید آنلاین باشی.');
     const {data}=await api.get<{files:TelegramFile[]}>('/files/offline-manifest');
     const [media,texts]=await Promise.all([listOfflineMedia(),listOfflineTexts()]);
     const existing=new Set([...media.map(item=>item.id),...texts.map(item=>item.id)]);
@@ -452,7 +453,7 @@ export async function updateOfflineTextDraft(id: number, content: string): Promi
 }
 
 export async function syncOfflineTextOutbox(): Promise<{ synced: number; failed: number }> {
-    if (!navigator.onLine) return { synced: 0, failed: 0 };
+    if (!isEffectivelyOnline()) return { synced: 0, failed: 0 };
     if (textOutboxSyncing) return { synced: 0, failed: 0 };
     textOutboxSyncing = true;
     try {
@@ -476,7 +477,7 @@ export async function syncOfflineTextOutbox(): Promise<{ synced: number; failed:
 }
 
 export async function cacheAllTextNotes(): Promise<void> {
-    if (!navigator.onLine) return;
+    if (!isEffectivelyOnline()) return;
     let page = 1;
     while (page <= 20) {
         const { data } = await api.get<{ files: TelegramFile[]; total: number; per_page: number }>('/files', { params: { file_type: 'text', page, per_page: 100 } });

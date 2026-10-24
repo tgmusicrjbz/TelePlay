@@ -1,12 +1,12 @@
 import React from 'react';
 
-type State = { failed: boolean };
+type State = { failed: boolean; errorId: string };
 
 export default class AppErrorBoundary extends React.Component<React.PropsWithChildren, State> {
-    state: State = { failed: false };
+    state: State = { failed: false, errorId: '' };
 
     static getDerivedStateFromError(): State {
-        return { failed: true };
+        return { failed: true, errorId: `UI-${Date.now().toString(36).toUpperCase()}` };
     }
 
     componentDidCatch(error: unknown) {
@@ -22,6 +22,7 @@ export default class AppErrorBoundary extends React.Component<React.PropsWithChi
                     <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary-500/15 text-2xl">{offline ? '📴' : '🧰'}</div>
                     <h1 className="text-lg font-bold">{offline ? 'این بخش آفلاین آماده نشد' : 'این بخش درست باز نشد'}</h1>
                     <p className="mt-2 text-sm leading-7 text-dark-300">{offline ? 'اطلاعات ذخیره‌شده روی دستگاه سالمه. یک‌بار برنامه رو دوباره باز کن.' : 'برنامه رو دوباره باز کن؛ اطلاعاتت حذف نمی‌شه.'}</p>
+                    <code dir="ltr" className="mt-3 inline-block rounded-lg bg-black/20 px-2 py-1 text-[11px] text-dark-400">{this.state.errorId}</code>
                     <div className="mt-5 grid grid-cols-2 gap-2">
                         <button className="rounded-2xl bg-primary-500 px-4 py-3 text-sm font-semibold text-white" onClick={() => window.location.reload()}>تلاش دوباره</button>
                         <button className="rounded-2xl bg-white/[.07] px-4 py-3 text-sm font-semibold" onClick={() => window.location.assign('/')}>رفتن به کمد</button>
