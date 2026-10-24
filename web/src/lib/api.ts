@@ -18,7 +18,13 @@ const normalizeServerOrigin = (value?: string | null) => {
     } catch { return window.location.origin; }
 };
 
-export const getServerOrigin = () => normalizeServerOrigin(localStorage.getItem('komod-server-origin'));
+// A saved reverse-proxy address belongs to the production app. Never let it
+// hijack requests while developing on localhost: Vite must proxy those calls
+// to the local API instance.
+const runningLocally = () => ['localhost', '127.0.0.1'].includes(window.location.hostname);
+export const getServerOrigin = () => runningLocally()
+    ? window.location.origin
+    : normalizeServerOrigin(localStorage.getItem('komod-server-origin'));
 export const resolveServerUrl = (value: string) => value.startsWith('/') ? `${getServerOrigin()}${value}` : value;
 
 // Types

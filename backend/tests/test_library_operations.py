@@ -1148,7 +1148,7 @@ class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
         from app.telegram import build_clients
         build_clients()
         from app.bot import get_web_app_button, settings
-        with patch.object(settings, "web_base_url", "http://localhost:3000"):
+        with patch.object(settings, "web_base_url", "http://localhost:5173"):
             button = get_web_app_button(111)
             self.assertEqual(button.callback_data, "get_web_link")
             self.assertIsNone(button.url)

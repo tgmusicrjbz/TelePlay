@@ -213,6 +213,12 @@ async def _session_for_device(db: AsyncSession, request: Request, user: User) ->
 @router.get("/bot/info", response_model=BotInfoResponse)
 async def get_bot_info_endpoint():
     """Get bot username and name for the login screen."""
+    if settings.local_dev_mode:
+        return BotInfoResponse(
+            username="komod_local",
+            name="کمد محلی",
+            server_version="local",
+        )
     try:
         me = await telegram.tg_client.get_me()
         return BotInfoResponse(

@@ -65,10 +65,10 @@ Create a private Telegram storage channel, add your bot as an administrator with
 **Windows PowerShell, running the source directly:**
 
 1. In the project root, run `Copy-Item backend/.env.example backend/.env` and `New-Item -ItemType Directory -Force backend/data`.
-2. Edit `backend/.env` with your credentials. Set `DATABASE_URL=sqlite:///./data/teleplay.db`, `WEB_BASE_URL=http://localhost:3000`, and a long random `JWT_SECRET`. Leave `TELEGRAM_HELPER_BOT_TOKENS` and `AUTH_USERS` empty unless needed.
+2. Edit `backend/.env` with your credentials. Set `DATABASE_URL=sqlite:///./data/teleplay.db`, `WEB_BASE_URL=http://localhost:5173`, and a long random `JWT_SECRET`. Leave `TELEGRAM_HELPER_BOT_TOKENS` and `AUTH_USERS` empty unless needed.
 3. In one terminal, run `cd backend`, `python -m venv .venv` if necessary, `.\.venv\Scripts\python.exe -m pip install -r requirements.txt`, then `.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000`.
 4. In a second terminal, run `cd web`, `npm install` if necessary, then `npm run dev`.
-5. Open [http://localhost:3000](http://localhost:3000) on the same computer. The backend health endpoint is [http://localhost:8000/health](http://localhost:8000/health). Use the login code shown by the web app and send `/login CODE` to your bot.
+5. Open [http://localhost:5173](http://localhost:5173) on the same computer. The backend health endpoint is [http://localhost:8000/health](http://localhost:8000/health). Use the login code shown by the web app and send `/login CODE` to your bot.
 
 **Docker Desktop:** Use the root `.env.example` as the template for a **root** `.env` file (not `backend/.env`), set `WEB_BASE_URL=http://localhost`, start Docker Desktop, then run `docker compose up -d --build` from the project root. Open [http://localhost](http://localhost). Stop any directly running backend first so only one process receives bot updates.
 

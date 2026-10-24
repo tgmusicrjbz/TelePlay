@@ -25,7 +25,8 @@
 .markdown-article--cream :is(h1,h2,h3,h4,h5,h6,strong,a,.katex), .markdown-article--white :is(h1,h2,h3,h4,h5,h6,strong,a,.katex) { color: #81552e !important; }
 .markdown-article--cream code:not(pre code), .markdown-article--white code:not(pre code) { color: #292524 !important; }
 .markdown-article--cream pre code, .markdown-article--white pre code { color: #e2e8f0 !important; }
-.markdown-article--custom { background: var(--md-surface); color: var(--md-text); border-color: var(--md-border); box-shadow: 0 0 0 100vmax var(--md-background), inset 0 0 24px rgb(0 0 0 / .08); }
+.markdown-reader-canvas--custom { background: var(--md-background); }
+.markdown-article--custom { background: var(--md-surface); color: var(--md-text); border-color: var(--md-border); box-shadow: inset 0 0 24px rgb(0 0 0 / .08); }
 .markdown-article--custom h1 { color: var(--md-h1) !important; }
 .markdown-article--custom h2 { color: var(--md-h2) !important; }
 .markdown-article--custom :is(h3,h4,h5,h6) { color: var(--md-h3) !important; }

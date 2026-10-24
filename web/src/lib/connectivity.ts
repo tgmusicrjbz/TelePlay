@@ -10,6 +10,7 @@ let pendingProbe: Promise<boolean> | null = null;
 const forcedOffline = () => localStorage.getItem('komod-force-offline') === '1';
 
 const serverOrigin = () => {
+    if (['localhost', '127.0.0.1'].includes(window.location.hostname)) return window.location.origin;
     const configured = String(localStorage.getItem('komod-server-origin') || '').trim().replace(/\/+$/, '');
     if (!configured) return window.location.origin;
     try {

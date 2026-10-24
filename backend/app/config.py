@@ -102,7 +102,7 @@ class Settings(BaseSettings):
     telegram_client_concurrency: int = 3
     
     # Web
-    web_base_url: str = "http://localhost:3000"
+    web_base_url: str = "http://localhost:5173"
     google_client_id: str = Field("", alias="GOOGLE_CLIENT_ID")
     google_client_secret: str = Field("", alias="GOOGLE_CLIENT_SECRET")
     google_redirect_uri: str = Field("", alias="GOOGLE_REDIRECT_URI")
@@ -128,7 +128,11 @@ class Settings(BaseSettings):
         return list(dict.fromkeys(value.strip() for value in values if value.strip()))
     
     class Config:
-        env_file = ".env"
+        # `.env` contains the normal local defaults. `.env.local` is ignored
+        # by Git and deliberately wins over it, so a developer can point a
+        # local API instance at another database without editing or exposing
+        # the shared configuration file.
+        env_file = (".env", ".env.local")
         env_file_encoding = "utf-8"
 
 
