@@ -810,7 +810,8 @@ async def admin_health(_: User = Depends(require_admin), db: AsyncSession = Depe
         active=connected_bots,
     ))
 
-    link_worker_alive = bool(link_importer.task and not link_importer.task.done())
+    link_workers = [task for task in getattr(link_importer, "tasks", []) if not task.done()]
+    link_worker_alive = bool(link_workers)
     if not link_importer.available:
         link_status, link_message = "disabled", "سشن دریافت لینک تنظیم نشده"
     elif link_worker_alive and link_importer.client is not None:
@@ -819,7 +820,7 @@ async def admin_health(_: User = Depends(require_admin), db: AsyncSession = Depe
         link_status, link_message = "error", "پردازشگر لینک متوقف شده"
     services.append(ServiceHealthItem(
         key="links", label="افزودن با لینک", status=link_status, message=link_message,
-        queued=link_importer.queue.qsize(), active=1 if link_importer.active_job_id else 0,
+        queued=link_importer.queue.qsize(), active=len(getattr(link_importer, "active_job_ids", set())),
     ))
 
     def speech_service(key: str, label: str, queue_service) -> ServiceHealthItem:

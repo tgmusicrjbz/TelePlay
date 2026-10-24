@@ -96,29 +96,33 @@ async def lifespan(app: FastAPI):
                 logger.info("Backfilled caption tags for existing files.")
     except Exception as e:
         logger.warning(f"Could not backfill caption tags: {e}")
-    await start_telegram_client()
-    logger.info("Telegram client started")
-    if link_importer.available:
-        try:
-            await link_importer.start()
-        except Exception:
-            logger.exception("Background link importer could not start; the rest of the app remains available")
-    await drive_importer.start()
-    # Recovery also supports users who configured only personal Gemini keys.
-    await tts_queue.start()
-    await stt_queue.start()
-    await source_monitor_service.start()
+    if settings.local_dev_mode:
+        logger.warning("Local development mode is active: external Telegram, Drive and monitor workers are disabled")
+    else:
+        await start_telegram_client()
+        logger.info("Telegram client started")
+        if link_importer.available:
+            try:
+                await link_importer.start()
+            except Exception:
+                logger.exception("Background link importer could not start; the rest of the app remains available")
+        await drive_importer.start()
+        # Recovery also supports users who configured only personal Gemini keys.
+        await tts_queue.start()
+        await stt_queue.start()
+        await source_monitor_service.start()
     
     yield
     
     logger.info("Shutting down...")
-    await source_monitor_service.stop()
-    await drive_importer.stop()
-    await link_importer.stop()
-    await tts_queue.stop()
-    await stt_queue.stop()
-    await stop_telegram_client()
-    logger.info("Telegram client stopped")
+    if not settings.local_dev_mode:
+        await source_monitor_service.stop()
+        await drive_importer.stop()
+        await link_importer.stop()
+        await tts_queue.stop()
+        await stt_queue.stop()
+        await stop_telegram_client()
+        logger.info("Telegram client stopped")
 
 
 app = FastAPI(

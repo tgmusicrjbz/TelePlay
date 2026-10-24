@@ -93,6 +93,10 @@ class Settings(BaseSettings):
     # Server
     server_host: str = "0.0.0.0"
     server_port: int = 8000
+    # A deliberately isolated local mode for UI/API development. It keeps the
+    # HTTP server and a local database available but never starts Telegram,
+    # Drive, link-import or scheduled monitor workers.
+    local_dev_mode: bool = Field(False, alias="KOMOD_LOCAL_DEV")
     
     # Concurrency
     telegram_client_concurrency: int = 3

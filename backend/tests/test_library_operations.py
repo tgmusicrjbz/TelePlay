@@ -193,13 +193,13 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             user = await db.get(User, self.user_id)
             response = await update_credentials(
                 self.auth_request(),
-                CredentialsUpdate(username="mahdi.komod", new_password="safe-password-1405"),
+                CredentialsUpdate(username="mahdi.komod", new_password="Safe-Password-1405"),
                 user, db,
             )
             self.assertEqual(response.user.login_username, "mahdi.komod")
             login = await password_login(
                 self.auth_request(),
-                PasswordLoginRequest(username="MAHDI.KOMOD", password="safe-password-1405"),
+                PasswordLoginRequest(username="MAHDI.KOMOD", password="Safe-Password-1405"),
                 db,
             )
             self.assertEqual(login.user.telegram_id, 111)
@@ -372,15 +372,15 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             user = await db.get(User, self.user_id)
             request = self.auth_request()
             request.state.signed_in_user = user
-            client = SimpleNamespace(copy_message=AsyncMock())
-            with patch("app.routers.files.telegram.tg_client", client):
+            sender = AsyncMock()
+            with patch("app.routers.files.telegram.copy_message_balanced", sender):
                 result = await send_files_to_telegram(
                     SendToTelegramRequest(ids=[self.nested_file_id, self.direct_file_id]),
                     request, db, user,
                 )
             self.assertEqual(result, {"sent": 2, "failed": []})
             self.assertEqual(
-                [call.args[2] for call in client.copy_message.await_args_list],
+                [call.kwargs["message_id"] for call in sender.await_args_list],
                 [102, 101],
             )
 
