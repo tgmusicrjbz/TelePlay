@@ -9,6 +9,7 @@ import hmac
 import json
 import time
 import re
+import secrets
 from urllib.parse import parse_qsl
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -292,6 +293,9 @@ async def password_register(
         raise HTTPException(status_code=403, detail="ساخت حساب تازه فعلاً غیرفعال است.")
     username = _normalize_login_username(payload.username)
     _validate_password(payload.password)
+    display_name = " ".join(payload.display_name.strip().split())
+    if len(display_name) < 2:
+        raise HTTPException(status_code=422, detail="نام نمایشی باید دست‌کم دو نویسه باشد.")
     if (await db.execute(select(User.id).where(User.login_username == username))).scalar_one_or_none() is not None:
         raise HTTPException(status_code=409, detail="این نام کاربری قبلاً انتخاب شده است.")
 
@@ -305,7 +309,7 @@ async def password_register(
         telegram_id=telegram_id,
         login_username=username,
         password_hash=password_context.hash(payload.password),
-        display_name=" ".join(payload.display_name.strip().split()),
+        display_name=display_name,
         is_active=True,
     )
     db.add(user)

@@ -382,7 +382,7 @@ function LoginPage() {
                     کمد
                 </h1>
                 <p className="text-dark-400 mb-8">
-                    درایو ابری و پخش‌کننده شخصی تو روی تلگرام
+                    درایو ابری و پخش‌کننده شخصی تو
                 </p>
 
                 <div className="mb-5 grid grid-cols-2 rounded-xl border border-white/[.07] bg-dark-950/50 p-1">

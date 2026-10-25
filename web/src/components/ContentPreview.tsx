@@ -148,6 +148,9 @@ export default function ContentPreview() {
         document.body.appendChild(anchor);anchor.click();anchor.remove();
     };
     const browserFileUrl=new URL(`${authorizedUrl}${authorizedUrl.includes('?')?'&':'?'}inline=1`,window.location.origin).toString();
+    const extension=file.file_name.split('.').pop()?.toLowerCase()||'';
+    const inferredMime:Record<string,string>={pdf:'application/pdf',doc:'application/msword',docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',xls:'application/vnd.ms-excel',xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',ppt:'application/vnd.ms-powerpoint',pptx:'application/vnd.openxmlformats-officedocument.presentationml.presentation',epub:'application/epub+zip',zip:'application/zip'};
+    const deviceMime=file.mime_type||inferredMime[extension]||'application/octet-stream';
     const openExternalFile=()=>{
         const telegramWebApp=(window as any).Telegram?.WebApp;
         if(typeof telegramWebApp?.openLink==='function'){
@@ -163,7 +166,7 @@ export default function ContentPreview() {
         try{
             if(/Android/i.test(navigator.userAgent)){
                 const target=browserFileUrl.replace(/^https?:\/\//i,'');
-                const mime=encodeURIComponent(file.mime_type||'application/octet-stream');
+                const mime=encodeURIComponent(deviceMime);
                 const fallback=encodeURIComponent(browserFileUrl);
                 window.location.href=`intent://${target}#Intent;scheme=https;action=android.intent.action.VIEW;type=${mime};S.browser_fallback_url=${fallback};end`;
                 return;
