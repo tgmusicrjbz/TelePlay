@@ -38,11 +38,24 @@ def extract_google_drive_file_id(value: str) -> str | None:
     except ValueError:
         return None
     host = (parsed.hostname or "").lower()
-    if host not in {"drive.google.com", "drive.usercontent.google.com"}:
+    if host not in {"drive.google.com", "drive.usercontent.google.com", "docs.google.com"}:
         return None
-    match = re.search(r"/file/d/([A-Za-z0-9_-]{10,})", parsed.path)
+    match = re.search(r"/(?:file|document|spreadsheets|presentation|drawings)/d/([A-Za-z0-9_-]{10,})", parsed.path)
     candidate = match.group(1) if match else (parse_qs(parsed.query).get("id") or [None])[0]
     return candidate if candidate and re.fullmatch(r"[A-Za-z0-9_-]{10,}", candidate) else None
+
+
+def infer_google_workspace_mime(value: str) -> str | None:
+    """Infer native Workspace type from a Docs/Sheets/Slides share URL."""
+    try:
+        path=urlparse(value.strip()).path
+    except ValueError:
+        return None
+    if "/document/d/" in path: return "application/vnd.google-apps.document"
+    if "/spreadsheets/d/" in path: return "application/vnd.google-apps.spreadsheet"
+    if "/presentation/d/" in path: return "application/vnd.google-apps.presentation"
+    if "/drawings/d/" in path: return "application/vnd.google-apps.drawing"
+    return None
 
 
 def _response_filename(headers, file_id: str) -> str:

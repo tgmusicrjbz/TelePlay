@@ -20,6 +20,7 @@ import Toasts from './Toasts';
 import CustomSelect from './CustomSelect';
 import { applyTheme, getStoredTheme } from '../lib/theme';
 import { publishLocalTransfer } from '../lib/transfers';
+import { folderTreeLabel } from '../lib/folderTreeLabel';
 import PackCard from './PackCard';
 
 // Heavy sections are downloaded only when the user opens them. Vite still
@@ -198,6 +199,7 @@ export default function FileBrowser() {
     const [importJobs, setImportJobs] = useState<ImportStatus[]>([]);
     const [importPanelMode, setImportPanelMode] = useState<'open'|'collapsed'|'hidden'>('open');
     const [forceOffline, setForceOffline] = useState(() => localStorage.getItem('komod-force-offline') === '1');
+    useEffect(()=>{const params=new URLSearchParams(window.location.search);const drive=params.get('drive');if(!drive)return;addToast(drive==='connected'?'حساب گوگل با موفقیت متصل شد.':'اتصال حساب گوگل کامل نشد؛ دوباره تلاش کن.',drive==='connected'?'success':'error');params.delete('drive');const query=params.toString();window.history.replaceState({},'',`${window.location.pathname}${query?`?${query}`:''}${window.location.hash}`)},[addToast]);
     useEffect(()=>{const open=(event:Event)=>{const ids=(event as CustomEvent<{fileIds:number[]}>).detail?.fileIds||[];if(ids.length){setPackFileIds(ids);setShowCreatePack(true)}};window.addEventListener('komod-add-to-pack',open);return()=>window.removeEventListener('komod-add-to-pack',open)},[]);
     // Vault views are deliberately ephemeral. Persisting this state used to
     // reopen the app inside an empty hidden-only view after refresh/login.
@@ -309,7 +311,7 @@ export default function FileBrowser() {
     const { data: folderTree, isLoading: folderTreeLoading, error: folderTreeError } = useFolderTree(showHidden);
     const importFolderOptions = useMemo(() => {
         const result:{value:string;label:string}[]=[];
-        const walk=(items:Folder[]|undefined,depth=0)=>items?.forEach(folder=>{result.push({value:String(folder.id),label:`${depth?`${'   '.repeat(Math.max(0,depth-1))}─┘ `:''}🗂️ ${folder.name}`});walk(folder.children,depth+1)});
+        const walk=(items:Folder[]|undefined,depth=0)=>items?.forEach(folder=>{result.push({value:String(folder.id),label:folderTreeLabel(folder.name,depth)});walk(folder.children,depth+1)});
         walk(folderTree);
         return result;
     },[folderTree]);

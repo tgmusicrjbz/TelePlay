@@ -3,7 +3,7 @@ PyroTGFork MTProto client for Telegram interactions.
 Handles both bot commands and file streaming via a client pool.
 """
 from .patch import Client
-from pyrogram.types import Message, BotCommand, MenuButtonWebApp, WebAppInfo
+from pyrogram.types import Message, BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats, MenuButtonWebApp, WebAppInfo
 from pyrogram.errors import MessageIdInvalid
 from .config import get_settings
 from pathlib import Path
@@ -74,24 +74,29 @@ def spawn_background(coro, *, name: str) -> asyncio.Task:
 async def configure_main_client(c) -> None:
     """Update commands and profile text; failures must never block the web app."""
     try:
-        await asyncio.wait_for(c.set_bot_commands([
+        private_commands = [
             BotCommand("start", "باز کردن منوی اصلی"),
             BotCommand("myfiles", "دیدن فایل‌های ذخیره‌شده"),
             BotCommand("folders", "مرور کشوهای کمد"),
             BotCommand("playlists", "ساخت و پخش پلی‌لیست‌ها"),
             BotCommand("tts", "ساخت صدا از متن"),
             BotCommand("stt", "استخراج متن از صدا"),
-            BotCommand("connect_here", "اتصال گروه یا کانال به کمد"),
-            BotCommand("group_settings", "تنظیم امکانات و سهمیه‌های گروه"),
-            BotCommand("group_usage", "نمایش مصرف امروز گروه"),
-            BotCommand("komod", "باز کردن منوی دکمه‌ای گروه"),
             BotCommand("search", "جست‌وجو در فایل‌ها و کشوها"),
             BotCommand("newfolder", "ساخت کشوی جدید"),
             BotCommand("web", "راهنمای ورود به نسخهٔ وب"),
             BotCommand("login", "تأیید کد ورود دستگاه"),
             BotCommand("help", "نمایش راهنمای استفاده"),
             BotCommand("logout_all", "خروج از همهٔ دستگاه‌ها"),
-        ]), timeout=20)
+        ]
+        group_commands = [
+            BotCommand("komod", "باز کردن منوی گروه"),
+            BotCommand("tts", "تبدیل متن ریپلای‌شده به صدا"),
+            BotCommand("stt", "تبدیل صوت یا ویدیوی ریپلای‌شده به متن"),
+            BotCommand("group_usage", "نمایش مصرف امروز گروه"),
+            BotCommand("connect_here", "درخواست اتصال این گروه"),
+        ]
+        await asyncio.wait_for(c.set_bot_commands(private_commands, scope=BotCommandScopeAllPrivateChats()), timeout=20)
+        await asyncio.wait_for(c.set_bot_commands(group_commands, scope=BotCommandScopeAllGroupChats()), timeout=20)
         web_url = settings.web_base_url.rstrip("/")
         if web_url.startswith("https://"):
             try:

@@ -411,6 +411,12 @@ class PasswordLoginRequest(BaseModel):
     otp: Optional[str] = Field(default=None, min_length=6, max_length=8)
 
 
+class PasswordRegisterRequest(BaseModel):
+    username: str = Field(min_length=4, max_length=32)
+    password: str = Field(min_length=8, max_length=128)
+    display_name: str = Field(min_length=2, max_length=80)
+
+
 class CredentialsUpdate(BaseModel):
     username: str = Field(min_length=4, max_length=32)
     current_password: Optional[str] = Field(default=None, max_length=128)

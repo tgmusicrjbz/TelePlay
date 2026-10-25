@@ -8,11 +8,12 @@ import { InlineMediaPlayer } from './MediaPlayer';
 import InternalFileLinkPicker from './InternalFileLinkPicker';
 import ZoomableImage from './ZoomableImage';
 import { getMarkdownSettings, getMarkdownThemeOptions, markdownFonts } from '../lib/markdownSettings';
+import { folderTreeLabel } from '../lib/folderTreeLabel';
 
 const packTextPreviewCache = new Map<number,string>();
 const packReaderFonts=markdownFonts;
 
-function flattenFolders(items:Folder[],depth=0):Array<{value:number|null;label:string}>{return items.flatMap(folder=>[{value:folder.id,label:`${depth?`${'   '.repeat(Math.max(0,depth-1))}─┘ `:''}🗂️ ${folder.name}`},...flattenFolders(folder.children||[],depth+1)])}
+function flattenFolders(items:Folder[],depth=0):Array<{value:number|null;label:string}>{return items.flatMap(folder=>[{value:folder.id,label:folderTreeLabel(folder.name,depth)},...flattenFolders(folder.children||[],depth+1)])}
 
 function FilePlaceholder({type,className=''}:{type:string;className?:string}) {
     const icon=type==='audio'?'🎵':type==='video'?'🎬':type==='image'?'🖼️':type==='text'?'📝':'📄';

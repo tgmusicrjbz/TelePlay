@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -200,6 +201,27 @@ class GeminiSTTProvider:
 
     def _request(self, key: str, path: Path, mime_type: str, custom_prompt: str) -> str:
         size = path.stat().st_size
+        instruction = (
+            "محتوای این فایل صوتی یا ویدیویی را بدون خلاصه‌سازی و بدون تغییر معنا، دقیق رونویسی کن. "
+            "اصطلاحات تخصصی و کلمات انگلیسی را به همان زبان نگه دار. خروجی فقط Markdown خوانا باشد؛ "
+            "برای پاراگراف‌ها و گوینده‌های متفاوت ساختار مناسب بساز و هیچ توضیح اضافه‌ای درباره فرایند ننویس."
+        )
+        if custom_prompt.strip():
+            instruction += f"\n\nدستور تکمیلی کاربر:\n{custom_prompt.strip()}"
+
+        # Short voice notes are faster as one inline request: this removes the
+        # separate Files API upload and ACTIVE-state polling round trip.
+        if size <= 12 * 1024 * 1024 and self.stt_model != "gemini-3.5-transcribe":
+            payload={"contents":[{"role":"user","parts":[
+                {"text":instruction},
+                {"inlineData":{"mimeType":mime_type,"data":base64.b64encode(path.read_bytes()).decode("ascii")}},
+            ]}],"generationConfig":{"temperature":0.1}}
+            endpoint=f"https://generativelanguage.googleapis.com/v1beta/models/{self.stt_model}:generateContent?{urlencode({'key':key})}"
+            result,_=self._json_request(Request(endpoint,data=json.dumps(payload).encode(),headers={"Content-Type":"application/json"},method="POST"),300)
+            parts=result.get("candidates",[{}])[0].get("content",{}).get("parts",[])
+            text="\n".join(str(part.get("text","")) for part in parts if part.get("text")).strip()
+            if not text: raise RuntimeError("Gemini متن معتبری از فایل برنگرداند.")
+            return text
         start = Request(
             f"https://generativelanguage.googleapis.com/upload/v1beta/files?{urlencode({'key': key})}",
             data=json.dumps({"file": {"display_name": path.name}}).encode(),
@@ -265,13 +287,6 @@ class GeminiSTTProvider:
                         text = self._text_request(key, text, custom_prompt.strip())
                     return text
 
-            instruction = (
-                "محتوای این فایل صوتی یا ویدیویی را بدون خلاصه‌سازی و بدون تغییر معنا، دقیق رونویسی کن. "
-                "اصطلاحات تخصصی و کلمات انگلیسی را به همان زبان نگه دار. خروجی فقط Markdown خوانا باشد؛ "
-                "برای پاراگراف‌ها و گوینده‌های متفاوت ساختار مناسب بساز و هیچ توضیح اضافه‌ای درباره فرایند ننویس."
-            )
-            if custom_prompt.strip():
-                instruction += f"\n\nدستور تکمیلی کاربر:\n{custom_prompt.strip()}"
             payload = {
                 "contents": [{"role": "user", "parts": [
                     {"text": instruction},

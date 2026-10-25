@@ -33,7 +33,7 @@ from .tts import TTSJob, VOICE_OPTIONS, consume_tts_quota, load_tts_settings, tt
 from .stt import STTJob, consume_stt_quota, stt_queue
 from .gemini_keys import decrypt_user_keys
 from .link_captions import render_link_caption
-from .group_tools import consume_group_quota, get_group_usage, get_or_create_group_settings, is_global_admin
+from .group_tools import consume_group_quota, get_group_usage, get_or_create_group_settings, get_group_voice, set_group_voice, is_global_admin
 from .bot_messages import bot_message
 
 settings = get_settings()
@@ -320,7 +320,7 @@ def group_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🎙️ متن به صدا", callback_data="grpmenu:tts"), InlineKeyboardButton("📝 صوت به متن", callback_data="grpmenu:stt")],
         [InlineKeyboardButton("🔗 دریافت لینک", callback_data="grpmenu:link"), InlineKeyboardButton("📊 مصرف امروز", callback_data="grpmenu:usage")],
-        [InlineKeyboardButton("⚙️ تنظیمات خصوصی ادمین", callback_data="grpmenu:settings")],
+        [InlineKeyboardButton("🎤 گوینده و محدودیت‌ها", callback_data="grpmenu:settings")],
     ])
 
 
@@ -329,6 +329,7 @@ async def group_settings_view(chat_id: int, telegram_user_id: int, title: str | 
         group = await get_or_create_group_settings(db, chat_id, title)
         await db.commit()
         group_usage, member_usage = await get_group_usage(db, chat_id, telegram_user_id)
+        voice = await get_group_voice(db, chat_id)
     operations = (("tts", "🎙️ متن به صدا"), ("stt", "📝 صوت به متن"), ("link", "🔗 افزودن لینک"))
     lines = [f"⚙️ **تنظیمات گروه {group.title}**", "", "مصرف امروز:"]
     rows = []
@@ -353,7 +354,9 @@ async def group_settings_view(chat_id: int, telegram_user_id: int, title: str | 
             InlineKeyboardButton(f"سقف {to_persian_digits(member_limit) if member_limit else '∞'}", callback_data="noop"),
             InlineKeyboardButton("+۱ عضو", callback_data=f"grpq:{chat_id}:{operation}:member:1"),
         ])
-    lines.extend(("", "برای واردکردن مقدار دقیق یا تأیید و قطع گروه‌ها از پنل مدیریت وب استفاده کن."))
+    voice_label=next((item["label"] for item in VOICE_OPTIONS if item["value"]==voice),voice)
+    lines.extend(("", f"گوینده گروه: {voice_label}", "برای واردکردن مقدار دقیق یا تأیید و قطع گروه‌ها از پنل مدیریت وب استفاده کن."))
+    rows.append([InlineKeyboardButton(f"🎤 گوینده: {voice_label.split(' · ')[0]}",callback_data=f"grpvoice:{chat_id}:menu")])
     return {"text": "\n".join(lines), "reply_markup": InlineKeyboardMarkup(rows)}
 
 
@@ -1312,10 +1315,13 @@ async def group_tts_command(client, message: Message):
             await message.reply(f"⛔ {error}")
             return
     title_line = next((line.strip() for line in source_text.splitlines() if line.strip()), "صدای ساخته‌شده")
+    preferences=load_tts_settings(user)
+    async with async_session() as db:
+        preferences["voice"]=await get_group_voice(db,message.chat.id,preferences.get("voice","Kore"))
     job = TTSJob(
         user_id=user.id, telegram_id=message.chat.id, output_chat_id=message.chat.id,
         text=source_text, title=title_line[:80], folder_id=None,
-        preferences=load_tts_settings(user), output_mode="telegram", api_keys=personal_keys,
+        preferences=preferences, output_mode="telegram", api_keys=personal_keys,
     )
     position = await tts_queue.enqueue(job)
     queue_note = f" نوبت {to_persian_digits(str(position))} در صف." if position > 1 else ""
@@ -2244,7 +2250,7 @@ async def handle_callback(client, callback: CallbackQuery):
     data = callback.data
     async with async_session() as db:
         known_user = (await db.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one_or_none()
-    group_settings_callback = (data.startswith("grpq:") and is_global_admin(callback.from_user.id)) or data.startswith("grpmenu:")
+    group_settings_callback = ((data.startswith("grpq:") or data.startswith("grpvoice:")) and is_global_admin(callback.from_user.id)) or data.startswith("grpmenu:")
     if ((known_user is not None and not known_user.is_active) or
             (settings.restrict_users and callback.from_user.id not in settings.bootstrap_users and known_user is None and not group_settings_callback)):
         await callback.answer("اجازهٔ استفاده از این ربات رو نداری.", show_alert=True)
@@ -2283,6 +2289,27 @@ async def handle_callback(client, callback: CallbackQuery):
         except (ValueError, TypeError):
             await callback.answer("این تنظیم معتبر نیست.", show_alert=True)
 
+    elif data.startswith("grpvoice:"):
+        try:
+            _,chat_id_raw,voice=data.split(":",2); group_chat_id=int(chat_id_raw)
+        except (ValueError,TypeError):
+            await callback.answer("این تنظیم معتبر نیست.",show_alert=True); return
+        if not is_global_admin(callback.from_user.id):
+            await callback.answer("فقط مدیر اصلی کمد می‌تواند گوینده گروه را تغییر دهد.",show_alert=True); return
+        if voice=="menu":
+            rows=[]
+            for index in range(0,len(VOICE_OPTIONS),2):
+                rows.append([InlineKeyboardButton(item["label"].split(" · ")[0],callback_data=f"grpvoice:{group_chat_id}:{item['value']}") for item in VOICE_OPTIONS[index:index+2]])
+            rows.append([InlineKeyboardButton("↩️ تنظیمات گروه",callback_data=f"grpvoice:{group_chat_id}:back")])
+            await callback.message.edit_text("🎤 گوینده پیش‌فرض این گروه را انتخاب کن:",reply_markup=InlineKeyboardMarkup(rows)); await callback.answer(); return
+        if voice=="back":
+            await callback.message.edit_text(**(await group_settings_view(group_chat_id,callback.from_user.id))); await callback.answer(); return
+        if voice not in {item["value"] for item in VOICE_OPTIONS}:
+            await callback.answer("این گوینده معتبر نیست.",show_alert=True); return
+        async with async_session() as db: await set_group_voice(db,group_chat_id,voice)
+        await callback.message.edit_text(**(await group_settings_view(group_chat_id,callback.from_user.id)))
+        await callback.answer("گوینده گروه ذخیره شد.")
+
     elif data.startswith("grpmenu:"):
         action = data.split(":", 1)[1]
         group_chat_id = callback.message.chat.id
@@ -2290,9 +2317,19 @@ async def handle_callback(client, callback: CallbackQuery):
             await callback.answer("این گروه هنوز تأیید نشده یا اتصال آن متوقف است.", show_alert=True)
             return
         if action == "tts":
-            await callback.answer("روی یک پیام متنی ریپلای کن و /tts را بفرست؛ یا متن را بعد از /tts بنویس.", show_alert=True)
+            command=callback.message.reply_to_message
+            if command and command.reply_to_message and command.from_user and command.from_user.id==callback.from_user.id:
+                await callback.answer("در صف تبدیل قرار گرفت.")
+                await group_tts_command(client,command)
+            else:
+                await callback.answer("منوی /komod را روی پیام متنی ریپلای کن و دوباره این دکمه را بزن؛ یا /tts را روی متن ریپلای کن.", show_alert=True)
         elif action == "stt":
-            await callback.answer("روی صدا یا ویدیو ریپلای کن و /stt را بفرست.", show_alert=True)
+            command=callback.message.reply_to_message
+            if command and command.reply_to_message and command.from_user and command.from_user.id==callback.from_user.id:
+                await callback.answer("در صف استخراج متن قرار گرفت.")
+                await group_stt_command(client,command)
+            else:
+                await callback.answer("منوی /komod را روی صدا یا ویدیو ریپلای کن و دوباره این دکمه را بزن؛ یا /stt را روی فایل ریپلای کن.", show_alert=True)
         elif action == "link":
             await callback.answer("لینک یوتیوب یا اینستاگرام را مستقیم در همین گروه بفرست.", show_alert=True)
         elif action == "usage":

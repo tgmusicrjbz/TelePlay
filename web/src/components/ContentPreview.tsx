@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlignCenter, AlignJustify, AlignLeft, AlignRight, ArrowRight, Bold, BookOpen, Braces, Check, ChevronLeft, ChevronRight, Code2, Copy, Download, ExternalLink, FileBox, Heading1, Image as ImageIcon, Italic, Link, Link2, List, ListChecks, ListOrdered, Maximize2, Minimize2, Minus, Moon, MoveHorizontal, Pencil, Plus, Quote, Redo2, Settings2, Share2, Sigma, Sparkles, Strikethrough, Sun, Table2, Underline, Undo2, Wand2, WrapText, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { AlignCenter, AlignJustify, AlignLeft, AlignRight, ArrowRight, Bold, BookOpen, Braces, Check, ChevronLeft, ChevronRight, Code2, Copy, Download, ExternalLink, FileBox, Heading1, Image as ImageIcon, Italic, Link, Link2, List, ListChecks, ListOrdered, Maximize2, Minimize2, Minus, Moon, MoveHorizontal, Pencil, Plus, Quote, Redo2, Settings2, Smartphone, Sigma, Sparkles, Strikethrough, Sun, Table2, Underline, Undo2, Wand2, WrapText, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { api, canPreviewText, useFiles, useRefineSTTText } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { cacheTextFile, getOfflineText, updateOfflineTextDraft } from '../lib/offline';
@@ -147,21 +147,32 @@ export default function ContentPreview() {
         anchor.rel='noopener noreferrer';
         document.body.appendChild(anchor);anchor.click();anchor.remove();
     };
-    const openExternalFile=()=>window.open(authorizedUrl,'_blank','noopener,noreferrer');
-    const openWithDevice=async()=>{
+    const browserFileUrl=new URL(`${authorizedUrl}${authorizedUrl.includes('?')?'&':'?'}inline=1`,window.location.origin).toString();
+    const openExternalFile=()=>{
+        const telegramWebApp=(window as any).Telegram?.WebApp;
+        if(typeof telegramWebApp?.openLink==='function'){
+            telegramWebApp.openLink(browserFileUrl,{try_instant_view:false});
+            return;
+        }
+        const anchor=document.createElement('a');
+        anchor.href=browserFileUrl;anchor.target='_blank';anchor.rel='noopener noreferrer';
+        document.body.appendChild(anchor);anchor.click();anchor.remove();
+    };
+    const openWithDevice=()=>{
         setOpeningExternal(true);
         try{
-            const response=await fetch(authorizedUrl);
-            if(!response.ok)throw new Error('دریافت فایل انجام نشد.');
-            const blob=await response.blob();
-            const sharedFile=new File([blob],file.file_name,{type:file.mime_type||blob.type||'application/octet-stream'});
-            const sharePayload={files:[sharedFile],title:file.file_name};
-            if(navigator.share&&(!navigator.canShare||navigator.canShare(sharePayload))){await navigator.share(sharePayload);return;}
+            if(/Android/i.test(navigator.userAgent)){
+                const target=browserFileUrl.replace(/^https?:\/\//i,'');
+                const mime=encodeURIComponent(file.mime_type||'application/octet-stream');
+                const fallback=encodeURIComponent(browserFileUrl);
+                window.location.href=`intent://${target}#Intent;scheme=https;action=android.intent.action.VIEW;type=${mime};S.browser_fallback_url=${fallback};end`;
+                return;
+            }
             openExternalFile();
-            addToast('فایل در مرورگر باز شد؛ از منوی مرورگر برنامهٔ موردنظرت را انتخاب کن.','info');
-        }catch(reason:any){
-            if(reason?.name!=='AbortError'){openExternalFile();addToast(reason?.message||'انتخاب برنامه انجام نشد؛ فایل در مرورگر باز شد.','info');}
-        }finally{setOpeningExternal(false)}
+            addToast('فایل برای بازشدن با نمایشگر یا برنامهٔ سازگار دستگاه فرستاده شد.','info');
+        }finally{
+            window.setTimeout(()=>setOpeningExternal(false),700);
+        }
     };
     const saveText = async () => {
         setSaving(true);
@@ -273,7 +284,7 @@ export default function ContentPreview() {
                             <h3 dir="auto" className="mt-5 break-words text-lg font-bold">{file.file_name}</h3>
                             <p className="mt-2 text-sm leading-7 text-dark-400">این فایل داخل مرورگر پیش‌نمایش مستقیمی ندارد. می‌توانی آن را با برنامه‌های نصب‌شده روی دستگاه باز کنی.</p>
                             <div className="mt-6 grid gap-2 sm:grid-cols-2">
-                                <button disabled={openingExternal} onClick={()=>void openWithDevice()} className="btn-primary flex min-h-12 items-center justify-center gap-2 disabled:opacity-50"><Share2 className="h-4 w-4"/>{openingExternal?'در حال آماده‌سازی…':'باز کردن با برنامه دستگاه'}</button>
+                                <button disabled={openingExternal} onClick={openWithDevice} className="btn-primary flex min-h-12 items-center justify-center gap-2 disabled:opacity-50"><Smartphone className="h-4 w-4"/>{openingExternal?'در حال باز کردن…':'باز کردن با برنامه دستگاه'}</button>
                                 <button onClick={openExternalFile} className="btn-secondary flex min-h-12 items-center justify-center gap-2"><ExternalLink className="h-4 w-4"/>باز کردن در مرورگر</button>
                                 <button onClick={downloadExternalFile} className="btn-secondary flex min-h-11 items-center justify-center gap-2 sm:col-span-2"><Download className="h-4 w-4"/>دانلود فایل</button>
                             </div>

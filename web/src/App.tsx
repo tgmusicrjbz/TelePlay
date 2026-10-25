@@ -1,7 +1,7 @@
 import { Routes, Route, Navigate, useSearchParams, useNavigate } from 'react-router-dom';
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { api, AuthResponse, getKomodDeviceId, resolveServerUrl, useCurrentUser, useLoginWithCode, usePasswordLogin, useBotInfo, useGenerateLoginCode } from './lib/api';
+import { api, AuthResponse, getKomodDeviceId, resolveServerUrl, useCurrentUser, useLoginWithCode, usePasswordLogin, useRegisterAccount, useBotInfo, useGenerateLoginCode } from './lib/api';
 import FileBrowser from './components/FileBrowser';
 import PwaManager from './components/PwaManager';
 import OfflineDownloadProgressPanel from './components/OfflineDownloadProgress';
@@ -241,6 +241,7 @@ function LoginPage() {
     const { mutate: loginByCode, isPending: isVerifying } = useLoginWithCode();
     const { mutate: generateCode, isPending: isGenerating } = useGenerateLoginCode();
     const passwordLogin = usePasswordLogin();
+    const registerAccount = useRegisterAccount();
     
     const [code, setCode] = useState('');
     const [isPolling, setIsPolling] = useState(false);
@@ -250,6 +251,9 @@ function LoginPage() {
     const [loginPassword, setLoginPassword] = useState('');
     const [loginOtp, setLoginOtp] = useState('');
     const [needsOtp, setNeedsOtp] = useState(false);
+    const [accountMode,setAccountMode]=useState<'login'|'register'>('login');
+    const [registerName,setRegisterName]=useState('');
+    const [registerPasswordAgain,setRegisterPasswordAgain]=useState('');
     const pollBusy = useRef(false);
     const localRuntime = ['localhost', '127.0.0.1'].includes(window.location.hostname);
 
@@ -351,6 +355,16 @@ function LoginPage() {
         });
     };
 
+    const handleRegister=(event:React.FormEvent)=>{
+        event.preventDefault();setError(null);
+        if(loginPassword!==registerPasswordAgain){setError('تکرار رمز عبور یکسان نیست.');return;}
+        registerAccount.mutate({username:loginUsername.trim(),password:loginPassword,display_name:registerName.trim()},{
+            onSuccess:data=>{saveAuthenticatedAccount(data);localStorage.setItem('komod-manual-account',String(data.user.telegram_id));window.location.href='/';},
+            onError:(err:any)=>setError(err.response?.data?.detail||'ساخت حساب انجام نشد.'),
+        });
+    };
+    const passwordStrong=loginPassword.length>=8&&/[a-z]/.test(loginPassword)&&/[A-Z]/.test(loginPassword)&&/\d/.test(loginPassword)&&/[^A-Za-z0-9]/.test(loginPassword);
+
     return (
         <div dir="rtl" className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
             {/* Gradient mesh background */}
@@ -377,7 +391,7 @@ function LoginPage() {
                 </div>
 
                 <div className="space-y-6">
-                    {loginMode === 'password' && <div className="glass-card p-6 text-right"><h3 className="mb-4 text-center font-medium text-white">ورود به کمد</h3>{localRuntime&&<p className="mb-4 rounded-xl bg-primary-500/10 px-3 py-2 text-center text-xs leading-6 text-primary-100">نسخهٔ محلی به دیتابیس اصلی وصل است. برای جلوگیری از اجرای هم‌زمان ربات، با نام کاربری و رمز وارد شو.</p>}<form onSubmit={handlePasswordLogin} className="space-y-3"><input dir="rtl" autoComplete="username" value={loginUsername} onChange={event=>setLoginUsername(event.target.value)} className="input w-full text-right" placeholder="نام کاربری"/><input dir="rtl" type="password" autoComplete="current-password" value={loginPassword} onChange={event=>setLoginPassword(event.target.value)} className="input w-full text-right" placeholder="رمز عبور"/>{needsOtp&&<input dir="ltr" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={loginOtp} onChange={event=>setLoginOtp(event.target.value.replace(/\D/g,'').slice(0,6))} className="input w-full text-center font-mono tracking-[.35em]" placeholder="کد ۶ رقمی"/>}<button disabled={passwordLogin.isPending||loginUsername.trim().length<4||loginPassword.length<8||(needsOtp&&loginOtp.length!==6)} className="btn-primary min-h-11 w-full disabled:opacity-50">{passwordLogin.isPending?'در حال ورود…':'ورود'}</button>{error&&<p className="text-center text-sm text-red-300">{error}</p>}</form>{!localRuntime&&<button onClick={()=>{sessionStorage.setItem('komod-password-recovery','1');setLoginMode('telegram');setError(null);}} className="mt-4 w-full text-center text-xs text-primary-300">رمزم را فراموش کرده‌ام</button>}</div>}
+                    {loginMode === 'password' && <div className="glass-card p-6 text-right"><div className="mb-4 grid grid-cols-2 rounded-xl bg-dark-950/55 p-1"><button type="button" onClick={()=>{setAccountMode('login');setError(null)}} className={`min-h-9 rounded-lg text-xs ${accountMode==='login'?'bg-primary-500 text-white':'text-dark-400'}`}>ورود</button><button type="button" onClick={()=>{setAccountMode('register');setNeedsOtp(false);setError(null)}} className={`min-h-9 rounded-lg text-xs ${accountMode==='register'?'bg-primary-500 text-white':'text-dark-400'}`}>ساخت حساب</button></div>{localRuntime&&accountMode==='login'&&<p className="mb-4 rounded-xl bg-primary-500/10 px-3 py-2 text-center text-xs leading-6 text-primary-100">نسخهٔ محلی به دیتابیس اصلی وصل است. برای جلوگیری از اجرای هم‌زمان ربات، با نام کاربری و رمز وارد شو.</p>}<form onSubmit={accountMode==='login'?handlePasswordLogin:handleRegister} className="space-y-3">{accountMode==='register'&&<input dir="rtl" autoComplete="name" value={registerName} onChange={event=>setRegisterName(event.target.value)} className="input w-full text-right" placeholder="نام نمایشی"/>}<input dir="rtl" autoComplete="username" value={loginUsername} onChange={event=>setLoginUsername(event.target.value)} className="input w-full text-right" placeholder="نام کاربری انگلیسی"/><input dir="rtl" type="password" autoComplete={accountMode==='login'?'current-password':'new-password'} value={loginPassword} onChange={event=>setLoginPassword(event.target.value)} className="input w-full text-right" placeholder="رمز عبور"/>{accountMode==='register'&&<><input dir="rtl" type="password" autoComplete="new-password" value={registerPasswordAgain} onChange={event=>setRegisterPasswordAgain(event.target.value)} className="input w-full text-right" placeholder="تکرار رمز عبور"/><p className={`text-[11px] leading-5 ${loginPassword&&!passwordStrong?'text-amber-300':'text-dark-500'}`}>حداقل ۸ نویسه شامل حرف بزرگ و کوچک انگلیسی، عدد و نماد</p></>}{accountMode==='login'&&needsOtp&&<input dir="ltr" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={loginOtp} onChange={event=>setLoginOtp(event.target.value.replace(/\D/g,'').slice(0,6))} className="input w-full text-center font-mono tracking-[.35em]" placeholder="کد ۶ رقمی"/>}<button disabled={accountMode==='login'?(passwordLogin.isPending||loginUsername.trim().length<4||loginPassword.length<8||(needsOtp&&loginOtp.length!==6)):(registerAccount.isPending||registerName.trim().length<2||loginUsername.trim().length<4||!passwordStrong||loginPassword!==registerPasswordAgain)} className="btn-primary min-h-11 w-full disabled:opacity-50">{accountMode==='login'?(passwordLogin.isPending?'در حال ورود…':'ورود'):(registerAccount.isPending?'در حال ساخت حساب…':'ساخت حساب و ورود')}</button>{error&&<p className="text-center text-sm text-red-300">{error}</p>}</form>{accountMode==='login'&&!localRuntime&&<button onClick={()=>{sessionStorage.setItem('komod-password-recovery','1');setLoginMode('telegram');setError(null);}} className="mt-4 w-full text-center text-xs text-primary-300">رمزم را فراموش کرده‌ام</button>}</div>}
                     <div className={`${loginMode === 'telegram' ? 'block' : 'hidden'} glass-card p-5 text-right sm:p-6`}>
                         <h3 className="mb-2 flex items-center gap-2 font-semibold text-white">
                             <svg className="w-5 h-5 text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">

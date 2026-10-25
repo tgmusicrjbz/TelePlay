@@ -34,8 +34,8 @@ from .. import telegram
 from ..config import get_settings
 from ..media_metadata import extract_embedded_cover
 from ..downloader import ImportJob, link_importer
-from ..drive_importer import drive_importer, extract_google_drive_file_id
-from ..google_drive import authorization_url, decode_state, exchange_code, account_email, access_token as google_access_token, list_files as google_list_files, configured as google_drive_configured, full_configured as google_drive_full_configured, picker_configured as google_picker_configured, picker_bootstrap, active_credentials, account_key, credential_accounts, encrypt_account_store
+from ..drive_importer import drive_importer, extract_google_drive_file_id, infer_google_workspace_mime
+from ..google_drive import authorization_url, decode_state, exchange_code, account_email, access_token as google_access_token, list_files as google_list_files, configured as google_drive_configured, full_configured as google_drive_full_configured, picker_configured as google_picker_configured, picker_bootstrap, active_credentials, account_key, credential_accounts, encrypt_account_store, redirect_uri as google_redirect_uri, web_base_url as google_web_base_url
 from ..processing_jobs import update_job
 from .folders import ensure_default_folder
 from ..services import (
@@ -726,14 +726,20 @@ async def import_from_google_drive(
             folder_id=(await ensure_default_folder(db,current_user.id)).id
             await db.commit()
     require_scoped_folder(request,folder_id)
-    job_id=await drive_importer.enqueue(url=payload.url.strip(),file_id=drive_file_id,user_id=current_user.id,folder_id=folder_id,send_to_telegram=payload.send_to_telegram,destination_ids=payload.destination_ids)
+    workspace_mime=infer_google_workspace_mime(payload.url)
+    # Native Docs/Sheets/Slides must be exported through an authenticated Drive
+    # request. Ordinary public Drive files keep working without an account.
+    authenticated=bool(workspace_mime and current_user.google_drive_credentials_encrypted)
+    if workspace_mime and not authenticated:
+        raise HTTPException(status_code=401,detail="برای افزودن Google Docs، Sheets یا Slides ابتدا حساب گوگل را متصل کن.")
+    job_id=await drive_importer.enqueue(url=payload.url.strip(),file_id=drive_file_id,user_id=current_user.id,folder_id=folder_id,authenticated=authenticated,mime_type=workspace_mime,send_to_telegram=payload.send_to_telegram,destination_ids=payload.destination_ids)
     return {"job_id":job_id,"message":"انتقال از گوگل درایو شروع شد."}
 
 @router.get("/drive/status")
 async def google_drive_status(current_user:User=Depends(get_current_user)):
     accounts,active=credential_accounts(current_user.google_drive_credentials_encrypted,current_user.google_drive_email)
     active_account=next((item for item in accounts if account_key(item)==active),None)
-    return {"configured":google_drive_configured(),"full_configured":google_drive_full_configured(),"picker_configured":google_picker_configured(),"connected":bool(accounts),"email":(active_account or {}).get("email"),"mode":(active_account or {}).get("mode") if active_account else None,"accounts":[{"email":item.get("email"),"mode":item.get("mode","full")} for item in accounts]}
+    return {"configured":google_drive_configured(),"full_configured":google_drive_full_configured(),"picker_configured":google_picker_configured(),"connected":bool(accounts),"email":(active_account or {}).get("email"),"mode":(active_account or {}).get("mode") if active_account else None,"accounts":[{"email":item.get("email"),"mode":item.get("mode","full")} for item in accounts],"redirect_uri":google_redirect_uri((active_account or {}).get("mode","picker"))}
 
 @router.get("/drive/connect")
 async def connect_google_drive(mode:str="picker",current_user:User=Depends(get_current_user)):
@@ -760,10 +766,10 @@ async def google_drive_callback(code:str,state:str,db:AsyncSession=Depends(get_d
         user.google_drive_credentials_encrypted=encrypt_account_store(accounts,account_key(token))
         user.google_drive_email=email
         await db.commit()
-        return RedirectResponse(f"{settings.web_base_url.rstrip('/')}?drive=connected")
+        return RedirectResponse(f"{google_web_base_url()}?drive=connected")
     except Exception:
         logger.exception("Google Drive OAuth callback failed")
-        return RedirectResponse(f"{settings.web_base_url.rstrip('/')}?drive=error")
+        return RedirectResponse(f"{google_web_base_url()}?drive=error")
 
 @router.post("/drive/switch")
 async def switch_google_drive(payload:DriveAccountRequest,current_user:User=Depends(get_current_user),db:AsyncSession=Depends(get_db)):
@@ -1616,7 +1622,7 @@ async def revoke_public_shares(
             target_type="file", details={"count": len(files), "file_ids": [item.id for item in files]},
         )
         await db.commit()
-    return {"revoked": len(files)}
+    return {"revoked": len(files), "file_ids": [item.id for item in files]}
 
 
 @router.get("/{file_id}", response_model=FileResponse)

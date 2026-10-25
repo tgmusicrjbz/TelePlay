@@ -19,7 +19,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from ..database import get_db
-from ..models import AuthSession, User, LoginCode
+from ..models import AuthSession, Folder, TTSUsage, User, LoginCode
 from ..audit import add_security_event
 from ..schemas import (
     Token, 
@@ -30,7 +30,7 @@ from ..schemas import (
     AuthResponse,
     RefreshTokenRequest,
     BotInfoResponse, SessionResponse, TelegramWebAppRequest,
-    PasswordLoginRequest, CredentialsUpdate, CredentialsStatus,
+    PasswordLoginRequest, PasswordRegisterRequest, CredentialsUpdate, CredentialsStatus,
     TwoFactorSetupResponse, TwoFactorEnableRequest, TwoFactorDisableRequest,
 )
 from ..account_security import (
@@ -147,6 +147,8 @@ async def _is_new_device(db: AsyncSession, request: Request, user: User) -> bool
 
 async def _notify_new_device(user: User, request: Request) -> None:
     """Best-effort Telegram warning; authentication never depends on delivery."""
+    if user.telegram_id < 0:
+        return
     if not any(getattr(client, "is_connected", False) for client in telegram.clients):
         return
     forwarded = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
@@ -275,6 +277,58 @@ async def password_login(
     await db.commit()
     if new_device:
         await _notify_new_device(user, request)
+    return _auth_response(user, session)
+
+
+@router.post("/password/register", response_model=AuthResponse, status_code=201)
+@limiter.limit("3/hour")
+async def password_register(
+    request: Request,
+    payload: PasswordRegisterRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a standalone Komod account that does not require Telegram."""
+    if not settings.public_registration_enabled:
+        raise HTTPException(status_code=403, detail="ساخت حساب تازه فعلاً غیرفعال است.")
+    username = _normalize_login_username(payload.username)
+    _validate_password(payload.password)
+    if (await db.execute(select(User.id).where(User.login_username == username))).scalar_one_or_none() is not None:
+        raise HTTPException(status_code=409, detail="این نام کاربری قبلاً انتخاب شده است.")
+
+    # Telegram IDs are positive. A negative internal identity preserves the
+    # existing token/storage contracts while clearly identifying local-only
+    # accounts and avoiding fake Telegram deliveries.
+    telegram_id = -secrets.randbelow(9_000_000_000_000_000 - 1) - 1
+    while (await db.execute(select(User.id).where(User.telegram_id == telegram_id))).scalar_one_or_none() is not None:
+        telegram_id = -secrets.randbelow(9_000_000_000_000_000 - 1) - 1
+    user = User(
+        telegram_id=telegram_id,
+        login_username=username,
+        password_hash=password_context.hash(payload.password),
+        display_name=" ".join(payload.display_name.strip().split()),
+        is_active=True,
+    )
+    db.add(user)
+    await db.flush()
+    db.add(Folder(user_id=user.id, name="فایل‌های من", parent_id=None, is_default=True))
+    db.add(TTSUsage(
+        user_id=user.id,
+        daily_limit=max(0, settings.public_user_tts_daily_limit),
+        max_chars=max(100, settings.public_user_tts_max_chars),
+        stt_daily_limit=max(0, settings.public_user_stt_daily_limit),
+        stt_max_seconds=max(0, settings.public_user_stt_max_seconds),
+    ))
+    session = await _session_for_device(db, request, user)
+    db.add(session)
+    add_security_event(
+        db, "account_registered", user_id=user.id, request=request,
+        target_type="account", target_id=user.id, details={"source": "password"},
+    )
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="این نام کاربری قبلاً انتخاب شده است.")
     return _auth_response(user, session)
 
 
@@ -541,6 +595,7 @@ async def get_current_user_info(
         display_name=current_user.display_name,
         is_active=current_user.is_active,
         is_admin=current_user.telegram_id in settings.admin_users,
+        login_username=current_user.login_username,
     )
 
 

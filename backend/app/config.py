@@ -97,6 +97,11 @@ class Settings(BaseSettings):
     # HTTP server and a local database available but never starts Telegram,
     # Drive, link-import or scheduled monitor workers.
     local_dev_mode: bool = Field(False, alias="KOMOD_LOCAL_DEV")
+    public_registration_enabled: bool = Field(True, alias="PUBLIC_REGISTRATION_ENABLED")
+    public_user_tts_daily_limit: int = Field(5, alias="PUBLIC_USER_TTS_DAILY_LIMIT")
+    public_user_tts_max_chars: int = Field(20_000, alias="PUBLIC_USER_TTS_MAX_CHARS")
+    public_user_stt_daily_limit: int = Field(5, alias="PUBLIC_USER_STT_DAILY_LIMIT")
+    public_user_stt_max_seconds: int = Field(600, alias="PUBLIC_USER_STT_MAX_SECONDS")
     
     # Concurrency
     telegram_client_concurrency: int = 3

@@ -8,12 +8,13 @@ from datetime import datetime
 from sqlalchemy import select
 
 from .config import get_settings
-from .models import TelegramGroupSettings, TelegramGroupUsage
+from .models import AppSetting, TelegramGroupSettings, TelegramGroupUsage
 
 
 OPERATIONS = {"tts", "stt", "link"}
 OPERATION_LABELS = {"tts": "تبدیل متن به صدا", "stt": "تبدیل صوت به متن", "link": "افزودن لینک"}
 _locks: defaultdict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
+GROUP_VOICE_PREFIX = "telegram.group.voice."
 
 
 def is_global_admin(telegram_user_id: int) -> bool:
@@ -81,3 +82,16 @@ async def get_group_usage(db, chat_id: int, telegram_user_id: int) -> tuple[Tele
     ))).scalars().all()
     by_member = {row.telegram_user_id: row for row in rows}
     return by_member.get(0), by_member.get(telegram_user_id)
+
+
+async def get_group_voice(db, chat_id:int, default:str="Kore") -> str:
+    row=await db.get(AppSetting,f"{GROUP_VOICE_PREFIX}{chat_id}")
+    return (row.value or default) if row else default
+
+
+async def set_group_voice(db, chat_id:int, voice:str) -> None:
+    key=f"{GROUP_VOICE_PREFIX}{chat_id}"
+    row=await db.get(AppSetting,key)
+    if row is None: db.add(AppSetting(key=key,value=voice))
+    else: row.value=voice
+    await db.commit()

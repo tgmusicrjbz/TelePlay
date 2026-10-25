@@ -1036,6 +1036,10 @@ export const usePasswordLogin = () => useMutation({
     mutationFn: async (payload: { username: string; password: string; otp?:string }) => (await api.post<AuthResponse>('/auth/password/login', payload)).data,
 });
 
+export const useRegisterAccount = () => useMutation({
+    mutationFn: async (payload: { username: string; password: string; display_name:string }) => (await api.post<AuthResponse>('/auth/password/register', payload)).data,
+});
+
 export const useCredentials = () => useQuery({
     queryKey: ['credentials'],
     queryFn: async () => (await api.get<CredentialsStatus>('/auth/credentials')).data,
@@ -1359,8 +1363,10 @@ export const usePublicShares = () => useQuery({
     queryFn:async()=>(await api.get<PublicShareItem[]>('/files/public-shares')).data,
 });
 export const useRevokePublicShares = () => { const queryClient=useQueryClient(); return useMutation({
-    mutationFn:async(fileIds:number[])=>(await api.post<{revoked:number}>('/files/public-shares/revoke',{file_ids:fileIds})).data,
-    onSuccess:()=>{
+    mutationFn:async(fileIds:number[])=>(await api.post<{revoked:number;file_ids:number[]}>('/files/public-shares/revoke',{file_ids:fileIds})).data,
+    onSuccess:(result)=>{
+        const revokedIds=new Set(result.file_ids||[]);
+        queryClient.setQueryData<PublicShareItem[]>(['public-shares'],current=>(current||[]).filter(item=>!revokedIds.has(item.file_id)));
         queryClient.invalidateQueries({queryKey:['public-shares']});
         queryClient.invalidateQueries({queryKey:['files']});
         queryClient.invalidateQueries({queryKey:['security-events']});
@@ -1422,10 +1428,10 @@ export interface AdminTelegramGroup {
     requested_by?:{telegram_id:number;name:string}|null;
     tts_enabled:boolean; stt_enabled:boolean; link_enabled:boolean;
     tts_daily_limit:number; stt_daily_limit:number; link_daily_limit:number;
-    member_tts_daily_limit:number; member_stt_daily_limit:number; member_link_daily_limit:number;
+    member_tts_daily_limit:number; member_stt_daily_limit:number; member_link_daily_limit:number; voice_name:string;
     usage:{tts_count:number;stt_count:number;link_count:number};
 }
-export type AdminTelegramGroupUpdate = Partial<Pick<AdminTelegramGroup,'approved'|'tts_enabled'|'stt_enabled'|'link_enabled'|'tts_daily_limit'|'stt_daily_limit'|'link_daily_limit'|'member_tts_daily_limit'|'member_stt_daily_limit'|'member_link_daily_limit'>>;
+export type AdminTelegramGroupUpdate = Partial<Pick<AdminTelegramGroup,'approved'|'tts_enabled'|'stt_enabled'|'link_enabled'|'tts_daily_limit'|'stt_daily_limit'|'link_daily_limit'|'member_tts_daily_limit'|'member_stt_daily_limit'|'member_link_daily_limit'|'voice_name'>>;
 export const useAdminTelegramGroups = (enabled=true) => useQuery({queryKey:['adminTelegramGroups'],enabled,queryFn:async()=>(await api.get<AdminTelegramGroup[]>('/admin/groups')).data});
 export const useUpdateAdminTelegramGroup = () => {const queryClient=useQueryClient();return useMutation({mutationFn:async({chatId,payload}:{chatId:number;payload:AdminTelegramGroupUpdate})=>(await api.patch<AdminTelegramGroup>(`/admin/groups/${chatId}`,payload)).data,onSuccess:()=>queryClient.invalidateQueries({queryKey:['adminTelegramGroups']})})};
 export const useRemoveAdminTelegramGroup = () => {const queryClient=useQueryClient();return useMutation({mutationFn:async(chatId:number)=>(await api.delete(`/admin/groups/${chatId}`)).data,onSuccess:()=>queryClient.invalidateQueries({queryKey:['adminTelegramGroups']})})};

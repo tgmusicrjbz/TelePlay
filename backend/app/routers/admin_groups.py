@@ -10,6 +10,8 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from .. import telegram
 from ..database import get_db
 from ..models import TelegramDestination, TelegramGroupSettings, TelegramGroupUsage, User
+from ..group_tools import get_group_voice, set_group_voice
+from ..tts import VOICE_OPTIONS
 from .accounts import require_admin
 
 router = APIRouter(prefix="/admin/groups", tags=["Admin Telegram groups"])
@@ -27,6 +29,7 @@ class GroupSettingsUpdate(BaseModel):
     member_tts_daily_limit: int | None = None
     member_stt_daily_limit: int | None = None
     member_link_daily_limit: int | None = None
+    voice_name: str | None = None
 
 
 async def _serialize_groups(db: AsyncSession) -> list[dict]:
@@ -62,6 +65,7 @@ async def _serialize_groups(db: AsyncSession) -> list[dict]:
             **{f"{operation}_daily_limit": int(getattr(group, f"{operation}_daily_limit")) for operation in OPERATIONS},
             **{f"member_{operation}_daily_limit": int(getattr(group, f"member_{operation}_daily_limit")) for operation in OPERATIONS},
             "usage": {f"{operation}_count": int(getattr(usage, f"{operation}_count", 0)) for operation in OPERATIONS},
+            "voice_name": await get_group_voice(db, group.chat_id),
         })
     return result
 
@@ -79,6 +83,9 @@ async def update_group(chat_id: int, payload: GroupSettingsUpdate, _: User = Dep
         raise HTTPException(status_code=404, detail="گروه پیدا نشد.")
     values = payload.model_dump(exclude_unset=True)
     approved = values.pop("approved", None)
+    voice_name = values.pop("voice_name", None)
+    if voice_name is not None and voice_name not in {item["value"] for item in VOICE_OPTIONS}:
+        raise HTTPException(status_code=422, detail="گوینده انتخاب‌شده معتبر نیست.")
     for key, value in values.items():
         if key.endswith("_daily_limit") and not 0 <= int(value) <= 100_000:
             raise HTTPException(status_code=422, detail="سقف مصرف باید بین صفر تا ۱۰۰٬۰۰۰ باشد.")
@@ -87,6 +94,8 @@ async def update_group(chat_id: int, payload: GroupSettingsUpdate, _: User = Dep
         for destination in destinations:
             destination.enabled = approved
     await db.commit()
+    if voice_name is not None:
+        await set_group_voice(db, chat_id, voice_name)
     if approved and telegram.tg_client is not None:
         try:
             await telegram.tg_client.send_message(

@@ -110,6 +110,7 @@ async def stored_message_response(file: File, message, range_header: str | None,
         "Accept-Ranges": "bytes",
         "Content-Length": str(end - start + 1),
         "Content-Disposition": f"{disposition}; filename*=utf-8''{quote(file.file_name)}",
+        "Cache-Control": "private, no-store, no-transform",
     }
     if range_header:
         headers["Content-Range"] = f"bytes {start}-{end}/{size}"
@@ -339,6 +340,7 @@ async def stream_file(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     download: int = Query(0, description="Set to 1 to force download"),
+    inline: int = Query(0, description="Set to 1 to request an inline browser response"),
 ):
     """Stream file from Telegram with range request support for seeking."""
     # Get file from database
@@ -383,7 +385,7 @@ async def stream_file(
     
     # Determine content disposition
     mime_type = media_type_for(file)
-    disposition = "attachment" if download else ("inline" if mime_type.startswith(("video/", "audio/", "image/", "text/")) else "attachment")
+    disposition = "attachment" if download else ("inline" if inline or mime_type.startswith(("video/", "audio/", "image/", "text/", "application/pdf")) else "attachment")
     
     from urllib.parse import quote
     encoded_filename = quote(file.file_name)
@@ -538,6 +540,7 @@ async def stream_public_file(
     request: Request,
     db: AsyncSession = Depends(get_db),
     download: int = Query(0, description="Set to 1 to force download"),
+    inline: int = Query(0, description="Set to 1 to request an inline browser response"),
     access_token: str | None = Query(default=None),
 ):
     """Stream file via public link (no auth required)."""
@@ -584,7 +587,7 @@ async def stream_public_file(
     
     # Determine content disposition
     mime_type = media_type_for(file)
-    disposition = "attachment" if download else ("inline" if mime_type.startswith(("video/", "audio/", "image/", "text/")) else "attachment")
+    disposition = "attachment" if download else ("inline" if inline or mime_type.startswith(("video/", "audio/", "image/", "text/", "application/pdf")) else "attachment")
     
     from urllib.parse import quote
     encoded_filename = quote(file.file_name)
@@ -594,7 +597,10 @@ async def stream_public_file(
         "Content-Length": str(req_length),
         "Content-Disposition": f"{disposition}; filename*=utf-8''{encoded_filename}",
         "Accept-Ranges": "bytes",
-        "Cache-Control": "public, max-age=3600, no-transform",
+        # Public links are revocable and may have a password or view limit.
+        # Caching the body allowed an already opened URL to keep working after
+        # its owner revoked it.
+        "Cache-Control": "private, no-store, no-transform",
     }
     if range_header:
         headers["Content-Range"] = f"bytes {from_bytes}-{until_bytes}/{file_size}"

@@ -1,8 +1,8 @@
 """Google OAuth and Drive API helpers. Tokens are encrypted at rest."""
 from __future__ import annotations
 
-import asyncio, base64, hashlib, json, time
-from urllib.parse import urlencode
+import asyncio, base64, hashlib, json, re, time
+from urllib.parse import urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 from jose import jwt
 from cryptography.fernet import Fernet, InvalidToken
@@ -17,10 +17,30 @@ def full_configured()->bool: return bool(settings.google_client_id and settings.
 def picker_configured()->bool:
     return bool(settings.google_picker_client_id and settings.google_picker_client_secret and settings.google_picker_api_key and settings.google_picker_app_id)
 def configured()->bool: return full_configured() or picker_configured()
+
+def _clean_public_url(value:str)->str:
+    """Normalize dashboard/env values and reject accidental Markdown URLs."""
+    raw=(value or "").strip().strip('"\'')
+    markdown=re.fullmatch(r"\[[^]]+\]\((https?://[^)]+)\)",raw)
+    if markdown: raw=markdown.group(1)
+    if raw and "://" not in raw: raw=f"https://{raw}"
+    parsed=urlsplit(raw)
+    if parsed.scheme not in {"http","https"} or not parsed.netloc:
+        raise ValueError("آدرس عمومی برنامه معتبر نیست؛ WEB_BASE_URL را با https:// وارد کن.")
+    return urlunsplit((parsed.scheme,parsed.netloc,parsed.path.rstrip('/'),"",""))
+
+def web_base_url()->str:
+    return _clean_public_url(settings.web_base_url)
+
 def redirect_uri(mode:str="full")->str:
-    if mode=="picker" and settings.google_picker_redirect_uri:
-        return settings.google_picker_redirect_uri
-    return settings.google_redirect_uri or f"{settings.web_base_url.rstrip('/')}/api/files/drive/oauth/callback"
+    base=web_base_url()
+    # The callback is served by the same FastAPI origin as the web app. Derive
+    # it from WEB_BASE_URL so an old GOOGLE_REDIRECT_URI cannot send users to a
+    # retired domain. Local development can still provide an explicit callback.
+    if urlsplit(base).hostname not in {"localhost","127.0.0.1"}:
+        return f"{base}/api/files/drive/oauth/callback"
+    configured_uri=settings.google_picker_redirect_uri if mode=="picker" else settings.google_redirect_uri
+    return _clean_public_url(configured_uri) if configured_uri else f"{base}/api/files/drive/oauth/callback"
 
 def _oauth_config(mode:str)->tuple[str,str,str,str]:
     if mode=="picker":

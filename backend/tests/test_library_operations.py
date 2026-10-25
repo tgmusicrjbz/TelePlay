@@ -28,7 +28,7 @@ from sqlalchemy.orm import selectinload
 
 from app.database import Base, async_session, engine
 from app.models import AuthSession, BotUserState, ErrorLog, File, Folder, Pack, PackItem, Playlist, PlaylistItem, ProcessingJob, SecurityEvent, TTSUsage, User, WatchProgress
-from app.routers.auth import _session_for_device, password_login, update_credentials
+from app.routers.auth import _session_for_device, password_login, password_register, update_credentials
 from app.routers.accounts import admin_error_logs, admin_health, delete_tag_definition, delete_tag_definitions_batch, export_account_data, get_saved_filters, get_tag_settings, import_account_data, report_client_error, resolve_admin_error, update_saved_filters, update_tag_settings
 from app.stt import consume_stt_quota
 from app.routers.files import (
@@ -58,7 +58,7 @@ from app.routers.folders import delete_folder_contents, list_folders, update_fol
 from app.routers.streaming import public_share_info, stored_message_response, unlock_public_share
 from app.routers.playlists import add_playlist_items, create_playlist, reorder_playlist, shuffle_playlist
 from app.routers.packs import create_pack, get_pack, remove_pack_item, reorder_pack
-from app.schemas import BatchFileUpdate, CredentialsUpdate, FileUpdate, FolderUpdate, PackCreate, PackReorder, PasswordLoginRequest, PlayerStateUpdate, PlaylistAddItems, PlaylistCreate, PlaylistReorder, PublicShareCreate, PublicShareUnlock, SavedFilter, SavedFiltersUpdate, TagBatchDelete, TagDefinition, TagSettingsUpdate
+from app.schemas import BatchFileUpdate, CredentialsUpdate, FileUpdate, FolderUpdate, PackCreate, PackReorder, PasswordLoginRequest, PasswordRegisterRequest, PlayerStateUpdate, PlaylistAddItems, PlaylistCreate, PlaylistReorder, PublicShareCreate, PublicShareUnlock, SavedFilter, SavedFiltersUpdate, TagBatchDelete, TagDefinition, TagSettingsUpdate
 from app.telegram import configure_main_client, start_one_client
 from app import telegram
 
@@ -225,6 +225,26 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
                 SecurityEvent.user_id == self.user_id, SecurityEvent.event_type == "login_success"
             ))).scalars().all()
             self.assertEqual(len(login_events), 1)
+
+    async def test_standalone_account_can_register_without_telegram(self):
+        async with async_session() as db:
+            response = await password_register(
+                self.auth_request(),
+                PasswordRegisterRequest(
+                    username="standalone.user",
+                    password="Safe-Password-1405!",
+                    display_name="کاربر مستقل",
+                ),
+                db,
+            )
+            self.assertLess(response.user.telegram_id, 0)
+            self.assertEqual(response.user.login_username, "standalone.user")
+            user = (await db.execute(select(User).where(User.login_username == "standalone.user"))).scalar_one()
+            folder = (await db.execute(select(Folder).where(Folder.user_id == user.id, Folder.is_default.is_(True)))).scalar_one()
+            usage = await db.get(TTSUsage, user.id)
+            self.assertEqual(folder.name, "فایل‌های من")
+            self.assertEqual(usage.daily_limit, 5)
+            self.assertEqual(usage.stt_daily_limit, 5)
 
     async def test_tag_settings_counts_and_hash_search(self):
         async with async_session() as db:
@@ -1178,9 +1198,12 @@ class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
         )
         await start_one_client(0, client)
         await configure_main_client(client)
-        commands = client.set_bot_commands.await_args.args[0]
-        self.assertIn("search", [command.command for command in commands])
-        self.assertTrue(all(command.description for command in commands))
+        command_sets = [call.args[0] for call in client.set_bot_commands.await_args_list]
+        private_commands, group_commands = command_sets[-2:]
+        self.assertIn("search", [command.command for command in private_commands])
+        self.assertNotIn("search", [command.command for command in group_commands])
+        self.assertEqual({command.command for command in group_commands}, {"komod", "tts", "stt", "group_usage", "connect_here"})
+        self.assertTrue(all(command.description for commands in command_sets for command in commands))
         client.set_bot_name.assert_awaited_once_with("🗂 کمد | درایو ابری تلگرام")
         client.set_bot_info_short_description.assert_awaited_once_with(
             "فایلات رو کشوبندی کن، فیلم و موزیکاتو بدون نیاز به دانلود استریم کن و همه‌چیز رو منظم نگه دار! 📦✨"

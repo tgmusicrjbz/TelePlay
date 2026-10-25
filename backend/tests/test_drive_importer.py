@@ -2,8 +2,8 @@ import asyncio
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from app.drive_importer import GoogleDriveImporter, _detect_type, _response_filename, extract_google_drive_file_id
-from app.google_drive import credential_accounts, decode_state, decrypt_credentials, encrypt_account_store, encrypt_credentials, settings
+from app.drive_importer import GoogleDriveImporter, _detect_type, _response_filename, extract_google_drive_file_id, infer_google_workspace_mime
+from app.google_drive import credential_accounts, decode_state, decrypt_credentials, encrypt_account_store, encrypt_credentials, redirect_uri, settings
 from jose import jwt
 import time
 
@@ -18,6 +18,18 @@ def test_extracts_file_id_from_google_drive_open_link():
     assert extract_google_drive_file_id(
         "https://drive.google.com/open?id=1AbCdEfGhIjKlMnOpQrStUv"
     ) == "1AbCdEfGhIjKlMnOpQrStUv"
+
+
+def test_extracts_native_google_workspace_links():
+    file_id="1AbCdEfGhIjKlMnOpQrStUv"
+    assert extract_google_drive_file_id(f"https://docs.google.com/document/d/{file_id}/edit") == file_id
+    assert extract_google_drive_file_id(f"https://docs.google.com/spreadsheets/d/{file_id}/edit") == file_id
+    assert infer_google_workspace_mime(f"https://docs.google.com/presentation/d/{file_id}/edit") == "application/vnd.google-apps.presentation"
+
+
+def test_production_google_callback_is_derived_from_web_app_domain():
+    with patch.object(settings,"web_base_url","komod.rjbzmhd.ir"),patch.object(settings,"google_redirect_uri","https://rjbzmhd.ir/old"):
+        assert redirect_uri("full") == "https://komod.rjbzmhd.ir/api/files/drive/oauth/callback"
 
 
 def test_rejects_non_drive_and_folder_links():
