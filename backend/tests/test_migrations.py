@@ -9,6 +9,7 @@ from pathlib import Path
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
+HEAD_REVISION = "20261026_0003"
 
 
 def migration_env(database_path: Path) -> dict[str, str]:
@@ -48,7 +49,7 @@ class MigrationTests(unittest.TestCase):
                 )}
             finally:
                 connection.close()
-            self.assertEqual(revision, "20261025_0002")
+            self.assertEqual(revision, HEAD_REVISION)
             self.assertIn("users", tables)
             self.assertIn("files", tables)
             self.assertIn("processing_jobs", tables)
@@ -82,7 +83,7 @@ class MigrationTests(unittest.TestCase):
                 marker = connection.execute("SELECT value FROM legacy_marker").fetchone()[0]
             finally:
                 connection.close()
-            self.assertEqual(revision, "20261025_0002")
+            self.assertEqual(revision, HEAD_REVISION)
             self.assertEqual(marker, 42)
 
 

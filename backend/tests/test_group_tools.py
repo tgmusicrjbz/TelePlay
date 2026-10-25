@@ -33,6 +33,7 @@ class TelegramGroupQuotaTests(unittest.IsolatedAsyncioTestCase):
     async def test_group_and_member_limits_are_counted_separately(self):
         async with async_session() as db:
             group = await get_or_create_group_settings(db, -1001, "آزمایش")
+            group.approved = True
             group.tts_daily_limit = 3
             group.member_tts_daily_limit = 2
             await db.commit()
@@ -50,6 +51,7 @@ class TelegramGroupQuotaTests(unittest.IsolatedAsyncioTestCase):
     async def test_disabled_operation_is_rejected(self):
         async with async_session() as db:
             group = await get_or_create_group_settings(db, -1002)
+            group.approved = True
             group.stt_enabled = False
             await db.commit()
             with self.assertRaisesRegex(ValueError, "غیرفعال"):
@@ -58,6 +60,7 @@ class TelegramGroupQuotaTests(unittest.IsolatedAsyncioTestCase):
     async def test_global_admin_bypasses_disabled_tools_and_limits(self):
         async with async_session() as db:
             group = await get_or_create_group_settings(db, -1003)
+            group.approved = True
             group.link_enabled = False
             group.link_daily_limit = 1
             group.member_link_daily_limit = 1
@@ -72,6 +75,7 @@ class TelegramGroupQuotaTests(unittest.IsolatedAsyncioTestCase):
     async def test_zero_limit_means_unlimited(self):
         async with async_session() as db:
             group = await get_or_create_group_settings(db, -1004)
+            group.approved = True
             group.link_daily_limit = 0
             group.member_link_daily_limit = 0
             await db.commit()
@@ -80,6 +84,15 @@ class TelegramGroupQuotaTests(unittest.IsolatedAsyncioTestCase):
             total, member = await get_group_usage(db, -1004, 10)
             self.assertEqual(total.link_count, 20)
             self.assertEqual(member.link_count, 20)
+
+    async def test_pending_group_is_rejected_even_for_global_admin(self):
+        async with async_session() as db:
+            group = await get_or_create_group_settings(db, -1005)
+            self.assertFalse(group.approved)
+            await db.commit()
+            with patch("app.group_tools.is_global_admin", return_value=True):
+                with self.assertRaisesRegex(ValueError, "تأیید نشده"):
+                    await consume_group_quota(db, chat_id=-1005, telegram_user_id=999, operation="tts")
 
 
 if __name__ == "__main__":

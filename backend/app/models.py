@@ -144,6 +144,7 @@ class TelegramGroupSettings(Base):
 
     chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     title: Mapped[str] = mapped_column(String(255), default="گروه تلگرام", nullable=False)
+    approved: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     tts_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     stt_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     link_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

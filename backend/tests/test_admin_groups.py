@@ -46,6 +46,8 @@ class AdminGroupSettingsTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(updated["approved"])
             self.assertEqual(updated["tts_daily_limit"], 42)
             self.assertEqual(updated["member_tts_daily_limit"], 7)
+            group = await db.get(TelegramGroupSettings, -10055)
+            self.assertTrue(group.approved)
 
 
 if __name__ == "__main__":

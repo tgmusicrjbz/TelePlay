@@ -58,7 +58,7 @@ async def _serialize_groups(db: AsyncSession) -> list[dict]:
         usage = usage_by_chat.get(group.chat_id)
         result.append({
             "chat_id": group.chat_id, "title": group.title,
-            "approved": bool(destination.enabled), "chat_type": destination.chat_type,
+            "approved": bool(group.approved), "chat_type": destination.chat_type,
             "requested_at": destination.created_at,
             "requested_by": ({"telegram_id": owner.telegram_id, "name": owner.display_name or owner.first_name or owner.username or str(owner.telegram_id)} if owner else None),
             **{f"{operation}_enabled": bool(getattr(group, f"{operation}_enabled")) for operation in OPERATIONS},
@@ -91,6 +91,7 @@ async def update_group(chat_id: int, payload: GroupSettingsUpdate, _: User = Dep
             raise HTTPException(status_code=422, detail="سقف مصرف باید بین صفر تا ۱۰۰٬۰۰۰ باشد.")
         setattr(group, key, value)
     if approved is not None:
+        group.approved = approved
         for destination in destinations:
             destination.enabled = approved
     await db.commit()

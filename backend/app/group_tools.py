@@ -39,11 +39,16 @@ async def consume_group_quota(
     """Check and increment both group and member counters for one operation."""
     if operation not in OPERATIONS:
         raise ValueError("نوع عملیات گروه معتبر نیست.")
-    if is_global_admin(telegram_user_id):
-        return
     amount = max(1, int(amount))
     async with _locks[chat_id]:
-        group = await get_or_create_group_settings(db, chat_id, title)
+        group = await db.get(TelegramGroupSettings, chat_id)
+        if group is None or not group.approved:
+            raise ValueError("این گروه هنوز توسط مدیر کمد تأیید نشده است.")
+        if title and group.title != title[:255]:
+            group.title = title[:255]
+        if is_global_admin(telegram_user_id):
+            await db.commit()
+            return
         if not getattr(group, f"{operation}_enabled"):
             raise ValueError(f"{OPERATION_LABELS[operation]} در این گروه غیرفعال است.")
 

@@ -23,7 +23,7 @@ from sqlalchemy.orm import selectinload
 from .telegram import tg_client, forward_to_storage_channel, delete_from_storage_channel
 from .routers.folders import ensure_default_folder
 from .database import async_session
-from .models import User, File, Folder, LoginCode, Playlist, PlaylistItem, BotUserState, TelegramDestination, AppSetting
+from .models import User, File, Folder, LoginCode, Playlist, PlaylistItem, BotUserState, TelegramDestination, TelegramGroupSettings, AppSetting
 from .config import get_settings
 from .auth import create_access_token
 from .services import escape_like, select_best_thumbnail, telegram_text_with_links, unreferenced_audio_variant_messages, unreferenced_storage_messages
@@ -298,6 +298,9 @@ async def is_group_manager(client, chat_id: int, telegram_user_id: int) -> bool:
 
 async def is_connected_group(chat_id: int) -> bool:
     async with async_session() as db:
+        group = await db.get(TelegramGroupSettings, chat_id)
+        if group is None or not group.approved:
+            return False
         destination_id = (await db.execute(select(TelegramDestination.id).where(
             TelegramDestination.chat_id == chat_id,
             TelegramDestination.enabled.is_(True),
@@ -2113,7 +2116,8 @@ async def connect_current_chat(client, message: Message):
         destination = (await db.execute(select(TelegramDestination).where(
             TelegramDestination.chat_id == message.chat.id,
         ).order_by(TelegramDestination.created_at.asc()))).scalars().first()
-        approved = is_global_admin(message.from_user.id)
+        group = await get_or_create_group_settings(db, message.chat.id, message.chat.title)
+        approved = bool(group.approved)
         if destination is None:
             destination = TelegramDestination(
                 user_id=owner.id, chat_id=message.chat.id,
@@ -2122,10 +2126,7 @@ async def connect_current_chat(client, message: Message):
             )
             db.add(destination)
         else:
-            if approved:
-                destination.enabled = True
             destination.name = str(message.chat.title or destination.name)[:120]
-        await get_or_create_group_settings(db, message.chat.id, message.chat.title)
         await db.commit()
     await message.reply_text(
         await bot_message("group_connected" if approved else "group_approval_pending"),
@@ -2138,6 +2139,8 @@ async def handle_import_link(client, message: Message):
     """Queue supported social links without blocking the bot conversation."""
     destination_id = None
     if message.chat.type != enums.ChatType.PRIVATE:
+        if not await is_connected_group(message.chat.id):
+            return
         async with async_session() as db:
             destination = (await db.execute(select(TelegramDestination).where(
                 TelegramDestination.chat_id == message.chat.id,
