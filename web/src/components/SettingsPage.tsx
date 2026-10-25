@@ -339,7 +339,8 @@ export default function SettingsPage() {
 
             {user?.is_admin && <SettingsGroup title="مدیریت" text="تنظیمات فنی و کاربران" icon={<UserRoundCog/>} layout={homeLayout}>
                 <SettingsButton layout={homeLayout} icon={<Globe2/>} title="اتصال برنامه" text="آدرس اصلی یا مسیر HTTPS جایگزین" onClick={() => setView('connection')} />
-                <SettingsButton layout={homeLayout} icon={<UserRoundCog/>} title="مدیریت کاربران" text="وضعیت، محدودیت و مصرف کاربران" onClick={() => setView('admin')} />
+                <SettingsButton layout={homeLayout} icon={<UserRoundCog/>} title="مدیریت کاربران" text="وضعیت، محدودیت و مصرف کاربران" onClick={() => {setActiveSubsection('admin-users');setView('admin')}} />
+                <SettingsButton layout={homeLayout} icon={<MessageSquareText/>} title="پیام‌های ربات" text="ویرایش پاسخ دستورها، لینک‌ها و پردازش‌ها" onClick={() => {setActiveSubsection('admin-bot-messages');setView('admin')}} />
             </SettingsGroup>}
         </div>}
 
