@@ -16,6 +16,20 @@ jobs:
   backend:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: komod_migration_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d komod_migration_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -27,6 +41,18 @@ jobs:
       - name: Compile backend
         working-directory: backend
         run: python -m compileall -q app scripts tests
+      - name: Verify PostgreSQL migrations
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/komod_migration_test
+          TELEGRAM_API_ID: "12345"
+          TELEGRAM_API_HASH: migration-test
+          TELEGRAM_BOT_TOKEN: "000000:migration-test"
+          TELEGRAM_STORAGE_CHANNEL_ID: "-1001234567890"
+          JWT_SECRET: migration-test-secret
+        run: |
+          python -m alembic upgrade head
+          python -m alembic check
       - name: Test API, bot and mobile workflows
         working-directory: backend
         run: python -m unittest discover -s tests -v
@@ -43,6 +69,9 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - working-directory: web
         run: npm ci
+      - name: Audit production dependencies
+        working-directory: web
+        run: npm audit --omit=dev --audit-level=high
       - name: Type-check and build responsive mini-app
         working-directory: web
         run: |

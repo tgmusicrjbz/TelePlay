@@ -24,6 +24,7 @@ TELEGRAM_STORAGE_CHANNEL_ID=-1001234567890
 ```powershell
 cd backend
 .\.venv\Scripts\Activate.ps1
+python -m alembic upgrade head
 uvicorn app.main:app --reload --port 8000
 ```
 

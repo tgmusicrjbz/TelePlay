@@ -71,4 +71,7 @@ if (-not (Test-Path -LiteralPath '.\.venv\Scripts\python.exe')) {
 }
 
 Write-Host 'API محلی با دیتابیس اصلی اجرا می‌شود؛ Workerها فقط روی Railway فعال‌اند.' -ForegroundColor Yellow
+Write-Host 'نسخه دیتابیس بررسی و Migrationهای لازم اجرا می‌شوند.' -ForegroundColor Cyan
+& .\.venv\Scripts\python.exe -m alembic upgrade head
+if ($LASTEXITCODE -ne 0) { throw 'اجرای Migration دیتابیس ناموفق بود؛ API اجرا نشد.' }
 & .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000

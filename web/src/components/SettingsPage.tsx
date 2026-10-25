@@ -106,7 +106,7 @@ export default function SettingsPage() {
     const accounts = savedAccounts();
     const incomingFolderOptions = useMemo(() => {
         const result = [{value:'default',label:'🗃️ کشوی پیش‌فرض'}];
-        const walk = (items:Folder[], depth=0) => items.forEach(folder => { result.push({value:String(folder.id),label:`${depth?`${'   '.repeat(Math.max(0,depth-1))}└─ `:''}🗂️ ${folder.name}`}); if(folder.children) walk(folder.children,depth+1); });
+        const walk = (items:Folder[], depth=0) => items.forEach(folder => { result.push({value:String(folder.id),label:`${depth?`${'   '.repeat(Math.max(0,depth-1))}─┘ `:''}🗂️ ${folder.name}`}); if(folder.children) walk(folder.children,depth+1); });
         walk(folderTree); return result;
     }, [folderTree]);
     const shareFolders = useMemo(() => {

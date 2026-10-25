@@ -33,6 +33,7 @@ from .tts import TTSJob, VOICE_OPTIONS, consume_tts_quota, load_tts_settings, tt
 from .stt import STTJob, consume_stt_quota, stt_queue
 from .gemini_keys import decrypt_user_keys
 from .link_captions import render_link_caption
+from .group_tools import consume_group_quota, get_group_usage, get_or_create_group_settings, is_global_admin
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -280,6 +281,70 @@ async def get_or_create_user(telegram_id: int, username: str = None,
             await db.refresh(user)
         
         return user
+
+
+async def is_group_manager(client, chat_id: int, telegram_user_id: int) -> bool:
+    """Global admins and Telegram group owners/admins may edit group settings."""
+    if is_global_admin(telegram_user_id):
+        return True
+    try:
+        member = await client.get_chat_member(chat_id, telegram_user_id)
+        status = str(getattr(member, "status", "")).lower()
+        return any(value in status for value in ("owner", "administrator"))
+    except Exception:
+        return False
+
+
+async def is_connected_group(chat_id: int) -> bool:
+    async with async_session() as db:
+        destination_id = (await db.execute(select(TelegramDestination.id).where(
+            TelegramDestination.chat_id == chat_id,
+            TelegramDestination.enabled.is_(True),
+        ))).scalars().first()
+    return destination_id is not None
+
+
+async def require_connected_group(message: Message) -> bool:
+    if await is_connected_group(message.chat.id):
+        return True
+    await message.reply("اول یکی از مدیرهای گروه دستور `/connect_here` را بفرستد تا امکانات کمد برای این گروه فعال شود.")
+    return False
+
+
+def _quota_text(used: int, limit: int) -> str:
+    return f"{to_persian_digits(used)} از {to_persian_digits(limit)}" if limit else f"{to_persian_digits(used)} از نامحدود"
+
+
+async def group_settings_view(chat_id: int, telegram_user_id: int, title: str | None = None) -> dict:
+    async with async_session() as db:
+        group = await get_or_create_group_settings(db, chat_id, title)
+        await db.commit()
+        group_usage, member_usage = await get_group_usage(db, chat_id, telegram_user_id)
+    operations = (("tts", "🎙️ متن به صدا"), ("stt", "📝 صوت به متن"), ("link", "🔗 افزودن لینک"))
+    lines = [f"⚙️ **تنظیمات گروه {group.title}**", "", "مصرف امروز:"]
+    rows = []
+    for operation, label in operations:
+        enabled = bool(getattr(group, f"{operation}_enabled"))
+        group_limit = int(getattr(group, f"{operation}_daily_limit"))
+        member_limit = int(getattr(group, f"member_{operation}_daily_limit"))
+        group_used = int(getattr(group_usage, f"{operation}_count", 0))
+        member_used = int(getattr(member_usage, f"{operation}_count", 0))
+        lines.append(f"{label}: {'فعال' if enabled else 'غیرفعال'} · گروه {_quota_text(group_used, group_limit)} · شما {_quota_text(member_used, member_limit)}")
+        rows.append([InlineKeyboardButton(
+            f"{'🟢' if enabled else '⚪'} {label}", callback_data=f"grpq:{operation}:toggle:0"
+        )])
+        rows.append([
+            InlineKeyboardButton("− گروه", callback_data=f"grpq:{operation}:group:-1"),
+            InlineKeyboardButton(f"سقف {to_persian_digits(group_limit) if group_limit else '∞'}", callback_data="noop"),
+            InlineKeyboardButton("+ گروه", callback_data=f"grpq:{operation}:group:1"),
+        ])
+        rows.append([
+            InlineKeyboardButton("− عضو", callback_data=f"grpq:{operation}:member:-1"),
+            InlineKeyboardButton(f"سقف {to_persian_digits(member_limit) if member_limit else '∞'}", callback_data="noop"),
+            InlineKeyboardButton("+ عضو", callback_data=f"grpq:{operation}:member:1"),
+        ])
+    lines.extend(("", "عدد صفر یعنی نامحدود. برای مقدار دقیق:", "`/group_limit tts 20 5`", "عدد اول سقف گروه و عدد دوم سقف هر عضو است."))
+    return {"text": "\n".join(lines), "reply_markup": InlineKeyboardMarkup(rows)}
 
 
 def _json_list(value: str | None, default: list) -> list:
@@ -1221,6 +1286,165 @@ async def stt_command(client, message: Message):
     await message.reply(f"📝 درخواست استخراج متن ثبت شد.{queue_note}")
 
 
+@tg_client.on_message(filters.command("tts") & filters.group)
+async def group_tts_command(client, message: Message):
+    """Create speech in a group without saving the generated file to a cabinet."""
+    if not message.from_user:
+        return
+    if not await require_connected_group(message):
+        return
+    user = await get_or_create_user(
+        message.from_user.id, message.from_user.username,
+        message.from_user.first_name, message.from_user.last_name,
+    )
+    personal_keys = decrypt_user_keys(user.gemini_api_keys_encrypted)
+    if not tts_queue.available and not personal_keys:
+        await message.reply("تبدیل متن به صدا هنوز روی سرور فعال نشده.")
+        return
+    direct_text = message.text.split(maxsplit=1)[1].strip() if message.text and len(message.text.split(maxsplit=1)) > 1 else ""
+    replied = message.reply_to_message
+    source_text = direct_text or ((replied.text or replied.caption or "").strip() if replied else "")
+    if not source_text:
+        await message.reply("متن را بعد از `/tts` بنویس یا این دستور را روی یک پیام متنی ریپلای کن.")
+        return
+    async with async_session() as db:
+        try:
+            await consume_group_quota(
+                db, chat_id=message.chat.id, telegram_user_id=message.from_user.id,
+                operation="tts", title=message.chat.title,
+            )
+        except ValueError as error:
+            await message.reply(f"⛔ {error}")
+            return
+    title_line = next((line.strip() for line in source_text.splitlines() if line.strip()), "صدای ساخته‌شده")
+    job = TTSJob(
+        user_id=user.id, telegram_id=message.chat.id, output_chat_id=message.chat.id,
+        text=source_text, title=title_line[:80], folder_id=None,
+        preferences=load_tts_settings(user), output_mode="telegram", api_keys=personal_keys,
+    )
+    position = await tts_queue.enqueue(job)
+    queue_note = f" نوبت {to_persian_digits(str(position))} در صف." if position > 1 else ""
+    await message.reply(f"🎙️ درخواست ساخت صدا ثبت شد.{queue_note}")
+
+
+@tg_client.on_message(filters.command("stt") & filters.group)
+async def group_stt_command(client, message: Message):
+    """Transcribe replied group media and return a temporary Markdown file."""
+    if not message.from_user:
+        return
+    if not await require_connected_group(message):
+        return
+    replied = message.reply_to_message
+    media = next((getattr(replied, name, None) for name in ("audio", "voice", "video", "video_note", "document") if replied and getattr(replied, name, None)), None)
+    if media is None:
+        await message.reply("روی یک صدا، ویدیو یا فایل صوتی ریپلای کن و `/stt` را بفرست.")
+        return
+    mime = getattr(media, "mime_type", None) or ("audio/ogg" if replied.voice else "video/mp4" if replied.video or replied.video_note else "application/octet-stream")
+    if not (mime.startswith("audio/") or mime.startswith("video/") or replied.audio or replied.voice or replied.video or replied.video_note):
+        await message.reply("این فایل صوتی یا ویدیویی نیست.")
+        return
+    user = await get_or_create_user(
+        message.from_user.id, message.from_user.username,
+        message.from_user.first_name, message.from_user.last_name,
+    )
+    personal_keys = decrypt_user_keys(user.gemini_api_keys_encrypted)
+    if not stt_queue.available and not personal_keys:
+        await message.reply("استخراج متن هنوز روی سرور فعال نشده.")
+        return
+    async with async_session() as db:
+        try:
+            await consume_group_quota(
+                db, chat_id=message.chat.id, telegram_user_id=message.from_user.id,
+                operation="stt", title=message.chat.title,
+            )
+        except ValueError as error:
+            await message.reply(f"⛔ {error}")
+            return
+    target_channel = user.storage_channel_id or settings.telegram_storage_channel_id
+    try:
+        temporary_message = await forward_to_storage_channel(replied, target_channel)
+        stored_media = next((getattr(temporary_message, field, None) for field in ("audio", "voice", "video", "video_note", "document") if getattr(temporary_message, field, None)), None)
+        if stored_media is None:
+            raise RuntimeError("فایل برای پردازش آماده نشد.")
+        async with async_session() as db:
+            default_folder = await ensure_default_folder(db, user.id)
+            source = File(
+                user_id=user.id, folder_id=default_folder.id, channel_message_id=temporary_message.id,
+                storage_channel_id=target_channel, file_id=stored_media.file_id,
+                file_unique_id=stored_media.file_unique_id,
+                file_name=sanitize_filename(getattr(stored_media, "file_name", None) or f"group-stt-{replied.id}"),
+                file_size=getattr(stored_media, "file_size", 0) or 0, mime_type=mime,
+                file_type="video" if mime.startswith("video/") or replied.video or replied.video_note else "audio",
+                duration=getattr(stored_media, "duration", None) or getattr(media, "duration", None),
+                is_hidden=True,
+            )
+            db.add(source)
+            await db.commit()
+            await db.refresh(source)
+        preferences = load_tts_settings(user)
+        position = await stt_queue.enqueue(STTJob(
+            user_id=user.id, source_file_id=source.id,
+            title=f"📝 متن {Path(source.file_name).stem or 'صدا'}"[:180], folder_id=None,
+            output_mode="temporary", telegram_id=message.chat.id, api_keys=personal_keys,
+            cleanup_source=True, stt_model=preferences["stt_model"],
+            text_model=preferences["text_model"], stt_mode=preferences["stt_mode"],
+        ))
+        queue_note = f" نوبت {to_persian_digits(str(position))} در صف." if position > 1 else ""
+        await message.reply(f"📝 درخواست استخراج متن ثبت شد.{queue_note}")
+    except Exception as error:
+        logger.exception("Could not queue group STT: %s", error)
+        await message.reply("❌ فایل برای استخراج متن آماده نشد؛ دوباره تلاش کن.")
+
+
+@tg_client.on_message(filters.command("group_settings") & filters.group)
+async def group_settings_command(client, message: Message):
+    if not message.from_user:
+        return
+    if not await require_connected_group(message):
+        return
+    manager = await is_group_manager(client, message.chat.id, message.from_user.id)
+    view = await group_settings_view(message.chat.id, message.from_user.id, message.chat.title)
+    if not manager:
+        view["reply_markup"] = None
+        view["text"] += "\n\nبرای تغییر این تنظیمات باید مدیر گروه باشی."
+    await message.reply(**view)
+
+
+@tg_client.on_message(filters.command("group_usage") & filters.group)
+async def group_usage_command(client, message: Message):
+    if message.from_user and await require_connected_group(message):
+        view = await group_settings_view(message.chat.id, message.from_user.id, message.chat.title)
+        view["reply_markup"] = None
+        await message.reply(**view)
+
+
+@tg_client.on_message(filters.command("group_limit") & filters.group)
+async def group_limit_command(client, message: Message):
+    if not await require_connected_group(message):
+        return
+    if not message.from_user or not await is_group_manager(client, message.chat.id, message.from_user.id):
+        await message.reply("فقط مدیرهای گروه می‌توانند سهمیه‌ها را تغییر دهند.")
+        return
+    parts = (message.text or "").split()
+    if len(parts) != 4 or parts[1].lower() not in {"tts", "stt", "link"}:
+        await message.reply("نمونه درست: `/group_limit tts 20 5`\nعدد اول سقف گروه و عدد دوم سقف هر عضو است؛ صفر یعنی نامحدود.")
+        return
+    try:
+        group_limit, member_limit = int(parts[2]), int(parts[3])
+        if not 0 <= group_limit <= 100000 or not 0 <= member_limit <= 100000:
+            raise ValueError
+    except ValueError:
+        await message.reply("سقف‌ها باید عددی بین صفر تا ۱۰۰٬۰۰۰ باشند.")
+        return
+    operation = parts[1].lower()
+    async with async_session() as db:
+        group = await get_or_create_group_settings(db, message.chat.id, message.chat.title)
+        setattr(group, f"{operation}_daily_limit", group_limit)
+        setattr(group, f"member_{operation}_daily_limit", member_limit)
+        await db.commit()
+    await message.reply(**(await group_settings_view(message.chat.id, message.from_user.id, message.chat.title)))
+
+
 @tg_client.on_message(filters.private & (filters.video | filters.audio | filters.voice | filters.document | filters.video_note), group=-1)
 async def handle_pending_stt_media(client, message: Message):
     """Claim the next media for STT before the ordinary file saver sees it."""
@@ -1903,8 +2127,16 @@ async def connect_current_chat(client, message: Message):
         else:
             destination.enabled = True
             destination.name = str(message.chat.title or destination.name)[:120]
+        await get_or_create_group_settings(db, message.chat.id, message.chat.title)
         await db.commit()
-    await message.reply_text("✅ اینجا به مقصدهای کمد اضافه شد. حالا لینک یوتیوب یا اینستاگرام را همین‌جا بفرست.")
+    await message.reply_text(
+        "✅ اینجا به مقصدهای کمد اضافه شد. حالا لینک یوتیوب یا اینستاگرام را همین‌جا بفرست.\n\n"
+        "فرمان‌های گروه:\n"
+        "• `/tts متن` یا ریپلای روی متن\n"
+        "• `/stt` به‌صورت ریپلای روی صدا یا ویدیو\n"
+        "• `/group_settings` برای تنظیم امکانات و سهمیه‌ها\n"
+        "• `/group_usage` برای دیدن مصرف امروز"
+    )
 
 
 @tg_client.on_message(filters.regex(r"https?://(?:www\.)?(?:youtube\.com|youtu\.be|instagram\.com)/"), group=-1)
@@ -1936,6 +2168,17 @@ async def handle_import_link(client, message: Message):
     )
     if not matches:
         return
+    if message.chat.type in {enums.ChatType.GROUP, enums.ChatType.SUPERGROUP} and message.from_user:
+        async with async_session() as db:
+            try:
+                await consume_group_quota(
+                    db, chat_id=message.chat.id, telegram_user_id=message.from_user.id,
+                    operation="link", amount=len(matches), title=message.chat.title,
+                )
+            except ValueError as error:
+                await message.reply(f"⛔ {error}")
+                message.stop_propagation()
+                return
     try:
         positions: list[int] = []
         if destination_id is None:
@@ -2007,15 +2250,44 @@ async def handle_text_note(client, message: Message):
 @tg_client.on_callback_query()
 async def handle_callback(client, callback: CallbackQuery):
     """Handle inline button callbacks."""
+    data = callback.data
     async with async_session() as db:
         known_user = (await db.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one_or_none()
-    if (known_user is not None and not known_user.is_active) or (settings.restrict_users and callback.from_user.id not in settings.bootstrap_users and known_user is None):
+    group_settings_callback = data.startswith("grpq:") and callback.message.chat.type in {enums.ChatType.GROUP, enums.ChatType.SUPERGROUP}
+    if ((known_user is not None and not known_user.is_active) or
+            (settings.restrict_users and callback.from_user.id not in settings.bootstrap_users and known_user is None and not group_settings_callback)):
         await callback.answer("اجازهٔ استفاده از این ربات رو نداری.", show_alert=True)
         return
     await load_user_ui_state(callback.from_user.id)
-    data = callback.data
 
-    if data.startswith("input_action:"):
+    if data.startswith("grpq:"):
+        if not await is_connected_group(callback.message.chat.id):
+            await callback.answer("این گروه دیگر به کمد متصل نیست.", show_alert=True)
+            return
+        if not await is_group_manager(client, callback.message.chat.id, callback.from_user.id):
+            await callback.answer("فقط مدیرهای گروه می‌توانند این تنظیمات را تغییر دهند.", show_alert=True)
+            return
+        try:
+            _, operation, scope, delta_raw = data.split(":", 3)
+            if operation not in {"tts", "stt", "link"} or scope not in {"toggle", "group", "member"}:
+                raise ValueError
+            async with async_session() as db:
+                group = await get_or_create_group_settings(db, callback.message.chat.id, callback.message.chat.title)
+                if scope == "toggle":
+                    field = f"{operation}_enabled"
+                    setattr(group, field, not getattr(group, field))
+                else:
+                    field = f"{operation}_daily_limit" if scope == "group" else f"member_{operation}_daily_limit"
+                    setattr(group, field, max(0, min(100000, int(getattr(group, field)) + int(delta_raw))))
+                await db.commit()
+            await callback.message.edit_text(**(await group_settings_view(
+                callback.message.chat.id, callback.from_user.id, callback.message.chat.title
+            )))
+            await callback.answer("تنظیمات گروه ذخیره شد.")
+        except (ValueError, TypeError):
+            await callback.answer("این تنظیم معتبر نیست.", show_alert=True)
+
+    elif data.startswith("input_action:"):
         action = data.split(":", 1)[1]
         queue = input_action_queues.get(callback.message.chat.id)
         if queue is None:

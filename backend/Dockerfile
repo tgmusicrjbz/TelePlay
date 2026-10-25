@@ -16,6 +16,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 # Note: We copy the 'app' directory into /app/app
 COPY app/ ./app/
+COPY alembic.ini ./alembic.ini
+COPY alembic/ ./alembic/
 
 # Create directory for Telegram sessions
 RUN mkdir -p /app/session
@@ -24,4 +26,4 @@ RUN mkdir -p /app/session
 EXPOSE 8000
 
 # Run on Railway's assigned port, with 8000 as the local fallback.
-CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

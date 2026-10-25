@@ -35,6 +35,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy backend code
 COPY backend/app/ ./app/
+COPY backend/alembic.ini ./alembic.ini
+COPY backend/alembic/ ./alembic/
 
 # Copy built frontend assets from Stage 1 to Backend's static folder
 # FastAPI is configured to look in 'app/static' to serve the SPA
@@ -50,4 +52,4 @@ ENV MULTI_CONTAINER_SETUP=false
 EXPOSE 8000
 
 # Run FastAPI on the port assigned by the hosting platform.
-CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

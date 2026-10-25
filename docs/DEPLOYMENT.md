@@ -66,7 +66,7 @@ Create a private Telegram storage channel, add your bot as an administrator with
 
 1. In the project root, run `Copy-Item backend/.env.example backend/.env` and `New-Item -ItemType Directory -Force backend/data`.
 2. Edit `backend/.env` with your credentials. Set `DATABASE_URL=sqlite:///./data/teleplay.db`, `WEB_BASE_URL=http://localhost:5173`, and a long random `JWT_SECRET`. Leave `TELEGRAM_HELPER_BOT_TOKENS` and `AUTH_USERS` empty unless needed.
-3. In one terminal, run `cd backend`, `python -m venv .venv` if necessary, `.\.venv\Scripts\python.exe -m pip install -r requirements.txt`, then `.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000`.
+3. In one terminal, run `cd backend`, `python -m venv .venv` if necessary, `.\.venv\Scripts\python.exe -m pip install -r requirements.txt`, `.\.venv\Scripts\python.exe -m alembic upgrade head`, then `.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000`.
 4. In a second terminal, run `cd web`, `npm install` if necessary, then `npm run dev`.
 5. Open [http://localhost:5173](http://localhost:5173) on the same computer. The backend health endpoint is [http://localhost:8000/health](http://localhost:8000/health). Use the login code shown by the web app and send `/login CODE` to your bot.
 

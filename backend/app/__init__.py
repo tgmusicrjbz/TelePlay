@@ -1,6 +1,5 @@
-"""
-TelePlay Backend Application.
-"""
-from .main import app
+"""TelePlay backend package.
 
-__all__ = ["app"]
+Importing a model or migration must not construct the FastAPI application or
+Telegram clients. The ASGI entry point remains ``app.main:app``.
+"""

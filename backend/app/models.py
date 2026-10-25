@@ -138,6 +138,47 @@ class TelegramDestination(Base):
     )
 
 
+class TelegramGroupSettings(Base):
+    """Feature switches and daily quotas for one Telegram group."""
+    __tablename__ = "telegram_group_settings"
+
+    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    title: Mapped[str] = mapped_column(String(255), default="گروه تلگرام", nullable=False)
+    tts_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    stt_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    link_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    tts_daily_limit: Mapped[int] = mapped_column(Integer, default=20, nullable=False)
+    stt_daily_limit: Mapped[int] = mapped_column(Integer, default=20, nullable=False)
+    link_daily_limit: Mapped[int] = mapped_column(Integer, default=100, nullable=False)
+    member_tts_daily_limit: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
+    member_stt_daily_limit: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
+    member_link_daily_limit: Mapped[int] = mapped_column(Integer, default=20, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
+class TelegramGroupUsage(Base):
+    """Daily group and per-member counters for Telegram group tools."""
+    __tablename__ = "telegram_group_usage"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    telegram_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    usage_date: Mapped[date] = mapped_column(Date, nullable=False)
+    tts_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    stt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    link_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    __table_args__ = (
+        UniqueConstraint("chat_id", "telegram_user_id", "usage_date", name="uq_group_usage_member_day"),
+        Index("idx_group_usage_chat_day", chat_id, usage_date),
+    )
+
+
 class SourceMonitor(Base):
     """A scheduled source check that can route new entries to Telegram."""
     __tablename__ = "source_monitors"

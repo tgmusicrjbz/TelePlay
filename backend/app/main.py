@@ -21,7 +21,7 @@ import logging
 logging.getLogger("pyrogram").setLevel(logging.INFO)
 
 from .config import get_settings
-from .database import init_db, engine
+from .database import verify_database_schema, engine
 from .telegram import start_telegram_client, stop_telegram_client
 from .downloader import link_importer
 from .drive_importer import drive_importer
@@ -58,7 +58,7 @@ async def persist_error_log(request_id: str, method: str, path: str, message: st
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan - start/stop Telegram client and init DB."""
+    """Application lifespan - verify DB and start/stop external workers."""
     logger.info("Starting کمد Backend...")
     logger.info(
         "Database target: host=%s port=%s pool=%s",
@@ -69,11 +69,11 @@ async def lifespan(app: FastAPI):
     logger.info("Runtime port: PORT=%s fallback=%s", os.getenv("PORT", "unset"), settings.server_port)
     for attempt in range(1, 7):
         try:
-            await init_db()
+            await verify_database_schema()
             break
         except Exception:
             if attempt == 6:
-                logger.exception("Database initialization failed after 6 attempts")
+                logger.exception("Database verification failed after 6 attempts")
                 raise
             delay = min(2 ** attempt, 10)
             logger.warning(
@@ -83,7 +83,7 @@ async def lifespan(app: FastAPI):
                 exc_info=True,
             )
             await asyncio.sleep(delay)
-    logger.info("Database initialized")
+    logger.info("Database migration revision verified")
     try:
         from .caption_metadata import extract_tags_from_caption
         from .models import File, User

@@ -179,7 +179,7 @@ export default function TTSSettingsPanel(){
         return()=>window.clearInterval(timer);
     },[sttJobs]);
     useEffect(()=>{if(message?.kind!=='ok')return;const timer=window.setTimeout(()=>setMessage(null),3500);return()=>window.clearTimeout(timer)},[message]);
-    const folderOptions=useMemo(()=>{const result=[{value:'default',label:'🗃️ کشوی پیش‌فرض کمد'}];const walk=(items:Folder[],depth=0)=>items.forEach(item=>{result.push({value:String(item.id),label:`${depth?`${'   '.repeat(Math.max(0,depth-1))}└─ `:''}🗂️ ${item.name}`});if(item.children)walk(item.children,depth+1)});walk(folders);return result},[folders]);
+    const folderOptions=useMemo(()=>{const result=[{value:'default',label:'🗃️ کشوی پیش‌فرض کمد'}];const walk=(items:Folder[],depth=0)=>items.forEach(item=>{result.push({value:String(item.id),label:`${depth?`${'   '.repeat(Math.max(0,depth-1))}─┘ `:''}🗂️ ${item.name}`});if(item.children)walk(item.children,depth+1)});walk(folders);return result},[folders]);
     const availableVoices=useMemo(()=>settings?.voices.filter(item=>(gender==='all'||item.gender===gender)&&(pitch==='all'||item.pitch===pitch))||[],[settings?.voices,gender,pitch]);
     const selectedVoice=settings?.voices.find(item=>item.value===voice);
     useEffect(()=>{if(availableVoices.length&&!availableVoices.some(item=>item.value===voice))setVoice(availableVoices[0].value)},[availableVoices,voice]);
