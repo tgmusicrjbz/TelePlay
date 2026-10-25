@@ -34,6 +34,7 @@ from .stt import STTJob, consume_stt_quota, stt_queue
 from .gemini_keys import decrypt_user_keys
 from .link_captions import render_link_caption
 from .group_tools import consume_group_quota, get_group_usage, get_or_create_group_settings, is_global_admin
+from .bot_messages import bot_message
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -307,12 +308,20 @@ async def is_connected_group(chat_id: int) -> bool:
 async def require_connected_group(message: Message) -> bool:
     if await is_connected_group(message.chat.id):
         return True
-    await message.reply("اول یکی از مدیرهای گروه دستور `/connect_here` را بفرستد تا امکانات کمد برای این گروه فعال شود.")
+    await message.reply(await bot_message("group_not_connected"))
     return False
 
 
 def _quota_text(used: int, limit: int) -> str:
     return f"{to_persian_digits(used)} از {to_persian_digits(limit)}" if limit else f"{to_persian_digits(used)} از نامحدود"
+
+
+def group_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎙️ متن به صدا", callback_data="grpmenu:tts"), InlineKeyboardButton("📝 صوت به متن", callback_data="grpmenu:stt")],
+        [InlineKeyboardButton("🔗 دریافت لینک", callback_data="grpmenu:link"), InlineKeyboardButton("📊 مصرف امروز", callback_data="grpmenu:usage")],
+        [InlineKeyboardButton("⚙️ تنظیمات خصوصی ادمین", callback_data="grpmenu:settings")],
+    ])
 
 
 async def group_settings_view(chat_id: int, telegram_user_id: int, title: str | None = None) -> dict:
@@ -329,21 +338,22 @@ async def group_settings_view(chat_id: int, telegram_user_id: int, title: str | 
         member_limit = int(getattr(group, f"member_{operation}_daily_limit"))
         group_used = int(getattr(group_usage, f"{operation}_count", 0))
         member_used = int(getattr(member_usage, f"{operation}_count", 0))
-        lines.append(f"{label}: {'فعال' if enabled else 'غیرفعال'} · گروه {_quota_text(group_used, group_limit)} · شما {_quota_text(member_used, member_limit)}")
+        personal_usage = "آزاد" if is_global_admin(telegram_user_id) else _quota_text(member_used, member_limit)
+        lines.append(f"{label}: {'فعال' if enabled else 'غیرفعال'} · گروه {_quota_text(group_used, group_limit)} · شما {personal_usage}")
         rows.append([InlineKeyboardButton(
-            f"{'🟢' if enabled else '⚪'} {label}", callback_data=f"grpq:{operation}:toggle:0"
+            f"{'🟢' if enabled else '⚪'} {label}", callback_data=f"grpq:{chat_id}:{operation}:toggle:0"
         )])
         rows.append([
-            InlineKeyboardButton("− گروه", callback_data=f"grpq:{operation}:group:-1"),
+            InlineKeyboardButton("−۵ گروه", callback_data=f"grpq:{chat_id}:{operation}:group:-5"),
             InlineKeyboardButton(f"سقف {to_persian_digits(group_limit) if group_limit else '∞'}", callback_data="noop"),
-            InlineKeyboardButton("+ گروه", callback_data=f"grpq:{operation}:group:1"),
+            InlineKeyboardButton("+۵ گروه", callback_data=f"grpq:{chat_id}:{operation}:group:5"),
         ])
         rows.append([
-            InlineKeyboardButton("− عضو", callback_data=f"grpq:{operation}:member:-1"),
+            InlineKeyboardButton("−۱ عضو", callback_data=f"grpq:{chat_id}:{operation}:member:-1"),
             InlineKeyboardButton(f"سقف {to_persian_digits(member_limit) if member_limit else '∞'}", callback_data="noop"),
-            InlineKeyboardButton("+ عضو", callback_data=f"grpq:{operation}:member:1"),
+            InlineKeyboardButton("+۱ عضو", callback_data=f"grpq:{chat_id}:{operation}:member:1"),
         ])
-    lines.extend(("", "عدد صفر یعنی نامحدود. برای مقدار دقیق:", "`/group_limit tts 20 5`", "عدد اول سقف گروه و عدد دوم سقف هر عضو است."))
+    lines.extend(("", "برای واردکردن مقدار دقیق یا تأیید و قطع گروه‌ها از پنل مدیریت وب استفاده کن."))
     return {"text": "\n".join(lines), "reply_markup": InlineKeyboardMarkup(rows)}
 
 
@@ -871,12 +881,6 @@ def post_upload_keyboard(file: File, telegram_id: int) -> InlineKeyboardMarkup |
     return file_detail_keyboard_for_user(file, telegram_id)
 
 
-HELP_TEXT = (
-    "💡 **راهنمای کمد**\n\n"
-    "فایل، متن یا لینک بفرست؛ بقیه‌اش با کمد."
-)
-
-
 def main_menu_keyboard(telegram_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🗄️ کشوهای من", callback_data="folders:0:0"),
@@ -1090,16 +1094,9 @@ async def check_auth(client, message: Message):
         # Ignore if it's a command we don't want to reply to (to avoid spamming unauthorized users)
         # But for /start, we should give a polite rejection
         if message.text and message.text.startswith("/start"):
-            await message.reply(
-                "🚫 **دسترسی محدوده**\n\n"
-                "این ربات فقط برای کاربرهای مجاز فعاله.\n"
-                f"شناسهٔ تلگرام شما: `{message.from_user.id}`"
-            )
+            await message.reply(await bot_message("access_denied", telegram_id=message.from_user.id))
         elif any(getattr(message, field, None) for field in ("video", "audio", "voice", "document", "photo", "animation", "video_note")):
-            await message.reply(
-                "🚫 این حساب فعلاً اجازهٔ ذخیره فایل در کمد رو نداره.\n"
-                f"آیدی تلگرام: `{message.from_user.id}`"
-            )
+            await message.reply(await bot_message("file_access_denied", telegram_id=message.from_user.id))
         
         # Stop further processing of this message
         message.stop_propagation()
@@ -1131,19 +1128,17 @@ async def start_command(client, message: Message):
                     login_code.telegram_id = message.from_user.id
                     await db.commit()
                     
-                    await message.reply(
-                        "✅ ورود دستگاه شما تأیید شد."
-                    )
+                    await message.reply(await bot_message("login_confirmed"))
                     return
                 elif login_code.telegram_id:
-                     await message.reply("⚠️ این کد قبلاً استفاده شده.")
+                     await message.reply(await bot_message("login_code_used"))
                      return
                 else:
-                     await message.reply("❌ اعتبار این کد تموم شده.")
+                     await message.reply(await bot_message("login_code_expired"))
                      return
 
     await message.reply(
-        f"🗄️ **سلام {message.from_user.first_name or 'رفیق'}!**\nفایل بفرست یا یکی از بخش‌ها را باز کن.",
+        await bot_message("welcome", first_name=message.from_user.first_name or "رفیق"),
         reply_markup=main_menu_keyboard(message.from_user.id),
     )
 
@@ -1153,7 +1148,7 @@ async def help_command(client, message: Message):
     """Show help message."""
     await load_user_ui_state(message.from_user.id)
     await set_current_drawer(message.from_user.id, None)
-    await message.reply(HELP_TEXT, reply_markup=help_keyboard(message.from_user.id))
+    await message.reply(await bot_message("help"), reply_markup=help_keyboard(message.from_user.id))
 
 
 @tg_client.on_message(filters.command("tts") & filters.private)
@@ -1165,7 +1160,7 @@ async def tts_command(client, message: Message):
     )
     personal_keys = decrypt_user_keys(user.gemini_api_keys_encrypted)
     if not tts_queue.available and not personal_keys:
-        await message.reply("تبدیل متن به صدا هنوز روی سرور فعال نشده.")
+        await message.reply(await bot_message("tts_unavailable"))
         return
     direct_text = message.text.split(maxsplit=1)[1].strip() if message.text and len(message.text.split(maxsplit=1)) > 1 else ""
     replied = message.reply_to_message
@@ -1190,7 +1185,7 @@ async def tts_command(client, message: Message):
     )
     position = await tts_queue.enqueue(job)
     queue_note = f"\nنوبت {to_persian_digits(str(position))} در صف" if position > 1 else ""
-    await message.reply(f"🎙️ درخواست ساخت صدا ثبت شد.{queue_note}")
+    await message.reply(await bot_message("tts_queued", queue_note=queue_note))
 
 
 @tg_client.on_message(filters.command("stt") & filters.private)
@@ -1202,7 +1197,7 @@ async def stt_command(client, message: Message):
     )
     personal_keys = decrypt_user_keys(user.gemini_api_keys_encrypted)
     if not stt_queue.available and not personal_keys:
-        await message.reply("استخراج متن هنوز روی سرور فعال نشده.")
+        await message.reply(await bot_message("stt_unavailable"))
         return
     replied = message.reply_to_message
     option = message.text.split(maxsplit=1)[1].strip().lower() if message.text and len(message.text.split(maxsplit=1)) > 1 else ""
@@ -1210,7 +1205,7 @@ async def stt_command(client, message: Message):
     if replied is None:
         if option:
             pending_stt_modes[message.from_user.id] = output_mode
-            await message.reply("🎙️ حالا صدا یا ویدیو را بفرست. خود فایل در کمد ذخیره نمی‌شود.")
+            await message.reply(await bot_message("stt_waiting_upload"))
         else:
             pending_stt_modes.pop(message.from_user.id, None)
             await message.reply(
@@ -1224,7 +1219,7 @@ async def stt_command(client, message: Message):
         return
     media = next((getattr(replied, name, None) for name in ("audio", "voice", "video", "video_note", "document") if replied and getattr(replied, name, None)), None)
     if media is None:
-        await message.reply("روی صدا یا ویدیو ریپلای کن و `/stt` را بفرست. برای خروجی موقت هم `/stt temp` بزن.")
+        await message.reply(await bot_message("stt_reply_required"))
         return
     cleanup_source = False
     async with async_session() as db:
@@ -1235,13 +1230,13 @@ async def stt_command(client, message: Message):
         if source is None:
             mime = getattr(media, "mime_type", None) or ("audio/ogg" if replied.voice else "video/mp4" if replied.video or replied.video_note else "application/octet-stream")
             if not (mime.startswith("audio/") or mime.startswith("video/") or replied.audio or replied.voice or replied.video or replied.video_note):
-                await message.reply("این فایل صوتی یا ویدیویی نیست.")
+                await message.reply(await bot_message("stt_invalid_media"))
                 return
             target_channel = user.storage_channel_id or settings.telegram_storage_channel_id
             temporary_message = await forward_to_storage_channel(replied, target_channel)
             stored_media = next((getattr(temporary_message, field, None) for field in ("audio", "voice", "video", "video_note", "document") if getattr(temporary_message, field, None)), None)
             if stored_media is None:
-                await message.reply("فایل برای استخراج متن آماده نشد؛ دوباره تلاش کن.")
+                await message.reply(await bot_message("stt_prepare_failed"))
                 return
             default_folder = await ensure_default_folder(db, user.id)
             source = File(
@@ -1283,7 +1278,7 @@ async def stt_command(client, message: Message):
     )
     position = await stt_queue.enqueue(job)
     queue_note = f"\nنوبت {to_persian_digits(str(position))} در صف" if position > 1 else ""
-    await message.reply(f"📝 درخواست استخراج متن ثبت شد.{queue_note}")
+    await message.reply(await bot_message("stt_queued", queue_note=queue_note))
 
 
 @tg_client.on_message(filters.command("tts") & filters.group)
@@ -1299,13 +1294,13 @@ async def group_tts_command(client, message: Message):
     )
     personal_keys = decrypt_user_keys(user.gemini_api_keys_encrypted)
     if not tts_queue.available and not personal_keys:
-        await message.reply("تبدیل متن به صدا هنوز روی سرور فعال نشده.")
+        await message.reply(await bot_message("tts_unavailable"))
         return
     direct_text = message.text.split(maxsplit=1)[1].strip() if message.text and len(message.text.split(maxsplit=1)) > 1 else ""
     replied = message.reply_to_message
     source_text = direct_text or ((replied.text or replied.caption or "").strip() if replied else "")
     if not source_text:
-        await message.reply("متن را بعد از `/tts` بنویس یا این دستور را روی یک پیام متنی ریپلای کن.")
+        await message.reply(await bot_message("tts_text_required"))
         return
     async with async_session() as db:
         try:
@@ -1324,7 +1319,7 @@ async def group_tts_command(client, message: Message):
     )
     position = await tts_queue.enqueue(job)
     queue_note = f" نوبت {to_persian_digits(str(position))} در صف." if position > 1 else ""
-    await message.reply(f"🎙️ درخواست ساخت صدا ثبت شد.{queue_note}")
+    await message.reply(await bot_message("tts_queued", queue_note=queue_note))
 
 
 @tg_client.on_message(filters.command("stt") & filters.group)
@@ -1341,7 +1336,7 @@ async def group_stt_command(client, message: Message):
         return
     mime = getattr(media, "mime_type", None) or ("audio/ogg" if replied.voice else "video/mp4" if replied.video or replied.video_note else "application/octet-stream")
     if not (mime.startswith("audio/") or mime.startswith("video/") or replied.audio or replied.voice or replied.video or replied.video_note):
-        await message.reply("این فایل صوتی یا ویدیویی نیست.")
+        await message.reply(await bot_message("stt_invalid_media"))
         return
     user = await get_or_create_user(
         message.from_user.id, message.from_user.username,
@@ -1349,7 +1344,7 @@ async def group_stt_command(client, message: Message):
     )
     personal_keys = decrypt_user_keys(user.gemini_api_keys_encrypted)
     if not stt_queue.available and not personal_keys:
-        await message.reply("استخراج متن هنوز روی سرور فعال نشده.")
+        await message.reply(await bot_message("stt_unavailable"))
         return
     async with async_session() as db:
         try:
@@ -1390,7 +1385,7 @@ async def group_stt_command(client, message: Message):
             text_model=preferences["text_model"], stt_mode=preferences["stt_mode"],
         ))
         queue_note = f" نوبت {to_persian_digits(str(position))} در صف." if position > 1 else ""
-        await message.reply(f"📝 درخواست استخراج متن ثبت شد.{queue_note}")
+        await message.reply(await bot_message("stt_queued", queue_note=queue_note))
     except Exception as error:
         logger.exception("Could not queue group STT: %s", error)
         await message.reply("❌ فایل برای استخراج متن آماده نشد؛ دوباره تلاش کن.")
@@ -1402,12 +1397,23 @@ async def group_settings_command(client, message: Message):
         return
     if not await require_connected_group(message):
         return
-    manager = await is_group_manager(client, message.chat.id, message.from_user.id)
-    view = await group_settings_view(message.chat.id, message.from_user.id, message.chat.title)
-    if not manager:
-        view["reply_markup"] = None
-        view["text"] += "\n\nبرای تغییر این تنظیمات باید مدیر گروه باشی."
-    await message.reply(**view)
+    if not is_global_admin(message.from_user.id):
+        notice = await message.reply("تنظیم محدودیت‌های گروه فقط در اختیار مدیر اصلی کمد است.")
+        asyncio.create_task(delete_preview_later(client, notice.chat.id, notice.id, 12))
+        return
+    try:
+        await client.send_message(message.from_user.id, **(await group_settings_view(message.chat.id, message.from_user.id, message.chat.title)))
+        with contextlib.suppress(Exception):
+            await message.delete()
+    except Exception:
+        notice = await message.reply("اول گفت‌وگوی خصوصی ربات را باز کن و Start را بزن؛ سپس دوباره این دکمه را بزن.")
+        asyncio.create_task(delete_preview_later(client, notice.chat.id, notice.id, 15))
+
+
+@tg_client.on_message(filters.command(["komod", "group_menu"]) & filters.group)
+async def group_menu_command(client, message: Message):
+    if await require_connected_group(message):
+        await message.reply("یکی از گزینه‌ها را انتخاب کن:", reply_markup=group_menu_keyboard())
 
 
 @tg_client.on_message(filters.command("group_usage") & filters.group)
@@ -1422,27 +1428,12 @@ async def group_usage_command(client, message: Message):
 async def group_limit_command(client, message: Message):
     if not await require_connected_group(message):
         return
-    if not message.from_user or not await is_group_manager(client, message.chat.id, message.from_user.id):
-        await message.reply("فقط مدیرهای گروه می‌توانند سهمیه‌ها را تغییر دهند.")
+    if not message.from_user or not is_global_admin(message.from_user.id):
+        await message.reply("تغییر سهمیه‌ها فقط در اختیار مدیر اصلی کمد است.")
         return
-    parts = (message.text or "").split()
-    if len(parts) != 4 or parts[1].lower() not in {"tts", "stt", "link"}:
-        await message.reply("نمونه درست: `/group_limit tts 20 5`\nعدد اول سقف گروه و عدد دوم سقف هر عضو است؛ صفر یعنی نامحدود.")
-        return
-    try:
-        group_limit, member_limit = int(parts[2]), int(parts[3])
-        if not 0 <= group_limit <= 100000 or not 0 <= member_limit <= 100000:
-            raise ValueError
-    except ValueError:
-        await message.reply("سقف‌ها باید عددی بین صفر تا ۱۰۰٬۰۰۰ باشند.")
-        return
-    operation = parts[1].lower()
-    async with async_session() as db:
-        group = await get_or_create_group_settings(db, message.chat.id, message.chat.title)
-        setattr(group, f"{operation}_daily_limit", group_limit)
-        setattr(group, f"member_{operation}_daily_limit", member_limit)
-        await db.commit()
-    await message.reply(**(await group_settings_view(message.chat.id, message.from_user.id, message.chat.title)))
+    await client.send_message(message.from_user.id, **(await group_settings_view(message.chat.id, message.from_user.id, message.chat.title)))
+    with contextlib.suppress(Exception):
+        await message.delete()
 
 
 @tg_client.on_message(filters.private & (filters.video | filters.audio | filters.voice | filters.document | filters.video_note), group=-1)
@@ -1476,7 +1467,7 @@ async def _process_pending_stt_media(client, message: Message, output_mode: str)
     )
     personal_keys = decrypt_user_keys(user.gemini_api_keys_encrypted)
     if not stt_queue.available and not personal_keys:
-        await message.reply("استخراج متن هنوز روی سرور فعال نشده.")
+        await message.reply(await bot_message("stt_unavailable"))
         return
     media = next((getattr(message, name, None) for name in ("audio", "voice", "video", "video_note", "document") if getattr(message, name, None)), None)
     mime = getattr(media, "mime_type", None) or ("audio/ogg" if message.voice else "video/mp4" if message.video or message.video_note else "application/octet-stream")
@@ -1522,7 +1513,7 @@ async def _process_pending_stt_media(client, message: Message, output_mode: str)
         stt_model=preferences["stt_model"], text_model=preferences["text_model"], stt_mode=preferences["stt_mode"],
     ))
     queue_note = f"\nنوبت {to_persian_digits(str(position))} در صف" if position > 1 else ""
-    await message.reply(f"📝 درخواست استخراج متن ثبت شد.{queue_note}")
+    await message.reply(await bot_message("stt_queued", queue_note=queue_note))
 
 
 def tts_bot_settings_view(preferences: dict) -> dict:
@@ -1571,12 +1562,12 @@ async def playlists_command(client, message: Message):
 async def newfolder_command(client, message: Message):
     """Create a new folder."""
     if len(message.command) < 2:
-        await message.reply("اسم کشو رو بعد از دستور بنویس؛ نمونه: `/newfolder فیلم‌ها`.")
+        await message.reply(await bot_message("folder_name_required"))
         return
     
     folder_name = " ".join(message.command[1:]).strip()
     if not folder_name or len(folder_name) > 255:
-        await message.reply("اسم کشو باید بین ۱ تا ۲۵۵ نویسه باشه.")
+        await message.reply(await bot_message("folder_name_invalid"))
         return
     
     async with async_session() as db:
@@ -1599,7 +1590,7 @@ async def newfolder_command(client, message: Message):
             )
         )
         if existing.scalar_one_or_none():
-            await message.reply(f"❌ یه کشو با اسم «{folder_name}» همین‌جا داری.")
+            await message.reply(await bot_message("folder_duplicate", folder_name=folder_name))
             return
         
         # Create folder
@@ -1621,7 +1612,7 @@ async def search_command(client, message: Message):
     """Search file names and descriptions."""
     query = " ".join(message.command[1:]).strip()
     if not query:
-        await message.reply("🔎 عبارت رو بعد از دستور بنویس؛ نمونه: `/search سفر`.")
+        await message.reply(await bot_message("search_query_required"))
         return
     await load_user_ui_state(message.from_user.id)
     search_queries[message.from_user.id] = query[:100]
@@ -1974,7 +1965,7 @@ async def handle_file(client, message: Message):
     user_id = message.from_user.id
     queue = upload_message_queues.setdefault(user_id, asyncio.Queue())
     position = queue.qsize() + (1 if user_id in upload_workers else 0)
-    status_msg = await message.reply("⏳ در صف ذخیره…" if position else "⏳ در حال ذخیره…")
+    status_msg = await message.reply(await bot_message("file_save_queued", state="در صف ذخیره…" if position else "در حال ذخیره…"))
     await queue.put((client, message, status_msg))
     worker = upload_workers.get(user_id)
     if worker is None or worker.done():
@@ -2095,47 +2086,44 @@ async def handle_personal_channel_post(client, message: Message):
 async def connect_current_chat(client, message: Message):
     """Connect a group/channel as a reusable Komod output destination."""
     if not message.from_user:
-        await message.reply_text("این دستور را یکی از مدیرهای گروه بفرستد.")
+        await message.reply_text(await bot_message("group_admin_required"))
         return
     try:
         member = await client.get_chat_member(message.chat.id, message.from_user.id)
         status = str(getattr(member, "status", "")).lower()
         if not any(value in status for value in ("owner", "administrator")):
-            await message.reply_text("فقط مدیر گروه یا کانال می‌تواند این مقصد را وصل کند.")
+            await message.reply_text(await bot_message("group_owner_required"))
             return
     except Exception:
-        await message.reply_text("بررسی دسترسی انجام نشد؛ ربات را مدیر این گفت‌وگو کن.")
+        await message.reply_text(await bot_message("group_access_check_failed"))
         return
     async with async_session() as db:
         owner = (await db.execute(select(User).where(
             User.telegram_id == message.from_user.id, User.is_active.is_(True)
         ))).scalar_one_or_none()
         if owner is None:
-            await message.reply_text("اول در گفت‌وگوی خصوصی ربات، کمدت را فعال کن.")
+            await message.reply_text(await bot_message("group_connect_private_first"))
             return
         destination = (await db.execute(select(TelegramDestination).where(
-            TelegramDestination.user_id == owner.id,
             TelegramDestination.chat_id == message.chat.id,
-        ))).scalar_one_or_none()
+        ).order_by(TelegramDestination.created_at.asc()))).scalars().first()
+        approved = is_global_admin(message.from_user.id)
         if destination is None:
             destination = TelegramDestination(
                 user_id=owner.id, chat_id=message.chat.id,
                 name=str(message.chat.title or "گفت‌وگوی تلگرام")[:120],
-                chat_type=str(message.chat.type).split(".")[-1].lower(), enabled=True,
+                chat_type=str(message.chat.type).split(".")[-1].lower(), enabled=approved,
             )
             db.add(destination)
         else:
-            destination.enabled = True
+            if approved:
+                destination.enabled = True
             destination.name = str(message.chat.title or destination.name)[:120]
         await get_or_create_group_settings(db, message.chat.id, message.chat.title)
         await db.commit()
     await message.reply_text(
-        "✅ اینجا به مقصدهای کمد اضافه شد. حالا لینک یوتیوب یا اینستاگرام را همین‌جا بفرست.\n\n"
-        "فرمان‌های گروه:\n"
-        "• `/tts متن` یا ریپلای روی متن\n"
-        "• `/stt` به‌صورت ریپلای روی صدا یا ویدیو\n"
-        "• `/group_settings` برای تنظیم امکانات و سهمیه‌ها\n"
-        "• `/group_usage` برای دیدن مصرف امروز"
+        await bot_message("group_connected" if approved else "group_approval_pending"),
+        reply_markup=group_menu_keyboard() if approved else None,
     )
 
 
@@ -2158,7 +2146,7 @@ async def handle_import_link(client, message: Message):
     else:
         user = await get_or_create_user(message.from_user.id, message.from_user.username, message.from_user.first_name, message.from_user.last_name)
     if not link_importer.available:
-        await message.reply("⚙️ دانلود از لینک هنوز روی سرور تنظیم نشده. متغیر TELEGRAM_WORKER_SESSION باید اضافه شود.")
+        await message.reply(await bot_message("link_service_unavailable"))
         message.stop_propagation()
         return
     matches = re.findall(
@@ -2183,12 +2171,15 @@ async def handle_import_link(client, message: Message):
         positions: list[int] = []
         if destination_id is None:
             await load_user_ui_state(message.from_user.id)
-        delivery_mode = "both" if destination_id is not None else link_delivery_modes.get(message.from_user.id, "both")
+        is_group_import = destination_id is not None
+        delivery_mode = "telegram" if is_group_import else link_delivery_modes.get(message.from_user.id, "both")
         for raw_url in matches:
             url = raw_url.rstrip(".,;!?)]}>'\"")
             positions.append(await link_importer.enqueue(ImportJob(
                 url=url, user_id=user.id, telegram_id=user.telegram_id, folder_id=None,
-                notify=True, default_folder=True,
+                notify=True, notification_chat_id=message.chat.id if is_group_import else None,
+                visible_to_user=not is_group_import,
+                default_folder=not is_group_import,
                 save_to_library=delivery_mode != "telegram",
                 send_to_telegram=delivery_mode != "library",
                 destination_ids=[destination_id] if destination_id is not None else [],
@@ -2196,11 +2187,11 @@ async def handle_import_link(client, message: Message):
         count = to_persian_digits(str(len(matches)))
         first_position = min(positions) if positions else 1
         queue_note = f" · شروع از نوبت {to_persian_digits(str(first_position))}" if first_position > 1 else ""
-        reply = await message.reply(f"🔗 {count} لینک به صف اضافه شد{queue_note}.\nوقتی آماده شود خبرت می‌کنم.")
+        reply = await message.reply(await bot_message("link_queued", count=count, queue_note=queue_note))
         asyncio.create_task(delete_preview_later(client, reply.chat.id, reply.id, 30))
     except Exception as error:
         logger.exception("Could not enqueue link import: %s", error)
-        await message.reply("❌ ثبت لینک در صف انجام نشد؛ کمی بعد دوباره تلاش کن.")
+        await message.reply(await bot_message("link_enqueue_failed"))
     message.stop_propagation()
 
 
@@ -2253,7 +2244,7 @@ async def handle_callback(client, callback: CallbackQuery):
     data = callback.data
     async with async_session() as db:
         known_user = (await db.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one_or_none()
-    group_settings_callback = data.startswith("grpq:") and callback.message.chat.type in {enums.ChatType.GROUP, enums.ChatType.SUPERGROUP}
+    group_settings_callback = (data.startswith("grpq:") and is_global_admin(callback.from_user.id)) or data.startswith("grpmenu:")
     if ((known_user is not None and not known_user.is_active) or
             (settings.restrict_users and callback.from_user.id not in settings.bootstrap_users and known_user is None and not group_settings_callback)):
         await callback.answer("اجازهٔ استفاده از این ربات رو نداری.", show_alert=True)
@@ -2261,18 +2252,23 @@ async def handle_callback(client, callback: CallbackQuery):
     await load_user_ui_state(callback.from_user.id)
 
     if data.startswith("grpq:"):
-        if not await is_connected_group(callback.message.chat.id):
+        try:
+            _, chat_id_raw, operation, scope, delta_raw = data.split(":", 4)
+            group_chat_id = int(chat_id_raw)
+        except (ValueError, TypeError):
+            await callback.answer("این تنظیم معتبر نیست.", show_alert=True)
+            return
+        if not await is_connected_group(group_chat_id):
             await callback.answer("این گروه دیگر به کمد متصل نیست.", show_alert=True)
             return
-        if not await is_group_manager(client, callback.message.chat.id, callback.from_user.id):
-            await callback.answer("فقط مدیرهای گروه می‌توانند این تنظیمات را تغییر دهند.", show_alert=True)
+        if not is_global_admin(callback.from_user.id):
+            await callback.answer("فقط مدیر اصلی کمد می‌تواند این تنظیمات را تغییر دهد.", show_alert=True)
             return
         try:
-            _, operation, scope, delta_raw = data.split(":", 3)
             if operation not in {"tts", "stt", "link"} or scope not in {"toggle", "group", "member"}:
                 raise ValueError
             async with async_session() as db:
-                group = await get_or_create_group_settings(db, callback.message.chat.id, callback.message.chat.title)
+                group = await get_or_create_group_settings(db, group_chat_id)
                 if scope == "toggle":
                     field = f"{operation}_enabled"
                     setattr(group, field, not getattr(group, field))
@@ -2281,11 +2277,44 @@ async def handle_callback(client, callback: CallbackQuery):
                     setattr(group, field, max(0, min(100000, int(getattr(group, field)) + int(delta_raw))))
                 await db.commit()
             await callback.message.edit_text(**(await group_settings_view(
-                callback.message.chat.id, callback.from_user.id, callback.message.chat.title
+                group_chat_id, callback.from_user.id
             )))
             await callback.answer("تنظیمات گروه ذخیره شد.")
         except (ValueError, TypeError):
             await callback.answer("این تنظیم معتبر نیست.", show_alert=True)
+
+    elif data.startswith("grpmenu:"):
+        action = data.split(":", 1)[1]
+        group_chat_id = callback.message.chat.id
+        if not await is_connected_group(group_chat_id):
+            await callback.answer("این گروه هنوز تأیید نشده یا اتصال آن متوقف است.", show_alert=True)
+            return
+        if action == "tts":
+            await callback.answer("روی یک پیام متنی ریپلای کن و /tts را بفرست؛ یا متن را بعد از /tts بنویس.", show_alert=True)
+        elif action == "stt":
+            await callback.answer("روی صدا یا ویدیو ریپلای کن و /stt را بفرست.", show_alert=True)
+        elif action == "link":
+            await callback.answer("لینک یوتیوب یا اینستاگرام را مستقیم در همین گروه بفرست.", show_alert=True)
+        elif action == "usage":
+            async with async_session() as db:
+                total, member = await get_group_usage(db, group_chat_id, callback.from_user.id)
+            text = " | ".join((
+                f"TTS: {to_persian_digits(getattr(total, 'tts_count', 0))}/{to_persian_digits(getattr(member, 'tts_count', 0))}",
+                f"STT: {to_persian_digits(getattr(total, 'stt_count', 0))}/{to_persian_digits(getattr(member, 'stt_count', 0))}",
+                f"لینک: {to_persian_digits(getattr(total, 'link_count', 0))}/{to_persian_digits(getattr(member, 'link_count', 0))}",
+            ))
+            await callback.answer(f"مصرف گروه / شما\n{text}", show_alert=True)
+        elif action == "settings":
+            if not is_global_admin(callback.from_user.id):
+                await callback.answer("این بخش فقط برای مدیر اصلی کمد است.", show_alert=True)
+                return
+            try:
+                await client.send_message(callback.from_user.id, **(await group_settings_view(group_chat_id, callback.from_user.id, callback.message.chat.title)))
+                await callback.answer("پنل تنظیمات در گفت‌وگوی خصوصی برایت فرستاده شد.", show_alert=True)
+            except Exception:
+                await callback.answer("اول گفت‌وگوی خصوصی ربات را باز کن و Start را بزن.", show_alert=True)
+        else:
+            await callback.answer()
 
     elif data.startswith("input_action:"):
         action = data.split(":", 1)[1]
@@ -3323,7 +3352,7 @@ async def handle_callback(client, callback: CallbackQuery):
 
     elif data == "show_help":
         await set_current_drawer(callback.from_user.id, None)
-        await safe_edit(callback.message, HELP_TEXT, reply_markup=help_keyboard(callback.from_user.id))
+        await safe_edit(callback.message, await bot_message("help"), reply_markup=help_keyboard(callback.from_user.id))
         await callback.answer()
 
     elif data.startswith("openfile:"):

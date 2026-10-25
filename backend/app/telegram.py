@@ -84,6 +84,7 @@ async def configure_main_client(c) -> None:
             BotCommand("connect_here", "اتصال گروه یا کانال به کمد"),
             BotCommand("group_settings", "تنظیم امکانات و سهمیه‌های گروه"),
             BotCommand("group_usage", "نمایش مصرف امروز گروه"),
+            BotCommand("komod", "باز کردن منوی دکمه‌ای گروه"),
             BotCommand("search", "جست‌وجو در فایل‌ها و کشوها"),
             BotCommand("newfolder", "ساخت کشوی جدید"),
             BotCommand("web", "راهنمای ورود به نسخهٔ وب"),

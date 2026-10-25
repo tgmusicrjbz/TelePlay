@@ -27,6 +27,7 @@ from .link_captions import render_link_caption
 from .processing_jobs import create_job, delete_finished_jobs, delete_job, load_jobs, update_job
 from .services import sanitize_filename, select_best_thumbnail
 from . import telegram
+from .bot_messages import bot_message
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -44,6 +45,8 @@ class ImportJob:
     folder_id: int | None = None
     quality: str = "480"
     notify: bool = True
+    notification_chat_id: int | None = None
+    visible_to_user: bool = True
     default_folder: bool = False
     save_to_library: bool = True
     send_to_telegram: bool = False
@@ -193,12 +196,15 @@ class LinkImportService:
                 url=str(payload.get("url") or ""), user_id=int(payload["user_id"]),
                 telegram_id=int(payload["telegram_id"]), folder_id=payload.get("folder_id"),
                 quality=str(payload.get("quality") or "480"), notify=bool(payload.get("notify", True)),
+                notification_chat_id=payload.get("notification_chat_id"),
+                visible_to_user=bool(payload.get("visible_to_user", True)),
                 default_folder=bool(payload.get("default_folder", False)),
                 save_to_library=bool(payload.get("save_to_library", True)),
                 send_to_telegram=bool(payload.get("send_to_telegram", False)),
                 destination_ids=[int(value) for value in payload.get("destination_ids", []) if str(value).isdigit()],
                 retry_count=int(status.get("retry_count") or 0), id=job_id,
             )
+            status["visible_to_user"] = job.visible_to_user
             status.update(state="queued", message="ادامه پس از راه‌اندازی دوباره", progress=0)
             self.statuses[job_id] = status
             self.controls[job_id] = {"paused": False, "cancelled": False}
@@ -221,13 +227,15 @@ class LinkImportService:
             await self.start()
         position = 1 + sum(1 for status in self.statuses.values() if status.get("state") not in {"done", "error", "cancelled"})
         job.id = job.id or uuid.uuid4().hex
-        self.statuses[job.id] = {"id": job.id, "user_id": job.user_id, "url": job.url, "quality": job.quality, "folder_id": job.folder_id, "state": "queued", "message": "در صف", "saved": 0, "progress": 0, "retry_count": job.retry_count, "created_at": datetime.utcnow().isoformat()}
+        self.statuses[job.id] = {"id": job.id, "user_id": job.user_id, "url": job.url, "quality": job.quality, "folder_id": job.folder_id, "state": "queued", "message": "در صف", "saved": 0, "progress": 0, "retry_count": job.retry_count, "visible_to_user": job.visible_to_user, "created_at": datetime.utcnow().isoformat()}
         self.controls[job.id] = {"paused": False, "cancelled": False}
         await create_job(
             job_id=job.id, user_id=job.user_id, kind="link", title=job.url,
             payload={"id": job.id, "url": job.url, "user_id": job.user_id,
                      "telegram_id": job.telegram_id, "folder_id": job.folder_id,
                      "quality": job.quality, "notify": job.notify, "default_folder": job.default_folder,
+                     "notification_chat_id": job.notification_chat_id,
+                     "visible_to_user": job.visible_to_user,
                      "save_to_library": job.save_to_library, "send_to_telegram": job.send_to_telegram,
                      "destination_ids": job.destination_ids},
             status=self.statuses[job.id],
@@ -276,7 +284,7 @@ class LinkImportService:
                 asyncio.get_running_loop().create_task(delete_job(job_id, user_id))
             except RuntimeError:
                 pass
-        jobs = [dict(item) for item in self.statuses.values() if item["user_id"] == user_id]
+        jobs = [dict(item) for item in self.statuses.values() if item["user_id"] == user_id and item.get("visible_to_user", True)]
         return sorted(jobs, key=lambda item: item.get("created_at", ""), reverse=True)[:100]
 
     def toggle_pause(self, job_id: str, user_id: int) -> dict | None:
@@ -308,6 +316,7 @@ class LinkImportService:
         cancellable = [
             job_id for job_id, status in self.statuses.items()
             if status.get("user_id") == user_id
+            and status.get("visible_to_user", True)
             and status.get("state") not in {"done", "error", "cancelled"}
         ]
         for job_id in cancellable:
@@ -379,7 +388,7 @@ class LinkImportService:
                 if job.notify:
                     count = str(len(saved)).translate(str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹"))
                     destination = "در تلگرام فرستاده و در کمد ذخیره شد" if job.send_to_telegram and job.save_to_library else "در تلگرام فرستاده شد" if job.send_to_telegram else "به کمد اضافه شد"
-                    await self._notify(job, f"✅ {count} فایل {destination}.")
+                    await self._notify(job, await bot_message("link_finished", count=count, destination=destination))
                 self.statuses[job.id].update(state="done", message="آماده شد", saved=len(saved), progress=100, finished_at=datetime.utcnow().isoformat())
                 await self._persist_status(job.id)
             except asyncio.CancelledError:
@@ -403,7 +412,7 @@ class LinkImportService:
                     continue
                 logger.exception("Link import failed for %s", job.url)
                 if job.notify:
-                    await self._notify(job, f"❌ {friendly_error}")
+                    await self._notify(job, await bot_message("link_failed", error=friendly_error))
                 self.statuses[job.id].update(state="error", message=friendly_error, finished_at=datetime.utcnow().isoformat())
                 await self._persist_status(job.id)
             finally:
@@ -713,14 +722,18 @@ class LinkImportService:
     async def _notify(self, job: ImportJob, text: str) -> None:
         if telegram.tg_client is None:
             return
-        token = quote(create_access_token(job.telegram_id), safe="")
-        url = f"{settings.web_base_url.rstrip('/')}/auth?token={token}"
-        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🗄️ باز کردن کمد", web_app=WebAppInfo(url=url))]]) if url.startswith("https://") else None
-        message = await telegram.tg_client.send_message(job.telegram_id, text, reply_markup=keyboard)
+        target_chat_id = job.notification_chat_id or job.telegram_id
+        keyboard = None
+        if target_chat_id == job.telegram_id:
+            token = quote(create_access_token(job.telegram_id), safe="")
+            url = f"{settings.web_base_url.rstrip('/')}/auth?token={token}"
+            if url.startswith("https://"):
+                keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🗄️ باز کردن کمد", web_app=WebAppInfo(url=url))]])
+        message = await telegram.tg_client.send_message(target_chat_id, text, reply_markup=keyboard)
         async def remove_later() -> None:
             await asyncio.sleep(45)
             try:
-                await telegram.tg_client.delete_messages(job.telegram_id, message.id)
+                await telegram.tg_client.delete_messages(target_chat_id, message.id)
             except Exception:
                 pass
         asyncio.create_task(remove_later())
