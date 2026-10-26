@@ -1,4 +1,5 @@
 export type MarkdownAlign = 'right'|'left'|'center'|'justify';
+export type MarkdownDirection = 'rtl'|'ltr';
 export type MarkdownPalette = {
     background:string; surface:string; text:string; border:string;
     heading1:string; heading2:string; heading3:string;
@@ -8,7 +9,8 @@ export type MarkdownPalette = {
 };
 export type MarkdownCustomTheme = {id:string;name:string;palette:MarkdownPalette;builtIn?:string};
 export type MarkdownSettings = {
-    font:string; fontSize:number; lineHeight:number; align:MarkdownAlign;
+    font:string; fontSize:number; lineHeight:number; align:MarkdownAlign; direction:MarkdownDirection;
+    textAttachmentPosition:'start'|'end';
     theme:string; showToolbar:boolean; wrap:boolean; wide:boolean;
 };
 
@@ -64,6 +66,8 @@ export function getMarkdownSettings():MarkdownSettings {
         fontSize:Number(localStorage.getItem('komod-reader-font-size'))||16,
         lineHeight:Number(localStorage.getItem('komod-reader-line-height'))||2,
         align:(localStorage.getItem('komod-reader-align') as MarkdownAlign)||'right',
+        direction:(localStorage.getItem('komod-reader-direction') as MarkdownDirection)||'rtl',
+        textAttachmentPosition:(localStorage.getItem('komod-text-attachment-position') as 'start'|'end')||'end',
         theme:localStorage.getItem('komod-reader-tone')||'dark',
         showToolbar:localStorage.getItem('komod-reader-tools')!=='hidden',
         wrap:localStorage.getItem('komod-reader-wrap')!=='off', wide:localStorage.getItem('komod-reader-wide')==='on',
@@ -74,6 +78,7 @@ export function saveMarkdownSettings(value:MarkdownSettings){
     localStorage.setItem(accountKey(SETTINGS_KEY),JSON.stringify(value));
     localStorage.setItem('komod-reader-font',value.font); localStorage.setItem('komod-reader-font-size',String(value.fontSize));
     localStorage.setItem('komod-reader-line-height',String(value.lineHeight)); localStorage.setItem('komod-reader-align',value.align);
+    localStorage.setItem('komod-reader-direction',value.direction); localStorage.setItem('komod-text-attachment-position',value.textAttachmentPosition);
     localStorage.setItem('komod-reader-tone',value.theme); localStorage.setItem('komod-reader-tools',value.showToolbar?'visible':'hidden');
     localStorage.setItem('komod-reader-wrap',value.wrap?'on':'off'); localStorage.setItem('komod-reader-wide',value.wide?'on':'off');
     window.dispatchEvent(new CustomEvent('komod-markdown-settings-changed',{detail:value}));

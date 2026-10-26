@@ -656,8 +656,14 @@ export const useDeleteFiles = () => {
     const queryClient = useQueryClient();
     return useMutation({
         mutationFn: async (ids: number[]) => {
-            await api.post('/files/batch-delete', ids as any);
-            return ids;
+            const unique=[...new Set(ids)];
+            const chunks=Array.from({length:Math.ceil(unique.length/100)},(_,index)=>unique.slice(index*100,(index+1)*100));
+            const deleted:number[]=[];
+            for(const chunk of chunks){
+                const response=await api.post<{deleted_ids?:number[]}>('/files/batch-delete', chunk as any);
+                deleted.push(...(response.data.deleted_ids||chunk));
+            }
+            return deleted;
         },
         onSuccess: ids => {
             queryClient.setQueriesData<Pack>({ queryKey: ['packs', 'detail'] }, pack => removeFilesFromCachedPack(pack, new Set(ids)));
@@ -1335,11 +1341,7 @@ export const useUpdateSavedFilters = () => {
 export const useUpdateTagSettings = () => {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (payload: Omit<TagSettings, 'tags'> & { tags: Array<{name:string;color:string;category?:string}> }) => runOrQueueMetadataMutation(
-            async()=>cacheTagSettings((await api.put<TagSettings>('/accounts/tags',payload)).data),
-            {entity:'tag',method:'put',url:'/accounts/tags',payload},
-            ()=>cacheTagSettings({...payload,tags:payload.tags.map(item=>({...item,file_count:0}))}),
-        ),
+        mutationFn: async (payload: Omit<TagSettings, 'tags'> & { tags: Array<{name:string;color:string;category?:string}> }) => cacheTagSettings((await api.put<TagSettings>('/accounts/tags',payload)).data),
         onSuccess: data => queryClient.setQueryData(['tag-settings'], data),
     });
 };
@@ -1347,11 +1349,7 @@ export const useUpdateTagSettings = () => {
 export const useDeleteTag = () => {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (name: string) => {const current=queryClient.getQueryData<TagSettings>(['tag-settings'])||{tags:[],excluded_tags:[],show_file_tags:false,display_limit:2};return runOrQueueMetadataMutation(
-            async()=>cacheTagSettings((await api.delete<TagSettings>(`/accounts/tags/${encodeURIComponent(name)}`)).data),
-            {entity:'tag',method:'delete',url:`/accounts/tags/${encodeURIComponent(name)}`},
-            ()=>cacheTagSettings({...current,tags:current.tags.filter(item=>item.name.toLocaleLowerCase('fa')!==name.toLocaleLowerCase('fa'))}),
-        )},
+        mutationFn: async (name: string) => cacheTagSettings((await api.delete<TagSettings>(`/accounts/tags/${encodeURIComponent(name)}`)).data),
         onSuccess: data => {
             queryClient.setQueryData(['tag-settings'], data);
             queryClient.invalidateQueries({ queryKey: ['files'] });

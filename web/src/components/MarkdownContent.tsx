@@ -121,7 +121,7 @@ function MarkdownCodeBlock({ code, language }: { code: string; language?: string
     </div>;
 }
 
-export default function MarkdownContent({ content, fontSize = 15, lineHeight = 2, theme = 'dark', fontFamily = 'vazir', wrap = true, wide = false, align = 'right', customPalette }: { content: string; fontSize?: number; lineHeight?: number; theme?: ReaderTone; fontFamily?: string; wrap?: boolean; wide?: boolean; align?: 'right' | 'left' | 'center' | 'justify'; customPalette?:MarkdownPalette }) {
+export default function MarkdownContent({ content, fontSize = 15, lineHeight = 2, theme = 'dark', fontFamily = 'vazir', wrap = true, wide = false, align = 'right', direction = 'rtl', customPalette }: { content: string; fontSize?: number; lineHeight?: number; theme?: ReaderTone; fontFamily?: string; wrap?: boolean; wide?: boolean; align?: 'right' | 'left' | 'center' | 'justify'; direction?:'rtl'|'ltr'; customPalette?:MarkdownPalette }) {
     const [,setThemeRevision]=useState(0);
     useEffect(()=>{
         const refresh=()=>setThemeRevision(value=>value+1);
@@ -185,6 +185,6 @@ export default function MarkdownContent({ content, fontSize = 15, lineHeight = 2
         '--md-inline-code-bg':palette.inlineCodeBackground,'--md-code':palette.codeText,'--md-code-bg':palette.codeBackground,
     } as React.CSSProperties):undefined;
     return <div className={`markdown-reader-canvas ${palette?'markdown-reader-canvas--custom p-2 sm:p-3':''} mx-auto w-full ${wide?'max-w-none':'max-w-3xl'} overflow-hidden rounded-2xl transition-colors`} style={paletteStyle}>
-        <article dir="auto" className={`markdown-article ${palette?'markdown-article--custom':`markdown-article--${theme}`} markdown-font--${fontFamily} w-full max-w-none overflow-hidden rounded-2xl border p-4 shadow-inner transition-colors sm:p-6 ${wrap ? 'break-words' : 'overflow-x-auto whitespace-pre'}`} style={{fontSize, lineHeight, textAlign: align}}>{blocks}</article>
+        <article dir={direction} className={`markdown-article ${palette?'markdown-article--custom':`markdown-article--${theme}`} markdown-font--${fontFamily} w-full max-w-none overflow-hidden rounded-2xl border p-4 shadow-inner transition-colors sm:p-6 ${wrap ? 'break-words' : 'overflow-x-auto whitespace-pre'}`} style={{fontSize, lineHeight, textAlign: align}}>{blocks}</article>
     </div>;
 }

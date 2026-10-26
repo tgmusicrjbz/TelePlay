@@ -117,7 +117,7 @@ def route_ai_model(preferences: dict, task: str, workload: int = 0, has_instruct
         return economy
     if mode == "quality":
         return quality
-    simple = (task == "tts" and workload <= 2500) or (task == "stt" and workload <= 600) or (task == "text" and workload <= 6000 and not has_instruction)
+    simple = (task == "tts" and workload <= 800 and not has_instruction) or (task == "stt" and workload <= 600 and not has_instruction) or (task == "text" and workload <= 6000 and not has_instruction)
     # A custom model remains available in manual mode; automatic routing uses
     # predictable economy/quality slots so cost behaviour is understandable.
     return economy if simple else quality

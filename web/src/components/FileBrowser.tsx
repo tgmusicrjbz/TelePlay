@@ -868,10 +868,11 @@ export default function FileBrowser() {
         addToast('دارم لینک‌های دانلود رو آماده می‌کنم…', 'info');
         for (const file of selectedFilesForActions) {
             try {
-                const {data}=await api.post<TelegramFile>(`/files/${file.id}/share`);
-                if(!data.public_stream_url) continue;
+                const token=localStorage.getItem('access_token')||'';
+                const raw=file.stream_url||`/api/stream/${file.id}`;
+                const stream=raw.startsWith('http')?raw:`${window.location.origin}${raw.startsWith('/')?'':'/'}${raw}`;
                 const anchor=document.createElement('a');
-                anchor.href=`${window.location.origin}${data.public_stream_url}${data.public_stream_url.includes('?')?'&':'?'}download=1`;
+                anchor.href=`${stream}${stream.includes('?')?'&':'?'}token=${encodeURIComponent(token)}&download=1`;
                 anchor.download=file.file_name; document.body.appendChild(anchor); anchor.click(); anchor.remove();
                 await new Promise(resolve=>setTimeout(resolve,250));
             } catch { /* continue with the remaining selected files */ }

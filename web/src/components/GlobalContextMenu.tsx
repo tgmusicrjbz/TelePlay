@@ -3,11 +3,13 @@ import { useAppStore } from '../lib/store';
 import { TelegramFile, Folder, api, canPreviewText, sendFilesToTelegram, useTextFirstMode, useUpdateFile, useUpdateFolder, useUploadFile } from '../lib/api';
 import { Play, Download, DownloadCloud, Link, Edit, FolderInput, Trash2, Globe, ShieldOff, HardDriveDownload, Eye, EyeOff, AlignLeft, ListPlus, Heart, Info, Pin, Tags, ChevronDown, ChevronUp, X, AudioLines, Send, Palette, Image as ImageIcon, Boxes, BookOpen, Sparkles } from 'lucide-react';
 import { saveFileOffline } from '../lib/offline';
+import { useQueryClient } from '@tanstack/react-query';
 
 export default function GlobalContextMenu() {
     const { activeContextMenu, setActiveContextMenu, setPreviewFile, setContentPreviewFile, setDetailsFile, setAIToolsFile, setMoveItems, setMoveFiles, setDeleteConfirm, setRenameFile, setRenameFolder, setDescriptionItem, selectedFileIds, selectedFiles, setPlaylistFile, setActiveSection, addToast } = useAppStore();
     const updateFile = useUpdateFile();
     const textFirstMode = useTextFirstMode();
+    const queryClient=useQueryClient();
     const updateFolder = useUpdateFolder();
     const uploadFile = useUploadFile();
     const menuRef = useRef<HTMLDivElement>(null);
@@ -72,7 +74,6 @@ export default function GlobalContextMenu() {
 
     const handleAction = (action: () => void) => {
         action();
-        if (activeContextMenu?.type === 'file' && activeContextMenu.packId) window.dispatchEvent(new Event('komod-pack-close'));
         setActiveContextMenu(null);
     };
 
@@ -124,6 +125,7 @@ export default function GlobalContextMenu() {
         addToast('در حال لغو پیوند…', 'info');
         try {
             await api.delete<TelegramFile>(`/files/${file.id}/share`);
+            await Promise.all([queryClient.invalidateQueries({queryKey:['files']}),queryClient.invalidateQueries({queryKey:['public-shares']})]);
             addToast('پیوند عمومی لغو شد.');
         } catch (error) {
             console.error('Failed to revoke share:', error);
@@ -131,31 +133,17 @@ export default function GlobalContextMenu() {
         }
     };
 
-    const ensurePublicLink = async (file: TelegramFile): Promise<string> => {
-        if (file.public_stream_url) {
-            return `${window.location.protocol}//${window.location.host}${file.public_stream_url}`;
-        }
-        try {
-            const { data } = await api.post<TelegramFile>(`/files/${file.id}/share`);
-            if (data.public_stream_url) {
-                if (activeContextMenu && activeContextMenu.type === 'file') {
-                    setActiveContextMenu({ ...activeContextMenu, item: data });
-                }
-                return `${window.location.protocol}//${window.location.host}${data.public_stream_url}`;
-            }
-        } catch (err) {
-            console.error('Failed to create public link:', err);
-        }
+    const privateFileLink = (file: TelegramFile): string => {
+        const raw=file.stream_url||`/api/stream/${file.id}`;
+        const absolute=raw.startsWith('http')?raw:`${window.location.origin}${raw.startsWith('/')?'':'/'}${raw}`;
         const token = localStorage.getItem('access_token');
-        const downloadUrl = `${api.defaults.baseURL}/stream/${file.id}?token=${token}`;
-        return downloadUrl.startsWith('http')
-            ? downloadUrl
-            : `${window.location.protocol}//${window.location.host}${downloadUrl}`;
+        if(!token||absolute.includes('token='))return absolute;
+        return `${absolute}${absolute.includes('?')?'&':'?'}token=${encodeURIComponent(token)}`;
     };
 
     const handleDownload = async (file: TelegramFile) => {
         try {
-            const url = await ensurePublicLink(file);
+            const url = privateFileLink(file);
             const downloadUrl = url + (url.includes('?') ? '&' : '?') + 'download=1';
             const a = document.createElement('a');
             a.href = downloadUrl;
@@ -198,7 +186,6 @@ export default function GlobalContextMenu() {
         localStorage.setItem('komod-speech-mode','stt');
         setActiveContextMenu(null);
         setActiveSection('settings');
-        window.history.pushState({},'', '/');
     };
     const handleSendToTelegram = async (files:TelegramFile[]) => {
         setActiveContextMenu(null);
@@ -255,8 +242,8 @@ export default function GlobalContextMenu() {
                                 </>}
                             </div>
                             {!readOnlyWorkspace&&<><div className="rounded-2xl border border-white/[.07] bg-dark-950/40 p-2"><p className="mb-2 px-1 text-[10px] font-medium text-dark-500">پیوندها</p><div className="grid grid-cols-2 gap-2">
-                                <ActionTile icon={<Link/>} label={copiedId==='stream'?'کپی شد':'پیوند پخش'} onClick={async()=>{setActiveContextMenu(null);addToast('در حال آماده‌سازی پیوند…','info');handleCopy(await ensurePublicLink(file),'stream');}}/>
-                                <ActionTile icon={<HardDriveDownload/>} label={copiedId==='download'?'کپی شد':'پیوند دانلود'} onClick={async()=>{setActiveContextMenu(null);addToast('در حال آماده‌سازی پیوند…','info');const url=await ensurePublicLink(file);handleCopy(url+(url.includes('?')?'&':'?')+'download=1','download');}}/>
+                                <ActionTile icon={<Link/>} label={copiedId==='stream'?'کپی شد':'پیوند خصوصی پخش'} onClick={()=>void handleCopy(privateFileLink(file),'stream')}/>
+                                <ActionTile icon={<HardDriveDownload/>} label={copiedId==='download'?'کپی شد':'پیوند خصوصی دانلود'} onClick={()=>void handleCopy(privateFileLink(file)+(privateFileLink(file).includes('?')?'&':'?')+'download=1','download')}/>
                                 {file.public_stream_url?<>
                                     <ActionTile icon={<Globe className="text-emerald-400"/>} label="پیوند عمومی" onClick={()=>handleCopy(publicPageUrl(file),'public')}/>
                                     <ActionTile icon={<ShieldOff/>} label="لغو پیوند عمومی" onClick={()=>handleRevokeShare(file)}/>

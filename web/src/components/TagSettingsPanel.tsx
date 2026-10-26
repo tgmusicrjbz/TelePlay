@@ -58,12 +58,12 @@ export default function TagSettingsPanel({activeSection}:{activeSection?:string|
         void save(next);setName('');setCategory('');setEditing(null);
     };
     const beginEdit=(tag:TagDefinition)=>{setEditing(tag.name);setName(tag.name);setColor(tag.color);setCategory(tag.category||'')};
-    const addExclusion=()=>{
+    const addExclusion=async()=>{
         const clean=excludedInput.trim().replace(/^#/,'').slice(0,40);if(!clean)return;
         const next=[...excludedTags.filter(tag=>tag.toLocaleLowerCase('fa')!==clean.toLocaleLowerCase('fa')),clean];
-        setExcludedTags(next);setExcludedInput('');void save(tags,show,limit,next);
+        setExcludedInput('');await save(tags,show,limit,next);
     };
-    const removeExclusion=(value:string)=>{const next=excludedTags.filter(tag=>tag!==value);setExcludedTags(next);void save(tags,show,limit,next)};
+    const removeExclusion=async(value:string)=>{const next=excludedTags.filter(tag=>tag!==value);await save(tags,show,limit,next)};
     const removeTagFromFile=async(fileId:number,fileTags:string[]=[])=>{if(activeTag)await updateFile.mutateAsync({id:fileId,tags:fileTags.filter(item=>item.toLocaleLowerCase('fa')!==activeTag.name.toLocaleLowerCase('fa'))})};
     const toggleCategory=(value:string)=>setCollapsed(current=>{const next=new Set(current);next.has(value)?next.delete(value):next.add(value);return next});
     const toggleTagSelection=(name:string)=>setSelectedTags(current=>{const next=new Set(current);next.has(name)?next.delete(name):next.add(name);return next});

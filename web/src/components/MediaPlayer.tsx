@@ -195,24 +195,11 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
         }
     };
 
-    // Auto-ensure public link exists for VLC/Download/Copy
+    // Public links are created only from the explicit share action. Playback,
+    // download and copy use the signed-in URL and never publish a file.
     useEffect(() => {
-        const ensurePublicLink = async () => {
-            const fileData = extendedFile || file;
-            if (fileData.public_stream_url) {
-                setPublicUrl(getAbsoluteUrl(fileData.public_stream_url));
-            } else {
-                try {
-                    const { data } = await api.post<TelegramFile>(`/files/${file.id}/share`);
-                    if (data.public_stream_url) {
-                        setPublicUrl(getAbsoluteUrl(data.public_stream_url));
-                    }
-                } catch (err) {
-                    console.error('Failed to create public link:', err);
-                }
-            }
-        };
-        ensurePublicLink();
+        const fileData = extendedFile || file;
+        setPublicUrl(fileData.public_stream_url ? getAbsoluteUrl(fileData.public_stream_url) : null);
     }, [file.id, extendedFile]);
 
     // Restore progress

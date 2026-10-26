@@ -129,6 +129,22 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(disabled["enabled"])
             self.assertFalse(disabled["media_file"]["prefer_text_view"])
 
+    async def test_text_first_mode_migrates_legacy_companion_caption(self):
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            image = self.make_file(user.id, self.folder_id, 994)
+            image.file_type, image.description = "image", None
+            db.add(image); await db.flush()
+            companion = self.make_file(user.id, self.folder_id, 995)
+            companion.file_id = f"text-post:{image.id}"
+            companion.file_type = "text"
+            companion.description = "کپشن قدیمی که نباید حذف شود"
+            expected_caption = companion.description
+            db.add(companion); await db.commit()
+            result = await set_text_first_mode(image.id, TextFirstUpdate(enabled=True), db, user)
+            self.assertEqual(result["media_file"]["description"], expected_caption)
+            self.assertIsNone(await db.get(File, companion.id))
+
     async def test_file_description_saves_long_markdown_and_can_be_cleared(self):
         async with async_session() as db:
             user = await db.get(User, self.user_id)
@@ -958,6 +974,17 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(result["storage_deleted"])
             remove.assert_not_awaited()
             self.assertIsNotNone(await db.get(File, original.id))
+
+    async def test_storage_error_does_not_block_file_deletion(self):
+        async with async_session() as db:
+            item = self.make_file(self.user_id, None, 996)
+            db.add(item); await db.commit()
+            user = await db.get(User, self.user_id)
+            user.delete_storage_files = True
+            with patch("app.routers.files.delete_from_storage_channel", new_callable=AsyncMock, side_effect=RuntimeError("missing message")):
+                result = await delete_file(item.id, db, user)
+            self.assertTrue(result["storage_cleanup_failed"])
+            self.assertIsNone(await db.get(File, item.id))
 
     async def test_multiple_file_types_can_be_filtered_together(self):
         async with async_session() as db:

@@ -16,7 +16,7 @@ import shutil
 import tempfile
 from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, delete, asc, desc, exists, false, and_, or_
+from sqlalchemy import select, func, delete, update, asc, desc, exists, false, and_, or_
 from sqlalchemy.orm import selectinload
 from pydantic import BaseModel, Field
 from datetime import datetime, timedelta
@@ -1344,6 +1344,11 @@ async def set_text_first_mode(
         ).options(selectinload(File.watch_progress)))).scalar_one_or_none()
     if media is None or media.file_type not in {"image", "video", "audio", "document"}:
         raise HTTPException(status_code=415, detail="این حالت فقط برای پست‌های دارای پیوست است.")
+    # Older versions stored the caption on a generated companion text record.
+    # Migrate it before removing that duplicate so switching modes can never
+    # make the original caption disappear.
+    if companion is not None and companion.id != media.id and not (media.description or "").strip() and (companion.description or "").strip():
+        media.description = companion.description.strip()
     if payload.enabled and not (media.description or "").strip():
         raise HTTPException(status_code=422, detail="ابتدا متن یا کپشن این فایل را در توضیحات ذخیره کن.")
     media.prefer_text_view = payload.enabled
@@ -1829,19 +1834,31 @@ async def delete_file(
     # Old Telegram messages may already be gone or belong to a previous storage
     # channel.  Their stale metadata must still be removable from Komod.
     storage_deleted = False
+    storage_cleanup_failed = False
     if current_user.delete_storage_files:
-        messages = await unreferenced_storage_messages(db, [file])
-        if messages:
-            channel_id, message_ids = next(iter(messages.items()))
-            storage_deleted = await delete_from_storage_channel(message_ids, channel_id)
-        for channel_id, message_ids in (await unreferenced_audio_variant_messages(db, [file])).items():
-            await delete_from_storage_channel(message_ids, channel_id)
+        try:
+            messages = await unreferenced_storage_messages(db, [file])
+            for channel_id, message_ids in messages.items():
+                storage_deleted = bool(await delete_from_storage_channel(message_ids, channel_id)) or storage_deleted
+            for channel_id, message_ids in (await unreferenced_audio_variant_messages(db, [file])).items():
+                await delete_from_storage_channel(message_ids, channel_id)
+        except Exception:
+            storage_cleanup_failed = True
+            logger.warning("Storage cleanup failed for file %s; deleting cabinet record anyway", file.id, exc_info=True)
     
     # Delete from database
-    await db.delete(file)
-    await db.commit()
+    try:
+        await db.execute(update(Folder).where(Folder.cover_file_id == file.id).values(cover_file_id=None))
+        await db.execute(update(Playlist).where(Playlist.cover_file_id == file.id).values(cover_file_id=None))
+        await db.execute(update(Pack).where(Pack.cover_file_id == file.id).values(cover_file_id=None))
+        await db.delete(file)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        logger.exception("Database deletion failed for file %s", file.id)
+        raise HTTPException(status_code=500, detail="حذف فایل از کمد انجام نشد. کد خطا در گزارش سرور ثبت شد.")
     
-    return {"message": "File deleted successfully", "storage_deleted": storage_deleted}
+    return {"message": "File deleted successfully", "deleted_ids": [file_id], "storage_deleted": storage_deleted, "storage_cleanup_failed": storage_cleanup_failed}
 
 
 @router.post("/batch-delete")
@@ -1885,13 +1902,22 @@ async def batch_delete_files(
                 except Exception:
                     logger.warning("Could not delete one audio variant batch", exc_info=True)
     
-    # Delete from DB
-    for file in files:
-        await db.delete(file)
-        
-    await db.commit()
+    # Cover references can exist on old records created before FK cascade rules
+    # were installed. Clear them explicitly, then delete in one transaction.
+    ids = [file.id for file in files]
+    try:
+        await db.execute(update(Folder).where(Folder.cover_file_id.in_(ids)).values(cover_file_id=None))
+        await db.execute(update(Playlist).where(Playlist.cover_file_id.in_(ids)).values(cover_file_id=None))
+        await db.execute(update(Pack).where(Pack.cover_file_id.in_(ids)).values(cover_file_id=None))
+        for file in files:
+            await db.delete(file)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        logger.exception("Batch database deletion failed for files %s", ids)
+        raise HTTPException(status_code=500, detail="حذف بعضی فایل‌ها از کمد انجام نشد. کد خطا در گزارش سرور ثبت شد.")
     
-    return {"message": f"Deleted {len(files)} files"}
+    return {"message": f"Deleted {len(files)} files", "deleted_ids": ids, "missing_ids": [item for item in file_ids if item not in set(ids)]}
 
 
 @router.post("/send-to-telegram")
