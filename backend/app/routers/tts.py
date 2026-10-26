@@ -22,6 +22,7 @@ router = APIRouter(prefix="/tts", tags=["Text to speech"])
 VOICE_PREVIEW_VERSION = "v3"
 settings = get_settings()
 AI_MODEL_COSTS_KEY = "ai_model_quota_costs"
+AI_MODEL_CATALOG_KEY = "ai_model_catalog"
 
 
 def _default_model_costs() -> dict[str, int]:
@@ -39,6 +40,34 @@ async def load_model_costs(db: AsyncSession) -> dict[str, int]:
         except (TypeError, ValueError, json.JSONDecodeError):
             pass
     return costs
+
+
+def _clean_model_ids(values: list[str] | object) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    return list(dict.fromkeys(str(value).strip()[:120] for value in values if str(value).strip()))[:12]
+
+
+async def load_model_catalog(db: AsyncSession) -> dict[str, list[str]]:
+    catalog = {"tts_models": [], "stt_models": [], "text_models": []}
+    row = await db.get(AppSetting, AI_MODEL_CATALOG_KEY)
+    if row:
+        try:
+            saved = json.loads(row.value)
+            if isinstance(saved, dict):
+                catalog = {key: _clean_model_ids(saved.get(key, [])) for key in catalog}
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+    return catalog
+
+
+def _with_catalog(preferences: dict, catalog: dict[str, list[str]]) -> dict:
+    return normalize_tts_settings({
+        **preferences,
+        "custom_tts_models": catalog["tts_models"],
+        "custom_stt_models": catalog["stt_models"],
+        "custom_text_models": catalog["text_models"],
+    })
 
 
 def quota_payload(usage: TTSUsage | None) -> dict:
@@ -70,6 +99,13 @@ class TTSSettingsUpdate(BaseModel):
     custom_stt_models: list[str] = Field(default_factory=list, max_length=12)
     custom_text_models: list[str] = Field(default_factory=list, max_length=12)
     model_costs: dict[str, int] | None = None
+
+
+class AIModelCatalogUpdate(BaseModel):
+    tts_models: list[str] = Field(default_factory=list, max_length=12)
+    stt_models: list[str] = Field(default_factory=list, max_length=12)
+    text_models: list[str] = Field(default_factory=list, max_length=12)
+    costs: dict[str, int] = Field(default_factory=dict)
 
 
 class TTSCreate(BaseModel):
@@ -129,7 +165,8 @@ async def test_personal_keys(current_user: User = Depends(get_current_user)):
 @router.get("/settings")
 async def get_tts_settings(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     personal_keys = decrypt_user_keys(current_user.gemini_api_keys_encrypted)
-    preferences = load_tts_settings(current_user)
+    catalog = await load_model_catalog(db)
+    preferences = _with_catalog(load_tts_settings(current_user), catalog)
     costs = await load_model_costs(db)
     usage = await db.get(TTSUsage, current_user.id)
     return {
@@ -146,6 +183,59 @@ async def get_tts_settings(current_user: User = Depends(get_current_user), db: A
     }
 
 
+@router.get("/model-catalog")
+async def get_model_catalog(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    catalog = await load_model_catalog(db)
+    costs = await load_model_costs(db)
+    return {
+        **catalog,
+        "models": model_options(TTS_MODEL_OPTIONS, catalog["tts_models"], costs),
+        "stt_models_available": model_options(STT_MODEL_OPTIONS, catalog["stt_models"], costs),
+        "text_models_available": model_options(TEXT_MODEL_OPTIONS, catalog["text_models"], costs),
+        "costs": costs,
+        "can_edit": current_user.telegram_id in settings.admin_users,
+    }
+
+
+@router.put("/model-catalog")
+async def update_model_catalog(payload: AIModelCatalogUpdate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    if current_user.telegram_id not in settings.admin_users:
+        raise HTTPException(status_code=403, detail="فقط مدیر می‌تواند مدل‌ها و ضرایب سهمیه را تغییر دهد.")
+    catalog = {
+        "tts_models": _clean_model_ids(payload.tts_models),
+        "stt_models": _clean_model_ids(payload.stt_models),
+        "text_models": _clean_model_ids(payload.text_models),
+    }
+    known_ids = {
+        item["value"] for item in [
+            *model_options(TTS_MODEL_OPTIONS, catalog["tts_models"], {}),
+            *model_options(STT_MODEL_OPTIONS, catalog["stt_models"], {}),
+            *model_options(TEXT_MODEL_OPTIONS, catalog["text_models"], {}),
+        ]
+    }
+    normalized_costs = {
+        str(key)[:120]: max(1, min(100, int(value)))
+        for key, value in payload.costs.items() if str(key) in known_ids
+    }
+    for key, value in ((AI_MODEL_CATALOG_KEY, catalog), (AI_MODEL_COSTS_KEY, normalized_costs)):
+        row = await db.get(AppSetting, key)
+        encoded = json.dumps(value, ensure_ascii=False)
+        if row is None:
+            db.add(AppSetting(key=key, value=encoded))
+        else:
+            row.value = encoded
+    await db.commit()
+    costs = await load_model_costs(db)
+    return {
+        **catalog,
+        "models": model_options(TTS_MODEL_OPTIONS, catalog["tts_models"], costs),
+        "stt_models_available": model_options(STT_MODEL_OPTIONS, catalog["stt_models"], costs),
+        "text_models_available": model_options(TEXT_MODEL_OPTIONS, catalog["text_models"], costs),
+        "costs": costs,
+        "can_edit": True,
+    }
+
+
 @router.put("/settings")
 async def update_tts_settings(
     payload: TTSSettingsUpdate,
@@ -157,17 +247,12 @@ async def update_tts_settings(
         if folder is None:
             raise HTTPException(status_code=404, detail="کشوی پیش‌فرض پیدا نشد.")
     payload_data = payload.model_dump(exclude_none=True)
-    submitted_costs = payload_data.pop("model_costs", None)
-    if submitted_costs is not None:
-        if current_user.telegram_id not in settings.admin_users:
-            raise HTTPException(status_code=403, detail="فقط مدیر می‌تواند ضریب مصرف مدل‌ها را تغییر دهد.")
-        normalized_costs = {str(key)[:120]: max(1, min(100, int(value))) for key, value in submitted_costs.items()}
-        row = await db.get(AppSetting, AI_MODEL_COSTS_KEY)
-        if row is None:
-            db.add(AppSetting(key=AI_MODEL_COSTS_KEY, value=json.dumps(normalized_costs)))
-        else:
-            row.value = json.dumps(normalized_costs)
-    preferences = normalize_tts_settings({**load_tts_settings(current_user), **payload_data})
+    payload_data.pop("model_costs", None)
+    payload_data.pop("custom_tts_models", None)
+    payload_data.pop("custom_stt_models", None)
+    payload_data.pop("custom_text_models", None)
+    catalog = await load_model_catalog(db)
+    preferences = _with_catalog({**load_tts_settings(current_user), **payload_data}, catalog)
     current_user.tts_settings_json = json.dumps(preferences, ensure_ascii=False)
     await db.commit()
     personal_keys = decrypt_user_keys(current_user.gemini_api_keys_encrypted)
@@ -189,12 +274,13 @@ async def create_tts_job(
         folder = (await db.execute(select(Folder).where(Folder.id == payload.folder_id, Folder.user_id == current_user.id))).scalar_one_or_none()
         if folder is None:
             raise HTTPException(status_code=404, detail="کشوی مقصد پیدا نشد.")
-    preferences = load_tts_settings(current_user)
+    catalog = await load_model_catalog(db)
+    preferences = _with_catalog(load_tts_settings(current_user), catalog)
     for key in ("voice", "style", "speed", "auto_expression", "gender", "pitch", "use_case"):
         value = getattr(payload, key)
         if value is not None:
             preferences[key] = value
-    preferences = normalize_tts_settings(preferences)
+    preferences = _with_catalog(preferences, catalog)
     preferences["model"] = route_ai_model(preferences, "tts", len(payload.text.strip()))
     costs = await load_model_costs(db)
     quota_cost = model_quota_cost(costs, preferences["model"])
@@ -230,7 +316,8 @@ async def preview_tts_voice(
     personal_keys = decrypt_user_keys(current_user.gemini_api_keys_encrypted)
     if not tts_queue.available and not personal_keys:
         raise HTTPException(status_code=503, detail="کلید Gemini TTS هنوز روی سرور تنظیم نشده است.")
-    preferences = load_tts_settings(current_user)
+    catalog = await load_model_catalog(db)
+    preferences = _with_catalog(load_tts_settings(current_user), catalog)
     preferences["model"] = route_ai_model(preferences, "tts", 100)
     preferences.update(voice=voice, style="طبیعی، واضح و دوستانه", auto_expression=False, use_case="general", speed=1)
     preview_model_key = f'{preferences["model"]}::{VOICE_PREVIEW_VERSION}'

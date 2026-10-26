@@ -71,6 +71,7 @@ export interface TTSModelOption { value:string; label:string; description:string
 export interface AIModelOption { value:string; label:string; description:string; profile?:'quality'|'economy'|'custom'; cost:number; }
 export interface SpeechQuota { limit:number; used:number; remaining:number|null; }
 export interface TTSSettings { voice: string; style: string; speed: number; model: string; stt_model:string; stt_mode:'verbatim'|'smart'; text_model:string; ai_routing_mode:'auto'|'economy'|'quality'|'manual'; custom_tts_models:string[]; custom_stt_models:string[]; custom_text_models:string[]; auto_expression: boolean; gender: 'all'|'female'|'male'; pitch: 'all'|'medium'|'low'|'high'; use_case: 'general'|'audiobook'|'podcast'|'story'|'education'|'news'|'advertising'|'accessibility'; folder_id: number|null; available: boolean; personal_key_count?: number; voices: TTSVoice[]; models:TTSModelOption[]; stt_models:AIModelOption[]; text_models:AIModelOption[]; model_costs:Record<string,number>; can_edit_model_costs:boolean; quota:{tts:SpeechQuota;stt:SpeechQuota}; }
+export interface AIModelCatalog { tts_models:string[]; stt_models:string[]; text_models:string[]; models:TTSModelOption[]; stt_models_available:AIModelOption[]; text_models_available:AIModelOption[]; costs:Record<string,number>; can_edit:boolean; }
 export interface GeminiKeySummary { count:number; masked:string[]; }
 export interface GeminiKeyHealth { masked:string; status:'healthy'|'limited'|'denied'|'unreachable'|'error'; message:string; }
 export interface FileMetadataSuggestion { title:string; description:string; tags:string[]; }
@@ -1525,8 +1526,20 @@ export const useTTSSettings = () => useQuery<TTSSettings>({
 export const useUpdateTTSSettings = () => {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (payload: Pick<TTSSettings, 'voice'|'style'|'speed'|'model'|'stt_model'|'stt_mode'|'text_model'|'ai_routing_mode'|'custom_tts_models'|'custom_stt_models'|'custom_text_models'|'auto_expression'|'gender'|'pitch'|'use_case'|'folder_id'> & {model_costs?:Record<string,number>}) => (await api.put<TTSSettings>('/tts/settings', payload)).data,
+        mutationFn: async (payload: Pick<TTSSettings, 'voice'|'style'|'speed'|'model'|'stt_model'|'stt_mode'|'text_model'|'ai_routing_mode'|'auto_expression'|'gender'|'pitch'|'use_case'|'folder_id'>) => (await api.put<TTSSettings>('/tts/settings', payload)).data,
         onSuccess: data => queryClient.setQueryData(['tts-settings'], data),
+    });
+};
+export const useAIModelCatalog = (enabled=true) => useQuery<AIModelCatalog>({
+    queryKey:['ai-model-catalog'],
+    queryFn:async()=>(await api.get<AIModelCatalog>('/tts/model-catalog')).data,
+    enabled,
+});
+export const useUpdateAIModelCatalog = () => {
+    const queryClient=useQueryClient();
+    return useMutation({
+        mutationFn:async(payload:Pick<AIModelCatalog,'tts_models'|'stt_models'|'text_models'|'costs'>)=>(await api.put<AIModelCatalog>('/tts/model-catalog',payload)).data,
+        onSuccess:data=>{queryClient.setQueryData(['ai-model-catalog'],data);queryClient.invalidateQueries({queryKey:['tts-settings']});},
     });
 };
 export const useGeminiKeys = () => useQuery<GeminiKeySummary>({queryKey:['gemini-personal-keys'],queryFn:async()=>(await api.get('/tts/personal-keys')).data});

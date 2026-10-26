@@ -18,7 +18,8 @@ os.environ.setdefault("JWT_SECRET", "test-secret")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.database import Base, async_session, engine
-from app.models import TTSUsage, User
+from app.models import AppSetting, TTSUsage, User
+from app.routers.tts import AI_MODEL_CATALOG_KEY, _clean_model_ids, load_model_catalog
 from app.tts import DIRECTOR_NOTES_SYSTEM_INSTRUCTION, GeminiRequestError, GeminiTTSProvider, TTSJob, TTSQueue, build_interaction_content, consume_tts_quota, extract_interaction_audio, merge_wav, normalize_director_notes, normalize_tts_settings, route_ai_model, split_long_text
 
 
@@ -255,6 +256,27 @@ class TTSQuotaTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(usage.total_jobs, 1)
             with self.assertRaisesRegex(ValueError, "سهمیه روزانه"):
                 await consume_tts_quota(db, self.user_id, 10, cost=2)
+
+
+class AIModelCatalogTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.drop_all)
+            await connection.run_sync(Base.metadata.create_all)
+
+    def test_model_ids_are_trimmed_deduplicated_and_limited(self):
+        values = ["  custom/model  ", "custom/model", *[f"model-{index}" for index in range(20)]]
+        cleaned = _clean_model_ids(values)
+        self.assertEqual(cleaned[0], "custom/model")
+        self.assertEqual(len(cleaned), 12)
+
+    async def test_catalog_is_loaded_from_global_app_setting(self):
+        async with async_session() as db:
+            db.add(AppSetting(key=AI_MODEL_CATALOG_KEY, value='{"tts_models":["voice/custom"],"stt_models":["speech/custom"],"text_models":[]}'))
+            await db.commit()
+            catalog = await load_model_catalog(db)
+        self.assertEqual(catalog["tts_models"], ["voice/custom"])
+        self.assertEqual(catalog["stt_models"], ["speech/custom"])
 
 
 if __name__ == "__main__":
