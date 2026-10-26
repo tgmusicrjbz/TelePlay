@@ -57,7 +57,7 @@ class TelegramGroupQuotaTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(ValueError, "غیرفعال"):
                 await consume_group_quota(db, chat_id=-1002, telegram_user_id=10, operation="stt")
 
-    async def test_global_admin_bypasses_disabled_tools_and_limits(self):
+    async def test_global_admin_bypasses_limits_but_usage_is_counted(self):
         async with async_session() as db:
             group = await get_or_create_group_settings(db, -1003)
             group.approved = True
@@ -69,8 +69,8 @@ class TelegramGroupQuotaTests(unittest.IsolatedAsyncioTestCase):
                 for _ in range(3):
                     await consume_group_quota(db, chat_id=-1003, telegram_user_id=999, operation="link", amount=10)
             total, member = await get_group_usage(db, -1003, 999)
-            self.assertIsNone(total)
-            self.assertIsNone(member)
+            self.assertEqual(total.link_count, 30)
+            self.assertEqual(member.link_count, 30)
 
     async def test_zero_limit_means_unlimited(self):
         async with async_session() as db:
