@@ -103,8 +103,8 @@ interface AppState {
     renameFolder: Folder | null;
     setRenameFolder: (folder: Folder | null) => void;
 
-    descriptionItem: { type: 'file'; item: TelegramFile } | { type: 'folder'; item: Folder } | null;
-    setDescriptionItem: (item: { type: 'file'; item: TelegramFile } | { type: 'folder'; item: Folder } | null) => void;
+    descriptionItem: { type: 'file'; item: TelegramFile; mode?: 'edit' | 'preview' } | { type: 'folder'; item: Folder; mode?: 'edit' | 'preview' } | null;
+    setDescriptionItem: (item: { type: 'file'; item: TelegramFile; mode?: 'edit' | 'preview' } | { type: 'folder'; item: Folder; mode?: 'edit' | 'preview' } | null) => void;
 
     moveItems: { files: TelegramFile[], folders: Folder[] } | null;
     setMoveItems: (items: { files: TelegramFile[], folders: Folder[] } | null) => void;

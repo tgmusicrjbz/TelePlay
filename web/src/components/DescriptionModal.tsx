@@ -9,11 +9,12 @@ interface DescriptionModalProps {
     isOpen: boolean;
     itemType: 'file' | 'folder';
     currentDescription: string;
+    initialPreview?: boolean;
     onClose: () => void;
     onSave: (description: string) => Promise<void>;
 }
 
-export default function DescriptionModal({ isOpen, itemType, currentDescription, onClose, onSave }: DescriptionModalProps) {
+export default function DescriptionModal({ isOpen, itemType, currentDescription, initialPreview=false, onClose, onSave }: DescriptionModalProps) {
     const [description, setDescription] = useState(currentDescription);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
@@ -25,8 +26,9 @@ export default function DescriptionModal({ isOpen, itemType, currentDescription,
         if (isOpen) {
             setDescription(currentDescription);
             setError('');
+            setPreview(initialPreview);
         }
-    }, [isOpen, currentDescription]);
+    }, [isOpen, currentDescription, initialPreview]);
 
     if (!isOpen) return null;
     const insertLink=(title:string,url:string)=>{const input=textareaRef.current;if(!input)return;const start=input.selectionStart,end=input.selectionEnd,selected=description.slice(start,end)||title;const value=`[${selected}](${url})`;setDescription(`${description.slice(0,start)}${value}${description.slice(end)}`);requestAnimationFrame(()=>{input.focus();input.setSelectionRange(start+value.length,start+value.length)})};
@@ -61,11 +63,11 @@ export default function DescriptionModal({ isOpen, itemType, currentDescription,
                 <div className="flex items-center justify-between mb-4">
                     <h2 className="text-lg font-semibold flex items-center gap-2">
                         <AlignLeft className="w-5 h-5 text-primary-400" />
-                        {currentDescription ? 'ویرایش' : 'افزودن'} توضیحات {itemType === 'file' ? 'فایل' : 'کشو'}
+                        {preview ? 'پیش‌نمایش' : currentDescription ? 'ویرایش' : 'افزودن'} توضیحات {itemType === 'file' ? 'فایل' : 'کشو'}
                     </h2>
                     <button type="button" onClick={onClose} className="p-1 hover:bg-dark-700 rounded"><X className="w-5 h-5" /></button>
                 </div>
-                <div className="mb-2 flex items-center gap-1 rounded-xl border border-white/[.06] bg-white/[.025] p-1"><button type="button" className="btn-icon h-9 w-9" title="پیوند وب" onClick={()=>insertLink('عنوان لینک','https://')}><Link className="h-4 w-4"/></button><button type="button" className="btn-icon h-9 w-9" title="تصویر از نشانی وب" onClick={()=>{const input=textareaRef.current;if(!input)return;const start=input.selectionStart,end=input.selectionEnd,alt=description.slice(start,end)||'تصویر',value=`![${alt}](https://)`;setDescription(`${description.slice(0,start)}${value}${description.slice(end)}`)}}><ImagePlus className="h-4 w-4"/></button><button type="button" className="btn-icon h-9 w-9" title="پیوند به فایل کمد" onClick={()=>setShowFilePicker(true)}><Link2 className="h-4 w-4"/></button><span className="mr-1 min-w-0 flex-1 text-xs text-dark-500">پیوند یا تصویر را در محل نشانگر بگذار</span><button type="button" onClick={()=>setPreview(value=>!value)} className={`flex h-9 items-center gap-1 rounded-lg px-2 text-xs ${preview?'bg-primary-500/15 text-primary-100':'text-dark-300'}`}>{preview?<Pencil className="h-3.5 w-3.5"/>:<Eye className="h-3.5 w-3.5"/>}{preview?'ویرایش':'پیش‌نمایش'}</button></div>{preview?<DescriptionPreview content={description}/>:<textarea
+                <div className="mb-2 flex items-center gap-1 rounded-xl border border-white/[.06] bg-white/[.025] p-1">{!preview&&<><button type="button" className="btn-icon h-9 w-9" title="پیوند وب" onClick={()=>insertLink('عنوان لینک','https://')}><Link className="h-4 w-4"/></button><button type="button" className="btn-icon h-9 w-9" title="تصویر از نشانی وب" onClick={()=>{const input=textareaRef.current;if(!input)return;const start=input.selectionStart,end=input.selectionEnd,alt=description.slice(start,end)||'تصویر',value=`![${alt}](https://)`;setDescription(`${description.slice(0,start)}${value}${description.slice(end)}`)}}><ImagePlus className="h-4 w-4"/></button><button type="button" className="btn-icon h-9 w-9" title="پیوند به فایل کمد" onClick={()=>setShowFilePicker(true)}><Link2 className="h-4 w-4"/></button></>}<span className="mr-1 min-w-0 flex-1 text-xs text-dark-500">{preview?'نمایش نهایی متن، پیوندها و رسانه‌ها':'پیوند یا تصویر را در محل نشانگر بگذار'}</span><button type="button" onClick={()=>setPreview(value=>!value)} className={`flex h-9 items-center gap-1 rounded-lg px-2 text-xs ${preview?'bg-primary-500/15 text-primary-100':'text-dark-300'}`}>{preview?<Pencil className="h-3.5 w-3.5"/>:<Eye className="h-3.5 w-3.5"/>}{preview?'ویرایش':'پیش‌نمایش'}</button></div>{preview?<DescriptionPreview content={description}/>:<textarea
                     ref={textareaRef}
                     value={description}
                     onChange={(event) => setDescription(event.target.value)}
@@ -75,7 +77,7 @@ export default function DescriptionModal({ isOpen, itemType, currentDescription,
                     placeholder="یک توضیح کوتاه بنویس…"
                     className="w-full resize-y px-4 py-3 bg-dark-700 border border-dark-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500/50"
                 />}
-                <div className="mt-2 rounded-xl border border-white/[.06] bg-white/[.025] p-1.5">
+                {!preview&&<div className="mt-2 rounded-xl border border-white/[.06] bg-white/[.025] p-1.5">
                     <div className="mb-1 flex items-center gap-1.5 px-1 text-[10px] text-dark-500"><Sparkles className="h-3.5 w-3.5"/>تمیزکاری توضیحات</div>
                     <div className="grid grid-cols-4 gap-1">
                         <button type="button" onClick={()=>cleanDescription('links')} className="flex min-h-9 items-center justify-center gap-1 rounded-lg text-[10px] text-dark-300 hover:bg-white/[.05]"><Link className="h-3.5 w-3.5"/>لینک‌ها</button>
@@ -83,20 +85,20 @@ export default function DescriptionModal({ isOpen, itemType, currentDescription,
                         <button type="button" onClick={()=>cleanDescription('hashtags')} className="flex min-h-9 items-center justify-center gap-1 rounded-lg text-[10px] text-dark-300 hover:bg-white/[.05]"><Hash className="h-3.5 w-3.5"/>هشتگ‌ها</button>
                         <button type="button" onClick={()=>cleanDescription('all')} className="min-h-9 rounded-lg bg-primary-500/10 px-1 text-[10px] text-primary-200 hover:bg-primary-500/15">پاک‌سازی همه</button>
                     </div>
-                </div>
-                <div className="flex justify-between mt-2 text-xs text-dark-400">
+                </div>}
+                {!preview&&<div className="flex justify-between mt-2 text-xs text-dark-400">
                     <span>برای حذف توضیحات، این بخش را خالی بگذار.</span>
                     <span>{description.length.toLocaleString('fa-IR')}/۲۰٬۰۰۰</span>
-                </div>
+                </div>}
                 {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
                 <div className="flex justify-end gap-3 mt-5">
                     <button type="button" onClick={onClose} className="px-4 py-2 text-dark-400 hover:text-white">لغو</button>
-                    {currentDescription && (
+                    {!preview&&currentDescription && (
                         <button type="button" disabled={saving} onClick={() => void persist('')} className="px-4 py-2 text-red-400 hover:bg-red-500/10 rounded-lg">پاک‌کردن و ذخیره</button>
                     )}
-                    <button type="submit" disabled={saving} className="px-4 py-2 bg-primary-600 hover:bg-primary-700 rounded-lg font-medium disabled:opacity-50">
+                    {!preview&&<button type="submit" disabled={saving} className="px-4 py-2 bg-primary-600 hover:bg-primary-700 rounded-lg font-medium disabled:opacity-50">
                         {saving ? 'در حال ذخیره…' : 'ذخیره'}
-                    </button>
+                    </button>}
                 </div>
             </form>
             {showFilePicker&&<InternalFileLinkPicker onClose={()=>setShowFilePicker(false)} onSelect={file=>{const input=textareaRef.current;if(file.file_type==='image'&&input){const start=input.selectionStart,end=input.selectionEnd,alt=description.slice(start,end)||file.file_name,value=`![${alt}](/api/stream/${file.id})`;setDescription(`${description.slice(0,start)}${value}${description.slice(end)}`)}else insertLink(file.file_name,`komod://file/${file.id}`);setShowFilePicker(false)}}/>}

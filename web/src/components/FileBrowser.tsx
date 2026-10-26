@@ -1768,6 +1768,7 @@ export default function FileBrowser() {
                 isOpen={!!descriptionItem}
                 itemType={descriptionItem?.type || 'file'}
                 currentDescription={descriptionItem?.item.description || ''}
+                initialPreview={descriptionItem?.mode === 'preview'}
                 onClose={() => setDescriptionItem(null)}
                 onSave={handleSaveDescription}
             />
