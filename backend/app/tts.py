@@ -45,6 +45,10 @@ DEFAULT_TTS_SETTINGS = {
     "stt_model": settings.gemini_stt_model,
     "stt_mode": "verbatim",
     "text_model": "gemini-3.8-flash",
+    "ai_routing_mode": "auto",
+    "custom_tts_models": [],
+    "custom_stt_models": [],
+    "custom_text_models": [],
     "auto_expression": True,
     "folder_id": None,
     "bot_output_mode": "save",
@@ -65,14 +69,46 @@ TTS_MODEL_OPTIONS = [
 ]
 SUPPORTED_TTS_MODELS = {item["value"] for item in TTS_MODEL_OPTIONS}
 STT_MODEL_OPTIONS = [
-    {"value": "gemini-3.8-flash", "label": "انعطاف‌پذیر", "description": "رونویسی همراه با دستور دلخواه و قالب‌بندی Markdown"},
+    {"value": "gemini-3.8-flash-lite", "label": "اقتصادی", "description": "برای فایل‌های کوتاه و واضح با هزینه کمتر", "profile": "economy"},
+    {"value": "gemini-3.8-flash", "label": "انعطاف‌پذیر", "description": "رونویسی همراه با دستور دلخواه و قالب‌بندی Markdown", "profile": "quality"},
     {"value": "gemini-3.5-transcribe", "label": "تخصصی رونویسی", "description": "مدل اختصاصی تشخیص گفتار برای دقت بیشتر در فایل صوتی"},
 ]
 TEXT_MODEL_OPTIONS = [
-    {"value": "gemini-3.8-flash", "label": "Gemini 3.8 Flash", "description": "برای خلاصه‌سازی و ویرایش چندمرحله‌ای متن"},
+    {"value": "gemini-3.8-flash-lite", "label": "مدل اقتصادی", "description": "برای مرتب‌سازی، پاک‌سازی و ویرایش‌های کوتاه", "profile": "economy"},
+    {"value": "gemini-3.8-flash", "label": "مدل کامل", "description": "برای خلاصه‌سازی سنگین و ویرایش چندمرحله‌ای متن", "profile": "quality"},
 ]
 SUPPORTED_STT_MODELS = {item["value"] for item in STT_MODEL_OPTIONS}
 SUPPORTED_TEXT_MODELS = {item["value"] for item in TEXT_MODEL_OPTIONS}
+MODEL_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$")
+
+
+def _custom_models(value) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return list(dict.fromkeys(item.strip() for item in value if isinstance(item, str) and MODEL_ID_PATTERN.fullmatch(item.strip())))[:12]
+
+
+def model_options(base: list[dict], custom: list[str]) -> list[dict]:
+    known = {item["value"] for item in base}
+    return [*base, *({"value": item, "label": item, "description": "مدل سفارشی حساب جاری", "profile": "custom"} for item in custom if item not in known)]
+
+
+def route_ai_model(preferences: dict, task: str, workload: int = 0, has_instruction: bool = False) -> str:
+    """Resolve a per-account routing policy to one concrete model id."""
+    mode = preferences.get("ai_routing_mode", "auto")
+    selected = preferences.get({"tts": "model", "stt": "stt_model", "text": "text_model"}[task])
+    economy = {"tts": "gemini-3.8-flash-lite-tts", "stt": "gemini-3.8-flash-lite", "text": "gemini-3.8-flash-lite"}[task]
+    quality = {"tts": "gemini-3.8-flash-tts", "stt": "gemini-3.8-flash", "text": "gemini-3.8-flash"}[task]
+    if mode == "manual":
+        return selected
+    if mode == "economy":
+        return economy
+    if mode == "quality":
+        return quality
+    simple = (task == "tts" and workload <= 2500) or (task == "stt" and workload <= 600) or (task == "text" and workload <= 6000 and not has_instruction)
+    # A custom model remains available in manual mode; automatic routing uses
+    # predictable economy/quality slots so cost behaviour is understandable.
+    return economy if simple else quality
 VOICE_OPTIONS = [
     {"value": "Kore", "label": "🌷 Kore · گرم و متعادل", "description": "صدایی گرم برای روایت، آموزش و متن‌های روزمره", "gender": "female", "pitch": "medium"},
     {"value": "Aoede", "label": "✨ Aoede · روشن و لطیف", "description": "مناسب متن‌های دوستانه، معرفی و محتوای سبک", "gender": "female", "pitch": "high"},
@@ -99,17 +135,20 @@ def normalize_tts_settings(value: dict | None) -> dict:
     voices = {item["value"] for item in VOICE_OPTIONS}
     raw["voice"] = raw["voice"] if raw["voice"] in voices else DEFAULT_TTS_SETTINGS["voice"]
     raw["style"] = str(raw.get("style") or DEFAULT_TTS_SETTINGS["style"]).strip()[:500]
+    for task in ("tts", "stt", "text"):
+        raw[f"custom_{task}_models"] = _custom_models(raw.get(f"custom_{task}_models"))
+    raw["ai_routing_mode"] = raw.get("ai_routing_mode") if raw.get("ai_routing_mode") in {"auto", "economy", "quality", "manual"} else "auto"
     requested_model = str(raw.get("model") or settings.gemini_tts_model).strip()[:120]
     if requested_model == "gemini-2.5-flash-preview-tts":
         requested_model = "gemini-3.8-flash-tts"
     default_model = settings.gemini_tts_model if settings.gemini_tts_model in SUPPORTED_TTS_MODELS else "gemini-3.8-flash-tts"
-    raw["model"] = requested_model if requested_model in SUPPORTED_TTS_MODELS else default_model
+    raw["model"] = requested_model if requested_model in SUPPORTED_TTS_MODELS or requested_model in raw["custom_tts_models"] else default_model
     requested_stt_model = str(raw.get("stt_model") or settings.gemini_stt_model).strip()[:120]
     default_stt_model = settings.gemini_stt_model if settings.gemini_stt_model in SUPPORTED_STT_MODELS else "gemini-3.8-flash"
-    raw["stt_model"] = requested_stt_model if requested_stt_model in SUPPORTED_STT_MODELS else default_stt_model
+    raw["stt_model"] = requested_stt_model if requested_stt_model in SUPPORTED_STT_MODELS or requested_stt_model in raw["custom_stt_models"] else default_stt_model
     raw["stt_mode"] = raw.get("stt_mode") if raw.get("stt_mode") in {"verbatim", "smart"} else "verbatim"
     requested_text_model = str(raw.get("text_model") or "gemini-3.8-flash").strip()[:120]
-    raw["text_model"] = requested_text_model if requested_text_model in SUPPORTED_TEXT_MODELS else "gemini-3.8-flash"
+    raw["text_model"] = requested_text_model if requested_text_model in SUPPORTED_TEXT_MODELS or requested_text_model in raw["custom_text_models"] else "gemini-3.8-flash"
     raw["speed"] = min(2.0, max(0.5, float(raw.get("speed") or 1)))
     raw["auto_expression"] = bool(raw.get("auto_expression", True))
     raw["gender"] = raw.get("gender") if raw.get("gender") in {"all", "female", "male"} else DEFAULT_TTS_SETTINGS["gender"]

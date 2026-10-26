@@ -14,7 +14,7 @@ from ..database import get_db
 from ..models import File, Folder, User
 from ..stt import GeminiSTTProvider, STTJob, consume_stt_quota, stt_queue
 from ..gemini_keys import decrypt_user_keys
-from ..tts import load_tts_settings
+from ..tts import load_tts_settings, route_ai_model
 
 router = APIRouter(prefix="/stt", tags=["Speech to text"])
 _refine_jobs: dict[str, dict] = {}
@@ -42,7 +42,8 @@ async def refine_stt_text(payload: STTRefine, current_user: User = Depends(get_c
         raise HTTPException(status_code=503, detail="برای ویرایش متن، کلید Gemini تنظیم نشده است.")
     try:
         preferences = load_tts_settings(current_user)
-        content = await GeminiSTTProvider(keys, text_model=preferences["text_model"]).refine_text(payload.content.strip(), payload.prompt.strip())
+        text_model = route_ai_model(preferences, "text", len(payload.content), len(payload.prompt.strip()) > 300)
+        content = await GeminiSTTProvider(keys, text_model=text_model).refine_text(payload.content.strip(), payload.prompt.strip())
     except RuntimeError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
     return {"content": content}
@@ -75,7 +76,8 @@ async def create_refine_job(payload: STTRefine, current_user: User = Depends(get
         "message": "درخواست ویرایش ثبت شد.", "progress": 10, "content": None,
     }
     preferences = load_tts_settings(current_user)
-    asyncio.create_task(_run_refine_job(job_id, keys, payload.content.strip(), payload.prompt.strip(), preferences["text_model"]))
+    text_model = route_ai_model(preferences, "text", len(payload.content), len(payload.prompt.strip()) > 300)
+    asyncio.create_task(_run_refine_job(job_id, keys, payload.content.strip(), payload.prompt.strip(), text_model))
     return {"job_id": job_id, "state": "queued", "message": "درخواست ویرایش ثبت شد.", "progress": 10}
 
 
@@ -106,11 +108,13 @@ async def create_stt_job(payload: STTCreate, current_user: User = Depends(get_cu
     if any(len(item) > 4_000 for item in post_prompts):
         raise HTTPException(status_code=422, detail="هر دستور پس از تبدیل باید حداکثر ۴۰۰۰ نویسه باشد.")
     preferences = load_tts_settings(current_user)
+    stt_model = route_ai_model(preferences, "stt", int(source.duration or 0), bool(payload.prompt.strip()))
+    text_model = route_ai_model(preferences, "text", sum(len(item) for item in post_prompts), sum(len(item) for item in post_prompts) > 300)
     job = STTJob(
         user_id=current_user.id, source_file_id=source.id, title=payload.title.strip(),
         folder_id=folder_id, prompt=payload.prompt.strip(), post_prompts=post_prompts,
         output_mode=payload.output_mode, api_keys=personal_keys,
-        stt_model=preferences["stt_model"], text_model=preferences["text_model"],
+        stt_model=stt_model, text_model=text_model,
         stt_mode=preferences["stt_mode"],
     )
     position = await stt_queue.enqueue(job)

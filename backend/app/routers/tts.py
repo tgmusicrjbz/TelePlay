@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import get_current_user
 from ..database import get_db
 from ..models import Folder, TTSVoicePreview, User
-from ..tts import GeminiTTSProvider, STT_MODEL_OPTIONS, TEXT_MODEL_OPTIONS, TTSJob, TTS_MODEL_OPTIONS, VOICE_OPTIONS, consume_tts_quota, load_tts_settings, normalize_tts_settings, tts_queue
+from ..tts import GeminiTTSProvider, STT_MODEL_OPTIONS, TEXT_MODEL_OPTIONS, TTSJob, TTS_MODEL_OPTIONS, VOICE_OPTIONS, consume_tts_quota, load_tts_settings, model_options, normalize_tts_settings, route_ai_model, tts_queue
 from ..gemini_keys import check_gemini_key, decrypt_user_keys, encrypt_user_keys
 
 router = APIRouter(prefix="/tts", tags=["Text to speech"])
@@ -33,6 +33,10 @@ class TTSSettingsUpdate(BaseModel):
     pitch: Literal["all", "low", "medium", "high"] = "all"
     use_case: Literal["general", "audiobook", "podcast", "story", "education", "news", "advertising", "accessibility"] = "general"
     folder_id: int | None = None
+    ai_routing_mode: Literal["auto", "economy", "quality", "manual"] = "auto"
+    custom_tts_models: list[str] = Field(default_factory=list, max_length=12)
+    custom_stt_models: list[str] = Field(default_factory=list, max_length=12)
+    custom_text_models: list[str] = Field(default_factory=list, max_length=12)
 
 
 class TTSCreate(BaseModel):
@@ -92,14 +96,15 @@ async def test_personal_keys(current_user: User = Depends(get_current_user)):
 @router.get("/settings")
 async def get_tts_settings(current_user: User = Depends(get_current_user)):
     personal_keys = decrypt_user_keys(current_user.gemini_api_keys_encrypted)
+    preferences = load_tts_settings(current_user)
     return {
-        **load_tts_settings(current_user),
+        **preferences,
         "available": tts_queue.available or bool(personal_keys),
         "personal_key_count": len(personal_keys),
         "voices": VOICE_OPTIONS,
-        "models": TTS_MODEL_OPTIONS,
-        "stt_models": STT_MODEL_OPTIONS,
-        "text_models": TEXT_MODEL_OPTIONS,
+        "models": model_options(TTS_MODEL_OPTIONS, preferences["custom_tts_models"]),
+        "stt_models": model_options(STT_MODEL_OPTIONS, preferences["custom_stt_models"]),
+        "text_models": model_options(TEXT_MODEL_OPTIONS, preferences["custom_text_models"]),
     }
 
 
@@ -117,7 +122,7 @@ async def update_tts_settings(
     current_user.tts_settings_json = json.dumps(preferences, ensure_ascii=False)
     await db.commit()
     personal_keys = decrypt_user_keys(current_user.gemini_api_keys_encrypted)
-    return {**preferences, "available": tts_queue.available or bool(personal_keys), "personal_key_count": len(personal_keys), "voices": VOICE_OPTIONS, "models": TTS_MODEL_OPTIONS, "stt_models": STT_MODEL_OPTIONS, "text_models": TEXT_MODEL_OPTIONS}
+    return {**preferences, "available": tts_queue.available or bool(personal_keys), "personal_key_count": len(personal_keys), "voices": VOICE_OPTIONS, "models": model_options(TTS_MODEL_OPTIONS, preferences["custom_tts_models"]), "stt_models": model_options(STT_MODEL_OPTIONS, preferences["custom_stt_models"]), "text_models": model_options(TEXT_MODEL_OPTIONS, preferences["custom_text_models"])}
 
 
 @router.post("/jobs", status_code=202)
@@ -139,6 +144,7 @@ async def create_tts_job(
         if value is not None:
             preferences[key] = value
     preferences = normalize_tts_settings(preferences)
+    preferences["model"] = route_ai_model(preferences, "tts", len(payload.text.strip()))
     target_folder_id = payload.folder_id if payload.folder_id is not None else preferences.get("folder_id")
     if target_folder_id is not None:
         folder = (await db.execute(select(Folder).where(Folder.id == target_folder_id, Folder.user_id == current_user.id))).scalar_one_or_none()
@@ -171,6 +177,7 @@ async def preview_tts_voice(
     if not tts_queue.available and not personal_keys:
         raise HTTPException(status_code=503, detail="کلید Gemini TTS هنوز روی سرور تنظیم نشده است.")
     preferences = load_tts_settings(current_user)
+    preferences["model"] = route_ai_model(preferences, "tts", 100)
     preferences.update(voice=voice, style="طبیعی، واضح و دوستانه", auto_expression=False, use_case="general", speed=1)
     preview_model_key = f'{preferences["model"]}::{VOICE_PREVIEW_VERSION}'
     # Remove samples generated with older prompts/models instead of merely

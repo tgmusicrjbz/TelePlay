@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.database import Base, async_session, engine
 from app.models import TTSUsage, User
-from app.tts import DIRECTOR_NOTES_SYSTEM_INSTRUCTION, GeminiRequestError, GeminiTTSProvider, TTSJob, TTSQueue, build_interaction_content, consume_tts_quota, extract_interaction_audio, merge_wav, normalize_director_notes, normalize_tts_settings, split_long_text
+from app.tts import DIRECTOR_NOTES_SYSTEM_INSTRUCTION, GeminiRequestError, GeminiTTSProvider, TTSJob, TTSQueue, build_interaction_content, consume_tts_quota, extract_interaction_audio, merge_wav, normalize_director_notes, normalize_tts_settings, route_ai_model, split_long_text
 
 
 def wav_with_frames(frames: bytes, rate: int = 24000) -> bytes:
@@ -67,6 +67,21 @@ class TTSHelpersTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(preferences["stt_model"], "gemini-3.5-transcribe")
         self.assertEqual(preferences["stt_mode"], "smart")
         self.assertEqual(preferences["text_model"], "gemini-3.8-flash")
+
+    def test_custom_models_are_account_scoped_and_manual_only(self):
+        preferences = normalize_tts_settings({
+            "ai_routing_mode": "manual", "custom_text_models": ["my-project/text-v2"],
+            "text_model": "my-project/text-v2",
+        })
+        self.assertEqual(preferences["text_model"], "my-project/text-v2")
+        self.assertEqual(route_ai_model(preferences, "text", 20), "my-project/text-v2")
+
+    def test_auto_routing_uses_workload_to_control_cost(self):
+        preferences = normalize_tts_settings({"ai_routing_mode": "auto"})
+        self.assertEqual(route_ai_model(preferences, "text", 500), "gemini-3.8-flash-lite")
+        self.assertEqual(route_ai_model(preferences, "text", 20_000), "gemini-3.8-flash")
+        self.assertEqual(route_ai_model(preferences, "stt", 120), "gemini-3.8-flash-lite")
+        self.assertEqual(route_ai_model(preferences, "stt", 1_200), "gemini-3.8-flash")
 
     def test_legacy_scoped_tags_become_director_notes(self):
         content = build_interaction_content("شروع <whisper>این بخش آرام است.</whisper> پایان", "روان")

@@ -69,6 +69,29 @@ def playable_message_media(message):
     )
 
 
+async def download_playable_media(message, target: Path):
+    """Download all Telegram video shapes, including document and video-note rows.
+
+    Pyrogram occasionally refuses a Message wrapper even though one of its
+    media fields is valid. Passing that media's file_id avoids the wrapper
+    ambiguity and also covers older rows imported as generic documents.
+    """
+    media = playable_message_media(message)
+    if media is None:
+        raise RuntimeError("این پیام در فضای ذخیره‌سازی رسانه قابل دریافت ندارد.")
+    reference = getattr(media, "file_id", None) or message
+    try:
+        downloaded = await telegram.tg_client.download_media(reference, file_name=str(target))
+    except Exception as error:
+        message_text = str(error).casefold()
+        if "does not contain any downloadable media" in message_text:
+            raise RuntimeError("تلگرام رسانه این فایل را برنگرداند؛ فایل اصلی را دوباره ذخیره کن یا کمی بعد دوباره تلاش کن.") from error
+        raise RuntimeError("دریافت فایل اصلی از فضای ذخیره‌سازی انجام نشد.") from error
+    if not downloaded:
+        raise RuntimeError("دریافت فایل اصلی کامل نشد.")
+    return downloaded
+
+
 def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
     """Parse HTTP Range header for video seeking support."""
     if not range_header:
@@ -232,9 +255,7 @@ async def _build_compatible_video(file_id: int, user_id: int) -> None:
             with tempfile.TemporaryDirectory(prefix="komod-compatible-video-") as temporary:
                 source = Path(temporary) / "source"
                 output = Path(temporary) / "compatible.mp4"
-                downloaded = await telegram.tg_client.download_media(message, file_name=str(source))
-                if not downloaded:
-                    raise RuntimeError("دریافت فایل اصلی کامل نشد.")
+                downloaded = await download_playable_media(message, source)
                 status.update(state="converting", progress=40, message="در حال سازگارکردن ویدیو")
                 process = await asyncio.create_subprocess_exec(
                     "ffmpeg", "-y", "-loglevel", "error", "-i", str(downloaded),
@@ -268,7 +289,10 @@ async def _build_compatible_video(file_id: int, user_id: int) -> None:
                 status.update(state="done", progress=100, message="نسخه سازگار آماده شد", stream_url=f"/api/stream/{file.id}/compatible")
     except Exception as error:
         logger.exception("Compatible video build failed for file %s", file_id)
-        status.update(state="error", progress=0, message=str(error) or "آماده‌سازی نسخه سازگار انجام نشد.")
+        detail = str(error).strip()
+        if not detail or any(token in detail.casefold() for token in ("traceback", "downloadable media", "messageempty")):
+            detail = "آماده‌سازی نسخه سازگار انجام نشد؛ دوباره تلاش کن."
+        status.update(state="error", progress=0, message=detail)
     finally:
         _compatible_video_tasks.pop(file_id, None)
 
@@ -350,14 +374,14 @@ async def stream_file(
     file = result.scalar_one_or_none()
     
     if not file:
-        raise HTTPException(status_code=404, detail="File not found")
+        raise HTTPException(status_code=404, detail="فایل پیدا نشد.")
     if file.is_hidden:
         require_vault_access(request, current_user)
     
     # Get message from channel
     message = await get_message_from_channel(file.channel_message_id, file.storage_channel_id)
     if not message:
-        raise HTTPException(status_code=404, detail="Message not found in channel")
+        raise HTTPException(status_code=404, detail="فایل در فضای ذخیره‌سازی پیدا نشد.")
     if file.file_type == "text" or message.photo:
         return await stored_message_response(file, message, request.headers.get("range"), download)
 
@@ -371,7 +395,7 @@ async def stream_file(
         return Response(status_code=416, headers={"Content-Range": f"bytes */{file_size}"})
     req_length = until_bytes - from_bytes + 1
     if not any(getattr(client, "is_connected", False) for client in telegram.clients):
-        raise HTTPException(status_code=503, detail="Telegram storage is temporarily unavailable")
+        raise HTTPException(status_code=503, detail="فضای ذخیره‌سازی تلگرام موقتاً در دسترس نیست.")
     
     async def file_streamer():
         """Generator that streams file chunks from Telegram MTProto."""

@@ -39,9 +39,9 @@
 .markdown-article--custom div:has(> div > pre) { background: var(--md-code-bg) !important; border-color: var(--md-border) !important; }
 .markdown-article--custom pre, .markdown-article--custom pre code { color: var(--md-code) !important; background: var(--md-code-bg) !important; }
 .markdown-font--vazir { font-family: "Vazirmatn", system-ui, sans-serif !important; }
-.markdown-font--yekan { font-family: "IRANYekan", "Yekan Bakh", "B Yekan", "Vazirmatn", sans-serif !important; }
-.markdown-font--iransans { font-family: "IRANSans", "Iran Sans", "Vazirmatn", sans-serif !important; }
-.markdown-font--zar { font-family: "B Zar", "Zar", "Noto Naskh Arabic", serif !important; }
+.markdown-font--yekan { font-family: "IRANYekan", "Yekan Bakh", "B Yekan", "Noto Sans Arabic", "Vazirmatn", sans-serif !important; }
+.markdown-font--iransans { font-family: "IRANSans", "Iran Sans", "IBM Plex Sans Arabic", "Vazirmatn", sans-serif !important; }
+.markdown-font--zar { font-family: "B Zar", "Zar", "Markazi Text", "Noto Naskh Arabic", serif !important; }
 .markdown-font--bnazanin { font-family: "B Nazanin", "BNazanin", "Noto Naskh Arabic", serif !important; }
 .markdown-font--tahoma { font-family: Tahoma, Arial, sans-serif !important; }
 .markdown-font--serif { font-family: "Noto Naskh Arabic", "Traditional Arabic", serif !important; }

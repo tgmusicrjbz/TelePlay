@@ -29,7 +29,7 @@ from .auth import create_access_token
 from .services import escape_like, select_best_thumbnail, telegram_text_with_links, unreferenced_audio_variant_messages, unreferenced_storage_messages
 from .caption_metadata import extract_tags_from_caption, parse_file_caption
 from .downloader import ImportJob, link_importer
-from .tts import TTSJob, VOICE_OPTIONS, consume_tts_quota, load_tts_settings, tts_queue
+from .tts import TTSJob, VOICE_OPTIONS, consume_tts_quota, load_tts_settings, route_ai_model, tts_queue
 from .stt import STTJob, consume_stt_quota, stt_queue
 from .gemini_keys import decrypt_user_keys
 from .link_captions import render_link_caption
@@ -1178,6 +1178,7 @@ async def tts_command(client, message: Message):
     folder_id = await get_active_drawer_id(message.from_user.id)
     title_line = next((line.strip() for line in source_text.splitlines() if line.strip()), "صدای ساخته‌شده")
     preferences = load_tts_settings(user)
+    preferences["model"] = route_ai_model(preferences, "tts", len(source_text))
     async with async_session() as db:
         try:
             await consume_tts_quota(db, user.id, len(source_text))
@@ -1277,11 +1278,13 @@ async def stt_command(client, message: Message):
     folder_id = await get_active_drawer_id(message.from_user.id)
     source_name = Path(source.file_name).stem.strip() or "صدا"
     preferences = load_tts_settings(user)
+    routed_stt_model = route_ai_model(preferences, "stt", int(source.duration or 0))
+    routed_text_model = route_ai_model(preferences, "text", 0)
     job = STTJob(
         user_id=user.id, source_file_id=source.id, title=f"📝 متن {source_name}"[:180],
         folder_id=folder_id, output_mode=output_mode, telegram_id=message.from_user.id,
         api_keys=personal_keys, cleanup_source=cleanup_source,
-        stt_model=preferences["stt_model"], text_model=preferences["text_model"], stt_mode=preferences["stt_mode"],
+        stt_model=routed_stt_model, text_model=routed_text_model, stt_mode=preferences["stt_mode"],
     )
     position = await stt_queue.enqueue(job)
     queue_note = f"\nنوبت {to_persian_digits(str(position))} در صف" if position > 1 else ""
@@ -1320,6 +1323,7 @@ async def group_tts_command(client, message: Message, source_message: Message | 
             return
     title_line = next((line.strip() for line in source_text.splitlines() if line.strip()), "صدای ساخته‌شده")
     preferences=load_tts_settings(user)
+    preferences["model"] = route_ai_model(preferences, "tts", len(source_text))
     async with async_session() as db:
         preferences["voice"]=await get_group_voice(db,message.chat.id,preferences.get("voice","Kore"))
     job = TTSJob(
@@ -1387,12 +1391,14 @@ async def group_stt_command(client, message: Message, source_message: Message | 
             await db.commit()
             await db.refresh(source)
         preferences = load_tts_settings(user)
+        routed_stt_model = route_ai_model(preferences, "stt", int(source.duration or 0))
+        routed_text_model = route_ai_model(preferences, "text", 0)
         position = await stt_queue.enqueue(STTJob(
             user_id=user.id, source_file_id=source.id,
             title=f"📝 متن {Path(source.file_name).stem or 'صدا'}"[:180], folder_id=None,
             output_mode="temporary", telegram_id=message.chat.id, api_keys=personal_keys,
-            cleanup_source=True, stt_model=preferences["stt_model"],
-            text_model=preferences["text_model"], stt_mode=preferences["stt_mode"],
+            cleanup_source=True, stt_model=routed_stt_model,
+            text_model=routed_text_model, stt_mode=preferences["stt_mode"],
         ))
         queue_note = f" نوبت {to_persian_digits(str(position))} در صف." if position > 1 else ""
         await message.reply(await bot_message("stt_queued", queue_note=queue_note))
@@ -1559,11 +1565,13 @@ async def _process_pending_stt_media(client, message: Message, output_mode: str)
     folder_id = await get_active_drawer_id(message.from_user.id)
     source_name = Path(source.file_name).stem.strip() or "صدا"
     preferences = load_tts_settings(user)
+    routed_stt_model = route_ai_model(preferences, "stt", int(source.duration or 0))
+    routed_text_model = route_ai_model(preferences, "text", 0)
     position = await stt_queue.enqueue(STTJob(
         user_id=user.id, source_file_id=source.id, title=f"📝 متن {source_name}"[:180],
         folder_id=folder_id, output_mode=output_mode, telegram_id=message.from_user.id,
         api_keys=personal_keys, cleanup_source=True,
-        stt_model=preferences["stt_model"], text_model=preferences["text_model"], stt_mode=preferences["stt_mode"],
+        stt_model=routed_stt_model, text_model=routed_text_model, stt_mode=preferences["stt_mode"],
     ))
     queue_note = f"\nنوبت {to_persian_digits(str(position))} در صف" if position > 1 else ""
     await message.reply(await bot_message("stt_queued", queue_note=queue_note))
@@ -3498,6 +3506,8 @@ async def handle_callback(client, callback: CallbackQuery):
                 return
             source_name = Path(file.file_name).stem.strip() or "صدا"
             preferences = load_tts_settings(user) if user else {}
+            routed_stt_model = route_ai_model(preferences, "stt", int(file.duration or 0)) if user else settings.gemini_stt_model
+            routed_text_model = route_ai_model(preferences, "text", 0) if user else "gemini-3.8-flash"
             job = STTJob(
                 user_id=file.user_id,
                 source_file_id=file.id,
@@ -3506,8 +3516,8 @@ async def handle_callback(client, callback: CallbackQuery):
                 output_mode="save",
                 telegram_id=callback.from_user.id,
                 api_keys=personal_keys,
-                stt_model=preferences.get("stt_model", settings.gemini_stt_model),
-                text_model=preferences.get("text_model", "gemini-3.8-flash"),
+                stt_model=routed_stt_model,
+                text_model=routed_text_model,
                 stt_mode=preferences.get("stt_mode", "verbatim"),
             )
         position = await stt_queue.enqueue(job)

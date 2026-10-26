@@ -52,6 +52,6 @@ export default function CustomSelect<T extends string | number>({ value, options
         </button>
         {open && createPortal(<div ref={menuRef} dir="rtl" role="listbox" style={menuStyle} className="min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain rounded-2xl border border-white/10 bg-dark-900/95 p-1.5 shadow-2xl backdrop-blur-xl">
             {options.map(option => <button type="button" role="option" aria-selected={option.value === value} key={String(option.value)} onClick={() => { onChange(option.value); setOpen(false); }} className={`flex w-full min-w-0 items-center justify-between gap-2 rounded-xl px-3 py-2.5 text-right text-sm transition ${option.value === value ? 'bg-primary-500/15 text-primary-200' : 'text-dark-300 hover:bg-white/[.05] hover:text-white'}`}><span className="flex min-w-0 flex-1 items-center gap-2">{option.color&&<span className="h-4 w-4 shrink-0 rounded-full border border-white/20" style={{backgroundColor:option.color}}/>}<span className="truncate">{option.label}</span></span>{option.value === value && <Check className="h-4 w-4 shrink-0"/>}</button>)}
-        </div>, document.body)}
+        </div>, document.fullscreenElement || document.body)}
     </div>;
 }

@@ -57,7 +57,7 @@ from ..ai_question import build_question_context, clean_grounded_answer, questio
 from ..ai_search import build_related_file_instruction, build_search_expansion_instruction, parse_search_expansion, parse_search_terms
 from ..gemini_keys import decrypt_user_keys
 from ..stt import GeminiSTTProvider, stt_queue
-from ..tts import load_tts_settings
+from ..tts import load_tts_settings, route_ai_model
 
 router = APIRouter(prefix="/files", tags=["Files"])
 settings = get_settings()
@@ -119,12 +119,13 @@ async def expand_smart_search(
     known_tags = [str(item.get("name") or "").strip() for item in stored_tags if isinstance(item, dict) and item.get("name")]
     preferences = load_tts_settings(current_user)
     normalized_query = re.sub(r"\s+", " ", payload.query).strip()
+    text_model = route_ai_model(preferences, "text", len(normalized_query))
     tag_fingerprint = hashlib.sha256("\0".join(known_tags).encode("utf-8")).hexdigest()[:12]
-    cache_key = (current_user.id, preferences["text_model"], normalized_query.casefold(), tag_fingerprint)
+    cache_key = (current_user.id, text_model, normalized_query.casefold(), tag_fingerprint)
     cached = _smart_search_cache.get(cache_key)
     if cached and cached[0] > datetime.utcnow():
         return cached[1]
-    provider = GeminiSTTProvider(keys, text_model=preferences["text_model"])
+    provider = GeminiSTTProvider(keys, text_model=text_model)
     try:
         raw = await provider.refine_text(normalized_query, build_search_expansion_instruction(known_tags))
         result = parse_search_expansion(raw, normalized_query)
@@ -167,9 +168,10 @@ async def suggest_file_metadata(
     except (TypeError, ValueError, json.JSONDecodeError):
         excluded_tags = []
     preferences = load_tts_settings(current_user)
-    provider = GeminiSTTProvider(keys, text_model=preferences["text_model"])
+    metadata_source = build_metadata_source(file)
+    provider = GeminiSTTProvider(keys, text_model=route_ai_model(preferences, "text", len(metadata_source)))
     try:
-        raw = await provider.refine_text(build_metadata_source(file), metadata_instruction(known_tags, excluded_tags))
+        raw = await provider.refine_text(metadata_source, metadata_instruction(known_tags, excluded_tags))
         return parse_metadata_suggestion(raw, file.file_name, excluded_tags)
     except (RuntimeError, ValueError) as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
@@ -201,14 +203,15 @@ async def find_related_files(
     # A short sample is enough for topic extraction and keeps token usage low.
     source_text = source_text[:3500]
     preferences = load_tts_settings(current_user)
+    text_model = route_ai_model(preferences, "text", len(source_text))
     tag_fingerprint = hashlib.sha256("\0".join(known_tags).encode("utf-8")).hexdigest()[:12]
     source_version = (source.updated_at or source.created_at).isoformat()
-    cache_key = (current_user.id, source.id, source_version, preferences["text_model"], tag_fingerprint)
+    cache_key = (current_user.id, source.id, source_version, text_model, tag_fingerprint)
     cached = _related_terms_cache.get(cache_key)
     if cached and cached[0] > datetime.utcnow():
         terms = cached[1]
     else:
-        provider = GeminiSTTProvider(keys, text_model=preferences["text_model"])
+        provider = GeminiSTTProvider(keys, text_model=text_model)
         try:
             raw = await provider.refine_text(source_text, build_related_file_instruction(known_tags))
             terms = parse_search_terms(raw)
@@ -291,14 +294,15 @@ async def create_file_insights(
     if not keys:
         raise HTTPException(status_code=503, detail="برای خلاصه هوشمند، کلید Gemini تنظیم نشده است.")
     preferences = load_tts_settings(current_user)
+    source_text = build_metadata_source(source)[:16_000]
+    text_model = route_ai_model(preferences, "text", len(source_text), True)
     source_version = (source.updated_at or source.created_at).isoformat()
-    cache_key = (current_user.id, source.id, source_version, preferences["text_model"])
+    cache_key = (current_user.id, source.id, source_version, text_model)
     cached = _ai_insights_cache.get(cache_key)
     if cached and cached[0] > datetime.utcnow():
         return cached[1]
 
-    provider = GeminiSTTProvider(keys, text_model=preferences["text_model"])
-    source_text = build_metadata_source(source)[:16_000]
+    provider = GeminiSTTProvider(keys, text_model=text_model)
     try:
         raw = await provider.refine_text(source_text, insights_instruction())
         result = parse_file_insights(raw)
@@ -354,9 +358,11 @@ async def suggest_file_folders(
     if not keys:
         raise HTTPException(status_code=503, detail="برای پیشنهاد کشو، کلید Gemini تنظیم نشده است.")
     preferences = load_tts_settings(current_user)
+    folder_source = build_metadata_source(source)[:5000]
+    text_model = route_ai_model(preferences, "text", len(folder_source))
     folder_fingerprint = hashlib.sha256("\0".join(f"{key}:{value['path']}" for key, value in allowed.items()).encode("utf-8")).hexdigest()[:16]
     source_version = (source.updated_at or source.created_at).isoformat()
-    cache_key = (current_user.id, source.id, source_version, preferences["text_model"], folder_fingerprint)
+    cache_key = (current_user.id, source.id, source_version, text_model, folder_fingerprint)
     cached = _folder_suggestion_cache.get(cache_key)
     if cached and cached[0] > datetime.utcnow():
         return {"suggestions": cached[1]}
@@ -364,9 +370,9 @@ async def suggest_file_folders(
     folder_lines = [f"{folder_id}: {value['path']}" for folder_id, value in list(allowed.items())[:250]]
     listed_ids = {int(line.split(":", 1)[0]) for line in folder_lines}
     listed = {folder_id: value for folder_id, value in allowed.items() if folder_id in listed_ids}
-    provider = GeminiSTTProvider(keys, text_model=preferences["text_model"])
+    provider = GeminiSTTProvider(keys, text_model=text_model)
     try:
-        raw = await provider.refine_text(build_metadata_source(source)[:5000], folder_suggestion_instruction(folder_lines))
+        raw = await provider.refine_text(folder_source, folder_suggestion_instruction(folder_lines))
         suggestions = parse_folder_suggestions(raw, listed)
     except (RuntimeError, ValueError) as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
@@ -405,9 +411,10 @@ async def ask_file_question(
         tags = []
     history = [turn.model_dump() for turn in payload.history]
     preferences = load_tts_settings(current_user)
+    text_model = route_ai_model(preferences, "text", len(content) + len(payload.question), True)
     source_version = (source.updated_at or source.created_at).isoformat()
     conversation_fingerprint = hashlib.sha256(json.dumps({"q": payload.question, "h": history}, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:20]
-    cache_key = (current_user.id, source.id, source_version, preferences["text_model"], conversation_fingerprint)
+    cache_key = (current_user.id, source.id, source_version, text_model, conversation_fingerprint)
     cached = _file_question_cache.get(cache_key)
     if cached and cached[0] > datetime.utcnow():
         return {"answer": cached[1]}
@@ -419,7 +426,7 @@ async def ask_file_question(
         content=content or source.description or "",
         question=payload.question,
     )
-    provider = GeminiSTTProvider(keys, text_model=preferences["text_model"])
+    provider = GeminiSTTProvider(keys, text_model=text_model)
     try:
         raw = await provider.refine_text(context, question_instruction(payload.question, history))
         answer = clean_grounded_answer(raw)

@@ -61,6 +61,12 @@ type ImportStatus = {
     saved?: number;
     progress?: number;
 };
+const mergeImportStatuses=(current:ImportStatus[],incoming:ImportStatus[])=>{
+    const merged=new Map<string,ImportStatus>();
+    current.forEach(item=>merged.set(item.id,item));
+    incoming.forEach(item=>merged.set(item.id,{...merged.get(item.id),...item}));
+    return Array.from(merged.values());
+};
 type DriveEntry={id:string;name:string;mimeType:string;size?:string;modifiedTime?:string;thumbnailLink?:string};
 type DriveAccount={email:string;mode:'full'|'picker'};
 type DriveConnection={
@@ -185,6 +191,7 @@ export default function FileBrowser() {
     const [driveConnection,setDriveConnection]=useState<DriveConnection|null>(null);
     const [driveConnecting,setDriveConnecting]=useState(false);
     const [driveEntries,setDriveEntries]=useState<DriveEntry[]>([]);
+    const [driveFoldersVisible,setDriveFoldersVisible]=useState(true);
     const [drivePath,setDrivePath]=useState<Array<{id:string;name:string}>>([{id:'root',name:'درایو من'}]);
     const [driveSelected,setDriveSelected]=useState<Set<string>>(new Set());
     const [driveSelectedDetails,setDriveSelectedDetails]=useState<Record<string,DriveEntry>>({});
@@ -248,10 +255,10 @@ export default function FileBrowser() {
                 api.get<Omit<ImportStatus,'source'>[]>('/files/import-link/status'),
                 api.get<Omit<ImportStatus,'source'>[]>('/files/import-drive/status'),
             ]);
-            if(!cancelled)setImportJobs([
+            if(!cancelled)setImportJobs(mergeImportStatuses([], [
                 ...links.data.map(job=>({...job,source:'link' as const})),
                 ...drives.data.map(job=>({...job,source:'drive' as const})),
-            ]);
+            ]));
         }catch{/* وضعیت محلی حفظ می‌شود */}};
         void syncQueue();
         const timer=window.setInterval(syncQueue,4000);
@@ -901,7 +908,7 @@ export default function FileBrowser() {
                 const result = await importLinkMutation.mutateAsync({ url, folder_id: importFolder === 'new' ? currentFolderId : importFolder, new_folder_name: importFolder === 'new' && index===0 ? importFolderName.trim() : undefined, quality: platform === 'instagram' ? 'auto' : importQuality, save_to_library:importDeliveryMode!=='telegram', send_to_telegram:importDeliveryMode!=='library', destination_ids:importDestinationIds });
                 lastMessage=result.message;
                 jobs.push(result.job_id);
-                setImportJobs(previous => [...previous, {id:result.job_id,source:'link',url,state:'queued',message:'در صف پردازش',saved:0}]);
+                setImportJobs(previous => mergeImportStatuses(previous, [{id:result.job_id,source:'link',url,state:'queued',message:'در صف پردازش',saved:0}]));
                 setImportPanelMode('open');
             }
             setShowImportLink(false); setImportUrl(''); setImportFolderName('');
@@ -929,7 +936,7 @@ export default function FileBrowser() {
             const added:ImportStatus[]=[];
             if(driveSelected.size){const chosen=Object.values(driveSelectedDetails),names=Object.fromEntries(chosen.map(item=>[item.id,item.name])),mimeTypes=Object.fromEntries(chosen.map(item=>[item.id,item.mimeType]));const {data}=await api.post<{job_ids:string[]}>('/files/drive/import-selected',{file_ids:Array.from(driveSelected),file_names:names,mime_types:mimeTypes,folder_id:driveFolder,send_to_telegram:driveSendToTelegram,destination_ids:driveDestinationIds});data.job_ids.forEach((id,index)=>added.push({id,source:'drive',url:`drive://${Array.from(driveSelected)[index]}`,folder_id:driveFolder,state:'queued',message:'در صف دریافت از گوگل درایو',saved:0,progress:1}))}
             for(const url of urls){const {data}=await api.post<{job_id:string}>('/files/import-drive',{url,folder_id:driveFolder,send_to_telegram:driveSendToTelegram,destination_ids:driveDestinationIds});added.push({id:data.job_id,source:'drive',url,folder_id:driveFolder,state:'queued',message:'در صف دریافت از گوگل درایو',saved:0,progress:1})}
-            setImportJobs(previous=>[...previous,...added]);
+            setImportJobs(previous=>mergeImportStatuses(previous,added));
             setImportPanelMode('open');
             setShowImportDrive(false);
             setDriveUrl('');
@@ -1795,8 +1802,8 @@ export default function FileBrowser() {
                     </div>
                     {driveSelected.size>0&&<div className="mt-3 rounded-2xl border border-emerald-400/15 bg-emerald-500/[.06] p-3"><strong className="text-sm text-emerald-200">{driveSelected.size.toLocaleString('fa-IR')} فایل انتخاب شده</strong><div className="mt-2 flex flex-wrap gap-1">{Object.values(driveSelectedDetails).slice(0,8).map(item=><span key={item.id} dir="auto" className="max-w-40 truncate rounded-lg bg-white/[.06] px-2 py-1 text-[11px] text-dark-300">{item.name}</span>)}</div></div>}
                     {driveConnection?.mode==='full'&&<div className="mt-4">
-                        <div className="flex flex-wrap items-center gap-1 text-xs text-dark-400">{drivePath.map((item,index)=><button type="button" key={item.id} onClick={()=>void loadDriveFolder(item.id,item.name)} className="rounded-lg px-2 py-1 hover:bg-white/[.05] hover:text-white">{index?'‹ ':''}{item.name}</button>)}</div>
-                        <div className="mt-2 max-h-64 space-y-1 overflow-y-auto rounded-2xl border border-white/[.07] bg-dark-950/35 p-2">{driveLoading?<div className="py-10 text-center text-sm text-dark-500">در حال خواندن درایو…</div>:driveEntries.map(item=>{const folder=item.mimeType==='application/vnd.google-apps.folder',selected=driveSelected.has(item.id);return <button type="button" key={item.id} onClick={()=>folder?void loadDriveFolder(item.id,item.name):setDriveSelected(previous=>{const next=new Set(previous);if(next.has(item.id)){next.delete(item.id);setDriveSelectedDetails(details=>{const copy={...details};delete copy[item.id];return copy})}else{next.add(item.id);setDriveSelectedDetails(details=>({...details,[item.id]:item}))}return next})} className={`flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-right transition ${selected?'bg-primary-500/15 text-primary-100':'hover:bg-white/[.045]'}`}><span className={`flex h-8 w-8 items-center justify-center rounded-lg ${folder?'bg-amber-500/10 text-amber-300':'bg-primary-500/10 text-primary-300'}`}>{folder?<FolderIcon className="h-4 w-4"/>:selected?<CheckSquare className="h-4 w-4"/>:<Square className="h-4 w-4"/>}</span><span dir="auto" className="min-w-0 flex-1 truncate text-sm">{item.name}</span></button>})}{!driveLoading&&!driveEntries.length&&<div className="py-10 text-center text-sm text-dark-500">برای دیدن فایل‌ها، «نمایش پوشه‌ها» را بزن.</div>}</div>
+                        <div className="flex flex-wrap items-center gap-1 text-xs text-dark-400"><div className="min-w-0 flex-1">{drivePath.map((item,index)=><button type="button" key={item.id} onClick={()=>void loadDriveFolder(item.id,item.name)} className="rounded-lg px-2 py-1 hover:bg-white/[.05] hover:text-white">{index?'‹ ':''}{item.name}</button>)}</div><button type="button" onClick={()=>setDriveFoldersVisible(value=>!value)} className={`flex min-h-8 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] ${driveFoldersVisible?'bg-white/[.06] text-dark-300':'bg-primary-500/12 text-primary-200'}`}>{driveFoldersVisible?<EyeOff className="h-3.5 w-3.5"/>:<Eye className="h-3.5 w-3.5"/>}{driveFoldersVisible?'مخفی‌کردن پوشه‌ها':'نمایش پوشه‌ها'}</button></div>
+                        <div className="mt-2 max-h-64 space-y-1 overflow-y-auto rounded-2xl border border-white/[.07] bg-dark-950/35 p-2">{driveLoading?<div className="py-10 text-center text-sm text-dark-500">در حال خواندن درایو…</div>:driveEntries.filter(item=>driveFoldersVisible||item.mimeType!=='application/vnd.google-apps.folder').map(item=>{const folder=item.mimeType==='application/vnd.google-apps.folder',selected=driveSelected.has(item.id);return <button type="button" key={item.id} onClick={()=>folder?void loadDriveFolder(item.id,item.name):setDriveSelected(previous=>{const next=new Set(previous);if(next.has(item.id)){next.delete(item.id);setDriveSelectedDetails(details=>{const copy={...details};delete copy[item.id];return copy})}else{next.add(item.id);setDriveSelectedDetails(details=>({...details,[item.id]:item}))}return next})} className={`flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-right transition ${selected?'bg-primary-500/15 text-primary-100':'hover:bg-white/[.045]'}`}><span className={`flex h-8 w-8 items-center justify-center rounded-lg ${folder?'bg-amber-500/10 text-amber-300':'bg-primary-500/10 text-primary-300'}`}>{folder?<FolderIcon className="h-4 w-4"/>:selected?<CheckSquare className="h-4 w-4"/>:<Square className="h-4 w-4"/>}</span><span dir="auto" className="min-w-0 flex-1 truncate text-sm">{item.name}</span></button>})}{!driveLoading&&!driveEntries.filter(item=>driveFoldersVisible||item.mimeType!=='application/vnd.google-apps.folder').length&&<div className="py-10 text-center text-sm text-dark-500">{driveFoldersVisible?'این پوشه خالی است.':'در این مسیر فایلی بیرون از پوشه‌ها نیست.'}</div>}</div>
                     </div>}
                     <div className="my-4 flex items-center gap-3 text-xs text-dark-500"><span className="h-px flex-1 bg-white/[.07]"/>یا لینک عمومی<span className="h-px flex-1 bg-white/[.07]"/></div>
                     <textarea dir="rtl" rows={3} className="input w-full resize-none text-right" value={driveUrl} onChange={event=>setDriveUrl(event.target.value)} placeholder="چند لینک گوگل درایو را پشت سر هم وارد کن"/>

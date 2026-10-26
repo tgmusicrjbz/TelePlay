@@ -1,5 +1,5 @@
 """Administrator-only Telegram group approval and quota management."""
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -45,10 +45,26 @@ async def _serialize_groups(db: AsyncSession) -> list[dict]:
     owner_by_id = {item.id: item for item in owners}
     today = datetime.utcnow().date()
     usage_rows = (await db.execute(select(TelegramGroupUsage).where(
-        TelegramGroupUsage.telegram_user_id == 0,
-        TelegramGroupUsage.usage_date == today,
+        TelegramGroupUsage.usage_date >= today - timedelta(days=29),
     ))).scalars().all()
-    usage_by_chat = {item.chat_id: item for item in usage_rows}
+    usage_by_chat = {item.chat_id: item for item in usage_rows if item.telegram_user_id == 0 and item.usage_date == today}
+    period_usage: dict[int, dict] = {}
+    for item in usage_rows:
+        bucket = period_usage.setdefault(item.chat_id, {
+            "seven": {f"{operation}_count": 0 for operation in OPERATIONS},
+            "thirty": {f"{operation}_count": 0 for operation in OPERATIONS},
+            "members": set(),
+        })
+        # telegram_user_id=0 is the authoritative group total. Member rows are
+        # kept separately to report active member count without double-counting.
+        if item.telegram_user_id == 0:
+            for operation in OPERATIONS:
+                count = int(getattr(item, f"{operation}_count", 0))
+                bucket["thirty"][f"{operation}_count"] += count
+                if item.usage_date >= today - timedelta(days=6):
+                    bucket["seven"][f"{operation}_count"] += count
+        elif any(int(getattr(item, f"{operation}_count", 0)) for operation in OPERATIONS):
+            bucket["members"].add(item.telegram_user_id)
     result = []
     for group in groups:
         destination = by_chat.get(group.chat_id)
@@ -56,6 +72,11 @@ async def _serialize_groups(db: AsyncSession) -> list[dict]:
             continue
         owner = owner_by_id.get(destination.user_id)
         usage = usage_by_chat.get(group.chat_id)
+        periods = period_usage.get(group.chat_id, {
+            "seven": {f"{operation}_count": 0 for operation in OPERATIONS},
+            "thirty": {f"{operation}_count": 0 for operation in OPERATIONS},
+            "members": set(),
+        })
         result.append({
             "chat_id": group.chat_id, "title": group.title,
             "approved": bool(group.approved), "chat_type": destination.chat_type,
@@ -65,6 +86,10 @@ async def _serialize_groups(db: AsyncSession) -> list[dict]:
             **{f"{operation}_daily_limit": int(getattr(group, f"{operation}_daily_limit")) for operation in OPERATIONS},
             **{f"member_{operation}_daily_limit": int(getattr(group, f"member_{operation}_daily_limit")) for operation in OPERATIONS},
             "usage": {f"{operation}_count": int(getattr(usage, f"{operation}_count", 0)) for operation in OPERATIONS},
+            "usage_periods": {
+                "seven_days": periods["seven"], "thirty_days": periods["thirty"],
+                "active_members": len(periods["members"]),
+            },
             "voice_name": await get_group_voice(db, group.chat_id),
         })
     return result

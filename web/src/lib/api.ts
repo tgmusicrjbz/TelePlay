@@ -65,9 +65,9 @@ export interface VaultStatus { configured: boolean; }
 export interface StorageChannelItem { channel_id:number; title?:string|null; active:boolean; }
 export interface StorageChannel { configured: boolean; channel_id?: number | null; title?: string | null; channels:StorageChannelItem[]; }
 export interface TTSVoice { value: string; label: string; description: string; gender: 'female'|'male'; pitch: 'low'|'medium'|'high'; }
-export interface TTSModelOption { value:string; label:string; description:string; profile:'quality'|'economy'; }
-export interface AIModelOption { value:string; label:string; description:string; }
-export interface TTSSettings { voice: string; style: string; speed: number; model: string; stt_model:string; stt_mode:'verbatim'|'smart'; text_model:string; auto_expression: boolean; gender: 'all'|'female'|'male'; pitch: 'all'|'medium'|'low'|'high'; use_case: 'general'|'audiobook'|'podcast'|'story'|'education'|'news'|'advertising'|'accessibility'; folder_id: number|null; available: boolean; personal_key_count?: number; voices: TTSVoice[]; models:TTSModelOption[]; stt_models:AIModelOption[]; text_models:AIModelOption[]; }
+export interface TTSModelOption { value:string; label:string; description:string; profile:'quality'|'economy'|'custom'; }
+export interface AIModelOption { value:string; label:string; description:string; profile?:'quality'|'economy'|'custom'; }
+export interface TTSSettings { voice: string; style: string; speed: number; model: string; stt_model:string; stt_mode:'verbatim'|'smart'; text_model:string; ai_routing_mode:'auto'|'economy'|'quality'|'manual'; custom_tts_models:string[]; custom_stt_models:string[]; custom_text_models:string[]; auto_expression: boolean; gender: 'all'|'female'|'male'; pitch: 'all'|'medium'|'low'|'high'; use_case: 'general'|'audiobook'|'podcast'|'story'|'education'|'news'|'advertising'|'accessibility'; folder_id: number|null; available: boolean; personal_key_count?: number; voices: TTSVoice[]; models:TTSModelOption[]; stt_models:AIModelOption[]; text_models:AIModelOption[]; }
 export interface GeminiKeySummary { count:number; masked:string[]; }
 export interface GeminiKeyHealth { masked:string; status:'healthy'|'limited'|'denied'|'unreachable'|'error'; message:string; }
 export interface FileMetadataSuggestion { title:string; description:string; tags:string[]; }
@@ -1430,6 +1430,7 @@ export interface AdminTelegramGroup {
     tts_daily_limit:number; stt_daily_limit:number; link_daily_limit:number;
     member_tts_daily_limit:number; member_stt_daily_limit:number; member_link_daily_limit:number; voice_name:string;
     usage:{tts_count:number;stt_count:number;link_count:number};
+    usage_periods:{seven_days:{tts_count:number;stt_count:number;link_count:number};thirty_days:{tts_count:number;stt_count:number;link_count:number};active_members:number};
 }
 export type AdminTelegramGroupUpdate = Partial<Pick<AdminTelegramGroup,'approved'|'tts_enabled'|'stt_enabled'|'link_enabled'|'tts_daily_limit'|'stt_daily_limit'|'link_daily_limit'|'member_tts_daily_limit'|'member_stt_daily_limit'|'member_link_daily_limit'|'voice_name'>>;
 export const useAdminTelegramGroups = (enabled=true) => useQuery({queryKey:['adminTelegramGroups'],enabled,queryFn:async()=>(await api.get<AdminTelegramGroup[]>('/admin/groups')).data});
@@ -1486,7 +1487,7 @@ export const useTTSSettings = () => useQuery<TTSSettings>({
 export const useUpdateTTSSettings = () => {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (payload: Pick<TTSSettings, 'voice'|'style'|'speed'|'model'|'stt_model'|'stt_mode'|'text_model'|'auto_expression'|'gender'|'pitch'|'use_case'|'folder_id'>) => (await api.put<TTSSettings>('/tts/settings', payload)).data,
+        mutationFn: async (payload: Pick<TTSSettings, 'voice'|'style'|'speed'|'model'|'stt_model'|'stt_mode'|'text_model'|'ai_routing_mode'|'custom_tts_models'|'custom_stt_models'|'custom_text_models'|'auto_expression'|'gender'|'pitch'|'use_case'|'folder_id'>) => (await api.put<TTSSettings>('/tts/settings', payload)).data,
         onSuccess: data => queryClient.setQueryData(['tts-settings'], data),
     });
 };
