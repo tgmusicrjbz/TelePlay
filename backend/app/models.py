@@ -318,6 +318,9 @@ class File(Base):
     # File metadata
     file_name: Mapped[str] = mapped_column(String(500), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
+    # When enabled, opening this attachment shows its caption as the primary
+    # document while the original media remains available from that document.
+    prefer_text_view: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # Private normalized source used by library search. It is intentionally
     # absent from FileResponse so note contents never leak in list endpoints.
     search_text: Mapped[Optional[str]] = mapped_column(Text)

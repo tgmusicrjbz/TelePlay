@@ -31,6 +31,7 @@ const MediaPlayer = lazyWithRecovery(() => import('./components/MediaPlayer'),'p
 const ContentPreview = lazyWithRecovery(() => import('./components/ContentPreview'),'preview');
 const AddToPlaylistDialog = lazyWithRecovery(() => import('./components/AddToPlaylistDialog'),'playlist-dialog');
 const FileDetailsSheet = lazyWithRecovery(() => import('./components/FileDetailsSheet'),'details');
+const FileAIToolsModal = lazyWithRecovery(() => import('./components/FileAIToolsModal'),'file-ai-tools');
 const PublicSharePage = lazyWithRecovery(() => import('./components/PublicSharePage'),'public-share');
 
 function LazyFallback(){return <div dir="rtl" className="fixed inset-x-0 bottom-5 z-[400] mx-auto flex w-fit items-center gap-2 rounded-2xl border border-white/10 bg-dark-900/95 px-4 py-3 text-xs text-dark-200 shadow-2xl"><span className="h-4 w-4 animate-spin rounded-full border-2 border-primary-300 border-t-transparent"/>در حال آماده‌سازی…</div>}
@@ -39,6 +40,7 @@ function DeferredOverlays() {
     const previewFile = useAppStore(state => state.previewFile);
     const contentPreviewFile = useAppStore(state => state.contentPreviewFile);
     const detailsFile = useAppStore(state => state.detailsFile);
+    const aiToolsFile = useAppStore(state => state.aiToolsFile);
     const contextMenu = useAppStore(state => state.activeContextMenu);
     const playlistFile = useAppStore(state => state.playlistFile);
     const playlistFiles = useAppStore(state => state.playlistFiles);
@@ -48,6 +50,7 @@ function DeferredOverlays() {
         {contentPreviewFile && <ContentPreview />}
         {(playlistFile || playlistFiles.length > 0) && <AddToPlaylistDialog />}
         {detailsFile && <FileDetailsSheet />}
+        {aiToolsFile && <FileAIToolsModal />}
     </Suspense>;
 }
 

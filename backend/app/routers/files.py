@@ -1087,7 +1087,7 @@ async def upload_file(
                 file_id=duplicate.file_id, file_unique_id=duplicate.file_unique_id,
                 channel_message_id=duplicate.channel_message_id,
                 storage_channel_id=duplicate.storage_channel_id,
-                file_name=filename, description=(description or "").strip()[:1024] or None,
+                file_name=filename, description=(description or "").strip()[:20_000] or None,
                 search_text=duplicate.search_text, content_hash=content_hash, is_shortcut=True,
                 file_size=duplicate.file_size, mime_type=duplicate.mime_type,
                 file_type=duplicate.file_type, duration=duplicate.duration,
@@ -1119,7 +1119,7 @@ async def upload_file(
         target_channel_id = current_user.storage_channel_id or settings.telegram_storage_channel_id
         common = {
             "chat_id": target_channel_id,
-            "caption": (description or "").strip()[:1024] or None,
+            "caption": (description or "").strip()[:20_000] or None,
             "parse_mode": None,
         }
         if embedded_cover_path:
@@ -1148,7 +1148,7 @@ async def upload_file(
             channel_message_id=sent_message.id,
             storage_channel_id=target_channel_id,
             file_name=filename,
-            description=(description or "").strip()[:1024] or None,
+            description=(description or "").strip()[:20_000] or None,
             search_text=search_text,
             content_hash=content_hash,
             file_size=media.file_size or file_size,
@@ -1321,7 +1321,7 @@ async def set_text_first_mode(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Create or remove the readable text card paired with a captioned media file."""
+    """Persist whether a captioned attachment opens as a readable document."""
     source = (await db.execute(select(File).where(
         File.id == file_id, File.user_id == current_user.id
     ).options(selectinload(File.watch_progress)))).scalar_one_or_none()
@@ -1344,36 +1344,18 @@ async def set_text_first_mode(
         ).options(selectinload(File.watch_progress)))).scalar_one_or_none()
     if media is None or media.file_type not in {"image", "video", "audio", "document"}:
         raise HTTPException(status_code=415, detail="این حالت فقط برای پست‌های دارای پیوست است.")
-    if not payload.enabled:
-        if companion is not None:
-            await db.delete(companion)
-            await db.commit()
-        return {"enabled": False, "media_file": add_urls_to_file(media)}
-    if companion is None:
-        content = (media.description or "").strip()
-        if not content:
-            raise HTTPException(status_code=422, detail="ابتدا متن یا کپشن این فایل را در توضیحات ذخیره کن.")
-        first_line = next((line.strip() for line in content.splitlines() if line.strip()), "یادداشت پیوست")
-        attachment_label = {"video": "ویدیو", "audio": "صدا", "document": "فایل"}.get(media.file_type, "پیوست")
-        attachment = (
-            f"\n\n![تصویر پیوست](/api/stream/{media.id})" if media.file_type == "image"
-            else f"\n\n[باز کردن {attachment_label}](komod://file/{media.id})"
-        )
-        companion = File(
-            user_id=media.user_id, folder_id=media.folder_id,
-            channel_message_id=media.channel_message_id, storage_channel_id=media.storage_channel_id,
-            file_id=f"text-post:{media.id}", file_unique_id=f"text-post:{media.file_unique_id}:{media.id}",
-            file_name=sanitize_filename(f"{first_line[:90]}.md"), description=first_line[:240],
-            search_text=f"{content}{attachment}", tags_json=media.tags_json,
-            file_size=len((content + attachment).encode("utf-8")), mime_type="text/markdown; charset=utf-8",
-            file_type="text", thumbnail_file_id=media.thumbnail_file_id,
-        )
-        db.add(companion)
-        await db.commit()
-        companion = (await db.execute(select(File).where(
-            File.id == companion.id
-        ).options(selectinload(File.watch_progress)))).scalar_one()
-    return {"enabled": True, "companion": add_urls_to_file(companion), "media_file": add_urls_to_file(media)}
+    if payload.enabled and not (media.description or "").strip():
+        raise HTTPException(status_code=422, detail="ابتدا متن یا کپشن این فایل را در توضیحات ذخیره کن.")
+    media.prefer_text_view = payload.enabled
+    # Remove records made by the former companion-file implementation. They
+    # duplicated one post in the library and are no longer needed.
+    if companion is not None and companion.id != media.id:
+        await db.delete(companion)
+    await db.commit()
+    media = (await db.execute(select(File).where(
+        File.id == media.id
+    ).options(selectinload(File.watch_progress)))).scalar_one()
+    return {"enabled": payload.enabled, "media_file": add_urls_to_file(media)}
 
 
 @router.get("", response_model=FileListResponse)
@@ -1751,8 +1733,8 @@ async def update_file(
     # Update fields
     if update_data.file_name is not None:
         file.file_name = sanitize_filename(update_data.file_name)
-    if update_data.description is not None:
-        file.description = update_data.description.strip()[:1024] or None
+    if "description" in update_data.model_fields_set:
+        file.description = (update_data.description or "").strip()[:20_000] or None
     if update_data.is_favorite is not None:
         file.is_favorite = update_data.is_favorite
     if update_data.is_pinned is not None:
@@ -1976,7 +1958,7 @@ async def batch_update_files(
                 break
         return cleaned
 
-    description = (update_data.description or "").strip()[:1024]
+    description = (update_data.description or "").strip()[:20_000]
     tags_to_add = clean_tags(update_data.tags_add)
     tags_to_remove = {tag.casefold() for tag in clean_tags(update_data.tags_remove)}
     replacement_tags = clean_tags(update_data.tags_replace) if update_data.tags_replace is not None else None
@@ -2007,7 +1989,7 @@ async def batch_update_files(
         elif update_data.description_mode == "set":
             file.description = description or None
         elif update_data.description_mode == "append" and description:
-            file.description = f"{file.description}\n{description}".strip()[:1024] if file.description else description
+            file.description = f"{file.description}\n{description}".strip()[:20_000] if file.description else description
         if update_data.cleanup_links or update_data.cleanup_mentions or update_data.cleanup_hashtags:
             file.description = clean_description(file.description)
 

@@ -50,7 +50,8 @@ export default function ContentPreview() {
     const editorRef = useRef<HTMLTextAreaElement>(null);
     // A delayed initial fetch must never replace a locally saved version.
     const textLoadVersionRef = useRef(0);
-    const show = !!file && file.file_type !== 'audio' && file.file_type !== 'video';
+    const textFirst = Boolean(file?.prefer_text_view && file.description?.trim());
+    const show = !!file && (textFirst || (file.file_type !== 'audio' && file.file_type !== 'video'));
     const {data:imageLibrary}=useFiles(undefined,'image','',1,'created:desc');
     const imageItems=imageLibrary?.files||[];
     const imageIndex=file?.file_type==='image'?imageItems.findIndex(item=>item.id===file.id):-1;
@@ -85,13 +86,20 @@ export default function ContentPreview() {
     }, []);
 
     useEffect(() => {
-        if (!show || !file || !canPreviewText(file)) return;
+        if (!show || !file || (!canPreviewText(file) && !textFirst)) return;
         let cancelled = false;
         const loadVersion = ++textLoadVersionRef.current;
         setLoading(true);
         setContent('');
         setError('');
         const loadText = async () => {
+            if (textFirst) {
+                const label = file.file_type === 'video' ? 'ویدیو' : file.file_type === 'audio' ? 'صدا' : 'فایل پیوست';
+                const attachment = file.file_type === 'image'
+                    ? `\n\n![تصویر پیوست](/api/stream/${file.id})`
+                    : `\n\n[باز کردن ${label}](komod://file/${file.id})`;
+                return `${file.description?.trim() || ''}${attachment}`;
+            }
             try {
                 if (!navigator.onLine) {
                     const cached = await getOfflineText(file.id);
@@ -112,7 +120,7 @@ export default function ContentPreview() {
             .catch((err) => { if (!cancelled && loadVersion === textLoadVersionRef.current) setError(err instanceof Error ? err.message : 'متن بارگذاری نشد.'); })
             .finally(() => { if (!cancelled && loadVersion === textLoadVersionRef.current) setLoading(false); });
         return () => { cancelled = true; };
-    }, [file?.id, show]);
+    }, [file?.description, file?.id, show, textFirst]);
 
     useEffect(() => {
         if (!show) return;
@@ -252,12 +260,12 @@ export default function ContentPreview() {
                     </div>
                 </header>}
                 {readerChromeHidden&&<button type="button" onClick={()=>setReaderChromeHidden(false)} className="absolute left-3 top-3 z-20 flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-black/25 text-white/35 opacity-20 backdrop-blur transition hover:opacity-100 focus:opacity-100" title="نمایش نوارها"><Eye className="h-4 w-4"/></button>}
-                {file.file_type === 'image' ? (
+                {file.file_type === 'image' && !textFirst ? (
                     <div className="relative min-h-0 flex-1 p-4 pb-20 text-center">
                         {imageFailed ? <div className="mx-auto rounded-2xl border border-dashed border-white/10 p-8 text-center"><p className="text-sm text-dark-400">نمایش عکس انجام نشد.</p><button className="btn-secondary mt-4" onClick={() => { setImageFailed(false); setImageRetry(Date.now()); }}>تلاش دوباره</button></div> : <div className="h-full min-h-[45vh] w-full"><ZoomableImage key={selectedImageUrl} src={selectedImageUrl} previewSrc={imageQuality==='original'?thumbnailUrl:''} alt={file.file_name} scale={imageScale} onScaleChange={setImageScale}/></div>}
                         <div className="absolute inset-x-2 bottom-2 mx-auto w-auto max-w-2xl overflow-hidden rounded-2xl border border-white/10 bg-dark-900/90 p-2 shadow-2xl backdrop-blur-xl sm:inset-x-4"><div className="overflow-hidden"><div className="mx-auto flex min-w-0 items-center justify-center gap-0.5">{imageItems.length>1&&<button disabled={imageIndex<=0} onClick={()=>showImageAt(imageIndex-1)} className="btn-icon shrink-0 disabled:opacity-25" title="عکس قبلی"><ChevronRight className="h-5 w-5"/></button>}<button onClick={()=>setImageScale(value=>Math.max(1,Number((value-.25).toFixed(2))))} className="btn-icon shrink-0" title="کوچک‌نمایی"><ZoomOut className="h-5 w-5"/></button><span dir="ltr" className="min-w-12 shrink-0 text-center text-xs text-dark-300">{Math.round(imageScale*100)}%</span><button onClick={()=>setImageScale(value=>Math.min(6,Number((value+.25).toFixed(2))))} className="btn-icon shrink-0" title="بزرگ‌نمایی"><ZoomIn className="h-5 w-5"/></button>{thumbnailUrl&&<button onClick={()=>{setImageFailed(false);setImageScale(1);setImageQuality(value=>value==='original'?'optimized':'original')}} className={`btn-icon h-8 w-8 shrink-0 ${imageQuality==='original'?'bg-primary-500/15 text-primary-200':'text-dark-300'}`} title={imageQuality==='original'?'نمایش نسخه بهینه':'نمایش کیفیت اصلی'}><ImageIcon className="h-4 w-4"/></button>}<button onClick={() => void toggleReaderFullscreen()} className="btn-icon shrink-0" title={readerFullscreen?'خروج از تمام‌صفحه':'تمام‌صفحه'}>{readerFullscreen?<Minimize2 className="h-5 w-5"/>:<Maximize2 className="h-5 w-5"/>}</button>{imageItems.length>1&&<button disabled={imageIndex<0||imageIndex>=imageItems.length-1} onClick={()=>showImageAt(imageIndex+1)} className="btn-icon shrink-0 disabled:opacity-25" title="عکس بعدی"><ChevronLeft className="h-5 w-5"/></button>}</div></div>{file.description&&<button dir="auto" onClick={()=>setImageDescriptionExpanded(true)} className="mt-1 w-full border-t border-white/[.07] px-2 pt-2 text-right text-xs leading-6 text-dark-300"><span className="line-clamp-2"><MarkdownInline content={file.description}/></span><span className="mr-1 text-primary-300">بیشتر</span></button>}</div>
                     </div>
-                ) : canPreviewText(file) ? (
+                ) : (canPreviewText(file) || textFirst) ? (
                     <>
                         {readerToolsVisible&&!readerChromeHidden&&<div className="flex shrink-0 items-center gap-2 overflow-x-auto overscroll-x-contain border-b border-white/[.06] bg-dark-950/70 px-3 py-2 sm:flex-wrap sm:px-5">
                             <div className="min-w-40 shrink-0"><CustomSelect value={readerFont} onChange={setReaderFont} options={readerFonts}/></div>

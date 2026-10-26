@@ -853,7 +853,9 @@ export default function FileBrowser() {
 
     // Handle File Open / Play
     const handleFileOpen = (file: TelegramFile) => {
-        if (file.file_type === 'video' || file.file_type === 'audio') {
+        if (file.prefer_text_view && file.description?.trim()) {
+            setContentPreviewFile(file);
+        } else if (file.file_type === 'video' || file.file_type === 'audio') {
             const queue = (displayFiles || []).filter(item => item.file_type === 'video' || item.file_type === 'audio');
             const index = queue.findIndex(item => item.id === file.id);
             startQueue(queue.length ? queue : [file], Math.max(0, index));

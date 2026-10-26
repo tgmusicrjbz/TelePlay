@@ -67,7 +67,7 @@ def extract_interaction_text(payload: dict) -> str:
     return "\n".join(dict.fromkeys(texts)).strip()
 
 
-async def consume_stt_quota(db, user_id: int, duration: int) -> TTSUsage:
+async def consume_stt_quota(db, user_id: int, duration: int, cost: int = 1) -> TTSUsage:
     """Validate and account for an accepted transcription request."""
     today = datetime.utcnow().date()
     usage = await db.get(TTSUsage, user_id)
@@ -81,9 +81,10 @@ async def consume_stt_quota(db, user_id: int, duration: int) -> TTSUsage:
         usage.stt_used_today = 0
     if usage.stt_max_seconds and duration > usage.stt_max_seconds:
         raise ValueError("مدت فایل از سقف مجاز تبدیل صوت به متن بیشتر است.")
-    if usage.stt_daily_limit and usage.stt_used_today >= usage.stt_daily_limit:
+    cost = max(1, min(100, int(cost)))
+    if usage.stt_daily_limit and usage.stt_used_today + cost > usage.stt_daily_limit:
         raise ValueError("سهمیه روزانه استخراج متن برای این حساب تمام شده است.")
-    usage.stt_used_today += 1
+    usage.stt_used_today += cost
     usage.stt_total_jobs += 1
     usage.stt_total_seconds += max(0, duration)
     await db.commit()
@@ -122,14 +123,17 @@ class GeminiSTTProvider:
             except GeminiRequestError as error:
                 last_error = error
                 if error.status == 404:
-                    fallback_model = "gemini-2.5-flash-lite" if "lite" in self.stt_model else "gemini-2.5-flash"
-                    try:
-                        result = await asyncio.to_thread(self._request, key, path, mime_type, prompt, fallback_model)
-                        self.cursor = (self.api_keys.index(key) + 1) % len(self.api_keys)
-                        return result
-                    except GeminiRequestError as fallback_error:
-                        last_error = fallback_error
-                        error = fallback_error
+                    fallback_models = ["gemini-2.5-flash-lite", "gemini-3.8-flash"] if "lite" in self.stt_model else ["gemini-2.5-flash", "gemini-3.8-flash"]
+                    for fallback_model in fallback_models:
+                        if fallback_model == self.stt_model:
+                            continue
+                        try:
+                            result = await asyncio.to_thread(self._request, key, path, mime_type, prompt, fallback_model)
+                            self.cursor = (self.api_keys.index(key) + 1) % len(self.api_keys)
+                            return result
+                        except GeminiRequestError as fallback_error:
+                            last_error = fallback_error
+                            error = fallback_error
                 if error.status == 400:
                     raise RuntimeError(f"فایل صوتی یا تنظیمات پذیرفته نشد: {error.user_detail()}") from error
                 if error.status in {429, 500, 502, 503, 504}:

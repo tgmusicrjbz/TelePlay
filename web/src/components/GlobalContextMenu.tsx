@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../lib/store';
-import { TelegramFile, Folder, api, canPreviewText, sendFilesToTelegram, useUpdateFile, useUpdateFolder, useUploadFile } from '../lib/api';
-import { Play, Download, DownloadCloud, Link, Edit, FolderInput, Trash2, Globe, ShieldOff, HardDriveDownload, Eye, EyeOff, AlignLeft, ListPlus, Heart, Info, Pin, Tags, ChevronDown, ChevronUp, X, AudioLines, Send, Palette, Image as ImageIcon, Boxes } from 'lucide-react';
+import { TelegramFile, Folder, api, canPreviewText, sendFilesToTelegram, useTextFirstMode, useUpdateFile, useUpdateFolder, useUploadFile } from '../lib/api';
+import { Play, Download, DownloadCloud, Link, Edit, FolderInput, Trash2, Globe, ShieldOff, HardDriveDownload, Eye, EyeOff, AlignLeft, ListPlus, Heart, Info, Pin, Tags, ChevronDown, ChevronUp, X, AudioLines, Send, Palette, Image as ImageIcon, Boxes, BookOpen, Sparkles } from 'lucide-react';
 import { saveFileOffline } from '../lib/offline';
 
 export default function GlobalContextMenu() {
-    const { activeContextMenu, setActiveContextMenu, setPreviewFile, setContentPreviewFile, setDetailsFile, setMoveItems, setMoveFiles, setDeleteConfirm, setRenameFile, setRenameFolder, setDescriptionItem, selectedFileIds, selectedFiles, setPlaylistFile, setActiveSection, addToast } = useAppStore();
+    const { activeContextMenu, setActiveContextMenu, setPreviewFile, setContentPreviewFile, setDetailsFile, setAIToolsFile, setMoveItems, setMoveFiles, setDeleteConfirm, setRenameFile, setRenameFolder, setDescriptionItem, selectedFileIds, selectedFiles, setPlaylistFile, setActiveSection, addToast } = useAppStore();
     const updateFile = useUpdateFile();
+    const textFirstMode = useTextFirstMode();
     const updateFolder = useUpdateFolder();
     const uploadFile = useUploadFile();
     const menuRef = useRef<HTMLDivElement>(null);
@@ -240,9 +241,15 @@ export default function GlobalContextMenu() {
                             <div className="grid grid-cols-2 gap-2">
                                 <ActionTile icon={<Download/>} label="دانلود" onClick={()=>{void handleDownload(file);setActiveContextMenu(null);}}/>
                                 <ActionTile icon={<Info/>} label="جزئیات فایل" onClick={()=>handleAction(()=>setDetailsFile(file))}/>
+                                <ActionTile icon={<Sparkles/>} label="ابزارهای هوش مصنوعی" onClick={()=>handleAction(()=>setAIToolsFile(file))}/>
                                 {!readOnlyWorkspace&&<>
                                     {playable&&<ActionTile icon={<ListPlus/>} label="افزودن به پلی‌لیست" onClick={()=>handleAction(()=>setPlaylistFile(file))}/>}
                                     <ActionTile icon={<AlignLeft/>} label={file.description?'ویرایش توضیحات':'افزودن توضیحات'} onClick={()=>handleAction(()=>setDescriptionItem({type:'file',item:file}))}/>
+                                    {file.description && ['image','video','audio','document'].includes(file.file_type) && <ActionTile
+                                        icon={file.prefer_text_view ? <EyeOff/> : <BookOpen/>}
+                                        label={file.prefer_text_view ? 'نمایش پیش‌فرض فایل' : 'نمایش پیش‌فرض متن'}
+                                        onClick={async()=>{setActiveContextMenu(null);try{await textFirstMode.mutateAsync({id:file.id,enabled:!file.prefer_text_view});addToast(file.prefer_text_view?'از این پس خود فایل باز می‌شود.':'از این پس متن کپشن باز می‌شود.');}catch(error:any){addToast(error?.response?.data?.detail||'تغییر حالت نمایش انجام نشد.','error');}}}
+                                    />}
                                     <ActionTile icon={<Tags/>} label="ویرایش تگ‌ها" onClick={()=>handleAction(()=>setDetailsFile(file))}/>
                                     <ActionTile icon={file.is_hidden?<Eye/>:<EyeOff/>} label={file.is_hidden?'خروج از گاوصندوق':'مخفی کردن'} onClick={async()=>{setActiveContextMenu(null);try{await updateFile.mutateAsync({id:file.id,is_hidden:!file.is_hidden});addToast(file.is_hidden?'فایل از گاوصندوق بیرون آمد.':'فایل مخفی شد 🔒');}catch(error:any){addToast(error?.response?.data?.detail||'ابتدا برای گاوصندوق رمز تعیین کن.','error');}}}/>
                                 </>}

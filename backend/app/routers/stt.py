@@ -1,5 +1,6 @@
 """Speech-to-text queue endpoints."""
 import asyncio
+import json
 from datetime import datetime, timedelta
 from typing import Literal
 from uuid import uuid4
@@ -11,12 +12,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import get_current_user
 from ..database import get_db
-from ..models import File, Folder, User
+from ..models import AppSetting, File, Folder, User
 from ..stt import GeminiSTTProvider, STTJob, consume_stt_quota, stt_queue
 from ..gemini_keys import decrypt_user_keys
-from ..tts import load_tts_settings, route_ai_model
+from ..tts import STT_MODEL_OPTIONS, load_tts_settings, model_quota_cost, route_ai_model
 
 router = APIRouter(prefix="/stt", tags=["Speech to text"])
+AI_MODEL_COSTS_KEY = "ai_model_quota_costs"
 _refine_jobs: dict[str, dict] = {}
 
 
@@ -100,16 +102,26 @@ async def create_stt_job(payload: STTCreate, current_user: User = Depends(get_cu
     folder_id = payload.folder_id if payload.output_mode == "save" else None
     if folder_id is not None and (await db.execute(select(Folder.id).where(Folder.id == folder_id, Folder.user_id == current_user.id))).scalar_one_or_none() is None:
         raise HTTPException(status_code=404, detail="کشوی مقصد پیدا نشد.")
-    try:
-        await consume_stt_quota(db, current_user.id, int(source.duration or 0))
-    except ValueError as error:
-        raise HTTPException(status_code=429, detail=str(error)) from error
     post_prompts = [item.strip() for item in payload.post_prompts if item.strip()][:5]
     if any(len(item) > 4_000 for item in post_prompts):
         raise HTTPException(status_code=422, detail="هر دستور پس از تبدیل باید حداکثر ۴۰۰۰ نویسه باشد.")
     preferences = load_tts_settings(current_user)
     stt_model = route_ai_model(preferences, "stt", int(source.duration or 0), bool(payload.prompt.strip()))
     text_model = route_ai_model(preferences, "text", sum(len(item) for item in post_prompts), sum(len(item) for item in post_prompts) > 300)
+    costs: dict[str, int] = {item["value"]: int(item.get("cost", 1)) for item in STT_MODEL_OPTIONS}
+    costs_row = await db.get(AppSetting, AI_MODEL_COSTS_KEY)
+    if costs_row:
+        try:
+            parsed = json.loads(costs_row.value)
+            if isinstance(parsed, dict):
+                costs = parsed
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+    quota_cost = model_quota_cost(costs, stt_model)
+    try:
+        usage = await consume_stt_quota(db, current_user.id, int(source.duration or 0), quota_cost)
+    except ValueError as error:
+        raise HTTPException(status_code=429, detail=str(error)) from error
     job = STTJob(
         user_id=current_user.id, source_file_id=source.id, title=payload.title.strip(),
         folder_id=folder_id, prompt=payload.prompt.strip(), post_prompts=post_prompts,
@@ -118,7 +130,8 @@ async def create_stt_job(payload: STTCreate, current_user: User = Depends(get_cu
         stt_mode=preferences["stt_mode"],
     )
     position = await stt_queue.enqueue(job)
-    return {"job_id": job.id, "queue_position": position, "message": "تبدیل صدا به متن شروع شد."}
+    remaining = max(0, usage.stt_daily_limit-usage.stt_used_today) if usage.stt_daily_limit else None
+    return {"job_id": job.id, "queue_position": position, "message": "تبدیل صدا به متن شروع شد.", "quota_cost": quota_cost, "quota_remaining": remaining}
 
 
 @router.get("/jobs")

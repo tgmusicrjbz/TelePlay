@@ -92,6 +92,7 @@ class FileBase(BaseModel):
     duration: Optional[float] = None
     width: Optional[int] = None
     height: Optional[int] = None
+    prefer_text_view: bool = False
 
 
 class FileCreate(FileBase):

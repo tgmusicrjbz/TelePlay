@@ -59,23 +59,25 @@ TTS_MODEL_OPTIONS = [
         "label": "کیفیت بهتر",
         "description": "برای روایت، متن‌های احساسی و خروجی نهایی",
         "profile": "quality",
+        "cost": 2,
     },
     {
         "value": "gemini-3.8-flash-lite-tts",
         "label": "سریع و کم‌مصرف",
         "description": "برای پیش‌نمایش و متن‌های روزمره با هزینه کمتر",
         "profile": "economy",
+        "cost": 1,
     },
 ]
 SUPPORTED_TTS_MODELS = {item["value"] for item in TTS_MODEL_OPTIONS}
 STT_MODEL_OPTIONS = [
-    {"value": "gemini-3.5-flash-lite", "label": "اقتصادی", "description": "برای فایل‌های کوتاه و واضح با هزینه کمتر", "profile": "economy"},
-    {"value": "gemini-3.8-flash", "label": "انعطاف‌پذیر", "description": "رونویسی همراه با دستور دلخواه و قالب‌بندی Markdown", "profile": "quality"},
-    {"value": "gemini-3.5-transcribe", "label": "تخصصی رونویسی", "description": "مدل اختصاصی تشخیص گفتار برای دقت بیشتر در فایل صوتی"},
+    {"value": "gemini-3.5-flash-lite", "label": "اقتصادی", "description": "برای فایل‌های کوتاه و واضح با هزینه کمتر", "profile": "economy", "cost": 1},
+    {"value": "gemini-3.8-flash", "label": "انعطاف‌پذیر", "description": "رونویسی همراه با دستور دلخواه و قالب‌بندی Markdown", "profile": "quality", "cost": 2},
+    {"value": "gemini-3.5-transcribe", "label": "تخصصی رونویسی", "description": "مدل اختصاصی تشخیص گفتار برای دقت بیشتر در فایل صوتی", "profile": "quality", "cost": 3},
 ]
 TEXT_MODEL_OPTIONS = [
-    {"value": "gemini-3.5-flash-lite", "label": "مدل اقتصادی", "description": "برای مرتب‌سازی، پاک‌سازی و ویرایش‌های کوتاه", "profile": "economy"},
-    {"value": "gemini-3.8-flash", "label": "مدل کامل", "description": "برای خلاصه‌سازی سنگین و ویرایش چندمرحله‌ای متن", "profile": "quality"},
+    {"value": "gemini-3.5-flash-lite", "label": "مدل اقتصادی", "description": "برای مرتب‌سازی، پاک‌سازی و ویرایش‌های کوتاه", "profile": "economy", "cost": 1},
+    {"value": "gemini-3.8-flash", "label": "مدل کامل", "description": "برای خلاصه‌سازی سنگین و ویرایش چندمرحله‌ای متن", "profile": "quality", "cost": 2},
 ]
 SUPPORTED_STT_MODELS = {item["value"] for item in STT_MODEL_OPTIONS}
 SUPPORTED_TEXT_MODELS = {item["value"] for item in TEXT_MODEL_OPTIONS}
@@ -88,9 +90,19 @@ def _custom_models(value) -> list[str]:
     return list(dict.fromkeys(item.strip() for item in value if isinstance(item, str) and MODEL_ID_PATTERN.fullmatch(item.strip())))[:12]
 
 
-def model_options(base: list[dict], custom: list[str]) -> list[dict]:
+def model_options(base: list[dict], custom: list[str], costs: dict[str, int] | None = None) -> list[dict]:
     known = {item["value"] for item in base}
-    return [*base, *({"value": item, "label": item, "description": "مدل سفارشی حساب جاری", "profile": "custom"} for item in custom if item not in known)]
+    configured = costs or {}
+    options = [{**item, "cost": max(1, min(100, int(configured.get(item["value"], item.get("cost", 1)))))} for item in base]
+    options.extend({"value": item, "label": item, "description": "مدل سفارشی حساب جاری", "profile": "custom", "cost": max(1, min(100, int(configured.get(item, 1))))} for item in custom if item not in known)
+    return options
+
+
+def model_quota_cost(costs: dict[str, int] | None, model: str) -> int:
+    try:
+        return max(1, min(100, int((costs or {}).get(model, 1))))
+    except (TypeError, ValueError):
+        return 1
 
 
 def route_ai_model(preferences: dict, task: str, workload: int = 0, has_instruction: bool = False) -> str:
@@ -166,7 +178,7 @@ def normalize_tts_settings(value: dict | None) -> dict:
     return raw
 
 
-async def consume_tts_quota(db, user_id: int, character_count: int) -> TTSUsage:
+async def consume_tts_quota(db, user_id: int, character_count: int, cost: int = 1) -> TTSUsage:
     """Validate and atomically account for an accepted TTS request."""
     today = datetime.utcnow().date()
     usage = await db.get(TTSUsage, user_id)
@@ -180,9 +192,10 @@ async def consume_tts_quota(db, user_id: int, character_count: int) -> TTSUsage:
         usage.stt_used_today = 0
     if character_count > usage.max_chars:
         raise ValueError(f"طول متن از سقف {to_persian_digits(usage.max_chars)} نویسه بیشتر است.")
-    if usage.daily_limit and usage.used_today >= usage.daily_limit:
+    cost = max(1, min(100, int(cost)))
+    if usage.daily_limit and usage.used_today + cost > usage.daily_limit:
         raise ValueError("سهمیه روزانه ساخت صدا برای این حساب تمام شده است.")
-    usage.used_today += 1
+    usage.used_today += cost
     usage.total_jobs += 1
     usage.total_chars += character_count
     await db.commit()
@@ -395,14 +408,18 @@ class GeminiTTSProvider:
                 last_error = error
                 status = error.status
                 if status == 404 and str(preferences.get("model", "")).startswith("gemini-3.8-"):
-                    # Some API keys receive newer 3.8 model names later than
-                    # others. Keep the economical path usable during rollout.
-                    fallback = {**preferences, "model": "gemini-2.5-flash-preview-tts"}
-                    try:
-                        return await self._request(key, text, fallback)
-                    except GeminiRequestError as fallback_error:
-                        last_error = fallback_error
-                        status = fallback_error.status
+                    # Model rollout differs between API projects. Try the
+                    # established Flash TTS endpoint, then the quality 3.8
+                    # sibling so economy mode still produces an answer.
+                    candidates = ["gemini-2.5-flash-preview-tts", "gemini-3.8-flash-tts"]
+                    for candidate in candidates:
+                        if candidate == preferences.get("model"):
+                            continue
+                        try:
+                            return await self._request(key, text, {**preferences, "model": candidate})
+                        except GeminiRequestError as fallback_error:
+                            last_error = fallback_error
+                            status = fallback_error.status
                 if status == 400:
                     detail = error.user_detail()
                     raise RuntimeError(f"متن یا تنظیمات صدا پذیرفته نشد: {detail}") from error

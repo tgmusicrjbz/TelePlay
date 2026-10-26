@@ -94,6 +94,8 @@ interface AppState {
     goBackContentPreview: () => void;
     detailsFile: TelegramFile | null;
     setDetailsFile: (file: TelegramFile | null) => void;
+    aiToolsFile: TelegramFile | null;
+    setAIToolsFile: (file: TelegramFile | null) => void;
 
     renameFile: TelegramFile | null;
     setRenameFile: (file: TelegramFile | null) => void;
@@ -249,6 +251,8 @@ export const useAppStore = create<AppState>((set) => ({
     }),
     detailsFile: null,
     setDetailsFile: (file) => set({ detailsFile: file }),
+    aiToolsFile: null,
+    setAIToolsFile: (file) => set({ aiToolsFile: file }),
 
     renameFile: null,
     setRenameFile: (file) => set({ renameFile: file }),

@@ -1875,7 +1875,7 @@ async def logout_all_command(client, message: Message):
 # ============== File Handler ==============
 
 async def create_text_first_companion(db, media_file: File, clean_caption: str | None) -> File | None:
-    """Create a readable Markdown card when a post's caption is the main content."""
+    """Mark caption-heavy media to open as text without duplicating the file."""
     content = str(clean_caption or "").strip()
     # Short captions remain ordinary media descriptions. A deliberate marker
     # lets users force text-first rendering for shorter posts as well.
@@ -1883,23 +1883,13 @@ async def create_text_first_companion(db, media_file: File, clean_caption: str |
     content = content.replace("#متن‌محور", "").replace("[نمایش: متن]", "").strip()
     if not forced and len(content) < 220:
         return None
-    first_line = next((line.strip() for line in content.splitlines() if line.strip()), "یادداشت پیوست")
-    attachment = (
-        f"\n\n![تصویر پیوست](/api/stream/{media_file.id})" if media_file.file_type == "image"
-        else f"\n\n[باز کردن { {'video':'ویدیو','audio':'صدا','document':'فایل'}.get(media_file.file_type, 'پیوست') }](komod://file/{media_file.id})"
-    )
-    note = File(
-        user_id=media_file.user_id, folder_id=media_file.folder_id,
-        channel_message_id=media_file.channel_message_id, storage_channel_id=media_file.storage_channel_id,
-        file_id=f"text-post:{media_file.id}", file_unique_id=f"text-post:{media_file.file_unique_id}:{media_file.id}",
-        file_name=sanitize_filename(f"{first_line[:90]}.md"), description=first_line[:240],
-        search_text=f"{content}{attachment}", tags_json=media_file.tags_json,
-        file_size=len((content + attachment).encode("utf-8")), mime_type="text/markdown; charset=utf-8",
-        file_type="text", thumbnail_file_id=media_file.thumbnail_file_id,
-    )
-    db.add(note)
+    media_file.prefer_text_view = True
+    # Keep the full meaningful caption available to the reader. Rendered link
+    # captions may already contain it, so only replace an empty description.
+    if not (media_file.description or "").strip():
+        media_file.description = content[:20_000]
     await db.flush()
-    return note
+    return media_file
 
 async def _handle_file_impl(client, message: Message, status_msg: Message):
     """Handle uploaded files - forward to channel and save to DB."""

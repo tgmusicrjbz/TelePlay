@@ -246,6 +246,16 @@ class TTSQuotaTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(ValueError, "طول متن"):
                 await consume_tts_quota(db, self.user_id, 11)
 
+    async def test_model_cost_consumes_weighted_quota(self):
+        async with async_session() as db:
+            db.add(TTSUsage(user_id=self.user_id, daily_limit=3, max_chars=100))
+            await db.commit()
+            usage = await consume_tts_quota(db, self.user_id, 10, cost=2)
+            self.assertEqual(usage.used_today, 2)
+            self.assertEqual(usage.total_jobs, 1)
+            with self.assertRaisesRegex(ValueError, "سهمیه روزانه"):
+                await consume_tts_quota(db, self.user_id, 10, cost=2)
+
 
 if __name__ == "__main__":
     unittest.main()

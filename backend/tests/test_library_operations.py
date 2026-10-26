@@ -108,7 +108,7 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             _require_telegram_two_factor(user, "000000")
         _require_telegram_two_factor(user, totp_code(secret))
 
-    async def test_text_first_mode_creates_readable_companion_without_copying_media(self):
+    async def test_text_first_mode_persists_on_the_original_media(self):
         async with async_session() as db:
             user = await db.get(User, self.user_id)
             image = self.make_file(user.id, self.folder_id, 990)
@@ -120,15 +120,27 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             await db.commit()
             await db.refresh(image)
             result = await set_text_first_mode(image.id, TextFirstUpdate(enabled=True), db, user)
-            companion = result["companion"]
-            companion_record = await db.get(File, companion["id"])
-            self.assertEqual(companion_record.channel_message_id, image.channel_message_id)
-            preview = await get_text_preview(companion["id"], db, user, self.auth_request())
-            self.assertIn("این متن اصلی پست است", preview["content"])
-            self.assertIn(f"/api/stream/{image.id}", preview["content"])
-            disabled = await set_text_first_mode(companion["id"], TextFirstUpdate(enabled=False), db, user)
+            self.assertTrue(result["enabled"])
+            self.assertEqual(result["media_file"]["id"], image.id)
+            self.assertTrue(result["media_file"]["prefer_text_view"])
+            self.assertIsNone((await db.execute(select(File).where(File.file_id == f"text-post:{image.id}"))).scalar_one_or_none())
+            disabled = await set_text_first_mode(image.id, TextFirstUpdate(enabled=False), db, user)
             self.assertFalse(disabled["enabled"])
-            self.assertIsNone(await db.get(File, companion["id"]))
+            self.assertFalse(disabled["media_file"]["prefer_text_view"])
+
+    async def test_file_description_saves_long_markdown_and_can_be_cleared(self):
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            item = self.make_file(user.id, self.folder_id, 991)
+            db.add(item)
+            await db.commit()
+            await db.refresh(item)
+            description = "# عنوان\n\n" + ("متن کامل و مهم پست. " * 260)
+            updated = await update_file(item.id, FileUpdate(description=description), db, user, None)
+            self.assertEqual(updated.description, description.strip())
+            self.assertGreater(len(updated.description), 1024)
+            cleared = await update_file(item.id, FileUpdate(description=""), db, user, None)
+            self.assertIsNone(cleared.description)
 
     async def test_mixed_pack_is_created_inside_folder_and_reordered(self):
         async with async_session() as db:

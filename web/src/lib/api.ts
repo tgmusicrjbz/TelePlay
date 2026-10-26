@@ -67,9 +67,10 @@ export interface VaultStatus { configured: boolean; }
 export interface StorageChannelItem { channel_id:number; title?:string|null; active:boolean; }
 export interface StorageChannel { configured: boolean; channel_id?: number | null; title?: string | null; channels:StorageChannelItem[]; }
 export interface TTSVoice { value: string; label: string; description: string; gender: 'female'|'male'; pitch: 'low'|'medium'|'high'; }
-export interface TTSModelOption { value:string; label:string; description:string; profile:'quality'|'economy'|'custom'; }
-export interface AIModelOption { value:string; label:string; description:string; profile?:'quality'|'economy'|'custom'; }
-export interface TTSSettings { voice: string; style: string; speed: number; model: string; stt_model:string; stt_mode:'verbatim'|'smart'; text_model:string; ai_routing_mode:'auto'|'economy'|'quality'|'manual'; custom_tts_models:string[]; custom_stt_models:string[]; custom_text_models:string[]; auto_expression: boolean; gender: 'all'|'female'|'male'; pitch: 'all'|'medium'|'low'|'high'; use_case: 'general'|'audiobook'|'podcast'|'story'|'education'|'news'|'advertising'|'accessibility'; folder_id: number|null; available: boolean; personal_key_count?: number; voices: TTSVoice[]; models:TTSModelOption[]; stt_models:AIModelOption[]; text_models:AIModelOption[]; }
+export interface TTSModelOption { value:string; label:string; description:string; profile:'quality'|'economy'|'custom'; cost:number; }
+export interface AIModelOption { value:string; label:string; description:string; profile?:'quality'|'economy'|'custom'; cost:number; }
+export interface SpeechQuota { limit:number; used:number; remaining:number|null; }
+export interface TTSSettings { voice: string; style: string; speed: number; model: string; stt_model:string; stt_mode:'verbatim'|'smart'; text_model:string; ai_routing_mode:'auto'|'economy'|'quality'|'manual'; custom_tts_models:string[]; custom_stt_models:string[]; custom_text_models:string[]; auto_expression: boolean; gender: 'all'|'female'|'male'; pitch: 'all'|'medium'|'low'|'high'; use_case: 'general'|'audiobook'|'podcast'|'story'|'education'|'news'|'advertising'|'accessibility'; folder_id: number|null; available: boolean; personal_key_count?: number; voices: TTSVoice[]; models:TTSModelOption[]; stt_models:AIModelOption[]; text_models:AIModelOption[]; model_costs:Record<string,number>; can_edit_model_costs:boolean; quota:{tts:SpeechQuota;stt:SpeechQuota}; }
 export interface GeminiKeySummary { count:number; masked:string[]; }
 export interface GeminiKeyHealth { masked:string; status:'healthy'|'limited'|'denied'|'unreachable'|'error'; message:string; }
 export interface FileMetadataSuggestion { title:string; description:string; tags:string[]; }
@@ -109,6 +110,7 @@ export interface TelegramFile {
     file_unique_id: string;
     file_name: string;
     description: string | null;
+    prefer_text_view?: boolean;
     file_size: number;
     mime_type: string | null;
     file_type: 'video' | 'audio' | 'document' | 'image' | 'text';
@@ -561,8 +563,14 @@ export const useFile = (fileId: number) => {
 export const useUpdateFile = () => {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async ({ id, ...data }: { id: number; file_name?: string; description?: string; folder_id?: number | null; is_favorite?: boolean; is_pinned?: boolean; is_hidden?: boolean; tags?: string[] }) => {
+        mutationFn: async ({ id, ...data }: { id: number; file_name?: string; description?: string | null; folder_id?: number | null; is_favorite?: boolean; is_pinned?: boolean; is_hidden?: boolean; tags?: string[] }) => {
             const cached=queryClient.getQueryData<TelegramFile>(['file',id]);
+            // A description editor must only report success after the server
+            // has persisted the text. Quietly queueing this change made the UI
+            // look saved while the database still contained the old caption.
+            if (Object.prototype.hasOwnProperty.call(data, 'description')) {
+                return (await api.patch<TelegramFile>(`/files/${id}`, data)).data;
+            }
             return runOrQueueMetadataMutation(
                 async()=>(await api.patch<TelegramFile>(`/files/${id}`,data)).data,
                 {entity:data.tags!==undefined?'tag':'folder',method:'patch',url:`/files/${id}`,payload:data,baseUpdatedAt:cached?.updated_at},
@@ -918,10 +926,13 @@ export const usePacks = (parentFolderId: number | null, allFolders = false) => {
 export const useTextFirstMode = () => {
     const queryClient=useQueryClient();
     return useMutation({
-        mutationFn:async({id,enabled}:{id:number;enabled:boolean})=>(await api.post<{enabled:boolean;companion?:TelegramFile;media_file:TelegramFile}>(`/files/${id}/text-first`,{enabled})).data,
-        onSuccess:()=>{
+        mutationFn:async({id,enabled}:{id:number;enabled:boolean})=>(await api.post<{enabled:boolean;media_file:TelegramFile}>(`/files/${id}/text-first`,{enabled})).data,
+        onSuccess:(result,variables)=>{
+            queryClient.setQueryData(['file',variables.id],result.media_file);
+            queryClient.setQueriesData<FileListResponse>({queryKey:['files']},current=>current?{
+                ...current,files:current.files.map(file=>file.id===variables.id?result.media_file:file),
+            }:current);
             queryClient.invalidateQueries({queryKey:['files']});
-            queryClient.invalidateQueries({queryKey:['activity']});
         },
     });
 };
@@ -1514,7 +1525,7 @@ export const useTTSSettings = () => useQuery<TTSSettings>({
 export const useUpdateTTSSettings = () => {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (payload: Pick<TTSSettings, 'voice'|'style'|'speed'|'model'|'stt_model'|'stt_mode'|'text_model'|'ai_routing_mode'|'custom_tts_models'|'custom_stt_models'|'custom_text_models'|'auto_expression'|'gender'|'pitch'|'use_case'|'folder_id'>) => (await api.put<TTSSettings>('/tts/settings', payload)).data,
+        mutationFn: async (payload: Pick<TTSSettings, 'voice'|'style'|'speed'|'model'|'stt_model'|'stt_mode'|'text_model'|'ai_routing_mode'|'custom_tts_models'|'custom_stt_models'|'custom_text_models'|'auto_expression'|'gender'|'pitch'|'use_case'|'folder_id'> & {model_costs?:Record<string,number>}) => (await api.put<TTSSettings>('/tts/settings', payload)).data,
         onSuccess: data => queryClient.setQueryData(['tts-settings'], data),
     });
 };
@@ -1533,8 +1544,8 @@ export const useTTSJobs = () => useQuery<TTSJobStatus[]>({
 export const useCreateTTSJob = () => {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (payload: {text:string;title:string;folder_id?:number|null;voice?:string;style?:string;speed?:number;auto_expression?:boolean;gender?:TTSSettings['gender'];pitch?:TTSSettings['pitch'];use_case?:TTSSettings['use_case'];output_mode?:'save'|'preview'|'telegram'}) => (await api.post<{job_id:string;queue_position:number;message:string}>('/tts/jobs', payload)).data,
-        onSuccess: () => queryClient.invalidateQueries({queryKey:['tts-jobs']}),
+        mutationFn: async (payload: {text:string;title:string;folder_id?:number|null;voice?:string;style?:string;speed?:number;auto_expression?:boolean;gender?:TTSSettings['gender'];pitch?:TTSSettings['pitch'];use_case?:TTSSettings['use_case'];output_mode?:'save'|'preview'|'telegram'}) => (await api.post<{job_id:string;queue_position:number;message:string;quota_cost:number;quota_remaining:number|null}>('/tts/jobs', payload)).data,
+        onSuccess: () => { queryClient.invalidateQueries({queryKey:['tts-jobs']}); queryClient.invalidateQueries({queryKey:['tts-settings']}); },
     });
 };
 export const useControlTTSJob = () => {
@@ -1565,7 +1576,7 @@ export const useSTTJobs = () => useQuery<STTJobStatus[]>({
 });
 export const useCreateSTTJob = () => { const queryClient=useQueryClient(); return useMutation({
     mutationFn:async(payload:{file_id:number;title:string;prompt?:string;post_prompts?:string[];folder_id?:number|null;output_mode:'temporary'|'save'})=>(await api.post('/stt/jobs',payload)).data,
-    onSuccess:()=>queryClient.invalidateQueries({queryKey:['stt-jobs']}),
+    onSuccess:()=>{queryClient.invalidateQueries({queryKey:['stt-jobs']});queryClient.invalidateQueries({queryKey:['tts-settings']});},
 }); };
 export const useCancelSTTJob = () => { const queryClient=useQueryClient(); return useMutation({
     mutationFn:async(id:string)=>(await api.post<STTJobStatus>(`/stt/jobs/${id}/cancel`)).data,

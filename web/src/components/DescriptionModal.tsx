@@ -62,7 +62,7 @@ export default function DescriptionModal({ isOpen, itemType, currentDescription,
                     ref={textareaRef}
                     value={description}
                     onChange={(event) => setDescription(event.target.value)}
-                    maxLength={1024}
+                        maxLength={20000}
                     rows={7}
                     autoFocus
                     placeholder="یک توضیح کوتاه بنویس…"
@@ -79,7 +79,7 @@ export default function DescriptionModal({ isOpen, itemType, currentDescription,
                 </div>
                 <div className="flex justify-between mt-2 text-xs text-dark-400">
                     <span>برای حذف توضیحات، این بخش را خالی بگذار.</span>
-                    <span>{description.length}/1024</span>
+                    <span>{description.length.toLocaleString('fa-IR')}/۲۰٬۰۰۰</span>
                 </div>
                 {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
                 <div className="flex justify-end gap-3 mt-5">

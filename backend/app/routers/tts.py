@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -12,12 +13,43 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import get_current_user
 from ..database import get_db
-from ..models import Folder, TTSVoicePreview, User
-from ..tts import GeminiTTSProvider, STT_MODEL_OPTIONS, TEXT_MODEL_OPTIONS, TTSJob, TTS_MODEL_OPTIONS, VOICE_OPTIONS, consume_tts_quota, load_tts_settings, model_options, normalize_tts_settings, route_ai_model, tts_queue
+from ..config import get_settings
+from ..models import AppSetting, Folder, TTSUsage, TTSVoicePreview, User
+from ..tts import GeminiTTSProvider, STT_MODEL_OPTIONS, TEXT_MODEL_OPTIONS, TTSJob, TTS_MODEL_OPTIONS, VOICE_OPTIONS, consume_tts_quota, load_tts_settings, model_options, model_quota_cost, normalize_tts_settings, route_ai_model, tts_queue
 from ..gemini_keys import check_gemini_key, decrypt_user_keys, encrypt_user_keys
 
 router = APIRouter(prefix="/tts", tags=["Text to speech"])
 VOICE_PREVIEW_VERSION = "v3"
+settings = get_settings()
+AI_MODEL_COSTS_KEY = "ai_model_quota_costs"
+
+
+def _default_model_costs() -> dict[str, int]:
+    return {item["value"]: int(item.get("cost", 1)) for item in [*TTS_MODEL_OPTIONS, *STT_MODEL_OPTIONS, *TEXT_MODEL_OPTIONS]}
+
+
+async def load_model_costs(db: AsyncSession) -> dict[str, int]:
+    costs = _default_model_costs()
+    row = await db.get(AppSetting, AI_MODEL_COSTS_KEY)
+    if row:
+        try:
+            saved = json.loads(row.value)
+            if isinstance(saved, dict):
+                costs.update({str(key): max(1, min(100, int(value))) for key, value in saved.items()})
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+    return costs
+
+
+def quota_payload(usage: TTSUsage | None) -> dict:
+    if usage is None:
+        return {"tts":{"limit":0,"used":0,"remaining":None},"stt":{"limit":0,"used":0,"remaining":None}}
+    used_today = usage.used_today if usage.usage_date == datetime.utcnow().date() else 0
+    stt_used_today = usage.stt_used_today if usage.usage_date == datetime.utcnow().date() else 0
+    return {
+        "tts": {"limit": usage.daily_limit, "used": used_today, "remaining": max(0, usage.daily_limit-used_today) if usage.daily_limit else None},
+        "stt": {"limit": usage.stt_daily_limit, "used": stt_used_today, "remaining": max(0, usage.stt_daily_limit-stt_used_today) if usage.stt_daily_limit else None},
+    }
 
 
 class TTSSettingsUpdate(BaseModel):
@@ -37,6 +69,7 @@ class TTSSettingsUpdate(BaseModel):
     custom_tts_models: list[str] = Field(default_factory=list, max_length=12)
     custom_stt_models: list[str] = Field(default_factory=list, max_length=12)
     custom_text_models: list[str] = Field(default_factory=list, max_length=12)
+    model_costs: dict[str, int] | None = None
 
 
 class TTSCreate(BaseModel):
@@ -94,17 +127,22 @@ async def test_personal_keys(current_user: User = Depends(get_current_user)):
 
 
 @router.get("/settings")
-async def get_tts_settings(current_user: User = Depends(get_current_user)):
+async def get_tts_settings(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     personal_keys = decrypt_user_keys(current_user.gemini_api_keys_encrypted)
     preferences = load_tts_settings(current_user)
+    costs = await load_model_costs(db)
+    usage = await db.get(TTSUsage, current_user.id)
     return {
         **preferences,
         "available": tts_queue.available or bool(personal_keys),
         "personal_key_count": len(personal_keys),
         "voices": VOICE_OPTIONS,
-        "models": model_options(TTS_MODEL_OPTIONS, preferences["custom_tts_models"]),
-        "stt_models": model_options(STT_MODEL_OPTIONS, preferences["custom_stt_models"]),
-        "text_models": model_options(TEXT_MODEL_OPTIONS, preferences["custom_text_models"]),
+        "models": model_options(TTS_MODEL_OPTIONS, preferences["custom_tts_models"], costs),
+        "stt_models": model_options(STT_MODEL_OPTIONS, preferences["custom_stt_models"], costs),
+        "text_models": model_options(TEXT_MODEL_OPTIONS, preferences["custom_text_models"], costs),
+        "model_costs": costs,
+        "can_edit_model_costs": current_user.telegram_id in settings.admin_users,
+        "quota": quota_payload(usage),
     }
 
 
@@ -118,11 +156,24 @@ async def update_tts_settings(
         folder = (await db.execute(select(Folder).where(Folder.id == payload.folder_id, Folder.user_id == current_user.id))).scalar_one_or_none()
         if folder is None:
             raise HTTPException(status_code=404, detail="کشوی پیش‌فرض پیدا نشد.")
-    preferences = normalize_tts_settings({**load_tts_settings(current_user), **payload.model_dump(exclude_none=True)})
+    payload_data = payload.model_dump(exclude_none=True)
+    submitted_costs = payload_data.pop("model_costs", None)
+    if submitted_costs is not None:
+        if current_user.telegram_id not in settings.admin_users:
+            raise HTTPException(status_code=403, detail="فقط مدیر می‌تواند ضریب مصرف مدل‌ها را تغییر دهد.")
+        normalized_costs = {str(key)[:120]: max(1, min(100, int(value))) for key, value in submitted_costs.items()}
+        row = await db.get(AppSetting, AI_MODEL_COSTS_KEY)
+        if row is None:
+            db.add(AppSetting(key=AI_MODEL_COSTS_KEY, value=json.dumps(normalized_costs)))
+        else:
+            row.value = json.dumps(normalized_costs)
+    preferences = normalize_tts_settings({**load_tts_settings(current_user), **payload_data})
     current_user.tts_settings_json = json.dumps(preferences, ensure_ascii=False)
     await db.commit()
     personal_keys = decrypt_user_keys(current_user.gemini_api_keys_encrypted)
-    return {**preferences, "available": tts_queue.available or bool(personal_keys), "personal_key_count": len(personal_keys), "voices": VOICE_OPTIONS, "models": model_options(TTS_MODEL_OPTIONS, preferences["custom_tts_models"]), "stt_models": model_options(STT_MODEL_OPTIONS, preferences["custom_stt_models"]), "text_models": model_options(TEXT_MODEL_OPTIONS, preferences["custom_text_models"])}
+    costs = await load_model_costs(db)
+    usage = await db.get(TTSUsage, current_user.id)
+    return {**preferences, "available": tts_queue.available or bool(personal_keys), "personal_key_count": len(personal_keys), "voices": VOICE_OPTIONS, "models": model_options(TTS_MODEL_OPTIONS, preferences["custom_tts_models"], costs), "stt_models": model_options(STT_MODEL_OPTIONS, preferences["custom_stt_models"], costs), "text_models": model_options(TEXT_MODEL_OPTIONS, preferences["custom_text_models"], costs), "model_costs": costs, "can_edit_model_costs": current_user.telegram_id in settings.admin_users, "quota": quota_payload(usage)}
 
 
 @router.post("/jobs", status_code=202)
@@ -145,13 +196,15 @@ async def create_tts_job(
             preferences[key] = value
     preferences = normalize_tts_settings(preferences)
     preferences["model"] = route_ai_model(preferences, "tts", len(payload.text.strip()))
+    costs = await load_model_costs(db)
+    quota_cost = model_quota_cost(costs, preferences["model"])
     target_folder_id = payload.folder_id if payload.folder_id is not None else preferences.get("folder_id")
     if target_folder_id is not None:
         folder = (await db.execute(select(Folder).where(Folder.id == target_folder_id, Folder.user_id == current_user.id))).scalar_one_or_none()
         if folder is None:
             target_folder_id = None
     try:
-        await consume_tts_quota(db, current_user.id, len(payload.text.strip()))
+        usage = await consume_tts_quota(db, current_user.id, len(payload.text.strip()), quota_cost)
     except ValueError as error:
         raise HTTPException(status_code=429, detail=str(error)) from error
     job = TTSJob(
@@ -161,7 +214,8 @@ async def create_tts_job(
         api_keys=personal_keys,
     )
     position = await tts_queue.enqueue(job)
-    return {"job_id": job.id, "queue_position": position, "message": "ساخت صدا شروع شد."}
+    remaining = max(0, usage.daily_limit-usage.used_today) if usage.daily_limit else None
+    return {"job_id": job.id, "queue_position": position, "message": "ساخت صدا شروع شد.", "quota_cost": quota_cost, "quota_remaining": remaining}
 
 
 @router.get("/preview/{voice}")
