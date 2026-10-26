@@ -206,6 +206,49 @@ class SourceMonitor(Base):
     )
 
 
+class InstagramInboxSender(Base):
+    """An Instagram sender that may be linked to one Komod account."""
+    __tablename__ = "instagram_inbox_senders"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    instagram_user_id: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
+    username: Mapped[Optional[str]] = mapped_column(String(255))
+    telegram_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    pairing_code: Mapped[str] = mapped_column(String(12), unique=True, nullable=False, index=True)
+    approved: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    blocked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    save_to_library: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    pairing_message_sent: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    received_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    forwarded_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_message_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+
+class InstagramInboxEvent(Base):
+    """Minimal, deduplicated record of a shared Instagram post."""
+    __tablename__ = "instagram_inbox_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    sender_id: Mapped[int] = mapped_column(
+        ForeignKey("instagram_inbox_senders.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    event_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    shared_url: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="pending", nullable=False, index=True)
+    import_job_id: Mapped[Optional[str]] = mapped_column(String(64), index=True)
+    error: Mapped[Optional[str]] = mapped_column(Text)
+    received_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    queued_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+    __table_args__ = (Index("idx_instagram_event_sender_status", sender_id, status),)
+
+
 class TTSVoicePreview(Base):
     """A server-wide cached voice sample shared by every user."""
     __tablename__ = "tts_voice_previews"

@@ -138,6 +138,14 @@ class Settings(BaseSettings):
     google_picker_api_key: str = Field("", alias="GOOGLE_PICKER_API_KEY")
     google_picker_app_id: str = Field("", alias="GOOGLE_PICKER_APP_ID")
 
+    # Instagram Messaging webhook. The access token and account id are only
+    # needed for sending the one-time pairing instructions back in Instagram.
+    instagram_app_secret: str = Field("", alias="INSTAGRAM_APP_SECRET")
+    instagram_webhook_verify_token: str = Field("", alias="INSTAGRAM_WEBHOOK_VERIFY_TOKEN")
+    instagram_access_token: str = Field("", alias="INSTAGRAM_ACCESS_TOKEN")
+    instagram_account_id: str = Field("", alias="INSTAGRAM_ACCOUNT_ID")
+    instagram_graph_version: str = Field("v26.0", alias="INSTAGRAM_GRAPH_VERSION")
+
     # Gemini text-to-speech. Keep these keys on the server; they must never be
     # returned by an API endpoint or embedded in the web bundle.
     gemini_api_keys_str: str = Field("", alias="GEMINI_API_KEYS")

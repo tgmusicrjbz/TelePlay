@@ -13,6 +13,7 @@ from .stt import router as stt_router
 from .packs import router as packs_router
 from .bot_messages import router as bot_messages_router
 from .admin_groups import router as admin_groups_router
+from .instagram import router as instagram_router
 
-__all__ = ["files_router", "folders_router", "streaming_router", "auth_router", "tv_router", "playlists_router", "accounts_router", "tts_router", "stt_router", "packs_router", "bot_messages_router", "admin_groups_router"]
+__all__ = ["files_router", "folders_router", "streaming_router", "auth_router", "tv_router", "playlists_router", "accounts_router", "tts_router", "stt_router", "packs_router", "bot_messages_router", "admin_groups_router", "instagram_router"]
 

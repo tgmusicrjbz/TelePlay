@@ -28,7 +28,7 @@ from .drive_importer import drive_importer
 from .tts import tts_queue
 from .stt import stt_queue
 from .monitoring import source_monitor_service, telegram_monitor_pool
-from .routers import files_router, folders_router, streaming_router, auth_router, tv_router, playlists_router, accounts_router, tts_router, stt_router, packs_router, bot_messages_router, admin_groups_router
+from .routers import files_router, folders_router, streaming_router, auth_router, tv_router, playlists_router, accounts_router, tts_router, stt_router, packs_router, bot_messages_router, admin_groups_router, instagram_router
 from .routers.delivery import router as delivery_router
 
 settings = get_settings()
@@ -237,6 +237,7 @@ app.include_router(packs_router, prefix="/api")
 app.include_router(bot_messages_router, prefix="/api")
 app.include_router(admin_groups_router, prefix="/api")
 app.include_router(delivery_router, prefix="/api")
+app.include_router(instagram_router, prefix="/api")
 
 
 

@@ -35,6 +35,7 @@ from .gemini_keys import decrypt_user_keys
 from .link_captions import render_link_caption
 from .group_tools import consume_group_quota, get_group_usage, get_group_usage_breakdown, get_or_create_group_settings, get_group_voice, set_group_voice, is_global_admin
 from .bot_messages import bot_message
+from .instagram_inbox import pair_sender_with_telegram
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -1849,6 +1850,32 @@ async def login_command(client, message: Message):
     )
 
     return
+
+
+@tg_client.on_message(filters.command("instagram") & filters.private)
+async def instagram_pair_command(client, message: Message):
+    """Link an Instagram scoped sender id to this Telegram account."""
+    await get_or_create_user(
+        message.from_user.id,
+        message.from_user.username,
+        message.from_user.first_name,
+        message.from_user.last_name,
+    )
+    if len(message.command) < 2:
+        await message.reply(
+            "کد اتصال را بعد از دستور بفرست. نمونه:\n`/instagram ABCD2345`"
+        )
+        return
+    status, _ = await pair_sender_with_telegram(message.command[1], message.from_user.id)
+    replies = {
+        "invalid": "❌ کد اتصال معتبر نیست یا منقضی شده است.",
+        "blocked": "⛔ این حساب اینستاگرام مسدود شده است.",
+        "user_unavailable": "❌ حساب کمدت فعال نیست؛ ابتدا /start را بزن.",
+        "already_linked": "❌ این حساب اینستاگرام قبلاً به حساب دیگری وصل شده است.",
+        "pending_approval": "✅ حساب‌ها به هم وصل شدند. پس از تأیید مدیر، پست برایت ارسال می‌شود.",
+        "active": "✅ اتصال فعال شد. پست‌های تأییدشده وارد صف ارسال تلگرام شدند.",
+    }
+    await message.reply(replies[status])
 
 @tg_client.on_message(filters.command("logout_all") & filters.private)
 async def logout_all_command(client, message: Message):
