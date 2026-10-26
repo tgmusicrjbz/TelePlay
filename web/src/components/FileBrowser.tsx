@@ -3,8 +3,8 @@
  */
 import { lazy, Suspense, useEffect, useCallback, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { FolderPlus, Folder as FolderIcon, Grid, LayoutGrid, List, Search, ChevronRight, ChevronDown, Home, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, StickyNote, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ChevronUp, Plus, CheckSquare, Square, ListChecks, ListPlus, Upload, Star, RefreshCw, Link2, DownloadCloud, Download, Send, Eye, EyeOff, Minus, Play, Tags, Cloud, CloudOff, AudioLines, FileAudio, Sparkles, BookmarkPlus, Combine } from 'lucide-react';
-import { api, useFiles, useFolders, useFolderTree, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useActivityFeed, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile, useImportLink, useTagSettings, useUnlockVault, useWorkspaces, sendFilesToTelegram, useTTSJobs, useSTTJobs, SavedFilter, useSavedFilters, useUpdateSavedFilters, usePacks, useExpandSmartSearch } from '../lib/api';
+import { FolderPlus, Folder as FolderIcon, Grid, LayoutGrid, List, Search, ChevronRight, ChevronDown, Home, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, StickyNote, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ArrowDownUp, ChevronUp, Plus, CheckSquare, Square, ListChecks, ListPlus, Upload, Star, RefreshCw, Link2, DownloadCloud, Download, Send, Eye, EyeOff, Minus, Play, Tags, Cloud, CloudOff, AudioLines, FileAudio, Sparkles, BookmarkPlus, Combine } from 'lucide-react';
+import { api, useFiles, useFolders, useFolderTree, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useActivityFeed, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile, useImportLink, useTagSettings, useUnlockVault, useWorkspaces, sendFilesToTelegram, useTTSJobs, useSTTJobs, SavedFilter, useSavedFilters, useUpdateSavedFilters, usePacks, useExpandSmartSearch, formatFileSize } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { cacheAllTextNotes, queueOfflineText, saveFileOffline } from '../lib/offline';
 import FileCard from './FileCard';
@@ -68,6 +68,11 @@ const mergeImportStatuses=(current:ImportStatus[],incoming:ImportStatus[])=>{
     return Array.from(merged.values());
 };
 type DriveEntry={id:string;name:string;mimeType:string;size?:string;modifiedTime?:string;thumbnailLink?:string};
+type DriveViewMode='list'|'grid'|'dense';
+type DriveTypeFilter='all'|'folder'|'image'|'video'|'audio'|'document';
+type DriveSort='name'|'modified'|'size'|'type';
+const driveEntryKind=(entry:DriveEntry):DriveTypeFilter=>entry.mimeType==='application/vnd.google-apps.folder'?'folder':entry.mimeType.startsWith('image/')?'image':entry.mimeType.startsWith('video/')?'video':entry.mimeType.startsWith('audio/')?'audio':'document';
+const driveKindLabel:Record<DriveTypeFilter,string>={all:'همه',folder:'پوشه',image:'عکس',video:'ویدیو',audio:'صدا',document:'سند و فایل'};
 type DriveAccount={email:string;mode:'full'|'picker'};
 type DriveConnection={
     configured:boolean; full_configured:boolean; picker_configured:boolean;
@@ -191,7 +196,12 @@ export default function FileBrowser() {
     const [driveConnection,setDriveConnection]=useState<DriveConnection|null>(null);
     const [driveConnecting,setDriveConnecting]=useState(false);
     const [driveEntries,setDriveEntries]=useState<DriveEntry[]>([]);
-    const [driveFoldersVisible,setDriveFoldersVisible]=useState(true);
+    const [driveBrowserVisible,setDriveBrowserVisible]=useState(()=>localStorage.getItem('komod-drive-browser-visible')==='1');
+    const [driveViewMode,setDriveViewMode]=useState<DriveViewMode>(()=>{const saved=localStorage.getItem('komod-drive-view');return saved==='grid'||saved==='dense'?saved:'list'});
+    const [driveTypeFilter,setDriveTypeFilter]=useState<DriveTypeFilter>('all');
+    const [driveQuery,setDriveQuery]=useState('');
+    const [driveSort,setDriveSort]=useState<DriveSort>('name');
+    const [driveSortDirection,setDriveSortDirection]=useState<'asc'|'desc'>('asc');
     const [drivePath,setDrivePath]=useState<Array<{id:string;name:string}>>([{id:'root',name:'درایو من'}]);
     const [driveSelected,setDriveSelected]=useState<Set<string>>(new Set());
     const [driveSelectedDetails,setDriveSelectedDetails]=useState<Record<string,DriveEntry>>({});
@@ -241,6 +251,15 @@ export default function FileBrowser() {
         } catch { /* incomplete URL */ }
         return null;
     }, [importUrls]);
+    const visibleDriveEntries=useMemo(()=>{
+        const query=driveQuery.trim().toLocaleLowerCase('fa');
+        return driveEntries.filter(item=>(driveTypeFilter==='all'||driveEntryKind(item)===driveTypeFilter)&&(!query||item.name.toLocaleLowerCase('fa').includes(query))).sort((a,b)=>{
+            const folderOrder=Number(driveEntryKind(b)==='folder')-Number(driveEntryKind(a)==='folder');
+            if(folderOrder&&driveTypeFilter==='all')return folderOrder;
+            const value=driveSort==='name'?a.name.localeCompare(b.name,'fa'):driveSort==='modified'?String(a.modifiedTime||'').localeCompare(String(b.modifiedTime||'')):driveSort==='size'?Number(a.size||0)-Number(b.size||0):driveEntryKind(a).localeCompare(driveEntryKind(b),'fa')||a.name.localeCompare(b.name,'fa');
+            return driveSortDirection==='asc'?value:-value;
+        });
+    },[driveEntries,driveQuery,driveTypeFilter,driveSort,driveSortDirection]);
     useEffect(() => {
         const syncConnectionMode = () => setForceOffline(localStorage.getItem('komod-force-offline') === '1');
         window.addEventListener('komod-connectivity-mode', syncConnectionMode);
@@ -860,7 +879,8 @@ export default function FileBrowser() {
     };
     const loadDriveFolder=async(id='root',name='درایو من',reset=false)=>{setDriveLoading(true);try{const {data}=await api.get<DriveEntry[]>('/files/drive/browse',{params:{folder_id:id}});setDriveEntries(data);setDrivePath(previous=>{if(reset||id==='root')return[{id:'root',name:'درایو من'}];const existing=previous.findIndex(item=>item.id===id);return existing>=0?previous.slice(0,existing+1):[...previous,{id,name}]})}catch(error:any){addToast(error?.response?.data?.detail||'خواندن فایل‌های گوگل درایو انجام نشد.','error')}finally{setDriveLoading(false)}};
     const fetchDriveConnection=async()=>{const {data}=await api.get<DriveConnection>('/files/drive/status');setDriveConnection(data);return data};
-    const openImportDrive = () => { setDriveFolder(incomingFolderId);setDriveSelected(new Set());setDriveSelectedDetails({});setDriveSendToTelegram(false);setDriveDestinationIds([]);setShowAddMenu(false);setShowImportDrive(true);void (async()=>{try{const data=await fetchDriveConnection();if(data.connected&&data.mode==='full')void loadDriveFolder('root','درایو من',true)}catch{setDriveConnection(null)}})() };
+    const openImportDrive = () => { setDriveFolder(incomingFolderId);setDriveSelected(new Set());setDriveSelectedDetails({});setDriveSendToTelegram(false);setDriveDestinationIds([]);setShowAddMenu(false);setShowImportDrive(true);void (async()=>{try{const data=await fetchDriveConnection();if(data.connected&&data.mode==='full'&&driveBrowserVisible)void loadDriveFolder('root','درایو من',true)}catch{setDriveConnection(null)}})() };
+    const toggleDriveBrowser=async()=>{const next=!driveBrowserVisible;setDriveBrowserVisible(next);localStorage.setItem('komod-drive-browser-visible',next?'1':'0');if(next&&driveConnection?.mode==='full')await loadDriveFolder('root','درایو من',true)};
     const connectGoogleDrive=async(mode:'full'|'picker'='picker')=>{setDriveConnecting(true);try{const {data}=await api.get<{url:string}>('/files/drive/connect',{params:{mode}});window.location.href=data.url}catch(error:any){setDriveConnecting(false);addToast(error?.response?.data?.detail||'شروع اتصال گوگل انجام نشد.','error')}};
     const openGoogleDrivePicker=async()=>{
         if(!driveConnection?.picker_configured){addToast('انتخاب‌گر عمومی گوگل هنوز روی سرور تنظیم نشده است.','error');return}
@@ -886,8 +906,8 @@ export default function FileBrowser() {
             picker.setVisible(true);
         }catch(error:any){addToast(error?.response?.data?.detail||'بازکردن انتخاب‌گر گوگل انجام نشد.','error')}finally{setDriveLoading(false)}
     };
-    const switchGoogleDrive=async(email:string,mode:'full'|'picker')=>{try{await api.post('/files/drive/switch',{email,mode});const data=await fetchDriveConnection();setDriveSelected(new Set());setDriveSelectedDetails({});setDriveEntries([]);if(data.mode==='full')await loadDriveFolder('root','درایو من',true);addToast('حساب گوگل عوض شد.')}catch(error:any){addToast(error?.response?.data?.detail||'تغییر حساب انجام نشد.','error')}};
-    const disconnectGoogleDrive=async()=>{if(!driveConnection?.email||!driveConnection.mode)return;try{await api.delete('/files/drive/disconnect',{params:{email:driveConnection.email,mode:driveConnection.mode}});const data=await fetchDriveConnection();setDriveEntries([]);setDriveSelected(new Set());setDriveSelectedDetails({});if(data.connected&&data.mode==='full')await loadDriveFolder('root','درایو من',true);addToast('حساب گوگل خارج شد.')}catch(error:any){addToast(error?.response?.data?.detail||'خروج از حساب انجام نشد.','error')}};
+    const switchGoogleDrive=async(email:string,mode:'full'|'picker')=>{try{await api.post('/files/drive/switch',{email,mode});const data=await fetchDriveConnection();setDriveSelected(new Set());setDriveSelectedDetails({});setDriveEntries([]);if(data.mode==='full'&&driveBrowserVisible)await loadDriveFolder('root','درایو من',true);addToast('حساب گوگل عوض شد.')}catch(error:any){addToast(error?.response?.data?.detail||'تغییر حساب انجام نشد.','error')}};
+    const disconnectGoogleDrive=async()=>{if(!driveConnection?.email||!driveConnection.mode)return;try{await api.delete('/files/drive/disconnect',{params:{email:driveConnection.email,mode:driveConnection.mode}});const data=await fetchDriveConnection();setDriveEntries([]);setDriveSelected(new Set());setDriveSelectedDetails({});if(data.connected&&data.mode==='full'&&driveBrowserVisible)await loadDriveFolder('root','درایو من',true);addToast('حساب گوگل خارج شد.')}catch(error:any){addToast(error?.response?.data?.detail||'خروج از حساب انجام نشد.','error')}};
     const openSpeechTools = (mode:'tts'|'stt') => {
         localStorage.setItem('komod-settings-target','tts');
         localStorage.setItem('komod-speech-mode',mode);
@@ -1797,11 +1817,11 @@ export default function FileBrowser() {
                         <div className="rounded-2xl border border-white/[.08] bg-dark-950/35 p-4">
                             <strong className="text-sm">مرور کامل درایو</strong>
                             <p className="mt-1 text-xs leading-6 text-dark-400">ویژه حساب‌هایی که در فهرست تست گوگل تأیید شده‌اند.</p>
-                            {driveConnection?.mode==='full'?<button type="button" onClick={()=>void loadDriveFolder('root','درایو من',true)} className="btn-secondary mt-3 w-full">نمایش پوشه‌ها</button>:<button type="button" disabled={!driveConnection?.full_configured||driveConnecting} onClick={()=>void connectGoogleDrive('full')} className="btn-secondary mt-3 w-full disabled:opacity-40">اتصال کامل آزمایشی</button>}
+                            {driveConnection?.mode==='full'?<button type="button" onClick={()=>void toggleDriveBrowser()} className={`mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold transition ${driveBrowserVisible?'bg-white/[.06] text-dark-200 hover:bg-white/[.1]':'bg-primary-500/15 text-primary-100 hover:bg-primary-500/25'}`}>{driveBrowserVisible?<EyeOff className="h-4 w-4"/>:<Eye className="h-4 w-4"/>}{driveBrowserVisible?'پنهان‌کردن محتویات درایو':'نمایش محتویات درایو'}</button>:<button type="button" disabled={!driveConnection?.full_configured||driveConnecting} onClick={()=>void connectGoogleDrive('full')} className="btn-secondary mt-3 w-full disabled:opacity-40">اتصال کامل آزمایشی</button>}
                         </div>
                     </div>
                     {driveSelected.size>0&&<div className="mt-3 rounded-2xl border border-emerald-400/15 bg-emerald-500/[.06] p-3"><strong className="text-sm text-emerald-200">{driveSelected.size.toLocaleString('fa-IR')} فایل انتخاب شده</strong><div className="mt-2 flex flex-wrap gap-1">{Object.values(driveSelectedDetails).slice(0,8).map(item=><span key={item.id} dir="auto" className="max-w-40 truncate rounded-lg bg-white/[.06] px-2 py-1 text-[11px] text-dark-300">{item.name}</span>)}</div></div>}
-                    {driveConnection?.mode==='full'&&<div className="mt-4">
+                    {driveConnection?.mode==='full'&&driveBrowserVisible&&<div className="mt-4 rounded-2xl border border-white/[.07] bg-dark-950/20 p-2.5 sm:p-3">
                         <div className="flex flex-wrap items-center gap-1 text-xs text-dark-400"><div className="min-w-0 flex-1">{drivePath.map((item,index)=><button type="button" key={item.id} onClick={()=>void loadDriveFolder(item.id,item.name)} className="rounded-lg px-2 py-1 hover:bg-white/[.05] hover:text-white">{index?'‹ ':''}{item.name}</button>)}</div><button type="button" onClick={()=>setDriveFoldersVisible(value=>!value)} className={`flex min-h-8 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] ${driveFoldersVisible?'bg-white/[.06] text-dark-300':'bg-primary-500/12 text-primary-200'}`}>{driveFoldersVisible?<EyeOff className="h-3.5 w-3.5"/>:<Eye className="h-3.5 w-3.5"/>}{driveFoldersVisible?'مخفی‌کردن پوشه‌ها':'نمایش پوشه‌ها'}</button></div>
                         <div className="mt-2 max-h-64 space-y-1 overflow-y-auto rounded-2xl border border-white/[.07] bg-dark-950/35 p-2">{driveLoading?<div className="py-10 text-center text-sm text-dark-500">در حال خواندن درایو…</div>:driveEntries.filter(item=>driveFoldersVisible||item.mimeType!=='application/vnd.google-apps.folder').map(item=>{const folder=item.mimeType==='application/vnd.google-apps.folder',selected=driveSelected.has(item.id);return <button type="button" key={item.id} onClick={()=>folder?void loadDriveFolder(item.id,item.name):setDriveSelected(previous=>{const next=new Set(previous);if(next.has(item.id)){next.delete(item.id);setDriveSelectedDetails(details=>{const copy={...details};delete copy[item.id];return copy})}else{next.add(item.id);setDriveSelectedDetails(details=>({...details,[item.id]:item}))}return next})} className={`flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-right transition ${selected?'bg-primary-500/15 text-primary-100':'hover:bg-white/[.045]'}`}><span className={`flex h-8 w-8 items-center justify-center rounded-lg ${folder?'bg-amber-500/10 text-amber-300':'bg-primary-500/10 text-primary-300'}`}>{folder?<FolderIcon className="h-4 w-4"/>:selected?<CheckSquare className="h-4 w-4"/>:<Square className="h-4 w-4"/>}</span><span dir="auto" className="min-w-0 flex-1 truncate text-sm">{item.name}</span></button>})}{!driveLoading&&!driveEntries.filter(item=>driveFoldersVisible||item.mimeType!=='application/vnd.google-apps.folder').length&&<div className="py-10 text-center text-sm text-dark-500">{driveFoldersVisible?'این پوشه خالی است.':'در این مسیر فایلی بیرون از پوشه‌ها نیست.'}</div>}</div>
                     </div>}
