@@ -16,7 +16,7 @@ import AdminGroupsSettings from './AdminGroupsSettings';
 import { useAppStore } from '../lib/store';
 import { folderTreeLabel } from '../lib/folderTreeLabel';
 
-type SettingsView = 'home' | 'accounts' | 'security' | 'sessions' | 'access' | 'storage' | 'files' | 'appearance' | 'markdown' | 'connection' | 'admin' | 'tags' | 'transfers' | 'tts';
+type SettingsView = 'home' | 'accounts' | 'security' | 'sessions' | 'access' | 'storage' | 'files' | 'appearance' | 'markdown' | 'connection' | 'admin' | 'admin-users' | 'admin-groups' | 'admin-messages' | 'tags' | 'transfers' | 'tts';
 type SettingsHomeLayout = 'cards' | 'list' | 'compact';
 type Permission = 'read' | 'write';
 type SavedColor = { color: string; name: string };
@@ -264,6 +264,11 @@ export default function SettingsPage() {
     };
     const sectionLinks = settingsSectionLinks(view);
     const selectedSubsection = sectionLinks.some(item=>item.id===activeSubsection) ? activeSubsection : sectionLinks[0]?.id || null;
+    const visibleAdminUsers = useMemo(() => filteredAdminUsers.filter(item => {
+        if (selectedSubsection === 'admin-users-pending') return item.telegram_id < 0 && !item.is_active;
+        if (selectedSubsection === 'admin-users-disabled') return !item.is_active && item.telegram_id >= 0;
+        return item.is_active;
+    }), [filteredAdminUsers, selectedSubsection]);
     const { data: adminErrors = [] } = useAdminErrors(Boolean(user?.is_admin) && view === 'admin' && selectedSubsection === 'admin-health');
     const resolveAdminError = useResolveAdminError();
     const clearAdminErrors = useClearAdminErrors();
@@ -303,7 +308,7 @@ export default function SettingsPage() {
             </div>
         </header>
 
-        {sectionLinks.length>1&&<SectionJumpNav items={sectionLinks} active={selectedSubsection} onChange={setActiveSubsection} mobileGrid={view==='admin'}/>}
+        {sectionLinks.length>1&&<SectionJumpNav items={sectionLinks} active={selectedSubsection} onChange={setActiveSubsection} mobileGrid={view.startsWith('admin')}/>}
 
         {view === 'home' && <div className="space-y-5">
             <section className="overflow-hidden rounded-3xl border border-white/[.07] bg-gradient-to-bl from-primary-500/[.12] via-dark-900/80 to-dark-950/85 p-4 sm:p-5">
@@ -337,10 +342,12 @@ export default function SettingsPage() {
                 <SettingsButton layout={homeLayout} icon={<Download/>} title="نصب کمد" text="افزودن برنامه به صفحه اصلی این دستگاه" onClick={() => window.dispatchEvent(new Event('komod-install-request'))} />
             </SettingsGroup>
 
-            {user?.is_admin && <SettingsGroup title="مدیریت" text="تنظیمات فنی و کاربران" icon={<UserRoundCog/>} layout={homeLayout}>
+            {user?.is_admin && <SettingsGroup title="مدیریت" text="تنظیمات فنی، کاربران، گروه‌ها و ربات" icon={<UserRoundCog/>} layout={homeLayout}>
                 <SettingsButton layout={homeLayout} icon={<Globe2/>} title="اتصال برنامه" text="آدرس اصلی یا مسیر HTTPS جایگزین" onClick={() => setView('connection')} />
-                <SettingsButton layout={homeLayout} icon={<UserRoundCog/>} title="مدیریت کاربران" text="وضعیت، محدودیت و مصرف کاربران" onClick={() => {setActiveSubsection('admin-users');setView('admin')}} />
-                <SettingsButton layout={homeLayout} icon={<MessageSquareText/>} title="پیام‌های ربات" text="ویرایش پاسخ دستورها، لینک‌ها و پردازش‌ها" onClick={() => {setActiveSubsection('admin-bot-messages');setView('admin')}} />
+                <SettingsButton layout={homeLayout} icon={<UserRoundCog/>} title="کاربران" text="درخواست‌ها، کاربران فعال، غیرفعال و افزودن کاربر" onClick={() => setView('admin-users')} />
+                <SettingsButton layout={homeLayout} icon={<Users/>} title="گروه‌ها" text="تأیید گروه‌ها، محدودیت‌ها و میزان مصرف" onClick={() => setView('admin-groups')} />
+                <SettingsButton layout={homeLayout} icon={<MessageSquareText/>} title="پیام‌های ربات" text="ویرایش پاسخ دستورها، لینک‌ها و پردازش‌ها" onClick={() => setView('admin-messages')} />
+                <SettingsButton layout={homeLayout} icon={<Gauge/>} title="گزارش و سلامت" text="آمار کلی، وضعیت سرویس‌ها و خطاها" onClick={() => setView('admin')} />
             </SettingsGroup>}
         </div>}
 
@@ -416,9 +423,18 @@ export default function SettingsPage() {
             </Card>
         </div>}
 
-        {view === 'admin' && user?.is_admin && <div className="space-y-4">
+        {view === 'admin-users' && user?.is_admin && <div className="space-y-4">
             {selectedSubsection==='admin-add'&&<Card id="admin-add" icon={<Plus/>} title="افزودن کاربر مجاز" subtitle="حذف دسترسی، فایل‌ها و اطلاعات قبلی کاربر را پاک نمی‌کند."><div className="mt-4 grid gap-2 sm:grid-cols-[1fr_1fr_auto]"><input dir="rtl" inputMode="numeric" value={newAdminTelegramId} onChange={event=>setNewAdminTelegramId(event.target.value.replace(/\D/g,''))} className="input text-right" placeholder="آیدی عددی تلگرام"/><input value={newAdminName} onChange={event=>setNewAdminName(event.target.value)} className="input" placeholder="نام دلخواه (اختیاری)"/><button disabled={addAdminUser.isPending||!newAdminTelegramId} onClick={()=>void addAuthorizedUser()} className="btn-primary min-h-11 px-5 disabled:opacity-40">افزودن</button></div></Card>}
             {adminUsersError && <div className="flex items-center gap-3 rounded-2xl border border-red-500/20 bg-red-500/[.07] p-4"><p className="min-w-0 flex-1 text-sm text-red-200">فهرست کاربران بارگذاری نشد. اتصال را بررسی کن و دوباره تلاش کن.</p><button className="btn-secondary shrink-0 px-3 py-2 text-xs" onClick={()=>void Promise.all([refetchAdminUsers(),refetchAdminStats()])}>تلاش دوباره</button></div>}
+            {selectedSubsection?.startsWith('admin-users-')&&<Card id={selectedSubsection} icon={<UserRoundCog/>} title={selectedSubsection==='admin-users-pending'?'درخواست‌های منتظر تأیید':selectedSubsection==='admin-users-disabled'?'کاربران غیرفعال':'کاربران فعال'}>
+                <label className="relative mt-4 block min-w-0"><Search className="pointer-events-none absolute right-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-dark-500"/><input value={adminQuery} onChange={event => setAdminQuery(event.target.value)} className="input w-full !pr-10" placeholder="جست‌وجو در همین بخش"/></label>
+                <div className="admin-users-grid mt-4 grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2">{visibleAdminUsers.map(item => <AdminRow key={item.id} item={item} onSave={(display_name) => updateAdmin.mutateAsync({id:item.id,display_name})} onQuota={(tts_daily_limit,tts_max_chars,stt_daily_limit,stt_max_seconds)=>updateAdmin.mutateAsync({id:item.id,tts_daily_limit,tts_max_chars,stt_daily_limit,stt_max_seconds})} onToggle={() => item.is_active ? removeAdminUser.mutateAsync(item.id) : updateAdmin.mutateAsync({id:item.id,is_active:true})}/>)}</div>
+                {adminUsersLoading && <div className="mt-4 grid gap-3 xl:grid-cols-2">{[0,1,2,3].map(item=><div key={item} className="h-48 animate-pulse rounded-2xl bg-dark-800/60"/>)}</div>}
+                {!adminUsersLoading && !adminUsersError && !visibleAdminUsers.length && <p className="py-10 text-center text-sm text-dark-500">موردی در این بخش پیدا نشد.</p>}
+            </Card>}
+        </div>}
+
+        {view === 'admin' && user?.is_admin && <div className="space-y-4">
             {selectedSubsection==='admin-summary'&&<section id="admin-summary" className="rounded-2xl border border-white/[.07] bg-dark-900/70 p-4 sm:p-5"><div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary-500/10 text-primary-300"><Gauge className="h-5 w-5"/></span><div><h2 className="font-bold">گزارش کلی</h2><p className="mt-1 text-xs text-dark-400">نمای سریع کاربران، فایل‌ها و مصرف ابزارهای هوش مصنوعی</p></div></div><div className="mt-4 grid gap-3 md:grid-cols-2"><div className="rounded-2xl bg-gradient-to-br from-primary-500/15 to-dark-800/60 p-4"><p className="text-xs text-dark-400">فضای کاربران</p><strong className="mt-2 block text-2xl text-primary-100">{adminStatsLoading?'…':formatFileSize(adminStats?.total_size||0)}</strong><div className="mt-4 grid grid-cols-2 gap-2"><AdminStat label="کاربر فعال" value={adminStatsLoading?'…':(adminStats?.active_users||0).toLocaleString('fa-IR')} icon={<Users/>}/><AdminStat label="کل فایل‌ها" value={adminStatsLoading?'…':(adminStats?.total_files||0).toLocaleString('fa-IR')} icon={<FileStack/>}/></div></div><div className="rounded-2xl border border-white/[.06] bg-dark-800/45 p-4"><p className="text-xs text-dark-400">مصرف متن و صدا</p><div className="mt-3 grid grid-cols-2 gap-2"><AdminStat label="TTS امروز" value={adminStatsLoading?'…':(adminStats?.tts_jobs_today||0).toLocaleString('fa-IR')} icon={<AudioLines/>}/><AdminStat label="STT امروز" value={adminStatsLoading?'…':(adminStats?.stt_jobs_today||0).toLocaleString('fa-IR')} icon={<FileText/>}/><AdminStat label="کل TTS" value={adminStatsLoading?'…':(adminStats?.tts_total_jobs||0).toLocaleString('fa-IR')} icon={<Gauge/>}/><AdminStat label="کل STT" value={adminStatsLoading?'…':(adminStats?.stt_total_jobs||0).toLocaleString('fa-IR')} icon={<FileStack/>}/></div></div></div></section>}
             {selectedSubsection==='admin-health'&&<section id="admin-health" className="rounded-2xl border border-white/[.07] bg-dark-900/70 p-4 sm:p-5">
                 <div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary-500/10 text-primary-300"><Activity className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h2 className="font-bold">سلامت سرویس‌ها</h2><p className="mt-1 text-xs text-dark-400">وضعیت زندهٔ بخش‌های اصلی و صف‌های پردازش</p></div><button className="btn-icon" disabled={adminHealthFetching} onClick={()=>void refetchAdminHealth()} aria-label="تازه‌سازی وضعیت"><RefreshCw className={`h-4 w-4 ${adminHealthFetching?'animate-spin':''}`}/></button></div>
@@ -430,23 +446,16 @@ export default function SettingsPage() {
                     <div className="mt-4 rounded-2xl border border-white/[.06] bg-dark-800/40 p-4"><div className="flex items-center justify-between gap-3"><div><h3 className="text-sm font-bold">خطاهای قابل پیگیری</h3><p className="mt-1 text-xs text-dark-500">مسیر و پیام خطا برای بررسی دقیق‌تر نمایش داده می‌شود.</p></div><div className="flex shrink-0 items-center gap-1.5"><span className="rounded-full bg-dark-700 px-2.5 py-1 text-xs">{adminErrors.filter(item=>!item.resolved).length.toLocaleString('fa-IR')}</span>{adminErrors.length>0&&<button disabled={clearAdminErrors.isPending} onClick={()=>void clearAdminErrors.mutateAsync()} className="btn-icon h-8 w-8 text-red-300" title="پاک‌کردن همه خطاها"><Trash2 className="h-3.5 w-3.5"/></button>}</div></div>{adminErrors.length?<div className="mt-3 max-h-64 space-y-2 overflow-y-auto">{adminErrors.map(item=><div key={item.error_id} className={`flex items-center gap-3 rounded-xl p-3 ${item.resolved?'bg-dark-950/25 opacity-60':'bg-red-500/[.06]'}`}><code dir="ltr" className="shrink-0 rounded-lg bg-black/20 px-2 py-1 text-[10px] text-red-200">{item.error_id}</code><div className="min-w-0 flex-1"><strong dir="ltr" className="block truncate text-xs">{item.method} {item.path}</strong><small className="block truncate text-dark-500">{item.message}</small></div>{!item.resolved&&<button className="btn-icon h-8 w-8" title="بررسی شد" onClick={()=>resolveAdminError.mutate(item.error_id)}><Check className="h-4 w-4"/></button>}</div>)}</div>:<p className="mt-3 text-sm text-emerald-300">خطای ثبت‌شده‌ای وجود ندارد.</p>}</div>
                 </>}
             </section>}
-            {selectedSubsection==='admin-users'&&<Card id="admin-users" icon={<UserRoundCog/>} title="کاربران کمد">
-                {adminUsers.some(item=>item.telegram_id<0&&!item.is_active)&&<div className="mt-4 flex items-center gap-3 rounded-xl border border-amber-400/20 bg-amber-500/[.08] p-3 text-xs text-amber-100"><span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 font-bold">{adminUsers.filter(item=>item.telegram_id<0&&!item.is_active).length.toLocaleString('fa-IR')}</span><span>درخواست ساخت حساب منتظر تأیید است. درخواست‌ها ابتدای فهرست آمده‌اند.</span></div>}
-                <label className="relative mt-4 block min-w-0"><Search className="pointer-events-none absolute right-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-dark-500"/><input value={adminQuery} onChange={event => setAdminQuery(event.target.value)} className="input w-full !pr-10" placeholder="جست‌وجو"/></label>
-                <div className="admin-users-grid mt-4 grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2">{filteredAdminUsers.map(item => <AdminRow key={item.id} item={item} onSave={(display_name) => updateAdmin.mutateAsync({id:item.id,display_name})} onQuota={(tts_daily_limit,tts_max_chars,stt_daily_limit,stt_max_seconds)=>updateAdmin.mutateAsync({id:item.id,tts_daily_limit,tts_max_chars,stt_daily_limit,stt_max_seconds})} onToggle={() => item.is_active ? removeAdminUser.mutateAsync(item.id) : updateAdmin.mutateAsync({id:item.id,is_active:true})}/>)}</div>
-                {adminUsersLoading && <div className="mt-4 grid gap-3 xl:grid-cols-2">{[0,1,2,3].map(item=><div key={item} className="h-48 animate-pulse rounded-2xl bg-dark-800/60"/>)}</div>}
-                {!adminUsersLoading && !adminUsersError && !filteredAdminUsers.length && <p className="py-10 text-center text-sm text-dark-500">کاربری با این مشخصات پیدا نشد.</p>}
-            </Card>}
-            {selectedSubsection==='admin-bot-messages'&&<BotMessagesSettings/>}
-            {selectedSubsection==='admin-groups'&&<AdminGroupsSettings/>}
         </div>}
+        {view === 'admin-messages' && user?.is_admin && <BotMessagesSettings/>}
+        {view === 'admin-groups' && user?.is_admin && <AdminGroupsSettings/>}
 
         {confirmation && <div className="fixed inset-0 z-[180] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={() => setConfirmation(null)}><div className="w-full max-w-sm rounded-2xl border border-white/10 bg-dark-900 p-5" onClick={event=>event.stopPropagation()}><h2 className="text-lg font-bold">{confirmation==='all'?'خروج از همه دستگاه‌ها؟':'از این دستگاه خارج می‌شی؟'}</h2><p className="mt-2 text-sm text-dark-300">فایل‌ها و اطلاعات کمد حذف نمی‌شوند.</p><div className="mt-5 flex gap-2"><button className="flex-1 rounded-xl bg-red-500 px-4 py-2.5" onClick={() => confirmation==='all'?void logoutEverywhere():void logoutThisDevice()}>خروج</button><button className="btn-secondary flex-1" onClick={()=>setConfirmation(null)}>بی‌خیال</button></div></div></div>}
     </div></SettingsSectionContext.Provider>;
 }
 
-function viewTitle(view: SettingsView) { return ({ home:'تنظیمات', accounts:'حساب‌ها', security:'ورود و امنیت', sessions:'مدیریت نشست‌ها', access:'دسترسی و اشتراک‌گذاری', storage:'فضای ذخیره‌سازی', files:'فایل‌ها و مقصدها', appearance:'ظاهر برنامه', markdown:'مطالعه و Markdown', connection:'اتصال برنامه', admin:'مدیریت کاربران', tags:'مدیریت تگ‌ها', transfers:'مرکز انتقال‌ها', tts:'متن و صدا' })[view]; }
-function viewSubtitle(view: SettingsView) { return ({ home:'', accounts:'حساب‌های ذخیره‌شده روی این دستگاه.', security:'رمز و روش ورودت را تنظیم کن.', sessions:'ورودهای فعال حساب فعلی را مدیریت کن.', access:'مشخص کن چه کسی کمدت را ببیند یا داخلش فایل ذخیره کند.', storage:'فضای فایل‌ها و شیوه حذف را مدیریت کن.', files:'مقصد فایل‌های تازه و لینک‌ها را انتخاب کن.', appearance:'رنگ و حالت نمایش کمد را تنظیم کن.', markdown:'ظاهر و رفتار پیش‌فرض فایل‌های متنی را تنظیم کن.', connection:'آدرس اصلی و مسیرهای جایگزین HTTPS را مدیریت کن.', admin:'کاربران کمد را مدیریت کن.', tags:'تگ‌های دلخواه و نمایش آن‌ها را تنظیم کن.', transfers:'همه انتقال‌های فعال و اخیر را یکجا مدیریت کن.', tts:'ساخت صدا و استخراج متن.' })[view]; }
+function viewTitle(view: SettingsView) { return ({ home:'تنظیمات', accounts:'حساب‌ها', security:'ورود و امنیت', sessions:'مدیریت نشست‌ها', access:'دسترسی و اشتراک‌گذاری', storage:'فضای ذخیره‌سازی', files:'فایل‌ها و مقصدها', appearance:'ظاهر برنامه', markdown:'مطالعه و Markdown', connection:'اتصال برنامه', admin:'گزارش و سلامت', 'admin-users':'مدیریت کاربران', 'admin-groups':'مدیریت گروه‌ها', 'admin-messages':'پیام‌های ربات', tags:'مدیریت تگ‌ها', transfers:'مرکز انتقال‌ها', tts:'متن و صدا' })[view]; }
+function viewSubtitle(view: SettingsView) { return ({ home:'', accounts:'حساب‌های ذخیره‌شده روی این دستگاه.', security:'رمز و روش ورودت را تنظیم کن.', sessions:'ورودهای فعال حساب فعلی را مدیریت کن.', access:'مشخص کن چه کسی کمدت را ببیند یا داخلش فایل ذخیره کند.', storage:'فضای فایل‌ها و شیوه حذف را مدیریت کن.', files:'مقصد فایل‌های تازه و لینک‌ها را انتخاب کن.', appearance:'رنگ و حالت نمایش کمد را تنظیم کن.', markdown:'ظاهر و رفتار پیش‌فرض فایل‌های متنی را تنظیم کن.', connection:'آدرس اصلی و مسیرهای جایگزین HTTPS را مدیریت کن.', admin:'آمار، سرویس‌ها و خطاهای قابل پیگیری.', 'admin-users':'درخواست‌ها و دسترسی کاربران را در بخش‌های جدا مدیریت کن.', 'admin-groups':'تأیید، محدودیت و مصرف گروه‌ها.', 'admin-messages':'متن پاسخ‌های ربات را ویرایش کن.', tags:'تگ‌های دلخواه و نمایش آن‌ها را تنظیم کن.', transfers:'همه انتقال‌های فعال و اخیر را یکجا مدیریت کن.', tts:'ساخت صدا و استخراج متن.' })[view]; }
 function securityEventLabel(type: string) { return ({ login_success:'ورود موفق به حساب', login_failed:'تلاش ناموفق برای ورود', credentials_updated:'تغییر اطلاعات ورود', two_factor_enabled:'فعال‌سازی تأیید دومرحله‌ای', two_factor_disabled:'غیرفعال‌سازی تأیید دومرحله‌ای', sessions_revoked_all:'خروج از همه نشست‌ها', sessions_revoked_others:'خروج از نشست‌های دیگر', session_revoked:'لغو یک نشست', public_link_created:'ساخت پیوند عمومی', public_link_revoked:'لغو پیوند عمومی', public_links_revoked:'لغو گروهی پیوندهای عمومی', public_link_unlocked:'باز شدن پیوند رمزدار', public_link_password_failed:'رمز اشتباه برای پیوند عمومی', public_view:'مشاهده پیوند عمومی', account_backup_restored:'بازیابی نسخه پشتیبان حساب', workspace_grant_updated:'تغییر دسترسی اشتراک‌گذاری', workspace_grant_revoked:'لغو دسترسی اشتراک‌گذاری', vault_password_updated:'تغییر رمز گاوصندوق', vault_unlocked:'باز شدن گاوصندوق', vault_unlock_failed:'رمز اشتباه گاوصندوق' } as Record<string,string>)[type] || 'رویداد امنیتی'; }
 function permissionLabel(permission: 'owner' | Permission) { return permission === 'owner' ? 'کمد خودم' : permission === 'write' ? 'مشاهده و ذخیره' : 'فقط مشاهده'; }
 function PermissionSelect({ value, onChange }:{ value:Permission; onChange:(value:Permission)=>void }) { return <CustomSelect value={value} onChange={onChange} options={[{value:'read',label:'👁️ فقط مشاهده'},{value:'write',label:'📥 مشاهده و ذخیره'}]}/>; }
@@ -501,7 +510,8 @@ function settingsSectionLinks(view:SettingsView):Array<{id:string;label:string}>
         storage:[{id:'storage-overview',label:'نمای کلی'},{id:'storage-channel',label:'فضای شخصی'},{id:'storage-delete',label:'حذف فایل'}],
         appearance:[{id:'appearance-color',label:'رنگ کمد'},{id:'appearance-display',label:'موارد قابل نمایش'}],
         tags:[{id:'tags-library',label:'تگ‌های من'},{id:'tags-display',label:'نمایش تگ‌ها'}],
-        admin:[{id:'admin-add',label:'افزودن کاربر'},{id:'admin-users',label:'فهرست کاربران'},{id:'admin-groups',label:'گروه‌ها'},{id:'admin-bot-messages',label:'پیام‌های ربات'},{id:'admin-summary',label:'گزارش کلی'},{id:'admin-health',label:'سلامت سرویس‌ها'}],
+        admin:[{id:'admin-summary',label:'گزارش کلی'},{id:'admin-health',label:'سلامت سرویس‌ها'}],
+        'admin-users':[{id:'admin-users-pending',label:'درخواست‌ها'},{id:'admin-users-active',label:'فعال‌ها'},{id:'admin-users-disabled',label:'غیرفعال‌ها'},{id:'admin-add',label:'افزودن کاربر'}],
     };
     return sections[view]||[];
 }

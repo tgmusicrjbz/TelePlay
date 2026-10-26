@@ -196,7 +196,13 @@ export default function FileBrowser() {
     const [driveConnection,setDriveConnection]=useState<DriveConnection|null>(null);
     const [driveConnecting,setDriveConnecting]=useState(false);
     const [driveEntries,setDriveEntries]=useState<DriveEntry[]>([]);
-    const [driveBrowserVisible,setDriveBrowserVisible]=useState(()=>localStorage.getItem('komod-drive-browser-visible')==='1');
+    const [driveBrowserVisible,setDriveBrowserVisible]=useState(()=>{
+        const saved=localStorage.getItem('komod-drive-browser-visible');
+        if(saved!==null)return saved==='1';
+        const legacy=localStorage.getItem('komod-drive-folders-visible');
+        if(legacy!==null){localStorage.setItem('komod-drive-browser-visible',legacy);localStorage.removeItem('komod-drive-folders-visible')}
+        return legacy==='1';
+    });
     const [driveViewMode,setDriveViewMode]=useState<DriveViewMode>(()=>{const saved=localStorage.getItem('komod-drive-view');return saved==='grid'||saved==='dense'?saved:'list'});
     const [driveTypeFilter,setDriveTypeFilter]=useState<DriveTypeFilter>('all');
     const [driveQuery,setDriveQuery]=useState('');
