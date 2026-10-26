@@ -34,18 +34,21 @@ export default function DescriptionModal({ isOpen, itemType, currentDescription,
         setDescription(next.replace(/[ \t]{2,}/g,' ').replace(/\n[ \t]+/g,'\n').trim());
     };
 
-    const submit = async (event: React.FormEvent) => {
-        event.preventDefault();
+    const persist = async (value:string) => {
         setSaving(true);
         setError('');
         try {
-            await onSave(description.trim());
+            await onSave(value.trim());
             onClose();
-        } catch {
-            setError('توضیحات ذخیره نشد. دوباره تلاش کن.');
+        } catch (reason:any) {
+            setError(reason?.response?.data?.detail||reason?.message||'توضیحات ذخیره نشد. دوباره تلاش کن.');
         } finally {
             setSaving(false);
         }
+    };
+    const submit = async (event: React.FormEvent) => {
+        event.preventDefault();
+        await persist(description);
     };
 
     return (
@@ -85,7 +88,7 @@ export default function DescriptionModal({ isOpen, itemType, currentDescription,
                 <div className="flex justify-end gap-3 mt-5">
                     <button type="button" onClick={onClose} className="px-4 py-2 text-dark-400 hover:text-white">لغو</button>
                     {currentDescription && (
-                        <button type="button" disabled={saving} onClick={() => setDescription('')} className="px-4 py-2 text-red-400 hover:bg-red-500/10 rounded-lg">پاک‌کردن</button>
+                        <button type="button" disabled={saving} onClick={() => void persist('')} className="px-4 py-2 text-red-400 hover:bg-red-500/10 rounded-lg">پاک‌کردن و ذخیره</button>
                     )}
                     <button type="submit" disabled={saving} className="px-4 py-2 bg-primary-600 hover:bg-primary-700 rounded-lg font-medium disabled:opacity-50">
                         {saving ? 'در حال ذخیره…' : 'ذخیره'}

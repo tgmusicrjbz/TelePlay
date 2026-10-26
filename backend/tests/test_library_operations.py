@@ -53,6 +53,7 @@ from app.routers.files import (
     list_files,
     send_files_to_telegram,
     update_file,
+    update_file_description,
     upload_file,
     SendToTelegramRequest,
     TextFirstUpdate,
@@ -63,7 +64,7 @@ from app.routers.delivery import MonitorPayload, _require_monitor_access, _valid
 from app.routers.streaming import public_share_info, stored_message_response, unlock_public_share
 from app.routers.playlists import add_playlist_items, create_playlist, reorder_playlist, shuffle_playlist
 from app.routers.packs import create_pack, get_pack, remove_pack_item, reorder_pack
-from app.schemas import BatchFileUpdate, CredentialsUpdate, FileUpdate, FolderUpdate, PackCreate, PackReorder, PasswordLoginRequest, PasswordRegisterRequest, PlayerStateUpdate, PlaylistAddItems, PlaylistCreate, PlaylistReorder, PublicShareCreate, PublicShareUnlock, SavedFilter, SavedFiltersUpdate, TagBatchDelete, TagDefinition, TagSettingsUpdate
+from app.schemas import BatchFileUpdate, CredentialsUpdate, FileDescriptionUpdate, FileUpdate, FolderUpdate, PackCreate, PackReorder, PasswordLoginRequest, PasswordRegisterRequest, PlayerStateUpdate, PlaylistAddItems, PlaylistCreate, PlaylistReorder, PublicShareCreate, PublicShareUnlock, SavedFilter, SavedFiltersUpdate, TagBatchDelete, TagDefinition, TagSettingsUpdate
 from app.telegram import configure_main_client, start_one_client
 from app import telegram
 
@@ -614,6 +615,25 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
                 self.direct_file_id, FileUpdate(description=""), db, user
             )
             self.assertIsNone(cleared.description)
+
+    async def test_dedicated_description_update_is_committed_and_can_be_cleared(self):
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            updated = await update_file_description(
+                self.direct_file_id, FileDescriptionUpdate(description="  متن ماندگار  "), db, user, None
+            )
+            self.assertEqual(updated.description, "متن ماندگار")
+        async with async_session() as verification_db:
+            saved = await verification_db.get(File, self.direct_file_id)
+            self.assertEqual(saved.description, "متن ماندگار")
+            user = await verification_db.get(User, self.user_id)
+            cleared = await update_file_description(
+                self.direct_file_id, FileDescriptionUpdate(description=""), verification_db, user, None
+            )
+            self.assertIsNone(cleared.description)
+        async with async_session() as verification_db:
+            saved = await verification_db.get(File, self.direct_file_id)
+            self.assertIsNone(saved.description)
 
     async def test_folder_color_and_icon_can_be_customized(self):
         async with async_session() as db:

@@ -113,6 +113,10 @@ class FileUpdate(BaseModel):
     is_hidden: Optional[bool] = None
 
 
+class FileDescriptionUpdate(BaseModel):
+    description: Optional[str] = Field(default=None, max_length=20_000)
+
+
 class BatchFileUpdate(BaseModel):
     ids: List[int] = Field(min_length=1, max_length=500)
     description_mode: Optional[Literal["set", "append", "clear"]] = None

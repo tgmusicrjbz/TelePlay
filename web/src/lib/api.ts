@@ -570,7 +570,10 @@ export const useUpdateFile = () => {
             // has persisted the text. Quietly queueing this change made the UI
             // look saved while the database still contained the old caption.
             if (Object.prototype.hasOwnProperty.call(data, 'description')) {
-                return (await api.patch<TelegramFile>(`/files/${id}`, data)).data;
+                const expected=String(data.description||'').trim();
+                const updated=(await api.put<TelegramFile>(`/files/${id}/description`,{description:expected})).data;
+                if(String(updated.description||'')!==expected)throw new Error('سرور مقدار ذخیره‌شده توضیحات را تأیید نکرد.');
+                return updated;
             }
             return runOrQueueMetadataMutation(
                 async()=>(await api.patch<TelegramFile>(`/files/${id}`,data)).data,

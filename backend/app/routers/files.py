@@ -27,7 +27,7 @@ from urllib.parse import urlparse
 
 from ..database import get_db
 from ..models import File, User, WatchProgress, Folder, Playlist, Pack, PackItem, TelegramDestination
-from ..schemas import ActivityResponse, BatchFileUpdate, FileResponse, FileListResponse, FileUpdate, PlayerStateResponse, PlayerStateUpdate, PublicShareCreate, WatchProgressUpdate
+from ..schemas import ActivityResponse, BatchFileUpdate, FileDescriptionUpdate, FileResponse, FileListResponse, FileUpdate, PlayerStateResponse, PlayerStateUpdate, PublicShareCreate, WatchProgressUpdate
 from ..auth import get_current_user, has_vault_access, require_scoped_folder, require_vault_access, workspace_scope
 from ..telegram import delete_from_storage_channel, get_message_from_channel
 from .. import telegram
@@ -1709,6 +1709,39 @@ async def get_file(
         require_vault_access(request, current_user)
     
     return FileResponse(**add_urls_to_file(file))
+
+
+@router.put("/{file_id}/description", response_model=FileResponse)
+async def update_file_description(
+    file_id: int,
+    update_data: FileDescriptionUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    request: Request = None,
+):
+    """Persist a caption and verify the committed value before reporting success."""
+    file = (await db.execute(
+        select(File).where(File.id == file_id, File.user_id == current_user.id)
+    )).scalar_one_or_none()
+    if file is None:
+        raise HTTPException(status_code=404, detail="فایل پیدا نشد.")
+    if file.is_hidden and not has_vault_access(request, current_user):
+        require_vault_access(request, current_user)
+
+    expected = (update_data.description or "").strip()[:20_000] or None
+    file.description = expected
+    await db.commit()
+
+    persisted = (await db.execute(
+        select(File)
+        .where(File.id == file_id, File.user_id == current_user.id)
+        .options(selectinload(File.watch_progress))
+        .execution_options(populate_existing=True)
+    )).scalar_one_or_none()
+    if persisted is None or persisted.description != expected:
+        logger.error("Description verification failed for file %s", file_id)
+        raise HTTPException(status_code=500, detail="توضیحات در دیتابیس تأیید نشد؛ دوباره تلاش کن.")
+    return FileResponse(**add_urls_to_file(persisted))
 
 
 @router.patch("/{file_id}", response_model=FileResponse)
