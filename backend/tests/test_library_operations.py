@@ -28,7 +28,8 @@ from sqlalchemy.orm import selectinload
 
 from app.database import Base, async_session, engine
 from app.models import AuthSession, BotUserState, ErrorLog, File, Folder, Pack, PackItem, Playlist, PlaylistItem, ProcessingJob, SecurityEvent, TTSUsage, User, WatchProgress
-from app.routers.auth import _session_for_device, password_login, password_register, update_credentials
+from app.routers.auth import _require_telegram_two_factor, _session_for_device, password_login, password_register, update_credentials
+from app.account_security import encrypt_secret, new_totp_secret, totp_code
 from app.routers.accounts import admin_error_logs, admin_health, delete_tag_definition, delete_tag_definitions_batch, export_account_data, get_saved_filters, get_tag_settings, import_account_data, report_client_error, resolve_admin_error, update_saved_filters, update_tag_settings
 from app.stt import consume_stt_quota
 from app.downloader import link_importer
@@ -42,6 +43,7 @@ from app.routers.files import (
     playback_recommendations,
     save_player_state,
     save_offline_manifest,
+    set_text_first_mode,
     share_file,
     list_public_shares,
     revoke_public_shares,
@@ -53,6 +55,7 @@ from app.routers.files import (
     update_file,
     upload_file,
     SendToTelegramRequest,
+    TextFirstUpdate,
     OfflineManifestUpdate,
 )
 from app.routers.folders import delete_folder_contents, list_folders, update_folder
@@ -65,6 +68,38 @@ from app import telegram
 
 
 class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_telegram_login_requires_totp_when_enabled(self):
+        secret = new_totp_secret()
+        user = SimpleNamespace(totp_secret_encrypted=encrypt_secret(secret))
+        with self.assertRaises(HTTPException) as missing:
+            _require_telegram_two_factor(user, None)
+        self.assertEqual(missing.exception.status_code, 401)
+        with self.assertRaises(HTTPException):
+            _require_telegram_two_factor(user, "000000")
+        _require_telegram_two_factor(user, totp_code(secret))
+
+    async def test_text_first_mode_creates_readable_companion_without_copying_media(self):
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            image = self.make_file(user.id, self.folder_id, 990)
+            image.file_type = "image"
+            image.mime_type = "image/jpeg"
+            image.file_name = "post.jpg"
+            image.description = "این متن اصلی پست است."
+            db.add(image)
+            await db.commit()
+            await db.refresh(image)
+            result = await set_text_first_mode(image.id, TextFirstUpdate(enabled=True), db, user)
+            companion = result["companion"]
+            companion_record = await db.get(File, companion["id"])
+            self.assertEqual(companion_record.channel_message_id, image.channel_message_id)
+            preview = await get_text_preview(companion["id"], db, user, self.auth_request())
+            self.assertIn("این متن اصلی پست است", preview["content"])
+            self.assertIn(f"/api/stream/{image.id}", preview["content"])
+            disabled = await set_text_first_mode(companion["id"], TextFirstUpdate(enabled=False), db, user)
+            self.assertFalse(disabled["enabled"])
+            self.assertIsNone(await db.get(File, companion["id"]))
+
     async def test_mixed_pack_is_created_inside_folder_and_reordered(self):
         async with async_session() as db:
             user = await db.get(User, self.user_id)
@@ -311,7 +346,7 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("پروژه", [tag.name for tag in result.tags])
             self.assertEqual(json.loads(direct.tags_json), ["نگه‌دار"])
             self.assertEqual(direct.description, "تگ‌ها: نگه‌دار\nیادداشت")
-            self.assertIn("پروژه", json.loads(user.tag_exclusions_json))
+            self.assertNotIn("پروژه", json.loads(user.tag_exclusions_json))
 
     async def test_deleting_multiple_tags_removes_them_in_one_pass(self):
         async with async_session() as db:

@@ -25,7 +25,7 @@ from .routers.folders import ensure_default_folder
 from .database import async_session
 from .models import User, File, Folder, LoginCode, Playlist, PlaylistItem, BotUserState, TelegramDestination, TelegramGroupSettings, AppSetting
 from .config import get_settings
-from .auth import create_access_token
+from .auth import create_telegram_login_token
 from .services import escape_like, select_best_thumbnail, telegram_text_with_links, unreferenced_audio_variant_messages, unreferenced_storage_messages
 from .caption_metadata import extract_tags_from_caption, parse_file_caption
 from .downloader import ImportJob, link_importer
@@ -322,14 +322,22 @@ def _quota_text(used: int, limit: int) -> str:
 
 def group_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎙️ متن به صدا", callback_data="grpmenu:tts"), InlineKeyboardButton("📝 صوت به متن", callback_data="grpmenu:stt")],
-        [InlineKeyboardButton("🔗 دریافت لینک", callback_data="grpmenu:link"), InlineKeyboardButton("📊 مصرف امروز", callback_data="grpmenu:usage")],
-        [InlineKeyboardButton("🎤 گوینده و محدودیت‌ها", callback_data="grpmenu:settings")],
+        [InlineKeyboardButton("📖 راهنمای متن به صدا", callback_data="grpmenu:tts"), InlineKeyboardButton("📖 راهنمای صوت به متن", callback_data="grpmenu:stt")],
+        [InlineKeyboardButton("📖 راهنمای لینک", callback_data="grpmenu:link"), InlineKeyboardButton("📊 گزارش مصرف", callback_data="grpmenu:usage")],
+        [InlineKeyboardButton("⚙️ تنظیمات مدیر", callback_data="grpmenu:settings")],
     ])
 
 
 def group_menu_text() -> str:
-    return "ابزار موردنظرت را انتخاب کن. برای تبدیل فوری، ابتدا روی پیام مقصد ریپلای کن و بعد این منو را باز کن."
+    return "🧰 راهنمای کمد در گروه\n\nبرای دیدن روش هر کار، راهنمای همان بخش را باز کن. تبدیل‌ها با دستور روی پیام ریپلای‌شده انجام می‌شوند."
+
+
+def group_tool_help(action: str) -> str:
+    return {
+        "tts": "🎙 متن به صدا\n\n۱) روی پیام متنی ریپلای کن.\n۲) دستور /tts را بفرست.\n\nمی‌توانی متن را مستقیم هم بنویسی: /tts متن موردنظر",
+        "stt": "📝 صوت به متن\n\n۱) روی صدا، ویدیو یا فایل صوتی ریپلای کن.\n۲) دستور /stt را بفرست.",
+        "link": "🔗 دریافت لینک\n\nلینک یوتیوب یا اینستاگرام را مستقیم در گروه بفرست؛ بعد از آماده‌شدن، خروجی در همین گروه ارسال می‌شود.",
+    }[action]
 
 
 async def group_settings_view(chat_id: int, telegram_user_id: int, title: str | None = None) -> dict:
@@ -374,6 +382,12 @@ def _remaining_text(used: int, limit: int) -> str:
     return to_persian_digits(str(max(0, limit - used)))
 
 
+def _usage_bar(used: int, limit: int) -> str:
+    ratio = min(1.0, used / limit) if limit else (1.0 if used else 0.0)
+    filled = round(ratio * 8)
+    return "▰" * filled + "▱" * (8 - filled)
+
+
 async def group_usage_view(chat_id: int) -> dict:
     async with async_session() as db:
         group, total, members = await get_group_usage_breakdown(db, chat_id)
@@ -384,7 +398,7 @@ async def group_usage_view(chat_id: int) -> dict:
     for operation, label in operations:
         used = int(getattr(total, f"{operation}_count", 0))
         limit = int(getattr(group, f"{operation}_daily_limit", 0))
-        lines.append(f"{label}: {to_persian_digits(str(used))} مصرف · {_remaining_text(used, limit)} باقی‌مانده")
+        lines.append(f"{label}\n{_usage_bar(used, limit)}  {to_persian_digits(str(used))} مصرف · {_remaining_text(used, limit)} باقی‌مانده")
     lines.extend(("", "👥 مصرف اعضا:"))
     if members:
         for row, name in members[:30]:
@@ -508,7 +522,7 @@ async def set_upload_drawer(telegram_id: int, folder_id: int | None) -> None:
 def get_web_app_button(telegram_id: int, text: str = "🌐 Open Web") -> InlineKeyboardButton:
     """Open the authenticated web app directly from Telegram."""
     from urllib.parse import quote
-    token = create_access_token(telegram_id)
+    token = create_telegram_login_token(telegram_id)
     encoded_token = quote(token, safe='')
     base_url = settings.web_base_url.strip().rstrip('/')
     if base_url.startswith('http://'):
@@ -1370,9 +1384,13 @@ async def group_tts_command(client, message: Message, source_message: Message | 
         text=source_text, title=title_line[:80], folder_id=None,
         preferences=preferences, output_mode="telegram", api_keys=personal_keys,
     )
+    status_message = await message.reply(await bot_message("tts_queued", queue_note=""))
+    job.output_caption = await bot_message("group_tts_output_caption", title=job.title)
+    job.status_chat_id = message.chat.id
+    job.status_message_id = status_message.id
     position = await tts_queue.enqueue(job)
-    queue_note = f" نوبت {to_persian_digits(str(position))} در صف." if position > 1 else ""
-    await message.reply(await bot_message("tts_queued", queue_note=queue_note))
+    if position > 1:
+        await status_message.edit(await bot_message("tts_queued", queue_note=f" نوبت {to_persian_digits(str(position))} در صف."))
 
 
 @tg_client.on_message(filters.command("stt") & filters.group)
@@ -1432,15 +1450,20 @@ async def group_stt_command(client, message: Message, source_message: Message | 
         preferences = load_tts_settings(user)
         routed_stt_model = route_ai_model(preferences, "stt", int(source.duration or 0))
         routed_text_model = route_ai_model(preferences, "text", 0)
-        position = await stt_queue.enqueue(STTJob(
+        status_message = await message.reply(await bot_message("stt_queued", queue_note=""))
+        job = STTJob(
             user_id=user.id, source_file_id=source.id,
             title=f"📝 متن {Path(source.file_name).stem or 'صدا'}"[:180], folder_id=None,
             output_mode="temporary", telegram_id=message.chat.id, api_keys=personal_keys,
             cleanup_source=True, stt_model=routed_stt_model,
             text_model=routed_text_model, stt_mode=preferences["stt_mode"],
-        ))
-        queue_note = f" نوبت {to_persian_digits(str(position))} در صف." if position > 1 else ""
-        await message.reply(await bot_message("stt_queued", queue_note=queue_note))
+        )
+        job.output_caption = await bot_message("group_stt_output_caption", title=job.title)
+        job.status_chat_id = message.chat.id
+        job.status_message_id = status_message.id
+        position = await stt_queue.enqueue(job)
+        if position > 1:
+            await status_message.edit(await bot_message("stt_queued", queue_note=f" نوبت {to_persian_digits(str(position))} در صف."))
     except Exception as error:
         logger.exception("Could not queue group STT: %s", error)
         await message.reply("❌ فایل برای استخراج متن آماده نشد؛ دوباره تلاش کن.")
@@ -1747,7 +1770,7 @@ async def web_command(client, message: Message):
         message.from_user.last_name,
     )
     
-    token = create_access_token(message.from_user.id)
+    token = create_telegram_login_token(message.from_user.id)
     base_url = settings.web_base_url.strip().rstrip('/')
     if not base_url.startswith(('http://', 'https://')):
         base_url = f"https://{base_url}"
@@ -2432,49 +2455,11 @@ async def handle_callback(client, callback: CallbackQuery):
             pending_group_actions.pop((group_chat_id, callback.from_user.id), None)
             await callback.message.edit_text(group_menu_text(), reply_markup=group_menu_keyboard())
             await callback.answer("عملیات لغو شد.")
-        elif action == "tts":
-            command=callback.message.reply_to_message
-            if command and command.reply_to_message and command.from_user and command.from_user.id==callback.from_user.id:
-                await callback.answer("در صف تبدیل قرار گرفت.")
-                try:
-                    await group_tts_command(client,command,command.reply_to_message)
-                except Exception as error:
-                    logger.exception("Group TTS button failed chat=%s user=%s: %s", group_chat_id, callback.from_user.id, error)
-                    await callback.message.reply("❌ ثبت تبدیل متن به صدا انجام نشد؛ دوباره تلاش کن.")
-            else:
-                pending_group_actions[(group_chat_id, callback.from_user.id)] = (
-                    "tts", datetime.now(timezone.utc) + timedelta(minutes=2), callback.message.id,
-                )
-                await callback.message.edit_text(
-                    "🎙 متن موردنظر را تا دو دقیقه آینده در همین گروه بفرست.",
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✖️ لغو", callback_data="grpmenu:cancel")]]),
-                )
-                await callback.answer()
-        elif action == "stt":
-            command=callback.message.reply_to_message
-            if command and command.reply_to_message and command.from_user and command.from_user.id==callback.from_user.id:
-                await callback.answer("در صف استخراج متن قرار گرفت.")
-                try:
-                    await group_stt_command(client,command,command.reply_to_message)
-                except Exception as error:
-                    logger.exception("Group STT button failed chat=%s user=%s: %s", group_chat_id, callback.from_user.id, error)
-                    await callback.message.reply("❌ ثبت تبدیل صوت به متن انجام نشد؛ دوباره تلاش کن.")
-            else:
-                pending_group_actions[(group_chat_id, callback.from_user.id)] = (
-                    "stt", datetime.now(timezone.utc) + timedelta(minutes=2), callback.message.id,
-                )
-                await callback.message.edit_text(
-                    "📝 صدا، ویدیو یا فایل صوتی را تا دو دقیقه آینده در همین گروه بفرست.",
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✖️ لغو", callback_data="grpmenu:cancel")]]),
-                )
-                await callback.answer()
-        elif action == "link":
-            pending_group_actions[(group_chat_id, callback.from_user.id)] = (
-                "link", datetime.now(timezone.utc) + timedelta(minutes=2), callback.message.id,
-            )
+        elif action in {"tts", "stt", "link"}:
+            pending_group_actions.pop((group_chat_id, callback.from_user.id), None)
             await callback.message.edit_text(
-                "🔗 لینک یوتیوب یا اینستاگرام را تا دو دقیقه آینده در همین گروه بفرست.",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✖️ لغو", callback_data="grpmenu:cancel")]]),
+                group_tool_help(action),
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩️ بازگشت به منوی گروه", callback_data="grpmenu:home")]]),
             )
             await callback.answer()
         elif action == "usage":
@@ -2486,11 +2471,14 @@ async def handle_callback(client, callback: CallbackQuery):
                 return
             try:
                 view = await group_settings_view(group_chat_id, callback.from_user.id, callback.message.chat.title)
-                await client.send_message(callback.from_user.id, **view)
+                # Refresh the bot peer cache first. After a restart Pyrogram may know
+                # the admin only through the group and otherwise raises PEER_ID_INVALID.
+                await asyncio.wait_for(client.get_users(callback.from_user.id), timeout=5)
+                await asyncio.wait_for(client.send_message(callback.from_user.id, **view), timeout=10)
                 await callback.answer("پنل تنظیمات در گفت‌وگوی خصوصی برایت فرستاده شد.", show_alert=True)
             except Exception as error:
                 logger.exception("Could not send private group settings chat=%s user=%s: %s", group_chat_id, callback.from_user.id, error)
-                await callback.answer("پنل خصوصی باز نشد. یک پیام معمولی برای ربات بفرست و دوباره امتحان کن.", show_alert=True)
+                await callback.answer("ارسال پنل خصوصی انجام نشد. در گفت‌وگوی ربات روی «شروع» بزن یا یک پیام معمولی بفرست و دوباره امتحان کن.", show_alert=True)
         else:
             await callback.answer()
 
@@ -3510,7 +3498,7 @@ async def handle_callback(client, callback: CallbackQuery):
         await callback.answer()
 
     elif data == "get_web_link":
-        token = create_access_token(callback.from_user.id)
+        token = create_telegram_login_token(callback.from_user.id)
         base_url = settings.web_base_url.strip().rstrip('/')
         if not base_url.startswith(('http://', 'https://')):
             base_url = f"https://{base_url}"

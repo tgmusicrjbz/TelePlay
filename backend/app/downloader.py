@@ -19,7 +19,7 @@ from pyrogram.errors import Timeout
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from sqlalchemy import select
 
-from .auth import create_access_token
+from .auth import create_telegram_login_token
 from .config import get_settings
 from .database import async_session
 from .models import AppSetting, File, Folder, TelegramDestination, User
@@ -725,7 +725,7 @@ class LinkImportService:
         target_chat_id = job.notification_chat_id or job.telegram_id
         keyboard = None
         if target_chat_id == job.telegram_id:
-            token = quote(create_access_token(job.telegram_id), safe="")
+            token = quote(create_telegram_login_token(job.telegram_id), safe="")
             url = f"{settings.web_base_url.rstrip('/')}/auth?token={token}"
             if url.startswith("https://"):
                 keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🗄️ باز کردن کمد", web_app=WebAppInfo(url=url))]])

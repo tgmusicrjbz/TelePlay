@@ -121,6 +121,15 @@ class GeminiSTTProvider:
                 return result
             except GeminiRequestError as error:
                 last_error = error
+                if error.status == 404:
+                    fallback_model = "gemini-2.5-flash-lite" if "lite" in self.stt_model else "gemini-2.5-flash"
+                    try:
+                        result = await asyncio.to_thread(self._request, key, path, mime_type, prompt, fallback_model)
+                        self.cursor = (self.api_keys.index(key) + 1) % len(self.api_keys)
+                        return result
+                    except GeminiRequestError as fallback_error:
+                        last_error = fallback_error
+                        error = fallback_error
                 if error.status == 400:
                     raise RuntimeError(f"فایل صوتی یا تنظیمات پذیرفته نشد: {error.user_detail()}") from error
                 if error.status in {429, 500, 502, 503, 504}:
@@ -199,7 +208,8 @@ class GeminiSTTProvider:
                 detail = str(error)
             raise GeminiRequestError(error.code, detail) from error
 
-    def _request(self, key: str, path: Path, mime_type: str, custom_prompt: str) -> str:
+    def _request(self, key: str, path: Path, mime_type: str, custom_prompt: str, model_override: str | None = None) -> str:
+        selected_model = model_override or self.stt_model
         size = path.stat().st_size
         instruction = (
             "محتوای این فایل صوتی یا ویدیویی را بدون خلاصه‌سازی و بدون تغییر معنا، دقیق رونویسی کن. "
@@ -211,12 +221,12 @@ class GeminiSTTProvider:
 
         # Short voice notes are faster as one inline request: this removes the
         # separate Files API upload and ACTIVE-state polling round trip.
-        if size <= 12 * 1024 * 1024 and self.stt_model != "gemini-3.5-transcribe":
+        if size <= 12 * 1024 * 1024 and selected_model != "gemini-3.5-transcribe":
             payload={"contents":[{"role":"user","parts":[
                 {"text":instruction},
                 {"inlineData":{"mimeType":mime_type,"data":base64.b64encode(path.read_bytes()).decode("ascii")}},
             ]}],"generationConfig":{"temperature":0.1}}
-            endpoint=f"https://generativelanguage.googleapis.com/v1beta/models/{self.stt_model}:generateContent?{urlencode({'key':key})}"
+            endpoint=f"https://generativelanguage.googleapis.com/v1beta/models/{selected_model}:generateContent?{urlencode({'key':key})}"
             result,_=self._json_request(Request(endpoint,data=json.dumps(payload).encode(),headers={"Content-Type":"application/json"},method="POST"),300)
             parts=result.get("candidates",[{}])[0].get("content",{}).get("parts",[])
             text="\n".join(str(part.get("text","")) for part in parts if part.get("text")).strip()
@@ -266,9 +276,9 @@ class GeminiSTTProvider:
                 state = str(remote.get("state", "ACTIVE")).upper()
             else:
                 raise RuntimeError("آماده‌شدن فایل برای تبدیل بیش از حد طول کشید.")
-            if self.stt_model == "gemini-3.5-transcribe":
+            if selected_model == "gemini-3.5-transcribe":
                 payload = {
-                    "model": self.stt_model,
+                    "model": selected_model,
                     "input": [{"type": "audio", "uri": file_uri, "mime_type": mime_type}],
                     "generation_config": {"transcription_config": {"mode": self.stt_mode}},
                 }
@@ -294,7 +304,7 @@ class GeminiSTTProvider:
                 ]}],
                 "generationConfig": {"temperature": 0.1},
             }
-            fallback_model = "gemini-3.8-flash" if self.stt_model == "gemini-3.5-transcribe" else self.stt_model
+            fallback_model = "gemini-3.8-flash" if selected_model == "gemini-3.5-transcribe" else selected_model
             endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{fallback_model}:generateContent?{urlencode({'key': key})}"
             result, _ = self._json_request(Request(endpoint, data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"}, method="POST"), 600)
             parts = result.get("candidates", [{}])[0].get("content", {}).get("parts", [])
@@ -351,6 +361,9 @@ class STTJob:
     stt_model: str = ""
     text_model: str = ""
     stt_mode: str = "verbatim"
+    output_caption: str | None = None
+    status_chat_id: int | None = None
+    status_message_id: int | None = None
     id: str = ""
 
 
@@ -402,6 +415,8 @@ class STTQueue:
                 stt_model=str(payload.get("stt_model") or settings.gemini_stt_model),
                 text_model=str(payload.get("text_model") or "gemini-3.8-flash"),
                 stt_mode=str(payload.get("stt_mode") or "verbatim"),
+                output_caption=payload.get("output_caption"), status_chat_id=payload.get("status_chat_id"),
+                status_message_id=payload.get("status_message_id"),
             )
             status.update(state="queued", message="ادامه پس از راه‌اندازی دوباره", progress=0, output_mode=job.output_mode,
                           fingerprint=payload.get("fingerprint") or status.get("fingerprint"))
@@ -453,7 +468,9 @@ class STTQueue:
                      "title": job.title, "folder_id": job.folder_id, "prompt": job.prompt, "post_prompts": job.post_prompts or [],
                      "output_mode": job.output_mode, "telegram_id": job.telegram_id,
                      "cleanup_source": job.cleanup_source, "stt_model": job.stt_model,
-                     "text_model": job.text_model, "stt_mode": job.stt_mode, "fingerprint": fingerprint},
+                     "text_model": job.text_model, "stt_mode": job.stt_mode,
+                     "output_caption": job.output_caption, "status_chat_id": job.status_chat_id,
+                     "status_message_id": job.status_message_id, "fingerprint": fingerprint},
             status=self.statuses[job.id],
         )
         self.durable_job_ids.add(job.id)
@@ -529,6 +546,11 @@ class STTQueue:
                 self.statuses[job.id].update(state="error", message=str(error) or "تبدیل صدا به متن انجام نشد.", finished_at=datetime.utcnow().isoformat())
                 await self._persist_status(job.id)
             finally:
+                if job.status_chat_id and job.status_message_id and self.statuses.get(job.id, {}).get("state") in TERMINAL_STATES:
+                    try:
+                        await telegram.tg_client.delete_messages(job.status_chat_id, job.status_message_id)
+                    except Exception:
+                        logger.debug("Could not remove STT status message", exc_info=True)
                 if job.cleanup_source:
                     await self._cleanup_temporary_source(job)
                 self.queue.task_done()
@@ -598,7 +620,7 @@ class STTQueue:
                     with tempfile.TemporaryDirectory(prefix="komod-stt-preview-") as directory:
                         path = Path(directory) / f"{sanitize_filename(job.title or 'متن')}.md"
                         path.write_text(markdown, encoding="utf-8")
-                        await telegram.tg_client.send_document(job.telegram_id, str(path), caption="📝 متن آماده شد")
+                        await telegram.tg_client.send_document(job.telegram_id, str(path), caption=(job.output_caption if job.output_caption is not None else job.title)[:1024])
                 return
             self.statuses[job.id].update(state="saving", message="ذخیره Markdown", progress=85)
             await self._persist_status(job.id)

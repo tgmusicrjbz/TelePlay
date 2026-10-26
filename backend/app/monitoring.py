@@ -14,7 +14,6 @@ from .downloader import ImportJob, link_importer
 from .models import SourceMonitor, TelegramDestination, User
 from .tts import TTSJob, consume_tts_quota, load_tts_settings, tts_queue
 from .gemini_keys import decrypt_user_keys
-from . import telegram
 
 logger = logging.getLogger(__name__)
 
@@ -167,9 +166,15 @@ class SourceMonitorService:
                 raise
 
     async def _run_telegram(self, monitor: SourceMonitor, user: User, filters: dict, actions: dict) -> int:
-        client = link_importer.clients[0] if monitor.source_type == "saved_messages" and link_importer.clients else telegram.tg_client
-        if client is None:
-            raise RuntimeError("تلگرام در دسترس نیست.")
+        # Reading history (including Saved Messages) is a user-session-only
+        # MTProto operation. Bot clients fail here with BOT_METHOD_INVALID.
+        if not link_importer.available:
+            raise RuntimeError("برای پایش تلگرام باید نشست کاربری TELEGRAM_WORKER_SESSION تنظیم شود؛ ربات به تاریخچه پیام‌ها دسترسی ندارد.")
+        if not link_importer.clients:
+            await link_importer.start()
+        if not link_importer.clients:
+            raise RuntimeError("نشست کاربری تلگرام متصل نشد. TELEGRAM_WORKER_SESSION را دوباره بررسی کن.")
+        client = link_importer.clients[0]
         source = "me" if monitor.source_type == "saved_messages" else monitor.source_url.strip()
         destinations: list[int] = []
         destination_ids = [int(value) for value in actions.get("destination_ids", [])]

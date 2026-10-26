@@ -344,39 +344,6 @@ input[dir="ltr"], textarea[dir="ltr"], select[dir="ltr"] {
   width: 100vw;
   height: 100vh;
 }
-.video-player[data-embedded="true"]:fullscreen [data-player-tools],
-.video-player[data-embedded="true"][data-fullscreen="true"] [data-player-tools] {
-  padding: .5rem;
-  gap: .25rem;
-}
-.video-player[data-embedded="true"]:fullscreen [data-player-tools] > button,
-.video-player[data-embedded="true"]:fullscreen [data-player-tools] > div > button,
-.video-player[data-embedded="true"][data-fullscreen="true"] [data-player-tools] > button,
-.video-player[data-embedded="true"][data-fullscreen="true"] [data-player-tools] > div > button {
-  min-width: 2.75rem;
-  min-height: 2.75rem;
-}
-.video-player[data-embedded="true"]:fullscreen [data-primary-play],
-.video-player[data-embedded="true"][data-fullscreen="true"] [data-primary-play] {
-  width: 6rem;
-  height: 6rem;
-}
-.video-player[data-embedded="true"]:fullscreen [data-primary-play] svg,
-.video-player[data-embedded="true"][data-fullscreen="true"] [data-primary-play] svg {
-  width: 2.75rem;
-  height: 2.75rem;
-}
-.video-player[data-embedded="true"]:fullscreen [data-player-transport] > button:not([data-primary-play]),
-.video-player[data-embedded="true"][data-fullscreen="true"] [data-player-transport] > button:not([data-primary-play]) {
-  min-width: 3.25rem;
-  min-height: 3.25rem;
-}
-.video-player[data-embedded="true"]:fullscreen [data-player-transport] > button:not([data-primary-play]) svg,
-.video-player[data-embedded="true"][data-fullscreen="true"] [data-player-transport] > button:not([data-primary-play]) svg {
-  width: 1.7rem;
-  height: 1.7rem;
-}
-
 :root.light {
   color-scheme: light;
   --app-white: 15 23 42;

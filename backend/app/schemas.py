@@ -395,6 +395,7 @@ class LoginCodeResponse(BaseModel):
 
 class VerifyCodeRequest(BaseModel):
     code: str
+    otp: Optional[str] = Field(default=None, min_length=6, max_length=8)
 
 
 class AuthResponse(Token):
@@ -409,11 +410,19 @@ class PasswordRegistrationResponse(BaseModel):
 
 class TelegramWebAppRequest(BaseModel):
     init_data: str = Field(min_length=1)
+    otp: Optional[str] = Field(default=None, min_length=6, max_length=8)
+
+
+class TelegramTokenLoginRequest(BaseModel):
+    token: str = Field(min_length=20)
+    otp: Optional[str] = Field(default=None, min_length=6, max_length=8)
 
 
 class PasswordLoginRequest(BaseModel):
     username: str = Field(min_length=4, max_length=32)
-    password: str = Field(min_length=8, max_length=128)
+    # Keep login compatible with legacy hashes. New and changed passwords
+    # still use the stricter policy below.
+    password: str = Field(min_length=1, max_length=128)
     otp: Optional[str] = Field(default=None, min_length=6, max_length=8)
 
 

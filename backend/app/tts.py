@@ -69,12 +69,12 @@ TTS_MODEL_OPTIONS = [
 ]
 SUPPORTED_TTS_MODELS = {item["value"] for item in TTS_MODEL_OPTIONS}
 STT_MODEL_OPTIONS = [
-    {"value": "gemini-3.8-flash-lite", "label": "اقتصادی", "description": "برای فایل‌های کوتاه و واضح با هزینه کمتر", "profile": "economy"},
+    {"value": "gemini-3.5-flash-lite", "label": "اقتصادی", "description": "برای فایل‌های کوتاه و واضح با هزینه کمتر", "profile": "economy"},
     {"value": "gemini-3.8-flash", "label": "انعطاف‌پذیر", "description": "رونویسی همراه با دستور دلخواه و قالب‌بندی Markdown", "profile": "quality"},
     {"value": "gemini-3.5-transcribe", "label": "تخصصی رونویسی", "description": "مدل اختصاصی تشخیص گفتار برای دقت بیشتر در فایل صوتی"},
 ]
 TEXT_MODEL_OPTIONS = [
-    {"value": "gemini-3.8-flash-lite", "label": "مدل اقتصادی", "description": "برای مرتب‌سازی، پاک‌سازی و ویرایش‌های کوتاه", "profile": "economy"},
+    {"value": "gemini-3.5-flash-lite", "label": "مدل اقتصادی", "description": "برای مرتب‌سازی، پاک‌سازی و ویرایش‌های کوتاه", "profile": "economy"},
     {"value": "gemini-3.8-flash", "label": "مدل کامل", "description": "برای خلاصه‌سازی سنگین و ویرایش چندمرحله‌ای متن", "profile": "quality"},
 ]
 SUPPORTED_STT_MODELS = {item["value"] for item in STT_MODEL_OPTIONS}
@@ -97,7 +97,7 @@ def route_ai_model(preferences: dict, task: str, workload: int = 0, has_instruct
     """Resolve a per-account routing policy to one concrete model id."""
     mode = preferences.get("ai_routing_mode", "auto")
     selected = preferences.get({"tts": "model", "stt": "stt_model", "text": "text_model"}[task])
-    economy = {"tts": "gemini-3.8-flash-lite-tts", "stt": "gemini-3.8-flash-lite", "text": "gemini-3.8-flash-lite"}[task]
+    economy = {"tts": "gemini-3.8-flash-lite-tts", "stt": "gemini-3.5-flash-lite", "text": "gemini-3.5-flash-lite"}[task]
     quality = {"tts": "gemini-3.8-flash-tts", "stt": "gemini-3.8-flash", "text": "gemini-3.8-flash"}[task]
     if mode == "manual":
         return selected
@@ -144,10 +144,14 @@ def normalize_tts_settings(value: dict | None) -> dict:
     default_model = settings.gemini_tts_model if settings.gemini_tts_model in SUPPORTED_TTS_MODELS else "gemini-3.8-flash-tts"
     raw["model"] = requested_model if requested_model in SUPPORTED_TTS_MODELS or requested_model in raw["custom_tts_models"] else default_model
     requested_stt_model = str(raw.get("stt_model") or settings.gemini_stt_model).strip()[:120]
+    if requested_stt_model == "gemini-3.8-flash-lite":
+        requested_stt_model = "gemini-3.5-flash-lite"
     default_stt_model = settings.gemini_stt_model if settings.gemini_stt_model in SUPPORTED_STT_MODELS else "gemini-3.8-flash"
     raw["stt_model"] = requested_stt_model if requested_stt_model in SUPPORTED_STT_MODELS or requested_stt_model in raw["custom_stt_models"] else default_stt_model
     raw["stt_mode"] = raw.get("stt_mode") if raw.get("stt_mode") in {"verbatim", "smart"} else "verbatim"
     requested_text_model = str(raw.get("text_model") or "gemini-3.8-flash").strip()[:120]
+    if requested_text_model == "gemini-3.8-flash-lite":
+        requested_text_model = "gemini-3.5-flash-lite"
     raw["text_model"] = requested_text_model if requested_text_model in SUPPORTED_TEXT_MODELS or requested_text_model in raw["custom_text_models"] else "gemini-3.8-flash"
     raw["speed"] = min(2.0, max(0.5, float(raw.get("speed") or 1)))
     raw["auto_expression"] = bool(raw.get("auto_expression", True))
@@ -390,6 +394,15 @@ class GeminiTTSProvider:
             except GeminiRequestError as error:
                 last_error = error
                 status = error.status
+                if status == 404 and str(preferences.get("model", "")).startswith("gemini-3.8-"):
+                    # Some API keys receive newer 3.8 model names later than
+                    # others. Keep the economical path usable during rollout.
+                    fallback = {**preferences, "model": "gemini-2.5-flash-preview-tts"}
+                    try:
+                        return await self._request(key, text, fallback)
+                    except GeminiRequestError as fallback_error:
+                        last_error = fallback_error
+                        status = fallback_error.status
                 if status == 400:
                     detail = error.user_detail()
                     raise RuntimeError(f"متن یا تنظیمات صدا پذیرفته نشد: {detail}") from error
@@ -517,6 +530,9 @@ class TTSJob:
     output_mode: str = "save"
     output_chat_id: int | None = None
     api_keys: list[str] | None = None
+    output_caption: str | None = None
+    status_chat_id: int | None = None
+    status_message_id: int | None = None
     id: str = ""
 
 
@@ -575,6 +591,9 @@ class TTSQueue:
                 output_mode=str(payload.get("output_mode") or "save"),
                 output_chat_id=payload.get("output_chat_id"),
                 api_keys=decrypt_user_keys(user.gemini_api_keys_encrypted),
+                output_caption=payload.get("output_caption"),
+                status_chat_id=payload.get("status_chat_id"),
+                status_message_id=payload.get("status_message_id"),
                 id=job_id,
             )
             status.update(state="queued", message="ادامه پس از راه‌اندازی دوباره", progress=0,
@@ -632,6 +651,9 @@ class TTSQueue:
                 "text": job.text, "title": job.title, "folder_id": job.folder_id,
                 "preferences": job.preferences, "output_mode": job.output_mode,
                 "output_chat_id": job.output_chat_id,
+                "output_caption": job.output_caption,
+                "status_chat_id": job.status_chat_id,
+                "status_message_id": job.status_message_id,
                 "fingerprint": fingerprint,
             },
             status=self.statuses[job.id],
@@ -747,6 +769,11 @@ class TTSQueue:
                 self.statuses[job.id].update(state="error", message=str(error) or "ساخت صدا انجام نشد.", finished_at=datetime.utcnow().isoformat())
                 await self._persist_status(job.id)
             finally:
+                if job.status_chat_id and job.status_message_id and self.statuses.get(job.id, {}).get("state") in TERMINAL_STATES:
+                    try:
+                        await telegram.tg_client.delete_messages(job.status_chat_id, job.status_message_id)
+                    except Exception:
+                        logger.debug("Could not remove TTS status message", exc_info=True)
                 self.active_job_ids.discard(job.id)
                 self.queue.task_done()
 
@@ -808,9 +835,9 @@ class TTSQueue:
             self.statuses[job.id].update(state="uploading", message="ارسال به تلگرام", progress=90)
             await self._persist_status(job.id)
             if output_path.suffix == ".ogg":
-                await telegram.tg_client.send_voice(job.output_chat_id or job.telegram_id, str(output_path), caption=job.title[:1024])
+                await telegram.tg_client.send_voice(job.output_chat_id or job.telegram_id, str(output_path), caption=(job.output_caption if job.output_caption is not None else job.title)[:1024])
             else:
-                await telegram.tg_client.send_audio(job.output_chat_id or job.telegram_id, str(output_path), caption=job.title[:1024])
+                await telegram.tg_client.send_audio(job.output_chat_id or job.telegram_id, str(output_path), caption=(job.output_caption if job.output_caption is not None else job.title)[:1024])
 
     async def _store(self, job: TTSJob, wav_data: bytes) -> File:
         with tempfile.TemporaryDirectory(prefix="komod-tts-") as temporary_dir:

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlignLeft, AtSign, Hash, Link, Link2, Sparkles, X } from 'lucide-react';
+import { AlignLeft, AtSign, Hash, ImagePlus, Link, Link2, Sparkles, X } from 'lucide-react';
 import InternalFileLinkPicker from './InternalFileLinkPicker';
 
 interface DescriptionModalProps {
@@ -28,7 +28,7 @@ export default function DescriptionModal({ isOpen, itemType, currentDescription,
     const insertLink=(title:string,url:string)=>{const input=textareaRef.current;if(!input)return;const start=input.selectionStart,end=input.selectionEnd,selected=description.slice(start,end)||title;const value=`[${selected}](${url})`;setDescription(`${description.slice(0,start)}${value}${description.slice(end)}`);requestAnimationFrame(()=>{input.focus();input.setSelectionRange(start+value.length,start+value.length)})};
     const cleanDescription=(kind:'links'|'mentions'|'hashtags'|'all')=>{
         let next=description;
-        if(kind==='links'||kind==='all') next=next.replace(/\[[^\]]*\]\(https?:\/\/[^)]+\)|https?:\/\/\S+/giu,' ');
+        if(kind==='links'||kind==='all') next=next.replace(/\[([^\]]*)\]\((?:https?:\/\/|www\.)[^)]+\)/giu,'$1').replace(/(?:https?:\/\/|www\.)\S+/giu,' ');
         if(kind==='mentions'||kind==='all') next=next.replace(/(^|\s)@[\p{L}\p{N}_]{3,}/gu,'$1');
         if(kind==='hashtags'||kind==='all') next=next.replace(/(^|\s)#[\p{L}\p{N}_\u200c-]+/gu,'$1');
         setDescription(next.replace(/[ \t]{2,}/g,' ').replace(/\n[ \t]+/g,'\n').trim());
@@ -58,7 +58,7 @@ export default function DescriptionModal({ isOpen, itemType, currentDescription,
                     </h2>
                     <button type="button" onClick={onClose} className="p-1 hover:bg-dark-700 rounded"><X className="w-5 h-5" /></button>
                 </div>
-                <div className="mb-2 flex items-center gap-1 rounded-xl border border-white/[.06] bg-white/[.025] p-1"><button type="button" className="btn-icon h-9 w-9" title="پیوند وب" onClick={()=>insertLink('عنوان لینک','https://')}><Link className="h-4 w-4"/></button><button type="button" className="btn-icon h-9 w-9" title="پیوند به فایل کمد" onClick={()=>setShowFilePicker(true)}><Link2 className="h-4 w-4"/></button><span className="mr-1 text-xs text-dark-500">روی متن انتخاب‌شده پیوند بگذار</span></div><textarea
+                <div className="mb-2 flex items-center gap-1 rounded-xl border border-white/[.06] bg-white/[.025] p-1"><button type="button" className="btn-icon h-9 w-9" title="پیوند وب" onClick={()=>insertLink('عنوان لینک','https://')}><Link className="h-4 w-4"/></button><button type="button" className="btn-icon h-9 w-9" title="تصویر از نشانی وب" onClick={()=>{const input=textareaRef.current;if(!input)return;const start=input.selectionStart,end=input.selectionEnd,alt=description.slice(start,end)||'تصویر',value=`![${alt}](https://)`;setDescription(`${description.slice(0,start)}${value}${description.slice(end)}`)}}><ImagePlus className="h-4 w-4"/></button><button type="button" className="btn-icon h-9 w-9" title="پیوند به فایل کمد" onClick={()=>setShowFilePicker(true)}><Link2 className="h-4 w-4"/></button><span className="mr-1 text-xs text-dark-500">پیوند یا تصویر را در محل نشانگر بگذار</span></div><textarea
                     ref={textareaRef}
                     value={description}
                     onChange={(event) => setDescription(event.target.value)}
@@ -92,7 +92,7 @@ export default function DescriptionModal({ isOpen, itemType, currentDescription,
                     </button>
                 </div>
             </form>
-            {showFilePicker&&<InternalFileLinkPicker onClose={()=>setShowFilePicker(false)} onSelect={file=>{insertLink(file.file_name,`komod://file/${file.id}`);setShowFilePicker(false)}}/>}
+            {showFilePicker&&<InternalFileLinkPicker onClose={()=>setShowFilePicker(false)} onSelect={file=>{const input=textareaRef.current;if(file.file_type==='image'&&input){const start=input.selectionStart,end=input.selectionEnd,alt=description.slice(start,end)||file.file_name,value=`![${alt}](/api/stream/${file.id})`;setDescription(`${description.slice(0,start)}${value}${description.slice(end)}`)}else insertLink(file.file_name,`komod://file/${file.id}`);setShowFilePicker(false)}}/>}
         </div>
     );
 }

@@ -25,13 +25,12 @@ from ..audit import add_security_event
 from ..schemas import (
     Token, 
     UserResponse, 
-    LoginCodeRequest,
     LoginCodeResponse, 
     VerifyCodeRequest, 
     AuthResponse,
     PasswordRegistrationResponse,
     RefreshTokenRequest,
-    BotInfoResponse, SessionResponse, TelegramWebAppRequest,
+    BotInfoResponse, SessionResponse, TelegramWebAppRequest, TelegramTokenLoginRequest,
     PasswordLoginRequest, PasswordRegisterRequest, CredentialsUpdate, CredentialsStatus,
     TwoFactorSetupResponse, TwoFactorEnableRequest, TwoFactorDisableRequest,
 )
@@ -75,6 +74,13 @@ def _validate_password(password: str) -> None:
     )
     if not valid:
         raise HTTPException(status_code=422, detail="رمز باید دست‌کم ۸ نویسه و شامل حرف بزرگ، حرف کوچک، عدد و نماد باشد.")
+
+
+def _require_telegram_two_factor(user: User, otp: str | None) -> None:
+    """Apply account TOTP to every Telegram based sign-in path."""
+    secret = decrypt_secret(user.totp_secret_encrypted)
+    if secret and not verify_totp(secret, otp or ""):
+        raise HTTPException(status_code=401, detail="کد تأیید دومرحله‌ای تلگرام را وارد کن.")
 
 
 def _auth_response(user: User, session: AuthSession) -> AuthResponse:
@@ -662,6 +668,7 @@ async def login_from_telegram_webapp(
         user.last_name = tg_user.get("last_name")
     if not user.is_active:
         raise HTTPException(status_code=403, detail="User account is inactive")
+    _require_telegram_two_factor(user, payload.otp)
     new_device = await _is_new_device(db, request, user)
     session = await _session_for_device(db, request, user)
     session.telegram_verified_at = datetime.utcnow()
@@ -681,6 +688,33 @@ async def login_from_telegram_webapp(
             created_at=user.created_at, last_active=user.last_active,
         ),
     )
+
+
+@router.post("/telegram-token", response_model=AuthResponse)
+@limiter.limit("10/minute")
+async def login_from_telegram_token(
+    request: Request,
+    payload: TelegramTokenLoginRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Exchange a short-lived Telegram link proof after optional account TOTP."""
+    token_payload = verify_token_payload(payload.token, "telegram-login")
+    if not token_payload:
+        raise HTTPException(status_code=401, detail="پیوند ورود تلگرام معتبر نیست یا منقضی شده است.")
+    telegram_id = int(token_payload["sub"])
+    user = (await db.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=403, detail="این حساب فعال نیست.")
+    _require_telegram_two_factor(user, payload.otp)
+    new_device = await _is_new_device(db, request, user)
+    session = await _session_for_device(db, request, user)
+    session.telegram_verified_at = datetime.utcnow()
+    db.add(session)
+    add_security_event(db, "login_success", user_id=user.id, request=request, suspicious=new_device, target_type="session", target_id=session.id, details={"source":"telegram_link","new_device":new_device})
+    await db.commit()
+    if new_device:
+        await _notify_new_device(user, request)
+    return _auth_response(user, session)
 
 
 @router.post("/generate-code", response_model=LoginCodeResponse)
@@ -759,6 +793,7 @@ async def verify_login_code(
         raise HTTPException(status_code=404, detail="حساب تلگرام پیدا نشد.")
     if not user.is_active:
         raise HTTPException(status_code=403, detail="این حساب هنوز توسط مدیر تأیید نشده یا غیرفعال است.")
+    _require_telegram_two_factor(user, code_request.otp)
         
     # Generate tokens
     session = await _session_for_device(db, request, user)
@@ -784,7 +819,7 @@ async def verify_login_code(
 @router.post("/code", response_model=AuthResponse)
 async def login_with_code(
     request: Request,
-    code_request: LoginCodeRequest,
+    code_request: VerifyCodeRequest,
     db: AsyncSession = Depends(get_db),
 ):
    """Legacy endpoint - use verify-code instead."""
@@ -792,6 +827,6 @@ async def login_with_code(
    # ... (reusing logic or redirecting)
    return await verify_login_code(
        request,
-       VerifyCodeRequest(code=code_request.code),
+       code_request,
        db
    )

@@ -37,7 +37,7 @@ export default function DeleteConfirmModal({ type, name, count = 1, onConfirm, o
                         <Trash2 className="w-5 h-5" />
                         {title}
                     </h2>
-                    <button onClick={onClose} disabled={isDeleting} className="p-1 hover:bg-dark-700 rounded disabled:opacity-50">
+                    <button onClick={onClose} className="p-1 hover:bg-dark-700 rounded" aria-label="بستن پنجره حذف">
                         <X className="w-5 h-5" />
                     </button>
                 </div>
@@ -52,7 +52,7 @@ export default function DeleteConfirmModal({ type, name, count = 1, onConfirm, o
                         {isDeleting ? 'در حال حذف…' : includesFolder ? 'حذف کشو و محتویات' : 'حذف فایل'}
                     </button>
                     {includesFolder && <button onClick={() => confirm(false)} disabled={isDeleting} className="min-h-11 rounded-xl border border-white/10 bg-dark-800 px-4 py-2 font-medium hover:bg-dark-700 disabled:opacity-50">فقط حذف کشو</button>}
-                    <button onClick={onClose} disabled={isDeleting} className="min-h-11 rounded-xl px-4 py-2 text-dark-400 transition-colors hover:bg-white/[.04] hover:text-white sm:col-span-2">بی‌خیال</button>
+                    <button onClick={onClose} className="min-h-11 rounded-xl px-4 py-2 text-dark-400 transition-colors hover:bg-white/[.04] hover:text-white sm:col-span-2">{isDeleting?'بستن و ادامه در پس‌زمینه':'بی‌خیال'}</button>
                 </div>
                 </div>
             </div>

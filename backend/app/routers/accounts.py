@@ -446,8 +446,9 @@ async def _delete_tag_definitions(names: list[str], current_user: User, db: Asyn
         exclusions = clean_tag_exclusions(json.loads(current_user.tag_exclusions_json or "[]"))
     except (TypeError, ValueError, json.JSONDecodeError):
         exclusions = []
-    existing_exclusions = {item.casefold() for item in exclusions}
-    exclusions.extend(sorted(key for key in keys if key not in existing_exclusions))
+    # Deleting a tag means deleting it everywhere. Exclusions are a separate
+    # user choice and must not be changed as a side effect of deletion.
+    exclusions = [item for item in exclusions if item.casefold() not in keys]
     current_user.tag_exclusions_json = json.dumps(clean_tag_exclusions(exclusions), ensure_ascii=False)
     from ..caption_metadata import remove_tags_from_caption
     files = (await db.execute(select(File).where(File.user_id == current_user.id))).scalars().all()

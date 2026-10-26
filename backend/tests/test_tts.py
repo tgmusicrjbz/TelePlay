@@ -78,9 +78,9 @@ class TTSHelpersTests(unittest.IsolatedAsyncioTestCase):
 
     def test_auto_routing_uses_workload_to_control_cost(self):
         preferences = normalize_tts_settings({"ai_routing_mode": "auto"})
-        self.assertEqual(route_ai_model(preferences, "text", 500), "gemini-3.8-flash-lite")
+        self.assertEqual(route_ai_model(preferences, "text", 500), "gemini-3.5-flash-lite")
         self.assertEqual(route_ai_model(preferences, "text", 20_000), "gemini-3.8-flash")
-        self.assertEqual(route_ai_model(preferences, "stt", 120), "gemini-3.8-flash-lite")
+        self.assertEqual(route_ai_model(preferences, "stt", 120), "gemini-3.5-flash-lite")
         self.assertEqual(route_ai_model(preferences, "stt", 1_200), "gemini-3.8-flash")
 
     def test_legacy_scoped_tags_become_director_notes(self):

@@ -88,30 +88,31 @@ function AuthCallback() {
     const token = searchParams.get('token');
     const [status, setStatus] = useState('در حال ورود به کمد…');
     const [saved, setSaved] = useState(false);
+    const [otpRequired,setOtpRequired]=useState(false);
+    const [otp,setOtp]=useState('');
+    const [submitting,setSubmitting]=useState(false);
+
+    const exchange=async(code?:string)=>{
+        if(!token||submitting)return;
+        setSubmitting(true);
+        try{
+            const {data}=await api.post<AuthResponse>('/auth/telegram-token',{token,otp:code||undefined});
+            saveAuthenticatedAccount(data);
+            setStatus('✅ ورود انجام شد؛ در حال باز کردن کمد…');
+            setSaved(true);
+            setTimeout(()=>navigate('/',{replace:true}),500);
+        }catch(error:any){
+            const detail=String(error?.response?.data?.detail||'ورود انجام نشد. دوباره از ربات وارد شو.');
+            if(detail.includes('تأیید دومرحله‌ای')){setOtpRequired(true);setStatus('کد برنامهٔ تأیید را وارد کن.');}
+            else setStatus(`❌ ${detail}`);
+        }finally{setSubmitting(false)}
+    };
 
     useEffect(() => {
-        if (token) {
-            void (async () => { try {
-                localStorage.setItem('access_token', token);
-                const check = localStorage.getItem('access_token');
-                if (check === token) {
-                    const { data } = await api.post<AuthResponse>('/auth/session', undefined, { headers: { Authorization: `Bearer ${token}` } });
-                    saveAuthenticatedAccount(data);
-                    setStatus('✅ ورود انجام شد؛ در حال باز کردن کمد…');
-                    setSaved(true);
-                    setTimeout(() => {
-                        navigate('/', { replace: true });
-                    }, 500);
-                } else {
-                    setStatus('❌ ذخیره اطلاعات ورود انجام نشد. دوباره تلاش کن.');
-                }
-            } catch {
-                setStatus('❌ ورود انجام نشد. دوباره از ربات وارد شو.');
-            } })();
-        } else {
-            setStatus('❌ اطلاعات ورود در این پیوند وجود ندارد.');
-        }
-    }, [token, navigate]);
+        if(token)void exchange();
+        else setStatus('❌ اطلاعات ورود در این پیوند وجود ندارد.');
+        // The initial exchange must only run once for this link.
+    }, [token]);
 
     // If saved but still on this page, try redirect again
     useEffect(() => {
@@ -126,8 +127,9 @@ function AuthCallback() {
     return (
         <div dir="rtl" className="min-h-screen flex items-center justify-center bg-dark-950 p-4">
             <div className="text-center max-w-lg">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500 mx-auto mb-4"></div>
+                {!otpRequired&&<div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500 mx-auto mb-4"></div>}
                 <p className="text-white text-lg mb-4">{status}</p>
+                {otpRequired&&!saved&&<form className="mx-auto mt-4 max-w-xs space-y-3" onSubmit={event=>{event.preventDefault();void exchange(otp)}}><input dir="ltr" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={otp} onChange={event=>setOtp(event.target.value.replace(/\D/g,'').slice(0,6))} className="input w-full text-center font-mono tracking-[.35em]" placeholder="کد ۶ رقمی"/><button disabled={otp.length!==6||submitting} className="btn-primary min-h-11 w-full disabled:opacity-40">{submitting?'در حال بررسی…':'تأیید و ورود'}</button></form>}
 
                 {token && !saved && <a href="/login" className="btn-secondary mt-4 inline-block">بازگشت به صفحه ورود</a>}
             </div>
@@ -137,6 +139,11 @@ function AuthCallback() {
 
 function TelegramWebAppBootstrap({ children }: { children: React.ReactNode }) {
     const [ready, setReady] = useState(() => Boolean(localStorage.getItem('access_token')));
+    const [pendingInitData,setPendingInitData]=useState<string|null>(null);
+    const [telegramOtp,setTelegramOtp]=useState('');
+    const [telegramOtpError,setTelegramOtpError]=useState<string|null>(null);
+    const [telegramOtpBusy,setTelegramOtpBusy]=useState(false);
+    const twoFactorPending=useRef(false);
     useEffect(() => {
         let cancelled = false;
         let syncing = false;
@@ -151,6 +158,7 @@ function TelegramWebAppBootstrap({ children }: { children: React.ReactNode }) {
             } catch { return null; }
         };
         const sync = async () => {
+            if(twoFactorPending.current)return;
             if (!await checkServerReachability()) { if (!cancelled) setReady(true); return; }
             const identity = telegramIdentity();
             if (!identity) { if (!cancelled) setReady(true); return; }
@@ -188,7 +196,15 @@ function TelegramWebAppBootstrap({ children }: { children: React.ReactNode }) {
                     body: JSON.stringify({ init_data: identity.initData }),
                     signal: controller.signal,
                 });
-                if (!response.ok) throw new Error('Telegram authentication failed');
+                if (!response.ok){
+                    const payload=await response.json().catch(()=>({detail:'ورود تلگرام انجام نشد.'})) as {detail?:string};
+                    if(response.status===401&&String(payload.detail||'').includes('تأیید دومرحله‌ای')){
+                        twoFactorPending.current=true;
+                        if(!cancelled){setPendingInitData(identity.initData);setTelegramOtpError(null);setReady(false)}
+                        return;
+                    }
+                    throw new Error(payload.detail||'Telegram authentication failed');
+                }
                 const data = await response.json() as AuthResponse;
                 saveAuthenticatedAccount(data);
                 localStorage.setItem('komod-telegram-user-id', identity.userId);
@@ -216,6 +232,24 @@ function TelegramWebAppBootstrap({ children }: { children: React.ReactNode }) {
             window.removeEventListener('komod-telegram-ready', onOnline);
         };
     }, []);
+    const submitTelegramOtp=async(event:React.FormEvent)=>{
+        event.preventDefault();
+        if(!pendingInitData||telegramOtp.length!==6||telegramOtpBusy)return;
+        setTelegramOtpBusy(true);setTelegramOtpError(null);
+        try{
+            const {data}=await api.post<AuthResponse>('/auth/telegram-webapp',{init_data:pendingInitData,otp:telegramOtp},{headers:{'X-Komod-Device-ID':getKomodDeviceId()}});
+            saveAuthenticatedAccount(data);
+            const rawUser=new URLSearchParams(pendingInitData).get('user');
+            const userId=rawUser?String(JSON.parse(rawUser).id||''):'';
+            if(userId)localStorage.setItem('komod-telegram-user-id',userId);
+            localStorage.setItem('komod-telegram-init-data',pendingInitData);
+            localStorage.removeItem('komod-manual-account');
+            twoFactorPending.current=false;
+            window.location.replace('/');
+        }catch(error:any){setTelegramOtpError(error?.response?.data?.detail||'کد تأیید درست نیست.')}
+        finally{setTelegramOtpBusy(false)}
+    };
+    if(pendingInitData)return <div className="flex min-h-screen items-center justify-center bg-dark-950 p-4" dir="rtl"><form onSubmit={submitTelegramOtp} className="glass-card w-full max-w-sm p-6 text-center"><h1 className="text-lg font-bold">تأیید دومرحله‌ای</h1><p className="mt-2 text-xs leading-6 text-dark-400">کد ۶ رقمی برنامهٔ تأیید را برای ورود با تلگرام وارد کن.</p><input dir="ltr" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={telegramOtp} onChange={event=>setTelegramOtp(event.target.value.replace(/\D/g,'').slice(0,6))} className="input mt-5 w-full text-center font-mono tracking-[.35em]" placeholder="کد ۶ رقمی"/><button disabled={telegramOtp.length!==6||telegramOtpBusy} className="btn-primary mt-3 min-h-11 w-full disabled:opacity-40">{telegramOtpBusy?'در حال بررسی…':'تأیید و ورود'}</button>{telegramOtpError&&<p className="mt-3 text-xs text-red-300">{telegramOtpError}</p>}</form></div>;
     if (!ready) return <div className="flex min-h-screen items-center justify-center bg-dark-950" dir="rtl"><div className="text-center"><div className="mx-auto mb-4 h-11 w-11 animate-spin rounded-full border-2 border-white/10 border-t-primary-400"/><p className="text-sm text-dark-300">در حال هماهنگ‌کردن حساب تلگرام…</p></div></div>;
     return <>{children}</>;
 }
@@ -252,6 +286,8 @@ function LoginPage() {
     const [loginPassword, setLoginPassword] = useState('');
     const [loginOtp, setLoginOtp] = useState('');
     const [needsOtp, setNeedsOtp] = useState(false);
+    const [telegramOtp,setTelegramOtp]=useState('');
+    const [telegramNeedsOtp,setTelegramNeedsOtp]=useState(false);
     const [accountMode,setAccountMode]=useState<'login'|'register'>('login');
     const [registerName,setRegisterName]=useState('');
     const [registerPasswordAgain,setRegisterPasswordAgain]=useState('');
@@ -297,6 +333,13 @@ function LoginPage() {
                 if (cancelled) return;
                 const detail = String(pollError?.response?.data?.detail || '');
                 const status = Number(pollError?.response?.status || 0);
+                if(status===401&&detail.includes('تأیید دومرحله‌ای')){
+                    cancelled=true;
+                    setIsPolling(false);
+                    setTelegramNeedsOtp(true);
+                    setError(null);
+                    return;
+                }
                 if (status === 400 && /expired|invalid|منقضی|اعتبار.*تمام|معتبر نیست/i.test(detail)) {
                     cancelled = true;
                     setError('کد قبلی منقضی شد؛ یک کد تازه می‌سازیم…');
@@ -323,7 +366,7 @@ function LoginPage() {
         e.preventDefault();
         if (!code) return;
 
-        loginByCode(code, {
+        loginByCode({code,otp:telegramNeedsOtp?telegramOtp:undefined}, {
             onSuccess: (data) => {
                 saveAuthenticatedAccount(data);
                 if(sessionStorage.getItem('komod-password-recovery')==='1'){
@@ -334,7 +377,9 @@ function LoginPage() {
                 window.location.href = '/';
             },
             onError: (err: any) => {
-                setError(err.response?.data?.detail || 'کد ورود معتبر نیست.');
+                const detail=String(err.response?.data?.detail||'کد ورود معتبر نیست.');
+                if(detail.includes('تأیید دومرحله‌ای'))setTelegramNeedsOtp(true);
+                setError(detail);
             }
         });
     };
@@ -389,11 +434,11 @@ function LoginPage() {
 
                 <div className="mb-5 grid grid-cols-2 rounded-xl border border-white/[.07] bg-dark-950/50 p-1">
                     <button onClick={()=>{setLoginMode('password');setError(null);setNotice(null);}} className={`min-h-10 rounded-lg text-sm transition ${loginMode==='password'?'bg-primary-500 text-white':'text-dark-400'}`}>نام کاربری</button>
-                    <button disabled={localRuntime} title={localRuntime?'برای جلوگیری از اجرای هم‌زمان ربات، ورود تلگرام در نسخهٔ محلی غیرفعال است.':'ورود با تلگرام'} onClick={()=>{setLoginMode('telegram');setError(null);setNotice(null);}} className={`min-h-10 rounded-lg text-sm transition disabled:cursor-not-allowed disabled:opacity-45 ${loginMode==='telegram'?'bg-primary-500 text-white':'text-dark-400'}`}>ورود با تلگرام</button>
+                    <button disabled={localRuntime} title={localRuntime?'برای جلوگیری از اجرای هم‌زمان ربات، ورود تلگرام در نسخهٔ محلی غیرفعال است.':'ورود با تلگرام'} onClick={()=>{setLoginMode('telegram');setError(null);setNotice(null);setTelegramNeedsOtp(false);setTelegramOtp('');}} className={`min-h-10 rounded-lg text-sm transition disabled:cursor-not-allowed disabled:opacity-45 ${loginMode==='telegram'?'bg-primary-500 text-white':'text-dark-400'}`}>ورود با تلگرام</button>
                 </div>
 
                 <div className="space-y-6">
-                    {loginMode === 'password' && <div className="glass-card p-6 text-right"><div className="mb-4 grid grid-cols-2 rounded-xl bg-dark-950/55 p-1"><button type="button" onClick={()=>{setAccountMode('login');setError(null)}} className={`min-h-9 rounded-lg text-xs ${accountMode==='login'?'bg-primary-500 text-white':'text-dark-400'}`}>ورود</button><button type="button" onClick={()=>{setAccountMode('register');setNeedsOtp(false);setError(null);setNotice(null)}} className={`min-h-9 rounded-lg text-xs ${accountMode==='register'?'bg-primary-500 text-white':'text-dark-400'}`}>ساخت حساب</button></div>{localRuntime&&accountMode==='login'&&<p className="mb-4 rounded-xl bg-primary-500/10 px-3 py-2 text-center text-xs leading-6 text-primary-100">نسخهٔ محلی به دیتابیس اصلی وصل است. برای جلوگیری از اجرای هم‌زمان ربات، با نام کاربری و رمز وارد شو.</p>}{accountMode==='register'&&<p className="mb-4 rounded-xl border border-primary-400/15 bg-primary-500/[.07] px-3 py-2 text-center text-xs leading-6 text-primary-100">این حساب بدون تلگرام ساخته می‌شود و پس از تأیید مدیر قابل استفاده است.</p>}{notice&&<p className="mb-4 rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-3 py-2 text-center text-xs leading-6 text-emerald-200">{notice}</p>}<form onSubmit={accountMode==='login'?handlePasswordLogin:handleRegister} className="space-y-3">{accountMode==='register'&&<input dir="rtl" autoComplete="name" value={registerName} onChange={event=>setRegisterName(event.target.value)} className="input w-full text-right" placeholder="نام نمایشی"/>}<input dir="rtl" autoComplete="username" value={loginUsername} onChange={event=>setLoginUsername(event.target.value)} className="input w-full text-right" placeholder="نام کاربری انگلیسی"/><input dir="rtl" type="password" autoComplete={accountMode==='login'?'current-password':'new-password'} value={loginPassword} onChange={event=>setLoginPassword(event.target.value)} className="input w-full text-right" placeholder="رمز عبور"/>{accountMode==='register'&&<><input dir="rtl" type="password" autoComplete="new-password" value={registerPasswordAgain} onChange={event=>setRegisterPasswordAgain(event.target.value)} className="input w-full text-right" placeholder="تکرار رمز عبور"/><p className={`text-[11px] leading-5 ${loginPassword&&!passwordStrong?'text-amber-300':'text-dark-500'}`}>حداقل ۸ نویسه شامل حرف بزرگ و کوچک انگلیسی، عدد و نماد</p></>}{accountMode==='login'&&needsOtp&&<input dir="ltr" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={loginOtp} onChange={event=>setLoginOtp(event.target.value.replace(/\D/g,'').slice(0,6))} className="input w-full text-center font-mono tracking-[.35em]" placeholder="کد ۶ رقمی"/>}<button disabled={accountMode==='login'?(passwordLogin.isPending||loginUsername.trim().length<4||loginPassword.length<8||(needsOtp&&loginOtp.length!==6)):(registerAccount.isPending||registerName.trim().length<2||loginUsername.trim().length<4||!passwordStrong||loginPassword!==registerPasswordAgain)} className="btn-primary min-h-11 w-full disabled:opacity-50">{accountMode==='login'?(passwordLogin.isPending?'در حال ورود…':'ورود'):(registerAccount.isPending?'در حال ثبت درخواست…':'ارسال درخواست ساخت حساب')}</button>{error&&<p className="text-center text-sm text-red-300">{error}</p>}</form>{accountMode==='login'&&!localRuntime&&<button onClick={()=>{sessionStorage.setItem('komod-password-recovery','1');setLoginMode('telegram');setError(null);}} className="mt-4 w-full text-center text-xs text-primary-300">رمزم را فراموش کرده‌ام</button>}</div>}
+                    {loginMode === 'password' && <div className="glass-card p-6 text-right"><div className="mb-4 grid grid-cols-2 rounded-xl bg-dark-950/55 p-1"><button type="button" onClick={()=>{setAccountMode('login');setError(null)}} className={`min-h-9 rounded-lg text-xs ${accountMode==='login'?'bg-primary-500 text-white':'text-dark-400'}`}>ورود</button><button type="button" onClick={()=>{setAccountMode('register');setNeedsOtp(false);setError(null);setNotice(null)}} className={`min-h-9 rounded-lg text-xs ${accountMode==='register'?'bg-primary-500 text-white':'text-dark-400'}`}>ساخت حساب</button></div>{localRuntime&&accountMode==='login'&&<p className="mb-4 rounded-xl bg-primary-500/10 px-3 py-2 text-center text-xs leading-6 text-primary-100">نسخهٔ محلی به دیتابیس اصلی وصل است. برای جلوگیری از اجرای هم‌زمان ربات، با نام کاربری و رمز وارد شو.</p>}{accountMode==='register'&&<p className="mb-4 rounded-xl border border-primary-400/15 bg-primary-500/[.07] px-3 py-2 text-center text-xs leading-6 text-primary-100">این حساب بدون تلگرام ساخته می‌شود و پس از تأیید مدیر قابل استفاده است.</p>}{notice&&<p className="mb-4 rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-3 py-2 text-center text-xs leading-6 text-emerald-200">{notice}</p>}<form onSubmit={accountMode==='login'?handlePasswordLogin:handleRegister} className="space-y-3">{accountMode==='register'&&<input dir="rtl" autoComplete="name" value={registerName} onChange={event=>setRegisterName(event.target.value)} className="input w-full text-right" placeholder="نام نمایشی"/>}<input dir="rtl" autoComplete="username" value={loginUsername} onChange={event=>setLoginUsername(event.target.value)} className="input w-full text-right" placeholder="نام کاربری"/><input dir="rtl" type="password" autoComplete={accountMode==='login'?'current-password':'new-password'} value={loginPassword} onChange={event=>setLoginPassword(event.target.value)} className="input w-full text-right" placeholder="رمز عبور"/>{accountMode==='register'&&<><input dir="rtl" type="password" autoComplete="new-password" value={registerPasswordAgain} onChange={event=>setRegisterPasswordAgain(event.target.value)} className="input w-full text-right" placeholder="تکرار رمز عبور"/><p className={`text-[11px] leading-5 ${loginPassword&&!passwordStrong?'text-amber-300':'text-dark-500'}`}>حداقل ۸ نویسه شامل حرف بزرگ و کوچک انگلیسی، عدد و نماد</p></>}{accountMode==='login'&&needsOtp&&<input dir="ltr" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={loginOtp} onChange={event=>setLoginOtp(event.target.value.replace(/\D/g,'').slice(0,6))} className="input w-full text-center font-mono tracking-[.35em]" placeholder="کد ۶ رقمی"/>}<button disabled={accountMode==='login'?(passwordLogin.isPending||loginUsername.trim().length<4||!loginPassword||(needsOtp&&loginOtp.length!==6)):(registerAccount.isPending||registerName.trim().length<2||loginUsername.trim().length<4||!passwordStrong||loginPassword!==registerPasswordAgain)} className="btn-primary min-h-11 w-full disabled:opacity-50">{accountMode==='login'?(passwordLogin.isPending?'در حال ورود…':'ورود'):(registerAccount.isPending?'در حال ثبت درخواست…':'ارسال درخواست ساخت حساب')}</button>{error&&<p className="text-center text-sm text-red-300">{error}</p>}</form>{accountMode==='login'&&!localRuntime&&<button onClick={()=>{sessionStorage.setItem('komod-password-recovery','1');setLoginMode('telegram');setError(null);}} className="mt-4 w-full text-center text-xs text-primary-300">رمزم را فراموش کرده‌ام</button>}</div>}
                     <div className={`${loginMode === 'telegram' ? 'block' : 'hidden'} glass-card p-5 text-right sm:p-6`}>
                         <h3 className="mb-2 flex items-center gap-2 font-semibold text-white">
                             <svg className="w-5 h-5 text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -410,8 +455,9 @@ function LoginPage() {
                         <div className="mt-4"><BotLink code={code}/></div>
                         {isGenerating&&<div className="mt-3 flex items-center justify-center gap-2 text-xs text-dark-400"><div className="h-4 w-4 animate-spin rounded-full border border-white/15 border-t-primary-400"/>در حال آماده‌سازی ورود امن…</div>}
                         {isPolling&&<div className="mt-3 flex items-center justify-center gap-2 text-xs text-dark-400"><div className="h-2 w-2 animate-pulse rounded-full bg-primary-500"/>منتظر تأیید در تلگرام…</div>}
+                        {telegramNeedsOtp&&<div className="mt-4 rounded-2xl border border-primary-400/15 bg-primary-500/[.06] p-3"><p className="mb-3 text-center text-xs leading-6 text-primary-100">تلگرام تأیید شد. حالا کد برنامهٔ تأیید را وارد کن.</p><input dir="ltr" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={telegramOtp} onChange={event=>setTelegramOtp(event.target.value.replace(/\D/g,'').slice(0,6))} className="input w-full text-center font-mono tracking-[.35em]" placeholder="کد ۶ رقمی"/></div>}
                         {error&&<p className="mt-3 rounded-xl bg-red-500/10 px-3 py-2 text-center text-xs leading-6 text-red-300">{error}</p>}
-                        <form onSubmit={handleManualLogin} className="mt-2 text-center"><button type="submit" disabled={code.length<6||isVerifying} className="px-3 py-2 text-[11px] text-dark-500 transition hover:text-primary-200 disabled:opacity-40">{isVerifying?'در حال بررسی…':'بررسی دوباره ورود'}</button></form>
+                        <form onSubmit={handleManualLogin} className="mt-2 text-center"><button type="submit" disabled={code.length<6||isVerifying||(telegramNeedsOtp&&telegramOtp.length!==6)} className={telegramNeedsOtp?'btn-primary min-h-11 w-full disabled:opacity-40':'px-3 py-2 text-[11px] text-dark-500 transition hover:text-primary-200 disabled:opacity-40'}>{isVerifying?'در حال بررسی…':telegramNeedsOtp?'تأیید و ورود':'بررسی دوباره ورود'}</button></form>
                         </div>
                 </div>
             </div>

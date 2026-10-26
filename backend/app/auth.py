@@ -3,6 +3,7 @@ JWT authentication utilities.
 """
 from datetime import datetime, timedelta
 import json
+import secrets
 from typing import Optional
 
 from jose import jwt, JWTError
@@ -74,6 +75,16 @@ def create_refresh_token(telegram_id: int, version: int = 0, session_id: str | N
     if session_id:
         payload["sid"] = session_id
     return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
+
+
+def create_telegram_login_token(telegram_id: int) -> str:
+    """Create a short-lived proof that Telegram initiated an interactive login."""
+    return jwt.encode({
+        "sub": str(telegram_id),
+        "exp": datetime.utcnow() + timedelta(minutes=5),
+        "type": "telegram-login",
+        "nonce": secrets.token_urlsafe(12),
+    }, settings.jwt_secret, algorithm="HS256")
 
 
 def create_vault_token(telegram_id: int, version: int = 0) -> str:

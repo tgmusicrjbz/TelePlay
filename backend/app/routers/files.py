@@ -82,6 +82,10 @@ class TextContentUpdate(BaseModel):
     content: str = Field(min_length=1, max_length=1_000_000)
 
 
+class TextFirstUpdate(BaseModel):
+    enabled: bool
+
+
 class PublicShareRevokeBatch(BaseModel):
     file_ids: list[int] = Field(min_length=1, max_length=200)
 
@@ -1216,6 +1220,8 @@ async def get_text_preview(
         raise HTTPException(status_code=415, detail="Text preview is not available for this file")
     if file.file_size > 1024 * 1024:
         raise HTTPException(status_code=413, detail="Text preview is limited to 1 MB")
+    if (file.file_id or "").startswith("text-post:"):
+        return {"content": file.search_text or file.description or ""}
     message = await get_message_from_channel(file.channel_message_id, file.storage_channel_id)
     if message is None:
         raise HTTPException(status_code=404, detail="Message not found in storage")
@@ -1256,6 +1262,14 @@ async def update_text_content(
         require_vault_access(request, current_user)
     if file.file_type != "text":
         raise HTTPException(status_code=415, detail="Only saved text notes can be edited")
+    if (file.file_id or "").startswith("text-post:"):
+        file.search_text = payload.content
+        file.file_size = len(payload.content.encode("utf-8"))
+        file.description = next((line.strip() for line in payload.content.splitlines() if line.strip()), file.description or "")[:240] or None
+        file.updated_at = datetime.utcnow()
+        await db.commit()
+        await db.refresh(file)
+        return {"content": payload.content, "file": add_urls_to_file(file)}
     message = await get_message_from_channel(file.channel_message_id, file.storage_channel_id)
     try:
         if message is not None and message.document is not None:
@@ -1298,6 +1312,68 @@ async def update_text_content(
     file.is_shortcut = False
     await db.commit()
     return {"content": payload.content, "file": add_urls_to_file(file)}
+
+
+@router.post("/{file_id}/text-first")
+async def set_text_first_mode(
+    file_id: int,
+    payload: TextFirstUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Create or remove the readable text card paired with a captioned media file."""
+    source = (await db.execute(select(File).where(
+        File.id == file_id, File.user_id == current_user.id
+    ).options(selectinload(File.watch_progress)))).scalar_one_or_none()
+    if source is None:
+        raise HTTPException(status_code=404, detail="فایل پیدا نشد.")
+    if (source.file_id or "").startswith("text-post:"):
+        try:
+            media_id = int(source.file_id.split(":", 1)[1])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=409, detail="پیوست این متن پیدا نشد.")
+        media = (await db.execute(select(File).where(
+            File.id == media_id, File.user_id == current_user.id
+        ).options(selectinload(File.watch_progress)))).scalar_one_or_none()
+        companion = source
+    else:
+        media = source
+        companion = (await db.execute(select(File).where(
+            File.user_id == current_user.id,
+            File.file_id == f"text-post:{source.id}",
+        ).options(selectinload(File.watch_progress)))).scalar_one_or_none()
+    if media is None or media.file_type not in {"image", "video", "audio", "document"}:
+        raise HTTPException(status_code=415, detail="این حالت فقط برای پست‌های دارای پیوست است.")
+    if not payload.enabled:
+        if companion is not None:
+            await db.delete(companion)
+            await db.commit()
+        return {"enabled": False, "media_file": add_urls_to_file(media)}
+    if companion is None:
+        content = (media.description or "").strip()
+        if not content:
+            raise HTTPException(status_code=422, detail="ابتدا متن یا کپشن این فایل را در توضیحات ذخیره کن.")
+        first_line = next((line.strip() for line in content.splitlines() if line.strip()), "یادداشت پیوست")
+        attachment_label = {"video": "ویدیو", "audio": "صدا", "document": "فایل"}.get(media.file_type, "پیوست")
+        attachment = (
+            f"\n\n![تصویر پیوست](/api/stream/{media.id})" if media.file_type == "image"
+            else f"\n\n[باز کردن {attachment_label}](komod://file/{media.id})"
+        )
+        companion = File(
+            user_id=media.user_id, folder_id=media.folder_id,
+            channel_message_id=media.channel_message_id, storage_channel_id=media.storage_channel_id,
+            file_id=f"text-post:{media.id}", file_unique_id=f"text-post:{media.file_unique_id}:{media.id}",
+            file_name=sanitize_filename(f"{first_line[:90]}.md"), description=first_line[:240],
+            search_text=f"{content}{attachment}", tags_json=media.tags_json,
+            file_size=len((content + attachment).encode("utf-8")), mime_type="text/markdown; charset=utf-8",
+            file_type="text", thumbnail_file_id=media.thumbnail_file_id,
+        )
+        db.add(companion)
+        await db.commit()
+        companion = (await db.execute(select(File).where(
+            File.id == companion.id
+        ).options(selectinload(File.watch_progress)))).scalar_one()
+    return {"enabled": True, "companion": add_urls_to_file(companion), "media_file": add_urls_to_file(media)}
 
 
 @router.get("", response_model=FileListResponse)
@@ -1778,13 +1854,21 @@ async def batch_delete_files(
         for channel_id, msg_ids in messages_by_channel.items():
             for start in range(0, len(msg_ids), 100):
                 batch = msg_ids[start:start + 100]
-                if channel_id is None:
-                    await delete_from_storage_channel(batch)
-                else:
-                    await delete_from_storage_channel(batch, channel_id)
+                try:
+                    if channel_id is None:
+                        await delete_from_storage_channel(batch)
+                    else:
+                        await delete_from_storage_channel(batch, channel_id)
+                except Exception:
+                    # A stale Telegram message must not keep the database item
+                    # and the whole bulk-delete dialog stuck forever.
+                    logger.warning("Could not delete one storage batch", exc_info=True)
         for channel_id, msg_ids in audio_messages_by_channel.items():
             for start in range(0, len(msg_ids), 100):
-                await delete_from_storage_channel(msg_ids[start:start + 100], channel_id)
+                try:
+                    await delete_from_storage_channel(msg_ids[start:start + 100], channel_id)
+                except Exception:
+                    logger.warning("Could not delete one audio variant batch", exc_info=True)
     
     # Delete from DB
     for file in files:

@@ -472,8 +472,8 @@ export const useCurrentUser = () => {
 
 export const useLoginWithCode = () => {
     return useMutation({
-        mutationFn: async (code: string) => {
-            const { data } = await api.post<AuthResponse>('/auth/code', { code });
+        mutationFn: async (payload: {code:string;otp?:string}) => {
+            const { data } = await api.post<AuthResponse>('/auth/verify-code', payload);
             return data;
         },
     });
@@ -509,8 +509,8 @@ export const useGenerateLoginCode = () => {
 
 export const useVerifyLoginCode = () => {
     return useMutation({
-        mutationFn: async (code: string) => {
-            const { data } = await api.post<AuthResponse>('/auth/verify-code', { code });
+        mutationFn: async (payload: {code:string;otp?:string}) => {
+            const { data } = await api.post<AuthResponse>('/auth/verify-code', payload);
             return data;
         },
     });
@@ -568,7 +568,12 @@ export const useUpdateFile = () => {
                 ()=>({...cached,id,...data,updated_at:new Date().toISOString()} as TelegramFile),
             );
         },
-        onSuccess: () => {
+        onSuccess: (updated,variables) => {
+            queryClient.setQueryData(['file',variables.id],updated);
+            queryClient.setQueriesData<FileListResponse>({queryKey:['files']},current=>current?{
+                ...current,
+                files:current.files.map(item=>item.id===variables.id?{...item,...updated}:item),
+            }:current);
             queryClient.invalidateQueries({ queryKey: ['files'] });
             queryClient.invalidateQueries({ queryKey: ['folders'] });
             queryClient.invalidateQueries({ queryKey: ['folderTree'] });
@@ -909,6 +914,17 @@ export const usePacks = (parentFolderId: number | null, allFolders = false) => {
     });
 };
 
+export const useTextFirstMode = () => {
+    const queryClient=useQueryClient();
+    return useMutation({
+        mutationFn:async({id,enabled}:{id:number;enabled:boolean})=>(await api.post<{enabled:boolean;companion?:TelegramFile;media_file:TelegramFile}>(`/files/${id}/text-first`,{enabled})).data,
+        onSuccess:()=>{
+            queryClient.invalidateQueries({queryKey:['files']});
+            queryClient.invalidateQueries({queryKey:['activity']});
+        },
+    });
+};
+
 export const usePack = (id: number | null) => useQuery<Pack>({
     queryKey: ['packs', 'detail', id],
     queryFn: async () => (await api.get<Pack>(`/packs/${id}`)).data,
@@ -1233,7 +1249,11 @@ export const useBatchUpdateFiles = () => {
                 ()=>({message:'تغییرات برای همگام‌سازی ذخیره شد.',updated:payload.ids.length}),
             );
         },
-        onSuccess: () => {
+        onSuccess: (updated) => {
+            queryClient.setQueryData(['file',updated.id],updated);
+            queryClient.setQueriesData<any>({ queryKey: ['files'] }, current => current?.files
+                ? {...current,files:current.files.map((item:TelegramFile)=>item.id===updated.id?updated:item)}
+                : current);
             queryClient.invalidateQueries({ queryKey: ['files'] });
             queryClient.invalidateQueries({ queryKey: ['folders'] });
             queryClient.invalidateQueries({ queryKey: ['tag-settings'] });
@@ -1364,7 +1384,12 @@ export const usePublicShares = () => useQuery({
     queryFn:async()=>(await api.get<PublicShareItem[]>('/files/public-shares')).data,
 });
 export const useRevokePublicShares = () => { const queryClient=useQueryClient(); return useMutation({
-    mutationFn:async(fileIds:number[])=>(await api.post<{revoked:number;file_ids:number[]}>('/files/public-shares/revoke',{file_ids:fileIds})).data,
+    mutationFn:async(fileIds:number[])=>{
+        const unique=[...new Set(fileIds)];
+        const chunks=Array.from({length:Math.ceil(unique.length/200)},(_,index)=>unique.slice(index*200,(index+1)*200));
+        const results=await Promise.all(chunks.map(chunk=>api.post<{revoked:number;file_ids:number[]}>('/files/public-shares/revoke',{file_ids:chunk})));
+        return results.reduce((total,response)=>({revoked:total.revoked+response.data.revoked,file_ids:[...total.file_ids,...response.data.file_ids]}),{revoked:0,file_ids:[] as number[]});
+    },
     onSuccess:(result)=>{
         const revokedIds=new Set(result.file_ids||[]);
         queryClient.setQueryData<PublicShareItem[]>(['public-shares'],current=>(current||[]).filter(item=>!revokedIds.has(item.file_id)));
