@@ -401,6 +401,12 @@ class AuthResponse(Token):
     user: UserResponse
 
 
+class PasswordRegistrationResponse(BaseModel):
+    status: Literal["pending_approval"] = "pending_approval"
+    message: str
+    username: str
+
+
 class TelegramWebAppRequest(BaseModel):
     init_data: str = Field(min_length=1)
 

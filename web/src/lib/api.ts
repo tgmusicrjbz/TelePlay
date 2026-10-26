@@ -43,6 +43,7 @@ export interface User {
 }
 
 export interface AuthSession { id: string; device_name: string; user_agent?: string | null; ip_address?: string | null; created_at: string; last_seen_at: string; current: boolean; }
+export interface PasswordRegistrationResponse { status:'pending_approval'; message:string; username:string; }
 export interface Workspace { user_id: number; telegram_id: number; name: string; username?: string | null; permission: 'owner' | 'read' | 'write'; folder_ids: number[]; file_ids: number[]; }
 export interface AdminUser extends User { total_size: number; file_count: number; session_count: number; tts_daily_limit:number; tts_max_chars:number; tts_used_today:number; tts_total_jobs:number; tts_total_chars:number; stt_daily_limit:number; stt_max_seconds:number; stt_used_today:number; stt_total_jobs:number; stt_total_seconds:number; }
 export interface AdminStats { active_users: number; total_users: number; total_files: number; total_size: number; tts_jobs_today:number; tts_total_jobs:number; tts_total_chars:number; stt_jobs_today:number; stt_total_jobs:number; stt_total_seconds:number; }
@@ -1037,7 +1038,7 @@ export const usePasswordLogin = () => useMutation({
 });
 
 export const useRegisterAccount = () => useMutation({
-    mutationFn: async (payload: { username: string; password: string; display_name:string }) => (await api.post<AuthResponse>('/auth/password/register', payload)).data,
+    mutationFn: async (payload: { username: string; password: string; display_name:string }) => (await api.post<PasswordRegistrationResponse>('/auth/password/register', payload)).data,
 });
 
 export const useCredentials = () => useQuery({

@@ -242,14 +242,35 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
                 ),
                 db,
             )
-            self.assertLess(response.user.telegram_id, 0)
-            self.assertEqual(response.user.login_username, "standalone.user")
+            self.assertEqual(response.status, "pending_approval")
+            self.assertEqual(response.username, "standalone.user")
             user = (await db.execute(select(User).where(User.login_username == "standalone.user"))).scalar_one()
+            self.assertLess(user.telegram_id, 0)
+            self.assertFalse(user.is_active)
             folder = (await db.execute(select(Folder).where(Folder.user_id == user.id, Folder.is_default.is_(True)))).scalar_one()
             usage = await db.get(TTSUsage, user.id)
             self.assertEqual(folder.name, "فایل‌های من")
             self.assertEqual(usage.daily_limit, 5)
             self.assertEqual(usage.stt_daily_limit, 5)
+            sessions = (await db.execute(select(AuthSession).where(AuthSession.user_id == user.id))).scalars().all()
+            self.assertEqual(sessions, [])
+            with self.assertRaises(HTTPException) as pending:
+                await password_login(
+                    self.auth_request(),
+                    PasswordLoginRequest(username="standalone.user", password="Safe-Password-1405!"),
+                    db,
+                )
+            self.assertEqual(pending.exception.status_code, 403)
+            self.assertIn("منتظر تأیید مدیر", pending.exception.detail)
+
+            user.is_active = True
+            await db.commit()
+            login = await password_login(
+                self.auth_request(),
+                PasswordLoginRequest(username="standalone.user", password="Safe-Password-1405!"),
+                db,
+            )
+            self.assertEqual(login.user.id, user.id)
 
     async def test_tag_settings_counts_and_hash_search(self):
         async with async_session() as db:

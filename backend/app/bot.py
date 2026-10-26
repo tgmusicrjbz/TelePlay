@@ -1122,9 +1122,10 @@ async def start_command(client, message: Message):
     await load_user_ui_state(message.from_user.id)
     await set_current_drawer(message.from_user.id, None)
     
-    # Check for deep-linked login codes (e.g. /start ABCDEF)
+    # Accept the explicit login payload and old plain-code links.
     if len(message.command) > 1:
-        code_input = message.command[1].strip().upper()
+        payload = message.command[1].strip()
+        code_input = (payload[6:] if payload.lower().startswith("login_") else payload).upper()
         async with async_session() as db:
             result = await db.execute(select(LoginCode).where(LoginCode.code == code_input))
             login_code = result.scalar_one_or_none()

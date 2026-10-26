@@ -246,6 +246,7 @@ function LoginPage() {
     const [code, setCode] = useState('');
     const [isPolling, setIsPolling] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [notice, setNotice] = useState<string | null>(null);
     const [loginMode, setLoginMode] = useState<'password'|'telegram'>('password');
     const [loginUsername, setLoginUsername] = useState('');
     const [loginPassword, setLoginPassword] = useState('');
@@ -296,7 +297,7 @@ function LoginPage() {
                 if (cancelled) return;
                 const detail = String(pollError?.response?.data?.detail || '');
                 const status = Number(pollError?.response?.status || 0);
-                if (status === 400 && /expired|invalid/i.test(detail)) {
+                if (status === 400 && /expired|invalid|منقضی|اعتبار.*تمام|معتبر نیست/i.test(detail)) {
                     cancelled = true;
                     setError('کد قبلی منقضی شد؛ یک کد تازه می‌سازیم…');
                     setIsPolling(false);
@@ -306,7 +307,7 @@ function LoginPage() {
                 if (!pollError?.response) {
                     networkFailures += 1;
                     if (networkFailures >= 3) setError('ارتباط با سرور ناپایدار است؛ بررسی ورود خودکار ادامه دارد.');
-                } else if (!/not yet verified/i.test(detail)) {
+                } else if (!/not yet verified|هنوز.*تأیید نشده/i.test(detail)) {
                     setError(detail || 'بررسی کد ورود انجام نشد؛ دوباره تلاش می‌کنیم.');
                 }
             } finally {
@@ -341,6 +342,7 @@ function LoginPage() {
     const handlePasswordLogin = (event: React.FormEvent) => {
         event.preventDefault();
         setError(null);
+        setNotice(null);
         passwordLogin.mutate({ username: loginUsername.trim(), password: loginPassword, otp: needsOtp ? loginOtp : undefined }, {
             onSuccess: data => {
                 saveAuthenticatedAccount(data);
@@ -356,10 +358,10 @@ function LoginPage() {
     };
 
     const handleRegister=(event:React.FormEvent)=>{
-        event.preventDefault();setError(null);
+        event.preventDefault();setError(null);setNotice(null);
         if(loginPassword!==registerPasswordAgain){setError('تکرار رمز عبور یکسان نیست.');return;}
         registerAccount.mutate({username:loginUsername.trim(),password:loginPassword,display_name:registerName.trim()},{
-            onSuccess:data=>{saveAuthenticatedAccount(data);localStorage.setItem('komod-manual-account',String(data.user.telegram_id));window.location.href='/';},
+            onSuccess:data=>{setAccountMode('login');setLoginPassword('');setRegisterPasswordAgain('');setNotice(data.message);},
             onError:(err:any)=>setError(err.response?.data?.detail||'ساخت حساب انجام نشد.'),
         });
     };
@@ -386,12 +388,12 @@ function LoginPage() {
                 </p>
 
                 <div className="mb-5 grid grid-cols-2 rounded-xl border border-white/[.07] bg-dark-950/50 p-1">
-                    <button onClick={()=>{setLoginMode('password');setError(null);}} className={`min-h-10 rounded-lg text-sm transition ${loginMode==='password'?'bg-primary-500 text-white':'text-dark-400'}`}>نام کاربری</button>
-                    <button disabled={localRuntime} title={localRuntime?'برای جلوگیری از اجرای هم‌زمان ربات، ورود تلگرام در نسخهٔ محلی غیرفعال است.':'ورود با تلگرام'} onClick={()=>{setLoginMode('telegram');setError(null);}} className={`min-h-10 rounded-lg text-sm transition disabled:cursor-not-allowed disabled:opacity-45 ${loginMode==='telegram'?'bg-primary-500 text-white':'text-dark-400'}`}>ورود با تلگرام</button>
+                    <button onClick={()=>{setLoginMode('password');setError(null);setNotice(null);}} className={`min-h-10 rounded-lg text-sm transition ${loginMode==='password'?'bg-primary-500 text-white':'text-dark-400'}`}>نام کاربری</button>
+                    <button disabled={localRuntime} title={localRuntime?'برای جلوگیری از اجرای هم‌زمان ربات، ورود تلگرام در نسخهٔ محلی غیرفعال است.':'ورود با تلگرام'} onClick={()=>{setLoginMode('telegram');setError(null);setNotice(null);}} className={`min-h-10 rounded-lg text-sm transition disabled:cursor-not-allowed disabled:opacity-45 ${loginMode==='telegram'?'bg-primary-500 text-white':'text-dark-400'}`}>ورود با تلگرام</button>
                 </div>
 
                 <div className="space-y-6">
-                    {loginMode === 'password' && <div className="glass-card p-6 text-right"><div className="mb-4 grid grid-cols-2 rounded-xl bg-dark-950/55 p-1"><button type="button" onClick={()=>{setAccountMode('login');setError(null)}} className={`min-h-9 rounded-lg text-xs ${accountMode==='login'?'bg-primary-500 text-white':'text-dark-400'}`}>ورود</button><button type="button" onClick={()=>{setAccountMode('register');setNeedsOtp(false);setError(null)}} className={`min-h-9 rounded-lg text-xs ${accountMode==='register'?'bg-primary-500 text-white':'text-dark-400'}`}>ساخت حساب</button></div>{localRuntime&&accountMode==='login'&&<p className="mb-4 rounded-xl bg-primary-500/10 px-3 py-2 text-center text-xs leading-6 text-primary-100">نسخهٔ محلی به دیتابیس اصلی وصل است. برای جلوگیری از اجرای هم‌زمان ربات، با نام کاربری و رمز وارد شو.</p>}<form onSubmit={accountMode==='login'?handlePasswordLogin:handleRegister} className="space-y-3">{accountMode==='register'&&<input dir="rtl" autoComplete="name" value={registerName} onChange={event=>setRegisterName(event.target.value)} className="input w-full text-right" placeholder="نام نمایشی"/>}<input dir="rtl" autoComplete="username" value={loginUsername} onChange={event=>setLoginUsername(event.target.value)} className="input w-full text-right" placeholder="نام کاربری انگلیسی"/><input dir="rtl" type="password" autoComplete={accountMode==='login'?'current-password':'new-password'} value={loginPassword} onChange={event=>setLoginPassword(event.target.value)} className="input w-full text-right" placeholder="رمز عبور"/>{accountMode==='register'&&<><input dir="rtl" type="password" autoComplete="new-password" value={registerPasswordAgain} onChange={event=>setRegisterPasswordAgain(event.target.value)} className="input w-full text-right" placeholder="تکرار رمز عبور"/><p className={`text-[11px] leading-5 ${loginPassword&&!passwordStrong?'text-amber-300':'text-dark-500'}`}>حداقل ۸ نویسه شامل حرف بزرگ و کوچک انگلیسی، عدد و نماد</p></>}{accountMode==='login'&&needsOtp&&<input dir="ltr" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={loginOtp} onChange={event=>setLoginOtp(event.target.value.replace(/\D/g,'').slice(0,6))} className="input w-full text-center font-mono tracking-[.35em]" placeholder="کد ۶ رقمی"/>}<button disabled={accountMode==='login'?(passwordLogin.isPending||loginUsername.trim().length<4||loginPassword.length<8||(needsOtp&&loginOtp.length!==6)):(registerAccount.isPending||registerName.trim().length<2||loginUsername.trim().length<4||!passwordStrong||loginPassword!==registerPasswordAgain)} className="btn-primary min-h-11 w-full disabled:opacity-50">{accountMode==='login'?(passwordLogin.isPending?'در حال ورود…':'ورود'):(registerAccount.isPending?'در حال ساخت حساب…':'ساخت حساب و ورود')}</button>{error&&<p className="text-center text-sm text-red-300">{error}</p>}</form>{accountMode==='login'&&!localRuntime&&<button onClick={()=>{sessionStorage.setItem('komod-password-recovery','1');setLoginMode('telegram');setError(null);}} className="mt-4 w-full text-center text-xs text-primary-300">رمزم را فراموش کرده‌ام</button>}</div>}
+                    {loginMode === 'password' && <div className="glass-card p-6 text-right"><div className="mb-4 grid grid-cols-2 rounded-xl bg-dark-950/55 p-1"><button type="button" onClick={()=>{setAccountMode('login');setError(null)}} className={`min-h-9 rounded-lg text-xs ${accountMode==='login'?'bg-primary-500 text-white':'text-dark-400'}`}>ورود</button><button type="button" onClick={()=>{setAccountMode('register');setNeedsOtp(false);setError(null);setNotice(null)}} className={`min-h-9 rounded-lg text-xs ${accountMode==='register'?'bg-primary-500 text-white':'text-dark-400'}`}>ساخت حساب</button></div>{localRuntime&&accountMode==='login'&&<p className="mb-4 rounded-xl bg-primary-500/10 px-3 py-2 text-center text-xs leading-6 text-primary-100">نسخهٔ محلی به دیتابیس اصلی وصل است. برای جلوگیری از اجرای هم‌زمان ربات، با نام کاربری و رمز وارد شو.</p>}{accountMode==='register'&&<p className="mb-4 rounded-xl border border-primary-400/15 bg-primary-500/[.07] px-3 py-2 text-center text-xs leading-6 text-primary-100">این حساب بدون تلگرام ساخته می‌شود و پس از تأیید مدیر قابل استفاده است.</p>}{notice&&<p className="mb-4 rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-3 py-2 text-center text-xs leading-6 text-emerald-200">{notice}</p>}<form onSubmit={accountMode==='login'?handlePasswordLogin:handleRegister} className="space-y-3">{accountMode==='register'&&<input dir="rtl" autoComplete="name" value={registerName} onChange={event=>setRegisterName(event.target.value)} className="input w-full text-right" placeholder="نام نمایشی"/>}<input dir="rtl" autoComplete="username" value={loginUsername} onChange={event=>setLoginUsername(event.target.value)} className="input w-full text-right" placeholder="نام کاربری انگلیسی"/><input dir="rtl" type="password" autoComplete={accountMode==='login'?'current-password':'new-password'} value={loginPassword} onChange={event=>setLoginPassword(event.target.value)} className="input w-full text-right" placeholder="رمز عبور"/>{accountMode==='register'&&<><input dir="rtl" type="password" autoComplete="new-password" value={registerPasswordAgain} onChange={event=>setRegisterPasswordAgain(event.target.value)} className="input w-full text-right" placeholder="تکرار رمز عبور"/><p className={`text-[11px] leading-5 ${loginPassword&&!passwordStrong?'text-amber-300':'text-dark-500'}`}>حداقل ۸ نویسه شامل حرف بزرگ و کوچک انگلیسی، عدد و نماد</p></>}{accountMode==='login'&&needsOtp&&<input dir="ltr" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={loginOtp} onChange={event=>setLoginOtp(event.target.value.replace(/\D/g,'').slice(0,6))} className="input w-full text-center font-mono tracking-[.35em]" placeholder="کد ۶ رقمی"/>}<button disabled={accountMode==='login'?(passwordLogin.isPending||loginUsername.trim().length<4||loginPassword.length<8||(needsOtp&&loginOtp.length!==6)):(registerAccount.isPending||registerName.trim().length<2||loginUsername.trim().length<4||!passwordStrong||loginPassword!==registerPasswordAgain)} className="btn-primary min-h-11 w-full disabled:opacity-50">{accountMode==='login'?(passwordLogin.isPending?'در حال ورود…':'ورود'):(registerAccount.isPending?'در حال ثبت درخواست…':'ارسال درخواست ساخت حساب')}</button>{error&&<p className="text-center text-sm text-red-300">{error}</p>}</form>{accountMode==='login'&&!localRuntime&&<button onClick={()=>{sessionStorage.setItem('komod-password-recovery','1');setLoginMode('telegram');setError(null);}} className="mt-4 w-full text-center text-xs text-primary-300">رمزم را فراموش کرده‌ام</button>}</div>}
                     <div className={`${loginMode === 'telegram' ? 'block' : 'hidden'} glass-card p-5 text-right sm:p-6`}>
                         <h3 className="mb-2 flex items-center gap-2 font-semibold text-white">
                             <svg className="w-5 h-5 text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -406,10 +408,7 @@ function LoginPage() {
                             <div className="flex items-center gap-2"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-primary-500/15 text-primary-200">۳</span><span>به این صفحه برگرد؛ ورود خودکار انجام می‌شود.</span></div>
                         </div>
                         <div className="mt-4"><BotLink code={code}/></div>
-                        <div className="mt-3 flex items-center gap-2 rounded-xl border border-white/[.07] bg-dark-950/45 p-2.5">
-                            <div className="min-w-0 flex-1"><span className="block text-[10px] text-dark-500">کد ورود</span><strong dir="ltr" className="mt-0.5 block font-mono text-lg tracking-[.2em] text-primary-200">{isGenerating?'••••••':code||'------'}</strong></div>
-                            <button type="button" disabled={!code} onClick={() => void navigator.clipboard.writeText(`/login ${code}`)} className="rounded-xl bg-white/[.06] px-3 py-2 text-xs text-dark-200 disabled:opacity-40">کپی دستور</button>
-                        </div>
+                        {isGenerating&&<div className="mt-3 flex items-center justify-center gap-2 text-xs text-dark-400"><div className="h-4 w-4 animate-spin rounded-full border border-white/15 border-t-primary-400"/>در حال آماده‌سازی ورود امن…</div>}
                         {isPolling&&<div className="mt-3 flex items-center justify-center gap-2 text-xs text-dark-400"><div className="h-2 w-2 animate-pulse rounded-full bg-primary-500"/>منتظر تأیید در تلگرام…</div>}
                         {error&&<p className="mt-3 rounded-xl bg-red-500/10 px-3 py-2 text-center text-xs leading-6 text-red-300">{error}</p>}
                         <form onSubmit={handleManualLogin} className="mt-2 text-center"><button type="submit" disabled={code.length<6||isVerifying} className="px-3 py-2 text-[11px] text-dark-500 transition hover:text-primary-200 disabled:opacity-40">{isVerifying?'در حال بررسی…':'بررسی دوباره ورود'}</button></form>
@@ -422,8 +421,9 @@ function LoginPage() {
 
 function BotLink({ code }: { code?: string }) {
     const { data: botInfo } = useBotInfo();
-    const botUrl = botInfo?.username 
-        ? `https://t.me/${botInfo.username}${code ? `?start=${code}` : ''}` 
+    const ready = Boolean(botInfo?.username && code);
+    const botUrl = ready
+        ? `https://t.me/${botInfo!.username}?start=login_${code}`
         : '#';
 
     return (
@@ -431,12 +431,13 @@ function BotLink({ code }: { code?: string }) {
             href={botUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className={`btn-secondary inline-flex items-center justify-center gap-2 w-full py-3 ${!botInfo?.username ? 'opacity-50 pointer-events-none' : ''}`}
+            aria-disabled={!ready}
+            className={`btn-secondary inline-flex items-center justify-center gap-2 w-full py-3 ${!ready ? 'opacity-50 pointer-events-none' : ''}`}
         >
             <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.562 8.161c-.18 1.897-.962 6.502-1.359 8.627-.168.9-.5 1.201-.82 1.23-.697.064-1.226-.461-1.901-.903-1.056-.692-1.653-1.123-2.678-1.799-1.185-.781-.417-1.21.258-1.911.177-.184 3.247-2.977 3.307-3.23.007-.032.015-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.139-5.062 3.345-.479.329-.913.489-1.302.481-.428-.009-1.252-.242-1.865-.442-.751-.244-1.349-.374-1.297-.789.027-.216.324-.437.893-.663 3.498-1.524 5.831-2.529 6.998-3.015 3.333-1.386 4.025-1.627 4.477-1.635.099-.002.321.023.465.141.121.099.155.232.17.325.015.094.034.31.019.478z" />
             </svg>
-            باز کردن ربات در تلگرام
+            تأیید ورود در تلگرام
         </a>
     );
 }

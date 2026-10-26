@@ -29,6 +29,7 @@ from ..schemas import (
     LoginCodeResponse, 
     VerifyCodeRequest, 
     AuthResponse,
+    PasswordRegistrationResponse,
     RefreshTokenRequest,
     BotInfoResponse, SessionResponse, TelegramWebAppRequest,
     PasswordLoginRequest, PasswordRegisterRequest, CredentialsUpdate, CredentialsStatus,
@@ -267,7 +268,11 @@ async def password_login(
     if totp_secret and not verify_totp(totp_secret, payload.otp or ""):
         raise HTTPException(status_code=401, detail="کد تأیید دومرحله‌ای را وارد کن.")
     if not user.is_active:
-        raise HTTPException(status_code=403, detail="این حساب غیرفعال است.")
+        detail = (
+            "درخواست ساخت این حساب هنوز منتظر تأیید مدیر است. بعد از تأیید دوباره وارد شو."
+            if user.telegram_id < 0 else "این حساب غیرفعال است."
+        )
+        raise HTTPException(status_code=403, detail=detail)
     user.failed_login_attempts = 0
     user.login_locked_until = None
     user.last_active = now
@@ -281,7 +286,7 @@ async def password_login(
     return _auth_response(user, session)
 
 
-@router.post("/password/register", response_model=AuthResponse, status_code=201)
+@router.post("/password/register", response_model=PasswordRegistrationResponse, status_code=202)
 @limiter.limit("3/hour")
 async def password_register(
     request: Request,
@@ -310,7 +315,7 @@ async def password_register(
         login_username=username,
         password_hash=password_context.hash(payload.password),
         display_name=display_name,
-        is_active=True,
+        is_active=False,
     )
     db.add(user)
     await db.flush()
@@ -322,18 +327,20 @@ async def password_register(
         stt_daily_limit=max(0, settings.public_user_stt_daily_limit),
         stt_max_seconds=max(0, settings.public_user_stt_max_seconds),
     ))
-    session = await _session_for_device(db, request, user)
-    db.add(session)
     add_security_event(
         db, "account_registered", user_id=user.id, request=request,
-        target_type="account", target_id=user.id, details={"source": "password"},
+        target_type="account", target_id=user.id,
+        details={"source": "password", "approval": "pending"},
     )
     try:
         await db.commit()
     except IntegrityError:
         await db.rollback()
         raise HTTPException(status_code=409, detail="این نام کاربری قبلاً انتخاب شده است.")
-    return _auth_response(user, session)
+    return PasswordRegistrationResponse(
+        message="درخواست ساخت حساب ثبت شد. پس از تأیید مدیر می‌توانی با همین نام کاربری وارد شوی.",
+        username=username,
+    )
 
 
 def _session_from_request(request: Request, db: AsyncSession):
@@ -730,16 +737,16 @@ async def verify_login_code(
     login_code = result.scalar_one_or_none()
     
     if not login_code:
-        raise HTTPException(status_code=400, detail="Invalid login code")
+        raise HTTPException(status_code=400, detail="کد ورود معتبر نیست.")
         
     if login_code.expires_at < datetime.utcnow():
         await db.delete(login_code)
         await db.commit()
-        raise HTTPException(status_code=400, detail="Login code expired")
+        raise HTTPException(status_code=400, detail="اعتبار کد ورود تمام شده است.")
     
     # Check if user has claimed it (telegram_id is set)
     if not login_code.telegram_id:
-        raise HTTPException(status_code=400, detail="Code not yet verified")
+        raise HTTPException(status_code=400, detail="ورود هنوز در تلگرام تأیید نشده است.")
         
     # Get user
     result = await db.execute(
@@ -749,7 +756,9 @@ async def verify_login_code(
     
     if not user:
         # Should not happen if bot flow is correct
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="حساب تلگرام پیدا نشد.")
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="این حساب هنوز توسط مدیر تأیید نشده یا غیرفعال است.")
         
     # Generate tokens
     session = await _session_for_device(db, request, user)
