@@ -105,6 +105,7 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HTTPException) as missing:
             _require_telegram_two_factor(user, None)
         self.assertEqual(missing.exception.status_code, 401)
+        self.assertEqual(missing.exception.headers.get("X-Komod-OTP-Required"), "true")
         with self.assertRaises(HTTPException):
             _require_telegram_two_factor(user, "000000")
         _require_telegram_two_factor(user, totp_code(secret))
@@ -324,6 +325,32 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
                 SecurityEvent.user_id == self.user_id, SecurityEvent.event_type == "login_success"
             ))).scalars().all()
             self.assertEqual(len(login_events), 1)
+
+    async def test_password_login_returns_a_two_factor_challenge_then_accepts_otp(self):
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            await update_credentials(
+                self.auth_request(),
+                CredentialsUpdate(username="mahdi.2fa", new_password="Safe-Password-1405!"),
+                user, db,
+            )
+            secret = new_totp_secret()
+            user.totp_secret_encrypted = encrypt_secret(secret)
+            await db.commit()
+            with self.assertRaises(HTTPException) as challenge:
+                await password_login(
+                    self.auth_request(),
+                    PasswordLoginRequest(username="mahdi.2fa", password="Safe-Password-1405!"),
+                    db,
+                )
+            self.assertEqual(challenge.exception.status_code, 401)
+            self.assertEqual(challenge.exception.headers.get("X-Komod-OTP-Required"), "true")
+            login = await password_login(
+                self.auth_request(),
+                PasswordLoginRequest(username="mahdi.2fa", password="Safe-Password-1405!", otp=totp_code(secret)),
+                db,
+            )
+            self.assertEqual(login.user.telegram_id, user.telegram_id)
 
     async def test_standalone_account_can_register_without_telegram(self):
         async with async_session() as db:

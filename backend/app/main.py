@@ -195,7 +195,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept", "Range", "X-Workspace-User", "X-Komod-Device-ID"],
-    expose_headers=["Content-Range", "Accept-Ranges", "Content-Length", "X-Request-ID"],
+    expose_headers=["Content-Range", "Accept-Ranges", "Content-Length", "X-Request-ID", "X-Komod-OTP-Required"],
 )
 
 

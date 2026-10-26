@@ -1,7 +1,7 @@
 import { Routes, Route, Navigate, useSearchParams, useNavigate } from 'react-router-dom';
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { api, AuthResponse, getKomodDeviceId, resolveServerUrl, useCurrentUser, useLoginWithCode, usePasswordLogin, useRegisterAccount, useBotInfo, useGenerateLoginCode } from './lib/api';
+import { api, AuthResponse, getKomodDeviceId, isTwoFactorChallenge, resolveServerUrl, useCurrentUser, useLoginWithCode, usePasswordLogin, useRegisterAccount, useBotInfo, useGenerateLoginCode } from './lib/api';
 import FileBrowser from './components/FileBrowser';
 import PwaManager from './components/PwaManager';
 import OfflineDownloadProgressPanel from './components/OfflineDownloadProgress';
@@ -106,7 +106,7 @@ function AuthCallback() {
             setTimeout(()=>navigate('/',{replace:true}),500);
         }catch(error:any){
             const detail=String(error?.response?.data?.detail||'ورود انجام نشد. دوباره از ربات وارد شو.');
-            if(detail.includes('تأیید دومرحله‌ای')){setOtpRequired(true);setStatus('کد برنامهٔ تأیید را وارد کن.');}
+            if(isTwoFactorChallenge(error)){setOtpRequired(true);setStatus('کد برنامهٔ تأیید را وارد کن.');}
             else setStatus(`❌ ${detail}`);
         }finally{setSubmitting(false)}
     };
@@ -381,7 +381,7 @@ function LoginPage() {
             },
             onError: (err: any) => {
                 const detail=String(err.response?.data?.detail||'کد ورود معتبر نیست.');
-                if(detail.includes('تأیید دومرحله‌ای'))setTelegramNeedsOtp(true);
+                if(isTwoFactorChallenge(err))setTelegramNeedsOtp(true);
                 setError(detail);
             }
         });
@@ -399,7 +399,7 @@ function LoginPage() {
             },
             onError: (err: any) => {
                 const detail=String(err.response?.data?.detail||'');
-                if(detail.includes('تأیید دومرحله‌ای')) setNeedsOtp(true);
+                if(isTwoFactorChallenge(err)){setNeedsOtp(true);setLoginOtp('');setError('کد ۶ رقمی برنامهٔ تأیید را وارد کن.');return;}
                 setError(detail||'ورود انجام نشد.');
             },
         });

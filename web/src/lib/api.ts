@@ -330,6 +330,15 @@ const processQueue = (error: any, token: string | null = null) => {
     failedQueue = [];
 };
 
+const AUTH_CHALLENGE_ENDPOINTS = [
+    '/auth/password/login', '/auth/telegram-token', '/auth/telegram-webapp', '/auth/verify-code',
+];
+export const isTwoFactorChallenge = (error:any):boolean =>
+    Number(error?.response?.status)===401 && (
+        String(error?.response?.headers?.['x-komod-otp-required']||'').toLowerCase()==='true' ||
+        String(error?.response?.data?.detail||'').includes('تأیید دومرحله‌ای')
+    );
+
 // Handle 401 and 429 errors
 api.interceptors.response.use(
     (response) => {
@@ -359,6 +368,8 @@ api.interceptors.response.use(
             }
         }
 
+        const isAuthChallenge = error.response?.status===401 && AUTH_CHALLENGE_ENDPOINTS.some(path=>String(originalRequest?.url||'').includes(path));
+        if(isAuthChallenge)return Promise.reject(error);
         if (error.response?.status === 401 && !originalRequest._retry) {
             if (originalRequest.url.includes('/auth/refresh')) {
                 // Refresh token itself failed/expired - clear everything

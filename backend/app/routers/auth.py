@@ -79,8 +79,10 @@ def _validate_password(password: str) -> None:
 def _require_telegram_two_factor(user: User, otp: str | None) -> None:
     """Apply account TOTP to every Telegram based sign-in path."""
     secret = decrypt_secret(user.totp_secret_encrypted)
+    if user.totp_secret_encrypted and not secret:
+        raise HTTPException(status_code=409, detail="تنظیمات تأیید دومرحله‌ای این حساب قابل خواندن نیست؛ از نشست فعال آن را بازنشانی کن یا با مدیر تماس بگیر.")
     if secret and not verify_totp(secret, otp or ""):
-        raise HTTPException(status_code=401, detail="کد تأیید دومرحله‌ای تلگرام را وارد کن.")
+        raise HTTPException(status_code=401, detail="کد تأیید دومرحله‌ای تلگرام را وارد کن.", headers={"X-Komod-OTP-Required": "true"})
 
 
 def _auth_response(user: User, session: AuthSession) -> AuthResponse:
@@ -272,8 +274,10 @@ async def password_login(
             await db.commit()
         raise HTTPException(status_code=401, detail="نام کاربری یا رمز عبور درست نیست.")
     totp_secret = decrypt_secret(user.totp_secret_encrypted)
+    if user.totp_secret_encrypted and not totp_secret:
+        raise HTTPException(status_code=409, detail="تنظیمات تأیید دومرحله‌ای این حساب قابل خواندن نیست؛ از نشست فعال آن را بازنشانی کن یا با مدیر تماس بگیر.")
     if totp_secret and not verify_totp(totp_secret, payload.otp or ""):
-        raise HTTPException(status_code=401, detail="کد تأیید دومرحله‌ای را وارد کن.")
+        raise HTTPException(status_code=401, detail="کد تأیید دومرحله‌ای را وارد کن.", headers={"X-Komod-OTP-Required": "true"})
     if not user.is_active:
         detail = (
             "درخواست ساخت این حساب هنوز منتظر تأیید مدیر است. بعد از تأیید دوباره وارد شو."
