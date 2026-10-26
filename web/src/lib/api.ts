@@ -535,7 +535,7 @@ export const useFiles = (folderId?: number | null, fileType?: string, search?: s
             if (includePlaylistCovers) params.include_playlist_covers = true;
             if (includeHidden) params.include_hidden = true;
             if (hiddenOnly) params.hidden_only = true;
-            if(offlineRequested()) return (cacheable?readJsonCache<FileListResponse>(cacheKey):undefined) || {files:[],total:0,page,per_page:50,pages:0};
+            if(offlineRequested()) return (cacheable?readJsonCache<FileListResponse>(cacheKey):undefined) || {files:[],total:0,page,per_page:50,search_mode:'exact' as const,suggestions:[]};
             const { data } = await api.get<FileListResponse>('/files', { params });
             if(cacheable)writeJsonCache(cacheKey,data);
             return data;
