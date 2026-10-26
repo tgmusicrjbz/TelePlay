@@ -31,6 +31,7 @@ from app.models import AuthSession, BotUserState, ErrorLog, File, Folder, Pack, 
 from app.routers.auth import _session_for_device, password_login, password_register, update_credentials
 from app.routers.accounts import admin_error_logs, admin_health, delete_tag_definition, delete_tag_definitions_batch, export_account_data, get_saved_filters, get_tag_settings, import_account_data, report_client_error, resolve_admin_error, update_saved_filters, update_tag_settings
 from app.stt import consume_stt_quota
+from app.downloader import link_importer
 from app.routers.files import (
     batch_update_files,
     delete_file,
@@ -168,12 +169,16 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
                 updated_at=datetime.utcnow() - timedelta(minutes=20),
             ))
             await db.commit()
-            with patch.object(telegram, "clients", [SimpleNamespace(is_connected=True)]):
+            worker = SimpleNamespace(done=lambda: False)
+            with patch.object(telegram, "clients", [SimpleNamespace(is_connected=True)]), patch.object(
+                type(link_importer), "available", new=property(lambda _: True)
+            ), patch.object(link_importer, "clients", [SimpleNamespace()]), patch.object(link_importer, "tasks", [worker]):
                 result = await admin_health(user, db)
         services = {item.key: item for item in result.services}
         self.assertEqual(result.overall, "warning")
         self.assertEqual(services["database"].status, "healthy")
         self.assertEqual(services["telegram"].active, 1)
+        self.assertEqual(services["links"].status, "healthy")
         self.assertEqual([job.id for job in result.stuck_jobs], ["stuck-health-job"])
         self.assertFalse(hasattr(result.stuck_jobs[0], "payload_json"))
 
@@ -1131,6 +1136,23 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
 
 
 class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
+    async def test_group_button_accepts_the_members_next_text(self):
+        from app.telegram import build_clients
+        build_clients()
+        from app.bot import handle_pending_group_action, pending_group_actions
+
+        message = SimpleNamespace(
+            chat=SimpleNamespace(id=-10055), from_user=SimpleNamespace(id=111),
+            text="متنی که باید خوانده شود", caption=None,
+            audio=None, voice=None, video=None, video_note=None, document=None,
+            reply=AsyncMock(),
+        )
+        pending_group_actions[(-10055, 111)] = ("tts", datetime.now(timezone.utc) + timedelta(minutes=2))
+        with patch("app.bot.group_tts_command", new_callable=AsyncMock) as queue_tts:
+            await handle_pending_group_action(None, message)
+        queue_tts.assert_awaited_once_with(None, message, message)
+        self.assertNotIn((-10055, 111), pending_group_actions)
+
     async def test_optional_telegram_setup_does_not_block_web_startup(self):
         main_client = SimpleNamespace()
         helper_client = SimpleNamespace()

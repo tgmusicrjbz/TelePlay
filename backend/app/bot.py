@@ -59,6 +59,7 @@ upload_drawers: dict[int, int | None] = {}
 show_file_actions: dict[int, bool] = {}
 link_delivery_modes: dict[int, str] = {}
 pending_stt_modes: dict[int, str] = {}
+pending_group_actions: dict[tuple[int, int], tuple[str, datetime]] = {}
 claimed_stt_messages: set[tuple[int, int]] = set()
 loaded_ui_state_users: set[int] = set()
 PAGE_SIZE = 8
@@ -1288,7 +1289,7 @@ async def stt_command(client, message: Message):
 
 
 @tg_client.on_message(filters.command("tts") & filters.group)
-async def group_tts_command(client, message: Message):
+async def group_tts_command(client, message: Message, source_message: Message | None = None):
     """Create speech in a group without saving the generated file to a cabinet."""
     if not message.from_user:
         return
@@ -1302,8 +1303,8 @@ async def group_tts_command(client, message: Message):
     if not tts_queue.available and not personal_keys:
         await message.reply(await bot_message("tts_unavailable"))
         return
-    direct_text = message.text.split(maxsplit=1)[1].strip() if message.text and len(message.text.split(maxsplit=1)) > 1 else ""
-    replied = message.reply_to_message
+    direct_text = message.text.split(maxsplit=1)[1].strip() if source_message is None and message.text and len(message.text.split(maxsplit=1)) > 1 else ""
+    replied = source_message or message.reply_to_message
     source_text = direct_text or ((replied.text or replied.caption or "").strip() if replied else "")
     if not source_text:
         await message.reply(await bot_message("tts_text_required"))
@@ -1332,13 +1333,13 @@ async def group_tts_command(client, message: Message):
 
 
 @tg_client.on_message(filters.command("stt") & filters.group)
-async def group_stt_command(client, message: Message):
+async def group_stt_command(client, message: Message, source_message: Message | None = None):
     """Transcribe replied group media and return a temporary Markdown file."""
     if not message.from_user:
         return
     if not await require_connected_group(message):
         return
-    replied = message.reply_to_message
+    replied = source_message or message.reply_to_message
     media = next((getattr(replied, name, None) for name in ("audio", "voice", "video", "video_note", "document") if replied and getattr(replied, name, None)), None)
     if media is None:
         await message.reply("روی یک صدا، ویدیو یا فایل صوتی ریپلای کن و `/stt` را بفرست.")
@@ -1417,6 +1418,49 @@ async def group_settings_command(client, message: Message):
     except Exception:
         notice = await message.reply("اول گفت‌وگوی خصوصی ربات را باز کن و Start را بزن؛ سپس دوباره این دکمه را بزن.")
         asyncio.create_task(delete_preview_later(client, notice.chat.id, notice.id, 15))
+
+
+@tg_client.on_message(
+    filters.group & (filters.text | filters.audio | filters.voice | filters.video | filters.video_note | filters.document),
+    group=-3,
+)
+async def handle_pending_group_action(client, message: Message):
+    """Complete a TTS/STT button flow with the member's next group message."""
+    if not message.from_user or (message.text and message.text.startswith("/")):
+        return
+    key = (message.chat.id, message.from_user.id)
+    pending = pending_group_actions.get(key)
+    if pending is None:
+        return
+    action, expires_at = pending
+    if datetime.now(timezone.utc) >= expires_at:
+        pending_group_actions.pop(key, None)
+        await message.reply("⏱ زمان این درخواست تمام شد؛ دوباره از منوی گروه انتخابش کن.")
+        return
+    pending_group_actions.pop(key, None)
+    if action == "tts":
+        if not (message.text or message.caption or "").strip():
+            await message.reply("برای متن به صدا، یک پیام متنی بفرست.")
+            return
+        try:
+            await group_tts_command(client, message, message)
+        except Exception as error:
+            logger.exception("Pending group TTS failed chat=%s user=%s: %s", message.chat.id, message.from_user.id, error)
+            await message.reply("❌ ثبت تبدیل متن به صدا انجام نشد؛ دوباره تلاش کن.")
+    elif action == "stt":
+        media = next((
+            getattr(message, name, None)
+            for name in ("audio", "voice", "video", "video_note", "document")
+            if getattr(message, name, None)
+        ), None)
+        if media is None:
+            await message.reply("برای صوت به متن، یک صدا، ویدیو یا فایل صوتی بفرست.")
+            return
+        try:
+            await group_stt_command(client, message, message)
+        except Exception as error:
+            logger.exception("Pending group STT failed chat=%s user=%s: %s", message.chat.id, message.from_user.id, error)
+            await message.reply("❌ ثبت تبدیل صوت به متن انجام نشد؛ دوباره تلاش کن.")
 
 
 @tg_client.on_message(filters.command(["komod", "group_menu"]) & filters.group)
@@ -2323,16 +2367,30 @@ async def handle_callback(client, callback: CallbackQuery):
             command=callback.message.reply_to_message
             if command and command.reply_to_message and command.from_user and command.from_user.id==callback.from_user.id:
                 await callback.answer("در صف تبدیل قرار گرفت.")
-                await group_tts_command(client,command)
+                try:
+                    await group_tts_command(client,command,command.reply_to_message)
+                except Exception as error:
+                    logger.exception("Group TTS button failed chat=%s user=%s: %s", group_chat_id, callback.from_user.id, error)
+                    await callback.message.reply("❌ ثبت تبدیل متن به صدا انجام نشد؛ دوباره تلاش کن.")
             else:
-                await callback.answer("منوی /komod را روی پیام متنی ریپلای کن و دوباره این دکمه را بزن؛ یا /tts را روی متن ریپلای کن.", show_alert=True)
+                pending_group_actions[(group_chat_id, callback.from_user.id)] = (
+                    "tts", datetime.now(timezone.utc) + timedelta(minutes=2),
+                )
+                await callback.answer("حالا تا دو دقیقه یک پیام متنی بفرست؛ همان متن به صدا تبدیل می‌شود.", show_alert=True)
         elif action == "stt":
             command=callback.message.reply_to_message
             if command and command.reply_to_message and command.from_user and command.from_user.id==callback.from_user.id:
                 await callback.answer("در صف استخراج متن قرار گرفت.")
-                await group_stt_command(client,command)
+                try:
+                    await group_stt_command(client,command,command.reply_to_message)
+                except Exception as error:
+                    logger.exception("Group STT button failed chat=%s user=%s: %s", group_chat_id, callback.from_user.id, error)
+                    await callback.message.reply("❌ ثبت تبدیل صوت به متن انجام نشد؛ دوباره تلاش کن.")
             else:
-                await callback.answer("منوی /komod را روی صدا یا ویدیو ریپلای کن و دوباره این دکمه را بزن؛ یا /stt را روی فایل ریپلای کن.", show_alert=True)
+                pending_group_actions[(group_chat_id, callback.from_user.id)] = (
+                    "stt", datetime.now(timezone.utc) + timedelta(minutes=2),
+                )
+                await callback.answer("حالا تا دو دقیقه صدا، ویدیو یا فایل صوتی را بفرست.", show_alert=True)
         elif action == "link":
             await callback.answer("لینک یوتیوب یا اینستاگرام را مستقیم در همین گروه بفرست.", show_alert=True)
         elif action == "usage":

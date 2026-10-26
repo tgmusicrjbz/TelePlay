@@ -816,7 +816,7 @@ async def admin_health(_: User = Depends(require_admin), db: AsyncSession = Depe
     link_worker_alive = bool(link_workers)
     if not link_importer.available:
         link_status, link_message = "disabled", "سشن دریافت لینک تنظیم نشده"
-    elif link_worker_alive and link_importer.client is not None:
+    elif link_worker_alive and bool(getattr(link_importer, "clients", [])):
         link_status, link_message = "healthy", "دریافت لینک آماده است"
     else:
         link_status, link_message = "error", "پردازشگر لینک متوقف شده"
