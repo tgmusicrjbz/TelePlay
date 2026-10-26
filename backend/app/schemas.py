@@ -26,6 +26,7 @@ class UserResponse(UserBase):
     display_name: Optional[str] = None
     is_active: bool = True
     is_admin: bool = False
+    can_use_monitors: bool = False
     login_username: Optional[str] = None
     
     model_config = ConfigDict(from_attributes=True)
@@ -508,6 +509,7 @@ class AdminUserUpdate(BaseModel):
     tts_max_chars: Optional[int] = Field(default=None, ge=100, le=200_000)
     stt_daily_limit: Optional[int] = Field(default=None, ge=0, le=10000)
     stt_max_seconds: Optional[int] = Field(default=None, ge=0, le=604_800)
+    can_use_monitors: Optional[bool] = None
 
 
 class AdminUserCreate(BaseModel):

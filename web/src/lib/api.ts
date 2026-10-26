@@ -39,6 +39,7 @@ export interface User {
     display_name?: string | null;
     is_active?: boolean;
     is_admin?: boolean;
+    can_use_monitors?: boolean;
     login_username?: string | null;
 }
 
@@ -1495,7 +1496,7 @@ export const useResetStorageChannel = () => { const queryClient=useQueryClient()
 export const useRemoveStorageChannel = () => { const queryClient=useQueryClient(); return useMutation({ mutationFn: async(channel_id:number)=>api.delete(`/accounts/storage-channel/${channel_id}`), onSuccess:()=>queryClient.invalidateQueries({queryKey:['storageChannel']}) }); };
 export const useUpdateAdminUser = () => {
     const queryClient = useQueryClient();
-    return useMutation({ mutationFn: async ({ id, ...payload }: { id: number; display_name?: string|null; is_active?: boolean; tts_daily_limit?:number; tts_max_chars?:number; stt_daily_limit?:number; stt_max_seconds?:number }) => (await api.patch<AdminUser>(`/admin/users/${id}`, payload)).data, onSuccess: (updated) => { queryClient.setQueryData<AdminUser[]>(['adminUsers'], current=>current?.map(item=>item.id===updated.id?updated:item)); queryClient.invalidateQueries({ queryKey: ['adminUsers'] }); queryClient.invalidateQueries({queryKey:['adminStats']}); } });
+    return useMutation({ mutationFn: async ({ id, ...payload }: { id: number; display_name?: string|null; is_active?: boolean; tts_daily_limit?:number; tts_max_chars?:number; stt_daily_limit?:number; stt_max_seconds?:number; can_use_monitors?:boolean }) => (await api.patch<AdminUser>(`/admin/users/${id}`, payload)).data, onSuccess: (updated) => { queryClient.setQueryData<AdminUser[]>(['adminUsers'], current=>current?.map(item=>item.id===updated.id?updated:item)); queryClient.invalidateQueries({ queryKey: ['adminUsers'] }); queryClient.invalidateQueries({queryKey:['adminStats']}); } });
 };
 export const useAddAdminUser = () => {
     const queryClient = useQueryClient();

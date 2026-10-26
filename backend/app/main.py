@@ -27,7 +27,7 @@ from .downloader import link_importer
 from .drive_importer import drive_importer
 from .tts import tts_queue
 from .stt import stt_queue
-from .monitoring import source_monitor_service
+from .monitoring import source_monitor_service, telegram_monitor_pool
 from .routers import files_router, folders_router, streaming_router, auth_router, tv_router, playlists_router, accounts_router, tts_router, stt_router, packs_router, bot_messages_router, admin_groups_router
 from .routers.delivery import router as delivery_router
 
@@ -126,6 +126,11 @@ async def lifespan(app: FastAPI):
         # Recovery also supports users who configured only personal Gemini keys.
         await tts_queue.start()
         await stt_queue.start()
+        if telegram_monitor_pool.available:
+            try:
+                await telegram_monitor_pool.start()
+            except Exception:
+                logger.exception("Telegram monitor accounts could not start; non-Telegram monitors remain available")
         await source_monitor_service.start()
     
     yield
@@ -133,6 +138,7 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down...")
     if not settings.local_dev_mode:
         await source_monitor_service.stop()
+        await telegram_monitor_pool.stop()
         await drive_importer.stop()
         await link_importer.stop()
         await tts_queue.stop()

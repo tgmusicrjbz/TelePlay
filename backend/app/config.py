@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     # Extra user sessions for parallel YouTube/Instagram imports.  Keep the
     # original singular setting so existing deployments keep working.
     telegram_worker_sessions_str: str = Field("", alias="TELEGRAM_WORKER_SESSIONS")
+    # Dedicated user sessions for Telegram channel/Saved Messages monitoring.
+    # They are deliberately never handed to the YouTube/Instagram importer.
+    telegram_monitor_session: str = Field("", alias="TELEGRAM_MONITOR_SESSION")
+    telegram_monitor_sessions_str: str = Field("", alias="TELEGRAM_MONITOR_SESSIONS")
     
     # Authorized Users (optional - comma separated IDs)
     auth_users_str: str = Field("", alias="AUTH_USERS")
@@ -73,6 +77,21 @@ class Settings(BaseSettings):
             if value and value not in sessions:
                 sessions.append(value)
         return sessions
+
+    @property
+    def telegram_monitor_sessions(self) -> list[str]:
+        """Monitoring-only Telegram accounts, de-duplicated in stable order."""
+        values = [*self.telegram_monitor_session.split(","), *self.telegram_monitor_sessions_str.split(",")]
+        sessions: list[str] = []
+        for value in values:
+            value = value.strip()
+            if value and value not in sessions:
+                sessions.append(value)
+        return sessions
+
+    monitor_user_max_sources: int = Field(5, alias="MONITOR_USER_MAX_SOURCES")
+    monitor_user_min_interval_minutes: int = Field(30, alias="MONITOR_USER_MIN_INTERVAL_MINUTES")
+    monitor_worker_concurrency: int = Field(3, alias="MONITOR_WORKER_CONCURRENCY")
     
     telegram_storage_channel_id: int
     

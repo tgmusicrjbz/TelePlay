@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from typing import Literal, Optional
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -39,6 +40,42 @@ DEFAULT_CAPTIONS = {
 def _require_admin(user: User) -> None:
     if user.telegram_id not in settings.admin_users:
         raise HTTPException(status_code=403, detail="این بخش فقط برای مدیر در دسترس است.")
+
+
+def _has_monitor_access(user: User) -> bool:
+    return user.telegram_id in settings.admin_users or bool(user.can_use_monitors)
+
+
+def _require_monitor_access(user: User) -> None:
+    if not _has_monitor_access(user):
+        raise HTTPException(status_code=403, detail="دسترسی پایش منابع برای این حساب فعال نشده است.")
+
+
+def _validate_monitor_payload(payload: "MonitorPayload", user: User) -> None:
+    is_admin = user.telegram_id in settings.admin_users
+    if payload.source_type == "saved_messages" and not is_admin:
+        raise HTTPException(status_code=403, detail="پایش Saved Messages فقط برای مدیر اصلی فعال است.")
+    if not is_admin and payload.interval_minutes < settings.monitor_user_min_interval_minutes:
+        raise HTTPException(
+            status_code=422,
+            detail=f"کمترین فاصله پایش برای کاربران {settings.monitor_user_min_interval_minutes} دقیقه است.",
+        )
+    if not is_admin and payload.source_type == "telegram":
+        source = payload.source_url.strip().lower()
+        public_source = source.startswith("@") or source.startswith("https://t.me/") or source.startswith("http://t.me/")
+        private_source = "/+" in source or "/joinchat/" in source
+        if not public_source or private_source:
+            raise HTTPException(status_code=422, detail="کاربران فقط می‌توانند کانال عمومی تلگرام را با @username یا لینک عمومی t.me پایش کنند.")
+    if not is_admin and payload.source_type in {"youtube", "instagram"}:
+        host = (urlparse(payload.source_url.strip()).hostname or "").lower()
+        allowed = (
+            {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"}
+            if payload.source_type == "youtube"
+            else {"instagram.com", "www.instagram.com"}
+        )
+        if host not in allowed:
+            platform = "یوتیوب" if payload.source_type == "youtube" else "اینستاگرام"
+            raise HTTPException(status_code=422, detail=f"برای این نوع پایش باید لینک معتبر {platform} وارد شود.")
 
 
 async def global_caption_templates(db: AsyncSession) -> dict[str, str]:
@@ -190,12 +227,19 @@ def _monitor_dict(item: SourceMonitor) -> dict:
 
 @router.get("/monitors")
 async def list_monitors(db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    _require_monitor_access(current_user)
     items = (await db.execute(select(SourceMonitor).where(SourceMonitor.user_id == current_user.id).order_by(SourceMonitor.created_at.desc()))).scalars().all()
     return [_monitor_dict(item) for item in items]
 
 
 @router.post("/monitors", status_code=201)
 async def create_monitor(payload: MonitorPayload, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    _require_monitor_access(current_user)
+    _validate_monitor_payload(payload, current_user)
+    if current_user.telegram_id not in settings.admin_users:
+        count = (await db.execute(select(SourceMonitor.id).where(SourceMonitor.user_id == current_user.id))).scalars().all()
+        if len(count) >= settings.monitor_user_max_sources:
+            raise HTTPException(status_code=409, detail=f"هر کاربر حداکثر {settings.monitor_user_max_sources} پایش می‌تواند بسازد.")
     item = SourceMonitor(
         user_id=current_user.id, name=payload.name.strip(), source_type=payload.source_type,
         source_url=payload.source_url.strip(), enabled=payload.enabled,
@@ -211,6 +255,8 @@ async def create_monitor(payload: MonitorPayload, db: AsyncSession = Depends(get
 
 @router.put("/monitors/{monitor_id}")
 async def update_monitor(monitor_id: int, payload: MonitorPayload, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    _require_monitor_access(current_user)
+    _validate_monitor_payload(payload, current_user)
     item = (await db.execute(select(SourceMonitor).where(SourceMonitor.id == monitor_id, SourceMonitor.user_id == current_user.id))).scalar_one_or_none()
     if item is None:
         raise HTTPException(status_code=404, detail="پایش پیدا نشد.")
@@ -225,6 +271,7 @@ async def update_monitor(monitor_id: int, payload: MonitorPayload, db: AsyncSess
 
 @router.delete("/monitors/{monitor_id}", status_code=204)
 async def delete_monitor(monitor_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    _require_monitor_access(current_user)
     result = await db.execute(delete(SourceMonitor).where(SourceMonitor.id == monitor_id, SourceMonitor.user_id == current_user.id))
     if not result.rowcount:
         raise HTTPException(status_code=404, detail="پایش پیدا نشد.")
@@ -233,6 +280,7 @@ async def delete_monitor(monitor_id: int, db: AsyncSession = Depends(get_db), cu
 
 @router.post("/monitors/{monitor_id}/run")
 async def run_monitor_now(monitor_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    _require_monitor_access(current_user)
     item = (await db.execute(select(SourceMonitor).where(SourceMonitor.id == monitor_id, SourceMonitor.user_id == current_user.id))).scalar_one_or_none()
     if item is None:
         raise HTTPException(status_code=404, detail="پایش پیدا نشد.")
@@ -241,3 +289,18 @@ async def run_monitor_now(monitor_id: int, db: AsyncSession = Depends(get_db), c
         return await source_monitor_service.run_one(monitor_id)
     except Exception as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
+
+
+@router.get("/monitor-accounts")
+async def list_monitor_accounts(current_user: User = Depends(get_current_user)):
+    """Return safe identities for admin-owned, monitoring-only Telegram sessions."""
+    _require_admin(current_user)
+    from ..monitoring import telegram_monitor_pool
+    if not telegram_monitor_pool.available:
+        return []
+    if not telegram_monitor_pool.clients:
+        try:
+            await telegram_monitor_pool.start()
+        except Exception as error:
+            raise HTTPException(status_code=503, detail=str(error)) from error
+    return telegram_monitor_pool.accounts

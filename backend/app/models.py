@@ -40,6 +40,7 @@ class User(Base):
     gemini_api_keys_encrypted: Mapped[Optional[str]] = mapped_column(Text)
     google_drive_credentials_encrypted: Mapped[Optional[str]] = mapped_column(Text)
     google_drive_email: Mapped[Optional[str]] = mapped_column(String(255))
+    can_use_monitors: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     auth_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

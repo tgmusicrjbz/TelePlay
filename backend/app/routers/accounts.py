@@ -18,7 +18,7 @@ from sqlalchemy.orm import selectinload
 from ..auth import create_vault_token, get_current_user, require_vault_access
 from ..config import get_settings
 from ..database import get_db
-from ..models import AuthSession, File, Folder, Pack, PackItem, Playlist, PlaylistItem, ProcessingJob, SecurityEvent, TTSUsage, User, WorkspaceGrant
+from ..models import AuthSession, File, Folder, Pack, PackItem, Playlist, PlaylistItem, ProcessingJob, SecurityEvent, SourceMonitor, TTSUsage, User, WorkspaceGrant
 from ..schemas import AccountPreferences, AccountPreferencesUpdate, AdminHealthResponse, AdminStatsResponse, AdminUserCreate, AdminUserResponse, AdminUserUpdate, SavedFilter, SavedFiltersUpdate, ServiceHealthItem, StorageChannelItem, StorageChannelResponse, StorageChannelUpdate, StuckJobResponse, TagBatchDelete, TagDefinitionResponse, TagSettingsResponse, TagSettingsUpdate, VaultPasswordRequest, VaultStatus, VaultTokenResponse, WorkspaceGrantCreate, WorkspaceResponse
 from .. import telegram
 from ..audit import add_security_event
@@ -783,6 +783,7 @@ async def admin_stats(_: User = Depends(require_admin), db: AsyncSession = Depen
 async def admin_health(_: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
     """Return a small, non-sensitive operational snapshot for administrators."""
     from ..downloader import link_importer
+    from ..monitoring import telegram_monitor_pool
     from ..stt import stt_queue
     from ..tts import tts_queue
 
@@ -824,6 +825,18 @@ async def admin_health(_: User = Depends(require_admin), db: AsyncSession = Depe
     services.append(ServiceHealthItem(
         key="links", label="افزودن با لینک", status=link_status, message=link_message,
         queued=link_importer.queue.qsize(), active=len(getattr(link_importer, "active_job_ids", set())),
+    ))
+
+    monitor_accounts = len(getattr(telegram_monitor_pool, "clients", []))
+    if not telegram_monitor_pool.available:
+        monitor_status, monitor_message = "disabled", "حساب پایش تلگرام تنظیم نشده"
+    elif monitor_accounts:
+        monitor_status, monitor_message = "healthy", f"{monitor_accounts} حساب پایش مستقل متصل است"
+    else:
+        monitor_status, monitor_message = "error", "حساب‌های پایش تلگرام متصل نشدند"
+    services.append(ServiceHealthItem(
+        key="telegram_monitors", label="پایش تلگرام", status=monitor_status,
+        message=monitor_message, active=monitor_accounts,
     ))
 
     def speech_service(key: str, label: str, queue_service) -> ServiceHealthItem:
@@ -891,6 +904,8 @@ async def admin_users(_: User = Depends(require_admin), db: AsyncSession = Depen
     )).all()
     return [
         AdminUserResponse.model_validate(user, from_attributes=True).model_copy(update={
+            "is_admin": user.telegram_id in settings.admin_users,
+            "can_use_monitors": user.telegram_id in settings.admin_users or user.can_use_monitors,
             "total_size": int(size or 0), "file_count": int(files or 0), "session_count": int(sessions or 0),
             "tts_daily_limit": usage.daily_limit if usage else 0,
             "tts_max_chars": usage.max_chars if usage else 200_000,
@@ -933,7 +948,10 @@ async def add_authorized_user(payload: AdminUserCreate, _: User = Depends(requir
             pass
     await db.commit()
     await db.refresh(user)
-    return AdminUserResponse.model_validate(user, from_attributes=True)
+    return AdminUserResponse.model_validate(user, from_attributes=True).model_copy(update={
+        "is_admin": user.telegram_id in settings.admin_users,
+        "can_use_monitors": user.telegram_id in settings.admin_users or user.can_use_monitors,
+    })
 
 
 @router.delete("/admin/users/{user_id}", status_code=204)
@@ -982,6 +1000,14 @@ async def update_admin_user(user_id: int, payload: AdminUserUpdate, admin: User 
             sessions = (await db.execute(select(AuthSession).where(AuthSession.user_id == user.id, AuthSession.revoked_at.is_(None)))).scalars().all()
             for session in sessions:
                 session.revoked_at = datetime.utcnow()
+    if payload.can_use_monitors is not None and user.telegram_id not in settings.admin_users:
+        user.can_use_monitors = payload.can_use_monitors
+        if not user.can_use_monitors:
+            await db.execute(
+                SourceMonitor.__table__.update()
+                .where(SourceMonitor.user_id == user.id)
+                .values(enabled=False, last_error="دسترسی پایش این حساب توسط مدیر غیرفعال شده است.")
+            )
     usage = await db.get(TTSUsage, user.id)
     if any(value is not None for value in (payload.tts_daily_limit, payload.tts_max_chars, payload.stt_daily_limit, payload.stt_max_seconds)):
         if usage is None:
@@ -1000,6 +1026,8 @@ async def update_admin_user(user_id: int, payload: AdminUserUpdate, admin: User 
     files = (await db.execute(select(func.count(File.id)).where(File.user_id == user.id))).scalar_one()
     sessions = (await db.execute(select(func.count(AuthSession.id)).where(AuthSession.user_id == user.id, AuthSession.revoked_at.is_(None)))).scalar_one()
     return AdminUserResponse.model_validate(user, from_attributes=True).model_copy(update={
+        "is_admin": user.telegram_id in settings.admin_users,
+        "can_use_monitors": user.telegram_id in settings.admin_users or user.can_use_monitors,
         "total_size": int(size or 0), "file_count": int(files or 0), "session_count": int(sessions or 0),
         "tts_daily_limit": usage.daily_limit if usage else 0,
         "tts_max_chars": usage.max_chars if usage else 200_000,

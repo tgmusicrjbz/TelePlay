@@ -7,6 +7,7 @@ import logging
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from pyrogram import Client
 from sqlalchemy import select
 
 from .database import async_session
@@ -14,8 +15,77 @@ from .downloader import ImportJob, link_importer
 from .models import SourceMonitor, TelegramDestination, User
 from .tts import TTSJob, consume_tts_quota, load_tts_settings, tts_queue
 from .gemini_keys import decrypt_user_keys
+from .config import get_settings
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
+
+
+class TelegramMonitorClientPool:
+    """Dedicated Telegram user sessions used only for source monitoring."""
+
+    def __init__(self) -> None:
+        self.clients: list[Client] = []
+        self.accounts: list[dict[str, object]] = []
+        self.locks: list[asyncio.Lock] = []
+
+    @property
+    def available(self) -> bool:
+        return bool(settings.telegram_monitor_sessions)
+
+    async def start(self) -> None:
+        if self.clients or not self.available:
+            return
+        for index, session in enumerate(settings.telegram_monitor_sessions):
+            client = Client(
+                f"komod-monitor-{index + 1}", api_id=settings.telegram_api_id,
+                api_hash=settings.telegram_api_hash, session_string=session,
+                in_memory=True, no_updates=True,
+            )
+            try:
+                await client.start()
+                me = await client.get_me()
+                self.clients.append(client)
+                self.locks.append(asyncio.Lock())
+                self.accounts.append({
+                    "index": index,
+                    "telegram_id": int(me.id),
+                    "name": " ".join(value for value in (me.first_name, me.last_name) if value).strip() or str(me.id),
+                    "username": me.username,
+                })
+            except Exception:
+                logger.exception("Telegram monitor account %s could not start", index + 1)
+                try:
+                    await client.stop()
+                except Exception:
+                    pass
+        if not self.clients:
+            raise RuntimeError("هیچ حساب پایش تلگرام متصل نشد.")
+
+    async def stop(self) -> None:
+        await asyncio.gather(*(client.stop() for client in self.clients), return_exceptions=True)
+        self.clients.clear()
+        self.accounts.clear()
+        self.locks.clear()
+
+    async def selected(self, configured_index: object) -> tuple[Client, asyncio.Lock]:
+        if not self.clients:
+            await self.start()
+        try:
+            index = int(configured_index or 0)
+        except (TypeError, ValueError):
+            index = 0
+        # Environment entries can fail independently. Match the original env
+        # index first, then fall back to the first healthy monitor account.
+        position = next((position for position, item in enumerate(self.accounts) if item["index"] == index), None)
+        if position is None:
+            if not self.clients:
+                raise RuntimeError("حساب پایش تلگرام در دسترس نیست.")
+            position = 0
+        return self.clients[position], self.locks[position]
+
+
+telegram_monitor_pool = TelegramMonitorClientPool()
 
 
 def _json(raw: str) -> dict:
@@ -107,11 +177,16 @@ class SourceMonitorService:
                         pass
                 elif not item.last_checked_at or item.last_checked_at <= now - timedelta(minutes=max(5, item.interval_minutes)):
                     due_ids.append(item.id)
-        for monitor_id in due_ids:
-            try:
-                await self.run_one(monitor_id)
-            except Exception:
-                logger.exception("Monitor %s failed", monitor_id)
+        semaphore = asyncio.Semaphore(max(1, settings.monitor_worker_concurrency))
+
+        async def run_due_monitor(monitor_id: int) -> None:
+            async with semaphore:
+                try:
+                    await self.run_one(monitor_id)
+                except Exception:
+                    logger.exception("Monitor %s failed", monitor_id)
+
+        await asyncio.gather(*(run_due_monitor(monitor_id) for monitor_id in due_ids))
 
     async def run_one(self, monitor_id: int) -> dict:
         async with async_session() as db:
@@ -121,6 +196,17 @@ class SourceMonitorService:
             user = await db.get(User, monitor.user_id)
             if user is None:
                 raise ValueError("کاربر پایش پیدا نشد.")
+            is_admin = user.telegram_id in settings.admin_users
+            if not is_admin and not user.can_use_monitors:
+                monitor.enabled = False
+                monitor.last_error = "دسترسی پایش این حساب توسط مدیر غیرفعال شده است."
+                await db.commit()
+                raise PermissionError(monitor.last_error)
+            if monitor.source_type == "saved_messages" and not is_admin:
+                monitor.enabled = False
+                monitor.last_error = "پایش Saved Messages فقط برای مدیر اصلی فعال است."
+                await db.commit()
+                raise PermissionError(monitor.last_error)
             filters = _json(monitor.filters_json)
             actions = _json(monitor.actions_json)
             previous_cursor = monitor.last_cursor
@@ -168,13 +254,12 @@ class SourceMonitorService:
     async def _run_telegram(self, monitor: SourceMonitor, user: User, filters: dict, actions: dict) -> int:
         # Reading history (including Saved Messages) is a user-session-only
         # MTProto operation. Bot clients fail here with BOT_METHOD_INVALID.
-        if not link_importer.available:
-            raise RuntimeError("برای پایش تلگرام باید نشست کاربری TELEGRAM_WORKER_SESSION تنظیم شود؛ ربات به تاریخچه پیام‌ها دسترسی ندارد.")
-        if not link_importer.clients:
-            await link_importer.start()
-        if not link_importer.clients:
-            raise RuntimeError("نشست کاربری تلگرام متصل نشد. TELEGRAM_WORKER_SESSION را دوباره بررسی کن.")
-        client = link_importer.clients[0]
+        if not telegram_monitor_pool.available:
+            raise RuntimeError("برای پایش تلگرام باید TELEGRAM_MONITOR_SESSION یا TELEGRAM_MONITOR_SESSIONS تنظیم شود.")
+        selected_index = actions.get("monitor_session_index")
+        if selected_index is None:
+            selected_index = monitor.id % max(1, len(settings.telegram_monitor_sessions))
+        client, client_lock = await telegram_monitor_pool.selected(selected_index)
         source = "me" if monitor.source_type == "saved_messages" else monitor.source_url.strip()
         destinations: list[int] = []
         destination_ids = [int(value) for value in actions.get("destination_ids", [])]
@@ -190,10 +275,11 @@ class SourceMonitorService:
             destinations = [user.telegram_id]
         cursor = int(monitor.last_cursor or 0)
         messages = []
-        async for message in client.get_chat_history(source, limit=50):
-            if message.id <= cursor:
-                break
-            messages.append(message)
+        async with client_lock:
+            async for message in client.get_chat_history(source, limit=50):
+                if message.id <= cursor:
+                    break
+                messages.append(message)
         if not messages:
             return 0
         if not monitor.last_cursor and not actions.get("include_existing"):

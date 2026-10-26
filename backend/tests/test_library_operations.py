@@ -59,6 +59,7 @@ from app.routers.files import (
     OfflineManifestUpdate,
 )
 from app.routers.folders import delete_folder_contents, list_folders, update_folder
+from app.routers.delivery import MonitorPayload, _require_monitor_access, _validate_monitor_payload
 from app.routers.streaming import public_share_info, stored_message_response, unlock_public_share
 from app.routers.playlists import add_playlist_items, create_playlist, reorder_playlist, shuffle_playlist
 from app.routers.packs import create_pack, get_pack, remove_pack_item, reorder_pack
@@ -68,6 +69,35 @@ from app import telegram
 
 
 class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_monitoring_requires_explicit_access_and_keeps_saved_messages_admin_only(self):
+        denied = SimpleNamespace(telegram_id=7654321, can_use_monitors=False)
+        with self.assertRaises(HTTPException) as access_error:
+            _require_monitor_access(denied)
+        self.assertEqual(access_error.exception.status_code, 403)
+
+        delegated = SimpleNamespace(telegram_id=7654321, can_use_monitors=True)
+        _require_monitor_access(delegated)
+        with self.assertRaises(HTTPException) as saved_error:
+            _validate_monitor_payload(MonitorPayload(
+                name="پیام‌های من", source_type="saved_messages", source_url="me",
+                interval_minutes=60,
+            ), delegated)
+        self.assertEqual(saved_error.exception.status_code, 403)
+
+        with self.assertRaises(HTTPException) as private_error:
+            _validate_monitor_payload(MonitorPayload(
+                name="کانال خصوصی", source_type="telegram",
+                source_url="https://t.me/+private-invite", interval_minutes=60,
+            ), delegated)
+        self.assertEqual(private_error.exception.status_code, 422)
+
+        with self.assertRaises(HTTPException) as foreign_url_error:
+            _validate_monitor_payload(MonitorPayload(
+                name="لینک نامعتبر", source_type="youtube",
+                source_url="http://127.0.0.1/private", interval_minutes=60,
+            ), delegated)
+        self.assertEqual(foreign_url_error.exception.status_code, 422)
+
     async def test_telegram_login_requires_totp_when_enabled(self):
         secret = new_totp_secret()
         user = SimpleNamespace(totp_secret_encrypted=encrypt_secret(secret))
