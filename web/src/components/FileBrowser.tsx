@@ -422,7 +422,8 @@ export default function FileBrowser() {
     const apiFileTypeFilter = fileTypeFilter.filter(type => type !== 'pack');
     const packOnlyFilter = packFilterActive && apiFileTypeFilter.length === 0;
     const effectiveSearchQuery=smartSearchQuery||debouncedSearchQuery;
-    const { data: filesList, isLoading: filesLoading, isFetching: filesFetching, error: filesError, refetch: refetchFiles } = useFiles(hiddenOnly || effectiveSearchQuery || activeSavedFilterId ? undefined : effectiveFolderId, apiFileTypeFilter.join(',') || undefined, effectiveSearchQuery || undefined, page, sortValue, favoriteOnly, false, showHidden, hiddenOnly);
+    const browseAllFiles=currentFolderId===null&&contentScope==='files';
+    const { data: filesList, isLoading: filesLoading, isFetching: filesFetching, error: filesError, refetch: refetchFiles } = useFiles(hiddenOnly || effectiveSearchQuery || activeSavedFilterId || browseAllFiles ? undefined : effectiveFolderId, apiFileTypeFilter.join(',') || undefined, effectiveSearchQuery || undefined, page, sortValue, favoriteOnly, false, showHidden, hiddenOnly, browseAllFiles);
     const { data: activityFeed, isLoading: activityLoading, isError: activityError, refetch: refetchActivity } = useActivityFeed(activeSection === 'activity', 50);
 
 
@@ -1146,7 +1147,7 @@ export default function FileBrowser() {
     useEffect(() => {
         setPage(1);
         setHasMore(true);
-    }, [currentFolderId, fileTypeFilter, favoriteOnly, searchQuery, activeSection, sortValue, activeSavedFilterId]);
+    }, [currentFolderId, fileTypeFilter, favoriteOnly, searchQuery, activeSection, sortValue, activeSavedFilterId, contentScope]);
 
     const selectedFilesForActions = displayFiles?.filter(file => selectedFileIds.has(file.id)) || [];
     const selectedTextFilesForActions = selectedFilesForActions.filter(file=>canPreviewText(file));
@@ -1412,7 +1413,7 @@ export default function FileBrowser() {
                     {/* Right: Actions */}
                     <div className="mr-2 flex shrink-0 items-center gap-1 sm:mr-4 sm:gap-2">
                         {activeSection === 'files' && hiddenOnly && <button onClick={closeVaultItems} className="flex h-10 shrink-0 items-center gap-2 rounded-xl border border-amber-400/25 bg-amber-500/10 px-2.5 text-xs text-amber-100 transition hover:bg-amber-500/15" title="خروج از نمایش موارد مخفی"><ChevronRight className="h-4 w-4"/><span className="hidden sm:inline">بازگشت به کمد</span></button>}
-                        <button onClick={toggleConnectionMode} className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border p-0 leading-none transition ${forceOffline?'border-primary-400/30 bg-primary-500/15 text-primary-200':'border-white/[.08] bg-dark-800/70 text-dark-300 hover:text-white'}`} title={forceOffline?'رفتن به حالت آنلاین':'رفتن به حالت آفلاین'} aria-label={forceOffline?'فعال‌کردن حالت آنلاین':'فعال‌کردن حالت آفلاین'}>{forceOffline?<CloudOff className="block h-5 w-5"/>:<Cloud className="block h-5 w-5"/>}</button>
+                        {activeSection!=='settings'&&<button onClick={toggleConnectionMode} className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border p-0 leading-none transition ${forceOffline?'border-primary-400/30 bg-primary-500/15 text-primary-200':'border-white/[.08] bg-dark-800/70 text-dark-300 hover:text-white'}`} title={forceOffline?'رفتن به حالت آنلاین':'رفتن به حالت آفلاین'} aria-label={forceOffline?'فعال‌کردن حالت آنلاین':'فعال‌کردن حالت آفلاین'}>{forceOffline?<CloudOff className="block h-5 w-5"/>:<Cloud className="block h-5 w-5"/>}</button>}
                         {clipboard && (clipboard.files.length > 0 || clipboard.folders.length > 0) && (
                             <button
                                 onClick={handlePaste}

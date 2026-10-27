@@ -1378,6 +1378,7 @@ async def list_files(
     include_hidden: bool = False,
     request: Request = None,
     hidden_only: bool = False,
+    all_levels: bool = Query(False, description="List files from every folder level"),
 ):
     """List user's files with optional filtering."""
     query = select(File).where(File.user_id == current_user.id).options(selectinload(File.watch_progress))
@@ -1408,9 +1409,9 @@ async def list_files(
     # Apply filters
     if folder_id is not None:
         query = query.where(File.folder_id == folder_id)
-    elif scope and (scope["folder_ids"] or scope["file_ids"]) and not search and not file_type and not favorite_only:
+    elif not all_levels and scope and (scope["folder_ids"] or scope["file_ids"]) and not search and not file_type and not favorite_only:
         query = query.where(File.id.in_(scope["file_ids"]) if scope["file_ids"] else false())
-    elif not hidden_only and not search and not file_type and not favorite_only and not (scope and (scope["folder_ids"] or scope["file_ids"])):
+    elif not all_levels and not hidden_only and not search and not file_type and not favorite_only and not (scope and (scope["folder_ids"] or scope["file_ids"])):
         # If simply browsing (no search/filter), only show files in root (folder_id is NULL)
         query = query.where(File.folder_id.is_(None))
 

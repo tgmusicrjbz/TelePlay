@@ -861,7 +861,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
                                         {audioOnly ? <Headphones className="h-24 w-24 text-primary-300 drop-shadow-lg" /> : videoHidden ? <EyeOff className="h-24 w-24 text-primary-300 drop-shadow-lg" /> : isVideo ? <Film className="h-24 w-24 text-primary-300 drop-shadow-lg" /> : <span className="text-8xl transform transition-transform duration-500 group-hover:scale-125 drop-shadow-lg">🎵</span>}
                                     </div>
                                 )}
-                                <p dir="auto" className={`max-w-[80vw] truncate font-bold text-white drop-shadow-md ${compactInline?'text-sm':'text-2xl'}`}>{cleanFileName}</p>
+                                <p dir="auto" className={`max-w-[80vw] truncate text-start font-bold text-white drop-shadow-md ${compactInline?'text-sm':'text-2xl'}`}>{cleanFileName}</p>
                                 {audioOnly && <p className="mb-2 text-sm text-dark-300">حالت فقط صدا فعاله</p>}
                                 {videoHidden && !audioOnly && <p className="mb-2 text-sm text-dark-300">تصویر خاموشه؛ صدای همین ویدیو پخش می‌شه</p>}
                                 <p className="text-primary-400 font-medium" dir="ltr">{formatPersianMetaTime(safeCurrentTime)} / {formatPersianMetaTime(safeDuration)}</p>
@@ -899,7 +899,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
                             )}
                         </div>
                         <div className="truncate flex-1 min-w-0">
-                            <h4 dir="auto" className="text-sm font-bold text-white truncate leading-tight">{cleanFileName}</h4>
+                            <h4 dir="auto" className="truncate text-start text-sm font-bold leading-tight text-white">{cleanFileName}</h4>
                             <p className="font-player text-xs text-dark-400" dir="ltr">{formatPlayerTime(safeCurrentTime)} / {formatPlayerTime(safeDuration)}</p>
                         </div>
                     </div>
@@ -955,9 +955,9 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
                     onPointerDown={isVideo ? undefined : revealControls}
                 >
                     {/* Top bar */}
-                    <div data-player-controls className={`absolute inset-x-0 top-0 z-30 flex items-center justify-between gap-3 bg-gradient-to-b from-black/80 to-transparent ${compactInline?'p-2':'p-3 sm:p-4'} ${isVideo ? 'overflow-hidden' : ''}`}>
-                        <div className="min-w-0 flex-1">
-                            {isVideo && <h3 dir="auto" className={`max-w-[min(52vw,28rem)] truncate font-medium text-white ${compactInline?'text-sm':'text-base sm:text-lg'}`} title={cleanFileName}>{cleanFileName}</h3>}
+                    <div data-player-controls className={`absolute inset-x-0 top-0 z-30 flex items-center justify-between gap-2 bg-gradient-to-b from-black/80 to-transparent ${compactInline?'p-2':'p-3 sm:p-4'} ${isVideo ? 'overflow-hidden' : ''}`}>
+                        <div className={`min-w-0 flex-1 ${inlineExpanded?'pl-24':''}`}>
+                            {isVideo && <h3 dir="auto" className={`w-full truncate text-start font-medium text-white ${compactInline?'text-sm':'text-base sm:text-lg'}`} title={cleanFileName}>{cleanFileName}</h3>}
                         </div>
                         {hasQueue && <p data-track-counter dir="rtl" className="absolute left-1/2 top-16 z-50 -translate-x-1/2 whitespace-nowrap rounded-xl border border-white/15 bg-black/75 px-4 py-2 text-sm font-bold text-white shadow-xl backdrop-blur-md">ترک <span className="font-black text-primary-300">{queuePosition.toLocaleString('fa-IR')}</span> از <span className="font-black text-primary-300">{queueLength.toLocaleString('fa-IR')}</span></p>}
                         {!inline && <div className="flex shrink-0 items-center justify-end gap-1 sm:gap-2">

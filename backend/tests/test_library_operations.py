@@ -191,6 +191,8 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn(image.id, {item.id for item in root_listing.files})
             search_listing = await list_files(folder_id=None, file_type=None, search="cover", page=1, per_page=20, db=db, current_user=user)
             self.assertNotIn(image.id, {item.id for item in search_listing.files})
+            all_levels_listing = await list_files(folder_id=None, file_type=None, search=None, page=1, per_page=20, db=db, current_user=user, all_levels=True)
+            self.assertIn(text_file.id, {item.id for item in all_levels_listing.files})
 
     async def test_caption_directives_are_parsed_and_removed_from_description(self):
         from app.caption_metadata import parse_file_caption

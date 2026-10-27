@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { Activity, AlertTriangle, ArrowRight, AtSign, BrainCircuit, ChevronDown, ChevronLeft, AudioLines, Check, CheckCircle2, Copy, Database, Download, ExternalLink, FileStack, FileText, FolderPlus, Gauge, Globe2, Grid2X2, HardDrive, Instagram, KeyRound, LayoutGrid, List, ListRestart, LockKeyhole, LogOut, MessageSquareText, MonitorSmartphone, Moon, MoreVertical, Palette, Pencil, Plus, RefreshCw, Search, Shield, Smartphone, Sun, Tags, Trash2, UserRoundCog, Users, Warehouse, XCircle } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowRight, AtSign, BrainCircuit, ChevronDown, ChevronLeft, AudioLines, Check, CheckCircle2, Cloud, CloudOff, Copy, Database, Download, ExternalLink, FileStack, FileText, FoldVertical, FolderPlus, Gauge, Globe2, Grid2X2, HardDrive, Instagram, KeyRound, LayoutGrid, List, ListRestart, LockKeyhole, LogOut, MessageSquareText, MonitorSmartphone, Moon, MoreVertical, Palette, Pencil, Plus, RefreshCw, Search, Shield, Smartphone, Sun, Tags, Trash2, UnfoldVertical, UserRoundCog, Users, Warehouse, XCircle } from 'lucide-react';
 import { AdminUser, Folder, PublicShareItem, TelegramFile, TwoFactorSetup, api, formatFileSize, formatIranTime, formatPersianDate, getServerOrigin, useAccountPreferences, useAddAdminUser, useAdminErrors, useAdminHealth, useAdminStats, useAdminUsers, useClearAdminErrors, useClearSecurityEvents, useCredentials, useCurrentUser, useDisableTwoFactor, useEnableTwoFactor, useFiles, useFolderTree, useGrantWorkspace, useLogoutAll, useLogoutOthers, usePublicShares, useRemoveAdminUser, useRemoveStorageChannel, useResetStorageChannel, useResolveAdminError, useRevokePublicShares, useRevokeSession, useRevokeWorkspace, useSecurityEvents, useSessions, useSetStorageChannel, useSetVaultPassword, useSetupTwoFactor, useStorageChannel, useStorageStats, useUnlockVault, useUpdateAccountPreferences, useUpdateAdminUser, useUpdateCredentials, useVaultStatus, useWorkspaceGrants, useWorkspaces } from '../lib/api';
 import { activateAccount, forgetAccount, savedAccounts, saveAuthenticatedAccount, syncCurrentAccount } from '../lib/accounts';
 import { applyAppearanceMode, applyCustomTheme, applyTheme, colorThemes, ActiveTheme, AppearanceMode, ColorTheme, getStoredAppearanceMode, getStoredTheme } from '../lib/theme';
@@ -301,11 +301,12 @@ export default function SettingsPage() {
     }, [view, setActiveSection]);
 
     return <SettingsSectionContext.Provider value={selectedSubsection}><div className="mx-auto w-full max-w-5xl p-4 pb-28 sm:p-6 md:pb-8 lg:p-8">
-        <header className={`mb-6 gap-3 ${view==='home'?'flex justify-end':'flex items-start'}`}>
+        <header className="mb-6 flex flex-wrap items-start gap-3">
             {view !== 'home' && <button className="btn-icon mt-1 shrink-0 text-primary-300" onClick={goBack} aria-label={view==='tts'&&sessionStorage.getItem('komod-settings-return-section')==='files'?'برگشت به کمد من':'برگشت به تنظیمات'}><ArrowRight className="h-5 w-5"/></button>}
+            {view==='home'&&<h1 className="w-full text-3xl font-bold sm:text-4xl">تنظیمات</h1>}
             {view!=='home'&&<div className="min-w-0 flex-1"><h1 className="text-2xl font-bold sm:text-3xl">{viewTitle(view)}</h1>{viewSubtitle(view)&&<p className="mt-2 text-sm text-dark-400">{viewSubtitle(view)}</p>}</div>}
-            <div className={`flex shrink-0 flex-wrap items-center gap-2 ${view==='home'?'rounded-2xl border border-white/[.07] bg-dark-900/65 p-1.5':''}`}>
-                {view==='home'&&<><button type="button" onClick={()=>setAllSettingsGroups(true)} className="btn-icon h-9 w-9" title="بازکردن همه بخش‌ها" aria-label="بازکردن همه بخش‌ها"><ChevronDown className="h-4 w-4 rotate-180"/></button><button type="button" onClick={()=>setAllSettingsGroups(false)} className="btn-icon h-9 w-9" title="بستن همه بخش‌ها" aria-label="بستن همه بخش‌ها"><ChevronDown className="h-4 w-4"/></button><SettingsLayoutPicker value={homeLayout} onChange={next=>{setHomeLayout(next);localStorage.setItem('komod-settings-home-layout',next)}}/></>}
+            <div className={`flex shrink-0 flex-wrap items-center gap-2 ${view==='home'?'w-full justify-between rounded-2xl border border-white/[.07] bg-dark-900/65 p-1.5':''}`}>
+                {view==='home'&&<><div className="flex items-center gap-1"><button type="button" onClick={()=>setAllSettingsGroups(true)} className="btn-icon h-10 w-10" title="بازکردن همه منوها" aria-label="بازکردن همه منوها"><UnfoldVertical className="h-4.5 w-4.5"/></button><button type="button" onClick={()=>setAllSettingsGroups(false)} className="btn-icon h-10 w-10" title="بستن همه منوها" aria-label="بستن همه منوها"><FoldVertical className="h-4.5 w-4.5"/></button><SettingsLayoutPicker value={homeLayout} onChange={next=>{setHomeLayout(next);localStorage.setItem('komod-settings-home-layout',next)}}/></div><button type="button" onClick={()=>changeConnectionMode(!forceOffline)} className={`flex h-10 items-center gap-2 rounded-xl border px-3 text-xs font-semibold transition ${forceOffline?'border-primary-400/30 bg-primary-500/15 text-primary-200':'border-white/[.08] bg-dark-800/70 text-dark-300'}`} title={forceOffline?'رفتن به حالت آنلاین':'رفتن به حالت آفلاین'}>{forceOffline?<CloudOff className="h-4.5 w-4.5"/>:<Cloud className="h-4.5 w-4.5"/>}<span>{forceOffline?'آفلاین':'آنلاین'}</span></button></>}
                 <button type="button" className="btn-icon h-10 w-10 text-primary-200" title={appearanceMode==='dark'?'حالت روشن':'حالت تاریک'} aria-label={appearanceMode==='dark'?'فعال‌کردن حالت روشن':'فعال‌کردن حالت تاریک'} onClick={()=>chooseAppearanceMode(appearanceMode==='dark'?'light':'dark')}>{appearanceMode==='dark'?<Sun className="h-4.5 w-4.5"/>:<Moon className="h-4.5 w-4.5"/>}</button>
             </div>
         </header>
@@ -341,7 +342,7 @@ export default function SettingsPage() {
             </SettingsGroup>
 
             <SettingsGroup title="ابزارها" text="کارهای هوشمند و قابلیت‌های دستگاه" icon={<AudioLines/>} layout={homeLayout}>
-                <SettingsButton layout={homeLayout} icon={<AudioLines/>} title="متن و صدا" onClick={() => setView('tts')} />
+                <SettingsButton layout={homeLayout} icon={<AudioLines/>} title="متن و صدا" text="ساخت صدا و استخراج متن از صوت یا ویدیو" onClick={() => setView('tts')} />
                 <SettingsButton layout={homeLayout} icon={<Download/>} title="نصب کمد" text="افزودن برنامه به صفحه اصلی این دستگاه" onClick={() => window.dispatchEvent(new Event('komod-install-request'))} />
             </SettingsGroup>
 
@@ -405,7 +406,7 @@ export default function SettingsPage() {
         {view === 'markdown' && <MarkdownSettingsPanel/>}
 
         {view === 'appearance' && <div className="space-y-4"><Card id="appearance-color" icon={<Palette/>} title="رنگ کمد" subtitle="یکی از رنگ‌های آماده را انتخاب کن یا رنگ خودت را با نام دلخواه بساز."><div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">{(Object.entries(colorThemes) as [ColorTheme, typeof colorThemes[ColorTheme]][]).map(([key,item]) => <button key={key} onClick={() => chooseTheme(key)} className={`flex min-h-12 items-center justify-between gap-2 rounded-2xl border px-3 transition ${theme===key?'border-primary-300/50 bg-primary-500/15 text-white shadow-lg shadow-primary-950/20':'border-white/[.07] bg-dark-800/60 text-dark-200 hover:border-white/15'}`}><span className="flex items-center gap-2"><span className="h-6 w-6 rounded-xl ring-2 ring-white/10" style={{backgroundColor:item.dot}}/>{item.label}</span>{theme===key&&<Check className="h-4 w-4 text-primary-200"/>}</button>)}</div></Card></div>}
-        {view === 'appearance' && <Card id="appearance-display" icon={<FileStack/>} title="موارد قابل نمایش" subtitle="اطلاعاتی را که روی فایل‌ها و کشوها می‌بینی انتخاب کن."><CardDisplaySettings/><TagDisplaySettingsPanel/></Card>}
+        {view === 'appearance' && <Card id="appearance-display" icon={<FileStack/>} title="موارد قابل نمایش" subtitle="اطلاعاتی را که روی فایل‌ها و کشوها می‌بینی انتخاب کن."><CardDisplaySettings><TagDisplaySettingsPanel/></CardDisplaySettings></Card>}
 
 
 

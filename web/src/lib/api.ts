@@ -535,11 +535,11 @@ export const useVerifyLoginCode = () => {
 
 // ============== Files Hooks ==============
 
-export const useFiles = (folderId?: number | null, fileType?: string, search?: string, page = 1, sort = '', favoriteOnly = false, includePlaylistCovers = false, includeHidden = false, hiddenOnly = false) => {
-    const cacheKey = libraryFileCacheKey(folderId,fileType,search,page,sort,favoriteOnly,includePlaylistCovers,includeHidden,hiddenOnly);
+export const useFiles = (folderId?: number | null, fileType?: string, search?: string, page = 1, sort = '', favoriteOnly = false, includePlaylistCovers = false, includeHidden = false, hiddenOnly = false, allLevels = false) => {
+    const cacheKey = libraryFileCacheKey(folderId,fileType,search,page,sort,favoriteOnly,includePlaylistCovers,includeHidden,hiddenOnly,allLevels);
     const cacheable = page === 1 && !search;
     return useQuery({
-        queryKey: ['files', folderId, fileType, search, page, sort, favoriteOnly, includePlaylistCovers, includeHidden, hiddenOnly],
+        queryKey: ['files', folderId, fileType, search, page, sort, favoriteOnly, includePlaylistCovers, includeHidden, hiddenOnly, allLevels],
         queryFn: async () => {
             const params: Record<string, any> = {};
             if (folderId !== undefined) params.folder_id = folderId;
@@ -552,6 +552,7 @@ export const useFiles = (folderId?: number | null, fileType?: string, search?: s
             if (includePlaylistCovers) params.include_playlist_covers = true;
             if (includeHidden) params.include_hidden = true;
             if (hiddenOnly) params.hidden_only = true;
+            if (allLevels) params.all_levels = true;
             if(offlineRequested()) return (cacheable?readJsonCache<FileListResponse>(cacheKey):undefined) || {files:[],total:0,page,per_page:50,search_mode:'exact' as const,suggestions:[]};
             const { data } = await api.get<FileListResponse>('/files', { params });
             if(cacheable)writeJsonCache(cacheKey,data);
@@ -1008,8 +1009,8 @@ const playlistCacheScope = () => {
     const owner = localStorage.getItem('komod-active-workspace') || cachedCurrentUser()?.id || 'guest';
     return String(owner);
 };
-const libraryFileCacheKey = (folderId?:number|null,fileType?:string,search?:string,page=1,sort='',favoriteOnly=false,includePlaylistCovers=false,includeHidden=false,hiddenOnly=false) =>
-    `komod-files:${playlistCacheScope()}:${folderId===undefined?'all':folderId===null?'root':folderId}:${fileType||'-'}:${search||'-'}:${page}:${sort||'-'}:${Number(favoriteOnly)}${Number(includePlaylistCovers)}${Number(includeHidden)}${Number(hiddenOnly)}`;
+const libraryFileCacheKey = (folderId?:number|null,fileType?:string,search?:string,page=1,sort='',favoriteOnly=false,includePlaylistCovers=false,includeHidden=false,hiddenOnly=false,allLevels=false) =>
+    `komod-files:${playlistCacheScope()}:${folderId===undefined?'all':folderId===null?'root':folderId}:${fileType||'-'}:${search||'-'}:${page}:${sort||'-'}:${Number(favoriteOnly)}${Number(includePlaylistCovers)}${Number(includeHidden)}${Number(hiddenOnly)}${Number(allLevels)}`;
 const libraryFolderCacheKey = (parentId?:number|null,sort='',favoriteOnly=false,includeHidden=false) =>
     `komod-folders:${playlistCacheScope()}:${parentId===undefined?'all':parentId===null?'root':parentId}:${sort||'-'}:${Number(favoriteOnly)}${Number(includeHidden)}`;
 const libraryFolderTreeCacheKey = (includeHidden=false) => `komod-folder-tree:${playlistCacheScope()}:${Number(includeHidden)}`;
