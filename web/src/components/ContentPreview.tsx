@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlignCenter, AlignJustify, AlignLeft, AlignRight, ArrowRight, Bold, BookOpen, Braces, Check, ChevronLeft, ChevronRight, Code2, Copy, Download, ExternalLink, Eye, EyeOff, FileBox, Heading1, Image as ImageIcon, Italic, Link, Link2, List, ListChecks, ListOrdered, Maximize2, Minimize2, Minus, Moon, MoveHorizontal, Pencil, Plus, Quote, Redo2, Settings2, Smartphone, Sigma, Sparkles, Strikethrough, Sun, Table2, Underline, Undo2, Wand2, WrapText, X, ZoomIn, ZoomOut } from 'lucide-react';
-import { api, canPreviewText, useFiles, useRefineSTTText } from '../lib/api';
+import { api, canPreviewText, useFiles, useRefineSTTText, useUpdateFile } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { cacheTextFile, getOfflineText, updateOfflineTextDraft } from '../lib/offline';
 import CustomSelect from './CustomSelect';
@@ -48,11 +48,13 @@ export default function ContentPreview() {
     const [aiStatus,setAIStatus]=useState('');
     const [aiError,setAIError]=useState('');
     const refineText=useRefineSTTText();
+    const updateFile=useUpdateFile();
     const previewRef = useRef<HTMLElement>(null);
     const editorRef = useRef<HTMLTextAreaElement>(null);
     // A delayed initial fetch must never replace a locally saved version.
     const textLoadVersionRef = useRef(0);
-    const textFirst = Boolean(file?.prefer_text_view && file.description?.trim());
+    const textFirst = Boolean(file?.prefer_text_view);
+    const textReader = Boolean(file && (canPreviewText(file) || textFirst));
     const show = !!file && (textFirst || (file.file_type !== 'audio' && file.file_type !== 'video'));
     const {data:imageLibrary}=useFiles(undefined,'image','',1,'created:desc');
     const imageItems=imageLibrary?.files||[];
@@ -64,10 +66,10 @@ export default function ContentPreview() {
     useEffect(()=>{const sync=()=>{const next=getMarkdownSettings();setReaderDirection(next.direction);setTextAttachmentPosition(next.textAttachmentPosition)};window.addEventListener('komod-markdown-settings-changed',sync);return()=>window.removeEventListener('komod-markdown-settings-changed',sync)},[]);
 
     useEffect(()=>{
-        const startEditing=(event:Event)=>{const requested=(event as CustomEvent<{fileId?:number}>).detail?.fileId;if(file&&canPreviewText(file)&&(!requested||requested===file.id))setEditing(true)};
+        const startEditing=(event:Event)=>{const requested=(event as CustomEvent<{fileId?:number}>).detail?.fileId;if(file&&textReader&&(!requested||requested===file.id)){if(textFirst)setDraft(file.description?.trim()||'');setEditing(true)}};
         window.addEventListener('komod-preview-edit',startEditing);
         return()=>window.removeEventListener('komod-preview-edit',startEditing);
-    },[file]);
+    },[file, textFirst, textReader]);
 
     useEffect(() => {
         localStorage.setItem('komod-reader-font-size', String(readerFontSize));
@@ -121,7 +123,7 @@ export default function ContentPreview() {
             }
         };
         loadText()
-            .then(text => { if (!cancelled && loadVersion === textLoadVersionRef.current) { setContent(text); setDraft(text); } })
+            .then(text => { if (!cancelled && loadVersion === textLoadVersionRef.current) { setContent(text); setDraft(textFirst ? file.description?.trim()||'' : text); } })
             .catch((err) => { if (!cancelled && loadVersion === textLoadVersionRef.current) setError(err instanceof Error ? err.message : 'متن بارگذاری نشد.'); })
             .finally(() => { if (!cancelled && loadVersion === textLoadVersionRef.current) setLoading(false); });
         return () => { cancelled = true; };
@@ -194,6 +196,16 @@ export default function ContentPreview() {
     const saveText = async () => {
         setSaving(true);
         try {
+            if (textFirst) {
+                const updated=await updateFile.mutateAsync({id:file.id,description:draft});
+                const description=updated.description?.trim()||'';
+                const label = file.file_type === 'video' ? 'ویدیو' : file.file_type === 'audio' ? 'صدا' : 'فایل پیوست';
+                const attachment = file.file_type === 'image' ? `![تصویر پیوست](/api/stream/${file.id})` : `[باز کردن ${label}](komod://file/${file.id})`;
+                const nextContent=textAttachmentPosition==='start'?`${attachment}\n\n${description}`:`${description}\n\n${attachment}`;
+                textLoadVersionRef.current += 1;
+                setContent(nextContent);setDraft(description);setEditing(false);addToast('تغییرات متن ذخیره شد.');
+                return;
+            }
             if (file.id < 0) {
                 await updateOfflineTextDraft(file.id, draft);
                 textLoadVersionRef.current += 1;
@@ -212,7 +224,7 @@ export default function ContentPreview() {
     const toggleReaderFullscreen = async () => {
         const next = !readerFullscreen;
         setReaderFullscreen(next);
-        if (next && file?.file_type !== 'image') setReaderToolsVisible(true);
+        if (next && (textFirst || file?.file_type !== 'image')) setReaderToolsVisible(true);
         try {
             if (next && previewRef.current?.requestFullscreen) await previewRef.current.requestFullscreen();
             else if (!next && document.fullscreenElement) await document.exitFullscreen();
@@ -245,10 +257,10 @@ export default function ContentPreview() {
         setDraft(`${draft.slice(0, start)}${prefix}${template}${draft.slice(editor.selectionEnd)}`);
         requestAnimationFrame(() => editor.focus());
     };
-    const openAIEditor=()=>{setAIVersions([content]);setAIVersion(0);setAIText(content);setAIPrompt('');setAIStatus('');setAIError('');setShowAIEditor(true)};
+    const openAIEditor=()=>{const source=textFirst?(file.description?.trim()||''):content;setAIVersions([source]);setAIVersion(0);setAIText(source);setAIPrompt('');setAIStatus('');setAIError('');setShowAIEditor(true)};
     const applyAIInstruction=async()=>{if(!aiText.trim()||!aiPrompt.trim())return;setAIError('');setAIStatus('درخواست ویرایش در حال ثبت است…');try{const result=await refineText.mutateAsync({content:aiText,prompt:aiPrompt.trim(),onStatus:message=>setAIStatus(message)});const next=[...aiVersions.slice(0,aiVersion+1),result.content];setAIVersions(next);setAIVersion(next.length-1);setAIText(result.content);setAIPrompt('');setAIStatus('نسخه تازه آماده شد.')}catch(reason:any){setAIStatus('');setAIError(reason?.response?.data?.detail||reason?.message||'ویرایش متن انجام نشد.')}};
     const showAIVersion=(nextIndex:number)=>{const next=Math.max(0,Math.min(nextIndex,aiVersions.length-1));setAIVersion(next);setAIText(aiVersions[next]);setAIError('')};
-    const saveAIResult=async()=>{if(!file||file.id<0||!aiText.trim())return;setAIError('');setAIStatus('در حال ذخیره در کمد…');try{const {data}=await api.patch<{content:string}>(`/files/${file.id}/text`,{content:aiText});await cacheTextFile(file,data.content);textLoadVersionRef.current+=1;setContent(data.content);setDraft(data.content);setShowAIEditor(false);addToast('نسخه ویرایش‌شده ذخیره شد.')}catch(reason:any){setAIStatus('');setAIError(reason?.response?.data?.detail||'ذخیره متن انجام نشد.')}};
+    const saveAIResult=async()=>{if(!file||file.id<0||!aiText.trim())return;setAIError('');setAIStatus('در حال ذخیره در کمد…');try{if(textFirst){const updated=await updateFile.mutateAsync({id:file.id,description:aiText});const description=updated.description?.trim()||'';const label=file.file_type==='video'?'ویدیو':file.file_type==='audio'?'صدا':'فایل پیوست';const attachment=file.file_type==='image'?`![تصویر پیوست](/api/stream/${file.id})`:`[باز کردن ${label}](komod://file/${file.id})`;const nextContent=textAttachmentPosition==='start'?`${attachment}\n\n${description}`:`${description}\n\n${attachment}`;textLoadVersionRef.current+=1;setContent(nextContent);setDraft(description)}else{const {data}=await api.patch<{content:string}>(`/files/${file.id}/text`,{content:aiText});await cacheTextFile(file,data.content);textLoadVersionRef.current+=1;setContent(data.content);setDraft(data.content)}setShowAIEditor(false);addToast('نسخه ویرایش‌شده ذخیره شد.')}catch(reason:any){setAIStatus('');setAIError(reason?.response?.data?.detail||'ذخیره متن انجام نشد.')}};
 
     return (
         <div className={`fixed inset-0 z-[220] flex items-center justify-center bg-black/85 backdrop-blur-md ${readerFullscreen ? 'p-0' : 'p-3 sm:p-8'}`} onClick={() => setContentPreviewFile(null)}>
@@ -256,11 +268,11 @@ export default function ContentPreview() {
                 {!readerChromeHidden&&<header className="flex items-start gap-3 border-b border-white/10 px-3 py-3 sm:px-5 sm:py-4">
                     <div className="flex-1 min-w-0">
                         <h2 className="truncate font-semibold" title={file.file_name}>{file.file_name}</h2>
-                        {file.file_type !== 'image' && file.description && <p dir="auto" className="mt-1 line-clamp-2 max-w-2xl whitespace-pre-wrap text-sm text-dark-400" title={file.description}><MarkdownInline content={file.description}/></p>}
+                        {!textFirst&&file.file_type !== 'image' && file.description && <p dir="auto" className="mt-1 line-clamp-2 max-w-2xl whitespace-pre-wrap text-sm text-dark-400" title={file.description}><MarkdownInline content={file.description}/></p>}
                     </div>
                     <div className="flex shrink-0 items-center gap-1">
                         {contentPreviewHistory.length>0&&<button onClick={goBackContentPreview} className="flex min-h-9 items-center gap-1.5 rounded-xl bg-primary-500/12 px-2.5 text-xs text-primary-200" title="برگشت به متن قبلی"><ArrowRight className="h-4 w-4"/><span className="hidden sm:inline">برگشت به متن</span></button>}
-                        {canPreviewText(file) && <><button onClick={openAIEditor} disabled={file.id<0||loading} className="btn-icon text-primary-200 disabled:opacity-30" title="ویرایش با هوش مصنوعی"><Sparkles className="h-5 w-5"/></button><button onClick={()=>setReaderToolsVisible(value=>!value)} className={`btn-icon ${readerToolsVisible?'text-primary-200':''}`} title={readerToolsVisible?'مخفی‌کردن تنظیمات مطالعه':'نمایش تنظیمات مطالعه'}><Settings2 className="h-5 w-5"/></button><button onClick={async () => { await navigator.clipboard.writeText(editing ? draft : content); addToast('متن کپی شد 📋'); }} className="btn-icon" title="کپی متن"><Copy className="h-5 w-5" /></button><button onClick={() => setEditing(value => !value)} className={`btn-secondary flex shrink-0 items-center gap-2 px-3 py-2 text-xs ${editing?'text-primary-200':''}`} title={editing?'حالت مطالعه':'ویرایش متن'}>{editing?<BookOpen className="h-4 w-4"/>:<Pencil className="h-4 w-4"/>}<span className="hidden sm:inline">{editing?'مطالعه':'ویرایش'}</span></button>{readerFullscreen&&<button onClick={()=>setReaderChromeHidden(true)} className="btn-icon" title="حالت مطالعه بدون نوار"><EyeOff className="h-5 w-5"/></button>}<button onClick={() => void toggleReaderFullscreen()} className="btn-icon" title={readerFullscreen ? 'خروج از تمام‌صفحه' : 'مطالعه در تمام‌صفحه'}>{readerFullscreen ? <Minimize2 className="h-5 w-5"/> : <Maximize2 className="h-5 w-5"/>}</button></>}
+                        {textReader && <><button onClick={openAIEditor} disabled={file.id<0||loading} className="btn-icon text-primary-200 disabled:opacity-30" title="ویرایش با هوش مصنوعی"><Sparkles className="h-5 w-5"/></button><button onClick={()=>setReaderToolsVisible(value=>!value)} className={`btn-icon ${readerToolsVisible?'text-primary-200':''}`} title={readerToolsVisible?'مخفی‌کردن تنظیمات مطالعه':'نمایش تنظیمات مطالعه'}><Settings2 className="h-5 w-5"/></button><button onClick={async () => { await navigator.clipboard.writeText(editing ? draft : content); addToast('متن کپی شد 📋'); }} className="btn-icon" title="کپی متن"><Copy className="h-5 w-5" /></button><button onClick={() => {if(!editing&&textFirst)setDraft(file.description?.trim()||'');setEditing(value => !value)}} className={`btn-secondary flex shrink-0 items-center gap-2 px-3 py-2 text-xs ${editing?'text-primary-200':''}`} title={editing?'حالت مطالعه':'ویرایش متن'}>{editing?<BookOpen className="h-4 w-4"/>:<Pencil className="h-4 w-4"/>}<span className="hidden sm:inline">{editing?'مطالعه':'ویرایش'}</span></button>{readerFullscreen&&<button onClick={()=>setReaderChromeHidden(true)} className="btn-icon" title="حالت مطالعه بدون نوار"><EyeOff className="h-5 w-5"/></button>}<button onClick={() => void toggleReaderFullscreen()} className="btn-icon" title={readerFullscreen ? 'خروج از تمام‌صفحه' : 'مطالعه در تمام‌صفحه'}>{readerFullscreen ? <Minimize2 className="h-5 w-5"/> : <Maximize2 className="h-5 w-5"/>}</button></>}
                         <button onClick={() => setContentPreviewFile(null)} className="btn-icon" title="بستن"><X className="w-5 h-5" /></button>
                     </div>
                 </header>}

@@ -29,6 +29,7 @@ export default function FileCard({
     const updateFile = useUpdateFile();
     const cardDisplay=useCardDisplayPreferences();
     const [thumbnailFailed, setThumbnailFailed] = useState(false);
+    const textFirst = Boolean(file.prefer_text_view);
     const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const longPressed = useRef(false);
     const toggleFavorite = async (event: React.MouseEvent) => {
@@ -64,7 +65,7 @@ export default function FileCard({
 
     // Generate authenticated stream URL for thumbnail
     const token = localStorage.getItem('access_token');
-    const thumbnailSource = file.thumbnail_url || (file.file_type === 'image' ? file.stream_url : null);
+    const thumbnailSource = textFirst ? null : file.thumbnail_url || (file.file_type === 'image' ? file.stream_url : null);
     const authorizedThumbnailUrl = thumbnailSource
         ? thumbnailSource.startsWith('blob:') ? thumbnailSource : `${thumbnailSource}${thumbnailSource.includes('?') ? '&' : '?'}token=${encodeURIComponent(token || '')}`
         : null;
@@ -73,6 +74,7 @@ export default function FileCard({
     const fallbackThumbnail = (large = false) => <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-gradient-to-br from-primary-500/25 via-dark-900 to-pink-500/20"><div className="absolute -left-6 -top-6 h-20 w-20 rounded-full bg-primary-400/10 blur-2xl"/><div className="absolute -bottom-7 -right-5 h-20 w-20 rounded-full bg-pink-400/10 blur-2xl"/><span className={`relative flex items-center justify-center rounded-2xl border border-white/10 bg-black/20 text-primary-200 shadow-xl ${large ? 'h-16 w-16' : 'h-10 w-10'}`}>{getIcon()}</span></div>;
 
     const getIcon = () => {
+        if (textFirst) return <MarkdownFileIcon large />;
         switch (file.file_type) {
             case 'video': return <Film className="w-8 h-8 text-primary-400" />;
             case 'audio': return <Music className="w-8 h-8 text-pink-400" />;
@@ -82,6 +84,7 @@ export default function FileCard({
     };
 
     const getSmallIcon = () => {
+        if (textFirst) return <MarkdownFileIcon />;
         switch (file.file_type) {
             case 'video': return <Film className="w-3 h-3 text-primary-400" />;
             case 'audio': return <Music className="w-3 h-3 text-pink-400" />;
@@ -90,7 +93,7 @@ export default function FileCard({
         }
     };
 
-    const typeLabel = ({ video: 'ویدیو', audio: 'صدا', image: 'عکس', document: 'سند', text: 'متن' } as Record<string, string>)[file.file_type] || 'فایل';
+    const typeLabel = textFirst ? 'Markdown' : (({ video: 'ویدیو', audio: 'صدا', image: 'عکس', document: 'سند', text: 'متن' } as Record<string, string>)[file.file_type] || 'فایل');
 
     if (viewMode === 'list') {
         return (
@@ -130,13 +133,13 @@ export default function FileCard({
                             <span>{typeLabel}</span>
                         </span>}
                         {cardDisplay.fileSize&&<span>{formatFileSize(file.file_size)}</span>}
-                        {cardDisplay.fileDuration&&file.duration && (
+                        {!textFirst&&cardDisplay.fileDuration&&file.duration && (
                             <>
                                 <span className="w-1 h-1 rounded-full bg-dark-600"></span>
                                 <span>{formatDuration(file.duration)}</span>
                             </>
                         )}
-                        {cardDisplay.fileProgress&&file.last_pos && file.duration && (file.last_pos / file.duration > 0.05) && (
+                        {!textFirst&&cardDisplay.fileProgress&&file.last_pos && file.duration && (file.last_pos / file.duration > 0.05) && (
                             <>
                                 <span className="w-1 h-1 rounded-full bg-dark-600"></span>
                                 <span className="text-primary-400">
@@ -200,7 +203,7 @@ export default function FileCard({
                 )}
 
                 {/* Progress Bar */}
-                {cardDisplay.fileProgress&&file.last_pos && file.duration && (file.last_pos / file.duration > 0.05) && (
+                {!textFirst&&cardDisplay.fileProgress&&file.last_pos && file.duration && (file.last_pos / file.duration > 0.05) && (
                     <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/40">
                         <div 
                             className="h-full bg-primary-500" 
@@ -210,14 +213,14 @@ export default function FileCard({
                 )}
 
                 {/* Duration badge */}
-                {cardDisplay.fileDuration&&file.duration && (
+                {!textFirst&&cardDisplay.fileDuration&&file.duration && (
                     <div className="absolute bottom-1.5 right-1.5 bg-black/60 backdrop-blur-md px-1.5 py-0.5 rounded text-[10px] font-medium text-white shadow-sm">
                         {formatDuration(file.duration)}
                     </div>
                 )}
 
                 {/* Play overlay for video/audio */}
-                {(file.file_type === 'video' || file.file_type === 'audio') && (
+                {!textFirst&&(file.file_type === 'video' || file.file_type === 'audio') && (
                     <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300">
                         <div className="w-10 h-10 rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center shadow-lg border border-white/20 hover:scale-110 transition-transform">
                             <Play className="w-4 h-4 text-white ml-0.5" fill="currentColor" />
@@ -266,5 +269,14 @@ export default function FileCard({
                 </div>
             </div>
         </div>
+    );
+}
+
+function MarkdownFileIcon({ large = false }: { large?: boolean }) {
+    return (
+        <span className={`relative inline-flex shrink-0 items-center justify-center text-blue-400 ${large ? 'h-9 w-9' : 'h-4 w-4'}`} aria-label="فایل Markdown">
+            <FileText className={large ? 'h-8 w-8' : 'h-3.5 w-3.5'} />
+            <span className={`absolute rounded bg-blue-500 font-bold leading-none text-white shadow-sm ${large ? '-bottom-1 -right-2 px-1 py-0.5 text-[7px]' : '-bottom-0.5 -right-1.5 px-0.5 text-[4px]'}`}>MD</span>
+        </span>
     );
 }
