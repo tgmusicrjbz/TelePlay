@@ -49,6 +49,19 @@ const extractImportUrls = (value: string) => {
         .filter(Boolean);
 };
 
+type ImportPlatform = 'youtube' | 'instagram' | 'pinterest';
+const classifyImportUrl = (raw:string):ImportPlatform|null => {
+    try {
+        const parsed=new URL(raw);
+        if(!['http:','https:'].includes(parsed.protocol))return null;
+        const host=parsed.hostname.toLowerCase().replace(/^www\./,'');
+        if(host==='youtu.be'||host==='youtube.com'||host.endsWith('.youtube.com'))return 'youtube';
+        if(host==='instagram.com'||host.endsWith('.instagram.com'))return 'instagram';
+        if(host==='pin.it'||host==='pinterest.com'||host.endsWith('.pinterest.com'))return 'pinterest';
+    } catch { /* incomplete URL */ }
+    return null;
+};
+
 type ImportStatus = {
     id: string;
     source: 'link' | 'drive';
@@ -249,14 +262,10 @@ export default function FileBrowser() {
     const hiddenPressTriggered = useRef(false);
     const uploadAbortRef = useRef<AbortController | null>(null);
     const importUrls = useMemo(() => extractImportUrls(importUrl), [importUrl]);
-    const importPlatform = useMemo<'youtube' | 'instagram' | null>(() => {
+    const importPlatform = useMemo<ImportPlatform | null>(() => {
         if (importUrls.length !== 1) return null;
         try {
-            const parsed = new URL(importUrls[0]);
-            if (!['http:', 'https:'].includes(parsed.protocol)) return null;
-            const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
-            if (host === 'youtu.be' || host === 'youtube.com' || host.endsWith('.youtube.com')) return 'youtube';
-            if (host === 'instagram.com' || host.endsWith('.instagram.com')) return 'instagram';
+            return classifyImportUrl(importUrls[0]);
         } catch { /* incomplete URL */ }
         return null;
     }, [importUrls]);
@@ -372,12 +381,13 @@ export default function FileBrowser() {
 
     useEffect(() => {
         if (!showImportLink || !importPlatform) return;
-        const saved = localStorage.getItem(importPlatform === 'youtube' ? 'komod-youtube-folder' : 'komod-instagram-folder') || 'none';
+        const storageKey=`komod-${importPlatform}-folder`;
+        const saved = localStorage.getItem(storageKey) || 'none';
         if (saved === 'none') return;
         const requested=saved==='default'?(defaultFolder?.id??null):Number(saved);
         const valid=requested===null||requested===defaultFolder?.id||importFolderOptions.some(option=>Number(option.value)===requested);
         if(!valid){
-            localStorage.setItem(importPlatform === 'youtube' ? 'komod-youtube-folder' : 'komod-instagram-folder','none');
+            localStorage.setItem(storageKey,'none');
             setImportFolder(null);
             return;
         }
@@ -933,14 +943,13 @@ export default function FileBrowser() {
     const submitImportLink = async (event: React.FormEvent) => {
         event.preventDefault();
         if (!importUrls.length) return;
-        const classify = (raw:string) => { try { const host=new URL(raw).hostname.replace(/^www\./,''); return host==='youtu.be'||host==='youtube.com'||host.endsWith('.youtube.com')?'youtube':host==='instagram.com'||host.endsWith('.instagram.com')?'instagram':null; } catch{return null;} };
-        if (importUrls.some(url => !classify(url))) { addToast('یکی از لینک‌ها معتبر نیست؛ فقط یوتیوب و اینستاگرام پذیرفته می‌شود.', 'error'); return; }
+        if (importUrls.some(url => !classifyImportUrl(url))) { addToast('یکی از لینک‌ها معتبر نیست؛ فقط یوتیوب، اینستاگرام و پینترست پذیرفته می‌شود.', 'error'); return; }
         try {
             let lastMessage='';
             const jobs:string[]=[];
             for (let index=0; index<importUrls.length; index++) {
-                const url=importUrls[index], platform=classify(url);
-                const result = await importLinkMutation.mutateAsync({ url, folder_id: importFolder === 'new' ? currentFolderId : importFolder, new_folder_name: importFolder === 'new' && index===0 ? importFolderName.trim() : undefined, quality: platform === 'instagram' ? 'auto' : importQuality, save_to_library:importDeliveryMode!=='telegram', send_to_telegram:importDeliveryMode!=='library', destination_ids:importDestinationIds });
+                const url=importUrls[index], platform=classifyImportUrl(url);
+                const result = await importLinkMutation.mutateAsync({ url, folder_id: importFolder === 'new' ? currentFolderId : importFolder, new_folder_name: importFolder === 'new' && index===0 ? importFolderName.trim() : undefined, quality: platform === 'instagram' || platform === 'pinterest' ? 'auto' : importQuality, save_to_library:importDeliveryMode!=='telegram', send_to_telegram:importDeliveryMode!=='library', destination_ids:importDestinationIds });
                 lastMessage=result.message;
                 jobs.push(result.job_id);
                 setImportJobs(previous => mergeImportStatuses(previous, [{id:result.job_id,source:'link',url,state:'queued',message:'در صف پردازش',saved:0}]));
@@ -1818,7 +1827,7 @@ export default function FileBrowser() {
                     </div>
                     <div className="max-h-52 divide-y divide-white/[.05] overflow-y-auto px-2">{importJobs.map(job=><div key={job.id} className="py-2"><div className="flex items-center gap-2"><span className={`h-2 w-2 shrink-0 rounded-full ${job.state==='done'?'bg-emerald-400':job.state==='error'||job.state==='cancelled'?'bg-red-400':job.state==='paused'?'bg-amber-400':'animate-pulse bg-primary-400'}`}/><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><strong className="min-w-0 flex-1 truncate text-xs">{job.source==='drive'?'گوگل درایو':job.url.includes('youtu')?'یوتیوب':'اینستاگرام'}</strong><span className="shrink-0 text-[10px] text-dark-500">{job.state==='queued'?'در صف':job.state==='downloading'?'در حال دریافت':job.state==='saving'?'در حال ذخیره':job.state==='paused'?'متوقف':job.state==='cancelled'?'لغو شد':job.state==='done'?'آماده شد':'ناموفق'}</span></div><div className="mt-1 flex items-center gap-2"><div className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-dark-950"><div className={`h-full rounded-full transition-[width] ${job.state==='error'?'bg-red-500':'bg-primary-500'}`} style={{width:`${Math.max(2,job.progress||0)}%`}}/></div><span className="w-8 shrink-0 text-left text-[10px] font-bold text-primary-300">{(job.progress||0).toLocaleString('fa-IR')}٪</span></div><p className="mt-1 truncate text-[10px] text-dark-500">{job.message}</p></div>{job.source==='link'&&['error','cancelled'].includes(job.state)&&<button className="btn-icon h-8 w-8 text-primary-200" title="تلاش دوباره" onClick={()=>void controlImportJob(job.id,'retry')}><RefreshCw className="h-3.5 w-3.5"/></button>}{['queued','downloading','saving','paused'].includes(job.state)&&<button className="btn-icon h-8 w-8 text-red-300" onClick={()=>void controlImportJob(job.id,'cancel')} title="لغو"><X className="h-3.5 w-3.5"/></button>}</div></div>)}</div>
                 </div>)}
-            {showImportLink && <div className="fixed inset-0 z-[170] flex items-end justify-center overflow-hidden bg-black/70 backdrop-blur-sm sm:items-center sm:p-4" onClick={() => setShowImportLink(false)}><form className="max-h-[92dvh] w-full max-w-lg overflow-x-hidden overflow-y-auto overscroll-contain rounded-t-3xl border border-white/10 bg-dark-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:max-h-[calc(100dvh-2rem)] sm:rounded-3xl sm:p-5" onClick={event => event.stopPropagation()} onSubmit={submitImportLink}><div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary-500/15 text-primary-200"><Link2 className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h2 className="font-bold">ذخیره از لینک</h2><p className="text-xs text-dark-400">لینک یوتیوب یا اینستاگرام را بفرست.</p></div><button type="button" className="btn-icon" onClick={() => setShowImportLink(false)}><X className="h-5 w-5"/></button></div><div className="mt-4"><textarea dir="auto" autoFocus rows={3} className="input w-full resize-none text-right" value={importUrl} onChange={event => setImportUrl(event.target.value)} placeholder="لینک‌هات رو اینجا وارد کن"/></div>{importUrl.trim() && <p className={`mt-2 text-xs ${importPlatform || importUrls.length > 1 ? 'text-emerald-300' : 'text-red-300'}`}>{importUrls.length > 1 ? `✓ ${importUrls.length.toLocaleString('fa-IR')} لینک برای افزودن دسته‌ای` : importPlatform === 'youtube' ? '✓ لینک یوتیوب شناسایی شد' : importPlatform === 'instagram' ? '✓ لینک اینستاگرام شناسایی شد' : 'لینک معتبر یوتیوب یا اینستاگرام نیست'}</p>}<CustomSelect className="mt-3" placement="top" label="کشوی مقصد" value={importFolder === 'new' ? 'new' : String(importFolder ?? 'root')} onChange={value => setImportFolder(value === 'new' ? 'new' : value === 'root' ? null : Number(value))} options={[{value:'root',label:'🗃️ فایل‌های من'},...(currentFolderId !== null?[{value:String(currentFolderId),label:'📍 کشوی فعلی'}]:[]),...importFolderOptions.filter(option => option.value !== String(currentFolderId)),{value:'new',label:'➕ ساخت کشوی تازه…'}]}/>{importFolder === 'new' && <input className="input mt-3 w-full" value={importFolderName} onChange={event => setImportFolderName(event.target.value)} placeholder="نام کشوی تازه"/>}{(importPlatform === 'youtube' || importUrls.length > 1) && <CustomSelect className="mt-3" placement="top" label="خروجی" value={importQuality} onChange={setImportQuality} options={[{value:'audio',label:'🎧 صدا'},{value:'480',label:'🎬 480p'},{value:'720',label:'🎬 720p'},{value:'1080',label:'🎬 1080p'}]}/>}<CustomSelect className="mt-3" placement="top" label="بعد از آماده‌شدن" value={importDeliveryMode} onChange={setImportDeliveryMode} options={[{value:'library',label:'فقط ذخیره در کمد'},{value:'both',label:'ذخیره در کمد و ارسال در تلگرام'},{value:'telegram',label:'فقط ارسال در تلگرام'}]}/>{importDeliveryMode!=='library'&&<DeliveryTargetPicker value={importDestinationIds} onChange={setImportDestinationIds}/>}<div className="mt-5 flex gap-2"><button type="button" className="btn-secondary flex-1" onClick={() => setShowImportLink(false)}>لغو</button><button disabled={!importUrl.trim() || (!importPlatform && importUrls.length < 2) || importLinkMutation.isPending || (importFolder === 'new' && !importFolderName.trim())} className="btn-primary flex-1 disabled:opacity-50">{importLinkMutation.isPending ? 'در حال ثبت…' : 'افزودن به صف'}</button></div></form></div>}
+            {showImportLink && <div className="fixed inset-0 z-[170] flex items-end justify-center overflow-hidden bg-black/70 backdrop-blur-sm sm:items-center sm:p-4" onClick={() => setShowImportLink(false)}><form className="max-h-[92dvh] w-full max-w-lg overflow-x-hidden overflow-y-auto overscroll-contain rounded-t-3xl border border-white/10 bg-dark-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:max-h-[calc(100dvh-2rem)] sm:rounded-3xl sm:p-5" onClick={event => event.stopPropagation()} onSubmit={submitImportLink}><div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary-500/15 text-primary-200"><Link2 className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h2 className="font-bold">ذخیره از لینک</h2><p className="text-xs text-dark-400">لینک یوتیوب، اینستاگرام یا یک پین عمومی را بفرست.</p></div><button type="button" className="btn-icon" onClick={() => setShowImportLink(false)}><X className="h-5 w-5"/></button></div><div className="mt-4"><textarea dir="auto" autoFocus rows={3} className="input w-full resize-none text-right" value={importUrl} onChange={event => setImportUrl(event.target.value)} placeholder="لینک‌هات رو اینجا وارد کن"/></div>{importUrl.trim() && <p className={`mt-2 text-xs ${importPlatform || importUrls.length > 1 ? 'text-emerald-300' : 'text-red-300'}`}>{importUrls.length > 1 ? `✓ ${importUrls.length.toLocaleString('fa-IR')} لینک برای افزودن دسته‌ای` : importPlatform === 'youtube' ? '✓ لینک یوتیوب شناسایی شد' : importPlatform === 'instagram' ? '✓ لینک اینستاگرام شناسایی شد' : importPlatform === 'pinterest' ? '✓ پین پینترست شناسایی شد' : 'لینک معتبر یوتیوب، اینستاگرام یا پینترست نیست'}</p>}<CustomSelect className="mt-3" placement="top" label="کشوی مقصد" value={importFolder === 'new' ? 'new' : String(importFolder ?? 'root')} onChange={value => setImportFolder(value === 'new' ? 'new' : value === 'root' ? null : Number(value))} options={[{value:'root',label:'🗃️ فایل‌های من'},...(currentFolderId !== null?[{value:String(currentFolderId),label:'📍 کشوی فعلی'}]:[]),...importFolderOptions.filter(option => option.value !== String(currentFolderId)),{value:'new',label:'➕ ساخت کشوی تازه…'}]}/>{importFolder === 'new' && <input className="input mt-3 w-full" value={importFolderName} onChange={event => setImportFolderName(event.target.value)} placeholder="نام کشوی تازه"/>}{(importPlatform === 'youtube' || importUrls.length > 1) && <CustomSelect className="mt-3" placement="top" label="خروجی" value={importQuality} onChange={setImportQuality} options={[{value:'audio',label:'🎧 صدا'},{value:'480',label:'🎬 480p'},{value:'720',label:'🎬 720p'},{value:'1080',label:'🎬 1080p'}]}/>}<CustomSelect className="mt-3" placement="top" label="بعد از آماده‌شدن" value={importDeliveryMode} onChange={setImportDeliveryMode} options={[{value:'library',label:'فقط ذخیره در کمد'},{value:'both',label:'ذخیره در کمد و ارسال در تلگرام'},{value:'telegram',label:'فقط ارسال در تلگرام'}]}/>{importDeliveryMode!=='library'&&<DeliveryTargetPicker value={importDestinationIds} onChange={setImportDestinationIds}/>}<div className="mt-5 flex gap-2"><button type="button" className="btn-secondary flex-1" onClick={() => setShowImportLink(false)}>لغو</button><button disabled={!importUrl.trim() || (!importPlatform && importUrls.length < 2) || importLinkMutation.isPending || (importFolder === 'new' && !importFolderName.trim())} className="btn-primary flex-1 disabled:opacity-50">{importLinkMutation.isPending ? 'در حال ثبت…' : 'افزودن به صف'}</button></div></form></div>}
             {showImportDrive && <div className="fixed inset-0 z-[170] flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-4" onClick={()=>setShowImportDrive(false)}>
                 <form className="max-h-[92dvh] w-full max-w-2xl overflow-y-auto rounded-t-3xl border border-white/10 bg-dark-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl sm:rounded-3xl sm:p-5" onClick={event=>event.stopPropagation()} onSubmit={submitDriveImport}>
                     <div className="flex items-center gap-3">

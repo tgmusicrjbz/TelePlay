@@ -24,6 +24,7 @@ settings = get_settings()
 CAPTION_KEYS = {
     "youtube": "caption_template_youtube",
     "instagram": "caption_template_instagram",
+    "pinterest": "caption_template_pinterest",
     "telegram": "caption_template_telegram",
     "drive": "caption_template_drive",
     "generic": "caption_template_generic",
@@ -31,6 +32,7 @@ CAPTION_KEYS = {
 DEFAULT_CAPTIONS = {
     "youtube": "📝 [عنوان]\n📺 [سازنده]\n🔗 [لینک]",
     "instagram": "📝 [عنوان]\n📷 [سازنده]\n🔗 [لینک]",
+    "pinterest": "📝 [عنوان]\n📌 پینترست\n🔗 [لینک]",
     "telegram": "📝 [عنوان]",
     "drive": "📝 [عنوان]",
     "generic": "📝 [عنوان]",
@@ -87,6 +89,7 @@ async def global_caption_templates(db: AsyncSession) -> dict[str, str]:
 class CaptionTemplatesUpdate(BaseModel):
     youtube: str = Field(max_length=2000)
     instagram: str = Field(max_length=2000)
+    pinterest: str = Field(default=DEFAULT_CAPTIONS["pinterest"], max_length=2000)
     telegram: str = Field(max_length=2000)
     drive: str = Field(max_length=2000)
     generic: str = Field(max_length=2000)

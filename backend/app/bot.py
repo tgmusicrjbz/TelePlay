@@ -337,7 +337,7 @@ def group_tool_help(action: str) -> str:
     return {
         "tts": "🎙 متن به صدا\n\n۱) روی پیام متنی ریپلای کن.\n۲) دستور /tts را بفرست.\n\nمی‌توانی متن را مستقیم هم بنویسی: /tts متن موردنظر",
         "stt": "📝 صوت به متن\n\n۱) روی صدا، ویدیو یا فایل صوتی ریپلای کن.\n۲) دستور /stt را بفرست.",
-        "link": "🔗 دریافت لینک\n\nلینک یوتیوب یا اینستاگرام را مستقیم در گروه بفرست؛ بعد از آماده‌شدن، خروجی در همین گروه ارسال می‌شود.",
+        "link": "🔗 دریافت لینک\n\nلینک یوتیوب، اینستاگرام یا یک پین عمومی پینترست را مستقیم در گروه بفرست؛ بعد از آماده‌شدن، خروجی در همین گروه ارسال می‌شود.",
     }[action]
 
 
@@ -1539,9 +1539,9 @@ async def handle_pending_group_action(client, message: Message):
             logger.exception("Pending group STT failed chat=%s user=%s: %s", message.chat.id, message.from_user.id, error)
             await message.reply("❌ ثبت تبدیل صوت به متن انجام نشد؛ دوباره تلاش کن.")
     elif action == "link":
-        if not re.search(r"https?://(?:www\.)?(?:youtube\.com|youtu\.be|instagram\.com)/", message.text or "", re.IGNORECASE):
+        if not re.search(r"https?://(?:www\.)?(?:youtube\.com|youtu\.be|instagram\.com|pinterest\.com|pin\.it)/", message.text or "", re.IGNORECASE):
             pending_group_actions[key] = (action, expires_at, prompt_message_id) if prompt_message_id else (action, expires_at)
-            await message.reply("یک لینک یوتیوب یا اینستاگرام بفرست.")
+            await message.reply("یک لینک یوتیوب، اینستاگرام یا پین پینترست بفرست.")
             return
         if prompt_message_id:
             with contextlib.suppress(Exception):
@@ -2279,7 +2279,7 @@ async def connect_current_chat(client, message: Message):
     )
 
 
-@tg_client.on_message(filters.regex(r"https?://(?:www\.)?(?:youtube\.com|youtu\.be|instagram\.com)/"), group=-1)
+@tg_client.on_message(filters.regex(r"https?://(?:www\.)?(?:youtube\.com|youtu\.be|instagram\.com|pinterest\.com|pin\.it)/"), group=-1)
 async def handle_import_link(client, message: Message):
     """Queue supported social links without blocking the bot conversation."""
     destination_id = None
@@ -2304,7 +2304,7 @@ async def handle_import_link(client, message: Message):
         message.stop_propagation()
         return
     matches = re.findall(
-        r"https?://(?:www\.)?(?:youtube\.com|youtu\.be|instagram\.com)/(?:(?!https?://|\s).)+",
+        r"https?://(?:www\.)?(?:youtube\.com|youtu\.be|instagram\.com|pinterest\.com|pin\.it)/(?:(?!https?://|\s).)+",
         message.text or "",
         re.IGNORECASE,
     )

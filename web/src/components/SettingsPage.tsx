@@ -71,6 +71,7 @@ export default function SettingsPage() {
     const [forceOffline, setForceOffline] = useState(() => localStorage.getItem('komod-force-offline') === '1');
     const [youtubeFolder, setYoutubeFolder] = useState(() => localStorage.getItem('komod-youtube-folder') || 'none');
     const [instagramFolder, setInstagramFolder] = useState(() => localStorage.getItem('komod-instagram-folder') || 'none');
+    const [pinterestFolder, setPinterestFolder] = useState(() => localStorage.getItem('komod-pinterest-folder') || 'none');
     const [serverUrl, setServerUrl] = useState('');
     const [serverName, setServerName] = useState('مسیر جایگزین');
     const [serverAddresses, setServerAddresses] = useState<ServerAddress[]>(() => { try { return JSON.parse(localStorage.getItem('komod-server-addresses') || '[]'); } catch { return []; } });
@@ -352,7 +353,7 @@ export default function SettingsPage() {
                 <SettingsButton layout={homeLayout} icon={<UserRoundCog/>} title="کاربران" text="درخواست‌ها، کاربران فعال، غیرفعال و افزودن کاربر" onClick={() => setView('admin-users')} />
                 <SettingsButton layout={homeLayout} icon={<Users/>} title="گروه‌ها" text="تأیید گروه‌ها، محدودیت‌ها و میزان مصرف" onClick={() => setView('admin-groups')} />
                 <SettingsButton layout={homeLayout} icon={<MessageSquareText/>} title="پیام‌های ربات" text="ویرایش پاسخ دستورها، لینک‌ها و پردازش‌ها" onClick={() => setView('admin-messages')} />
-                <SettingsButton layout={homeLayout} icon={<FileText/>} title="متن خروجی فایل‌ها" text="متن عمومی زیر خروجی‌های یوتیوب، اینستاگرام و تلگرام" onClick={() => setView('admin-captions')} />
+                <SettingsButton layout={homeLayout} icon={<FileText/>} title="متن خروجی فایل‌ها" text="متن عمومی زیر خروجی‌های یوتیوب، اینستاگرام، پینترست و تلگرام" onClick={() => setView('admin-captions')} />
                 <SettingsButton layout={homeLayout} icon={<BrainCircuit/>} title="مدل‌های هوش مصنوعی" text="مدل‌های مجاز و ضریب مصرف سهمیه" onClick={() => setView('admin-ai-models')} />
                 <SettingsButton layout={homeLayout} icon={<Instagram/>} title="دریافت از اینستاگرام" text="تأیید فرستنده‌ها و اتصال دایرکت به تلگرام" onClick={() => setView('admin-instagram')} />
                 <SettingsButton layout={homeLayout} icon={<Gauge/>} title="گزارش و سلامت" text="آمار کلی، وضعیت سرویس‌ها و خطاها" onClick={() => setView('admin')} />
@@ -415,7 +416,7 @@ export default function SettingsPage() {
 
         {view === 'files' && <Card id="files-incoming" icon={<FolderPlus/>} title="محل فایل‌های تازه" subtitle="مقصد پیش‌فرض فایل‌ها و لینک‌هایی که از صفحهٔ اصلی اضافه می‌کنی."><CustomSelect className="mt-3" value={localStorage.getItem('komod-incoming-folder') || 'default'} onChange={value => { localStorage.setItem('komod-incoming-folder', String(value)); window.dispatchEvent(new Event('komod-incoming-folder-changed')); }} options={incomingFolderOptions}/></Card>}
 
-        {view === 'files' && <Card id="files-links" icon={<Download/>} title="مقصد لینک‌ها" subtitle="برای یوتیوب و اینستاگرام کشوی پیش‌فرض جداگانه تعیین کن."><div className="mt-4 grid gap-3 sm:grid-cols-2"><CustomSelect label="لینک‌های یوتیوب" value={youtubeFolder} onChange={value=>{setYoutubeFolder(String(value));localStorage.setItem('komod-youtube-folder',String(value));}} options={[{value:'none',label:'هر بار انتخاب می‌کنم'},...incomingFolderOptions]}/><CustomSelect label="لینک‌های اینستاگرام" value={instagramFolder} onChange={value=>{setInstagramFolder(String(value));localStorage.setItem('komod-instagram-folder',String(value));}} options={[{value:'none',label:'هر بار انتخاب می‌کنم'},...incomingFolderOptions]}/></div></Card>}
+        {view === 'files' && <Card id="files-links" icon={<Download/>} title="مقصد لینک‌ها" subtitle="برای هر سرویس کشوی پیش‌فرض جداگانه تعیین کن."><div className="mt-4 grid gap-3 sm:grid-cols-2"><CustomSelect label="لینک‌های یوتیوب" value={youtubeFolder} onChange={value=>{setYoutubeFolder(String(value));localStorage.setItem('komod-youtube-folder',String(value));}} options={[{value:'none',label:'هر بار انتخاب می‌کنم'},...incomingFolderOptions]}/><CustomSelect label="لینک‌های اینستاگرام" value={instagramFolder} onChange={value=>{setInstagramFolder(String(value));localStorage.setItem('komod-instagram-folder',String(value));}} options={[{value:'none',label:'هر بار انتخاب می‌کنم'},...incomingFolderOptions]}/><CustomSelect label="لینک‌های پینترست" value={pinterestFolder} onChange={value=>{setPinterestFolder(String(value));localStorage.setItem('komod-pinterest-folder',String(value));}} options={[{value:'none',label:'هر بار انتخاب می‌کنم'},...incomingFolderOptions]}/></div></Card>}
 
         {view === 'files' && selectedSubsection === 'files-destinations' && <DeliverySettingsPanel section="destinations"/>}
         {view === 'links' && selectedSubsection === 'links-caption' && <LinkCaptionSettings/>}

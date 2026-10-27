@@ -15,7 +15,7 @@ os.environ.setdefault("JWT_SECRET", "test-secret")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.database import Base, async_session, engine
-from app.downloader import LinkImportService
+from app.downloader import LinkImportService, _PinterestMetaParser, _validate_pinterest_pin_url, classify_import_url
 from app.models import ProcessingJob, User
 from app.processing_jobs import create_job
 
@@ -77,6 +77,26 @@ class LinkImportDurabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(service.cancel_all(1), 1)
         self.assertEqual(service.statuses["mine"]["state"], "cancelled")
         self.assertEqual(service.statuses["other"]["state"], "queued")
+
+    def test_supported_link_classifier_includes_public_pinterest_urls(self):
+        self.assertEqual(classify_import_url("https://www.pinterest.com/pin/123456/"), "pinterest")
+        self.assertEqual(classify_import_url("https://pin.it/abc123"), "pinterest")
+        self.assertIsNone(classify_import_url("https://notpinterest.com/pin/123"))
+        self.assertIsNone(classify_import_url("file:///tmp/pin"))
+
+    def test_pinterest_validator_rejects_boards_and_redirects_off_site(self):
+        valid = "https://www.pinterest.com/pin/123456789/"
+        self.assertEqual(_validate_pinterest_pin_url(valid), valid)
+        with self.assertRaisesRegex(ValueError, "برد یا مجموعه"):
+            _validate_pinterest_pin_url("https://www.pinterest.com/example/my-board/")
+        with self.assertRaisesRegex(ValueError, "معتبر"):
+            _validate_pinterest_pin_url("https://example.com/pin/123456789/")
+
+    def test_pinterest_metadata_parser_reads_open_graph_media(self):
+        parser = _PinterestMetaParser()
+        parser.feed('<meta property="og:title" content="نمونه"><meta property="og:image" content="https://i.pinimg.com/a.jpg">')
+        self.assertEqual(parser.values["og:title"], "نمونه")
+        self.assertEqual(parser.values["og:image"], "https://i.pinimg.com/a.jpg")
 
 
 if __name__ == "__main__":

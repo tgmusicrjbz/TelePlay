@@ -33,7 +33,7 @@ from ..telegram import delete_from_storage_channel, get_message_from_channel
 from .. import telegram
 from ..config import get_settings
 from ..media_metadata import extract_embedded_cover
-from ..downloader import ImportJob, link_importer
+from ..downloader import ImportJob, classify_import_url, link_importer
 from ..drive_importer import drive_importer, extract_google_drive_file_id, infer_google_workspace_mime
 from ..google_drive import authorization_url, decode_state, exchange_code, account_email, access_token as google_access_token, list_files as google_list_files, configured as google_drive_configured, full_configured as google_drive_full_configured, picker_configured as google_picker_configured, picker_bootstrap, active_credentials, account_key, credential_accounts, encrypt_account_store, redirect_uri as google_redirect_uri, web_base_url as google_web_base_url
 from ..processing_jobs import update_job
@@ -623,9 +623,13 @@ async def import_link(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    host = (urlparse(payload.url.strip()).hostname or "").lower()
-    if not any(host == domain or host.endswith(f".{domain}") for domain in ("youtube.com", "youtu.be", "instagram.com")):
-        raise HTTPException(status_code=400, detail="فعلاً فقط لینک یوتیوب و اینستاگرام پشتیبانی می‌شود.")
+    source_url = payload.url.strip()
+    host = (urlparse(source_url).hostname or "").lower()
+    platform = classify_import_url(source_url)
+    if platform is None:
+        raise HTTPException(status_code=400, detail="فعلاً لینک یوتیوب، اینستاگرام و پینترست پشتیبانی می‌شود.")
+    if platform == "pinterest" and host != "pin.it" and not re.search(r"/pin/[^/?#]+", urlparse(source_url).path, re.IGNORECASE):
+        raise HTTPException(status_code=400, detail="فعلاً فقط لینک یک پین پشتیبانی می‌شود؛ لینک برد یا مجموعه را نمی‌توان افزود.")
     if not link_importer.available:
         raise HTTPException(status_code=503, detail="دانلود از لینک هنوز روی سرور تنظیم نشده است.")
     folder_id = payload.folder_id
@@ -651,9 +655,9 @@ async def import_link(
         await db.commit()
     if not scoped_new_folder:
         require_scoped_folder(request, folder_id)
-    quality = "auto" if host == "instagram.com" or host.endswith(".instagram.com") else (payload.quality or "480")
+    quality = "auto" if platform in {"instagram", "pinterest"} else (payload.quality or "480")
     job = ImportJob(
-        url=payload.url.strip(), user_id=current_user.id, telegram_id=current_user.telegram_id,
+        url=source_url, user_id=current_user.id, telegram_id=current_user.telegram_id,
         folder_id=folder_id, quality=quality, notify=True,
         save_to_library=payload.save_to_library, send_to_telegram=payload.send_to_telegram,
         destination_ids=payload.destination_ids,

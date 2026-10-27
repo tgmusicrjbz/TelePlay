@@ -1,17 +1,20 @@
-"""FIFO background importer for YouTube and Instagram links via @allsaverbot."""
+"""FIFO background importer for supported public media links."""
 from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
 import json
 import logging
+import mimetypes
 from pathlib import Path
 import re
+import shutil
 import tempfile
 import time
 import uuid
 from datetime import datetime, timedelta
-from urllib.parse import quote, urlencode
+from html.parser import HTMLParser
+from urllib.parse import quote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from pyrogram import Client
@@ -31,6 +34,164 @@ from .bot_messages import bot_message
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+PINTEREST_MAX_BYTES = 200 * 1024 * 1024
+PINTEREST_PAGE_MAX_BYTES = 2 * 1024 * 1024
+
+
+def classify_import_url(url: str) -> str | None:
+    """Return the supported platform for an absolute public URL."""
+    try:
+        parsed = urlparse(url.strip())
+        host = (parsed.hostname or "").lower().rstrip(".")
+        if parsed.scheme not in {"http", "https"}:
+            return None
+        if host == "youtu.be" or host == "youtube.com" or host.endswith(".youtube.com"):
+            return "youtube"
+        if host == "instagram.com" or host.endswith(".instagram.com"):
+            return "instagram"
+        if host == "pin.it" or host == "pinterest.com" or host.endswith(".pinterest.com"):
+            return "pinterest"
+    except ValueError:
+        pass
+    return None
+
+
+def _validate_pinterest_pin_url(url: str) -> str:
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower().rstrip(".")
+    if not (host == "pinterest.com" or host.endswith(".pinterest.com")):
+        raise ValueError("لینک کوتاه پینترست به یک صفحه معتبر پینترست نرسید.")
+    if not re.search(r"/pin/[^/?#]+", parsed.path, re.IGNORECASE):
+        raise ValueError("فعلاً فقط لینک یک پین پشتیبانی می‌شود؛ لینک برد یا مجموعه قابل دریافت نیست.")
+    return url
+
+
+class _PinterestMetaParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.values: dict[str, str] = {}
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.casefold() != "meta":
+            return
+        attributes = {str(key).casefold(): str(value or "") for key, value in attrs}
+        key = (attributes.get("property") or attributes.get("name") or "").casefold()
+        content = attributes.get("content", "").strip()
+        if key and content and key not in self.values:
+            self.values[key] = content
+
+
+class _QuietYTDLPLogger:
+    """Keep expected image-Pin extraction misses out of production stderr."""
+    def debug(self, message: str) -> None:
+        logger.debug("yt-dlp: %s", message)
+
+    info = debug
+    warning = debug
+    error = debug
+
+
+def _read_pinterest_page(url: str) -> tuple[str, dict[str, str]]:
+    request = Request(url, headers={
+        "User-Agent": "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml",
+    })
+    with urlopen(request, timeout=25) as response:
+        final_url = _validate_pinterest_pin_url(response.geturl())
+        body = response.read(PINTEREST_PAGE_MAX_BYTES)
+    parser = _PinterestMetaParser()
+    parser.feed(body.decode("utf-8", errors="ignore"))
+    return final_url, parser.values
+
+
+def _download_public_media(url: str, directory: Path, stem: str, max_bytes: int = PINTEREST_MAX_BYTES) -> Path:
+    media_host = (urlparse(url).hostname or "").lower().rstrip(".")
+    if not (media_host == "pinimg.com" or media_host.endswith(".pinimg.com") or media_host == "pinterest.com" or media_host.endswith(".pinterest.com")):
+        raise RuntimeError("نشانی رسانه این پین معتبر نیست.")
+    request = Request(url, headers={"User-Agent": "Mozilla/5.0 Komod/1.0", "Referer": "https://www.pinterest.com/"})
+    with urlopen(request, timeout=45) as response:
+        final_host = (urlparse(response.geturl()).hostname or "").lower().rstrip(".")
+        if not (final_host == "pinimg.com" or final_host.endswith(".pinimg.com") or final_host == "pinterest.com" or final_host.endswith(".pinterest.com")):
+            raise RuntimeError("تغییر مسیر رسانه پین معتبر نبود.")
+        size = int(response.headers.get("Content-Length") or 0)
+        if size and size > max_bytes:
+            raise RuntimeError("حجم این پین از سقف ۲۰۰ مگابایت بیشتر است.")
+        content_type = (response.headers.get_content_type() or "application/octet-stream").lower()
+        if not (content_type.startswith("image/") or content_type.startswith("video/")):
+            raise RuntimeError("پاسخ پینترست فایل تصویری یا ویدیویی نبود.")
+        extension = mimetypes.guess_extension(content_type) or Path(urlparse(response.geturl()).path).suffix or ".bin"
+        if extension == ".jpe":
+            extension = ".jpg"
+        target = directory / f"{stem}{extension[:8]}"
+        total = 0
+        with target.open("wb") as output:
+            while chunk := response.read(1024 * 1024):
+                total += len(chunk)
+                if total > max_bytes:
+                    raise RuntimeError("حجم این پین از سقف ۲۰۰ مگابایت بیشتر است.")
+                output.write(chunk)
+    return target
+
+
+def _download_pinterest(url: str) -> list[dict]:
+    """Download one public Pinterest Pin without cookies or account access."""
+    temp_dir = Path(tempfile.mkdtemp(prefix="komod-pinterest-"))
+    try:
+        source_host = (urlparse(url).hostname or "").lower().rstrip(".")
+        metadata: dict[str, str] = {}
+        if source_host == "pin.it":
+            canonical_url, metadata = _read_pinterest_page(url)
+        else:
+            canonical_url = _validate_pinterest_pin_url(url)
+        title = "پین پینترست"
+        author: str | None = None
+        local_path: Path | None = None
+        media_type = "video"
+        try:
+            from yt_dlp import YoutubeDL
+            options = {
+                "quiet": True, "no_warnings": True, "noplaylist": True,
+                "noprogress": True, "logger": _QuietYTDLPLogger(),
+                "format": "best[filesize<200M]/best",
+                "outtmpl": str(temp_dir / "%(id)s.%(ext)s"),
+                "max_filesize": PINTEREST_MAX_BYTES,
+                "socket_timeout": 30, "retries": 2,
+            }
+            with YoutubeDL(options) as downloader:
+                info = downloader.extract_info(canonical_url, download=True) or {}
+                candidate = Path(downloader.prepare_filename(info))
+                local_path = candidate if candidate.exists() else next((path for path in temp_dir.iterdir() if path.is_file()), None)
+                title = sanitize_filename(str(info.get("title") or info.get("description") or title).splitlines()[0])[:220]
+                author = _clean_source_author(info.get("uploader") or info.get("creator") or info.get("uploader_id"))
+        except Exception:
+            logger.debug("Pinterest video extraction was unavailable; trying public page media", exc_info=True)
+
+        if local_path is None:
+            if not metadata:
+                canonical_url, metadata = _read_pinterest_page(canonical_url)
+            title = sanitize_filename(
+                metadata.get("og:title") or metadata.get("twitter:title")
+                or metadata.get("og:description") or title
+            )[:220]
+            video_url = metadata.get("og:video:secure_url") or metadata.get("og:video") or metadata.get("twitter:player:stream")
+            image_url = metadata.get("og:image:secure_url") or metadata.get("og:image") or metadata.get("twitter:image")
+            media_url = video_url or image_url
+            if not media_url:
+                raise RuntimeError("رسانه قابل دریافت در این پین پیدا نشد؛ ممکن است خصوصی یا محدود شده باشد.")
+            media_type = "video" if video_url else "image"
+            local_path = _download_public_media(media_url, temp_dir, "pinterest")
+        elif local_path.suffix.casefold() in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
+            media_type = "image"
+
+        return [{
+            "message": None, "local_path": str(local_path), "temp_dir": str(temp_dir),
+            "title": title or "پین پینترست", "type": media_type, "author": author,
+            "source_url": canonical_url,
+        }]
+    except Exception:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise
 
 
 class ImportCancelled(Exception):
@@ -123,7 +284,12 @@ def _youtube_playlist_entries(url: str) -> tuple[str | None, list[dict[str, str]
 
 
 def _friendly_import_error(error: Exception) -> str:
-    message = str(error).lower()
+    raw_message = str(error).strip()
+    message = raw_message.lower()
+    if any(marker in raw_message for marker in ("لینک برد یا مجموعه", "سقف ۲۰۰ مگابایت", "رسانه قابل دریافت", "نشانی رسانه", "صفحه معتبر پینترست")):
+        return raw_message[:240]
+    if "pinterest" in message and ("403" in message or "forbidden" in message):
+        return "پینترست فعلاً دسترسی به این پین را محدود کرده است؛ کمی بعد دوباره امتحان کن."
     if isinstance(error, TimeoutError) or "timeout" in message or "زمان" in message:
         return "سرویس دانلود در زمان مقرر فایل اصلی را آماده نکرد. کمی بعد دوباره امتحان کن."
     if "private" in message or "خصوص" in message:
@@ -353,6 +519,7 @@ class LinkImportService:
     async def _run(self, client: Client, worker_index: int) -> None:
         while True:
             job = await self.queue.get()
+            temporary_directories: set[str] = set()
             try:
                 self.active_job_ids.add(job.id)
                 if not await self._checkpoint(job):
@@ -372,9 +539,14 @@ class LinkImportService:
                         progress = 10 + round((source_index - 1) / len(sources) * 65)
                         self.statuses[job.id].update(message=f"مورد {source_index} از {len(sources)}", progress=progress)
                         await self._persist_status(job.id)
-                    downloaded = await self._download(client, job, source["url"], job.quality)
+                    if classify_import_url(source["url"]) == "pinterest":
+                        downloaded = await asyncio.to_thread(_download_pinterest, source["url"])
+                    else:
+                        downloaded = await self._download(client, job, source["url"], job.quality)
                     for item_index, item in enumerate(downloaded, 1):
-                        item["source_url"] = source["url"]
+                        if item.get("temp_dir"):
+                            temporary_directories.add(item["temp_dir"])
+                        item["source_url"] = item.get("source_url") or source["url"]
                         item["collection_title"] = playlist_title
                         item["sequence"] = source_index if playlist_entries else item_index
                         if source.get("title") and item.get("title") in {"youtube", "instagram", ""}:
@@ -432,6 +604,8 @@ class LinkImportService:
                 self.statuses[job.id].update(state="error", message=friendly_error, finished_at=datetime.utcnow().isoformat())
                 await self._persist_status(job.id)
             finally:
+                for directory in temporary_directories:
+                    shutil.rmtree(directory, ignore_errors=True)
                 self.active_job_ids.discard(job.id)
                 self.queue.task_done()
 
@@ -591,18 +765,31 @@ class LinkImportService:
             raise TimeoutError("زمان دریافت فایل از سرویس دانلود تمام شد")
         return sorted(found, key=lambda item: item["message"].id)
 
-    async def _copy_to_storage(self, client: Client, message, item_type: str, filename: str, channel_id: int):
+    async def _copy_to_storage(self, client: Client, message, item_type: str, filename: str, channel_id: int, local_path: str | None = None):
         """Copy server-side when possible; fall back to bot re-upload.
 
         The Telegram account behind TELEGRAM_WORKER_SESSION does not need to be
         a member of the storage channel when the fallback is used.
         """
-        try:
-            return await message.copy(channel_id)
-        except Exception:
-            logger.warning("Worker could not copy media to storage; using bot upload fallback", exc_info=True)
+        if message is not None:
+            try:
+                return await message.copy(channel_id)
+            except Exception:
+                logger.warning("Worker could not copy media to storage; using bot upload fallback", exc_info=True)
         if telegram.tg_client is None:
             raise RuntimeError("ربات ذخیره‌سازی در دسترس نیست")
+        if local_path:
+            if item_type == "video":
+                return await telegram.tg_client.send_video(channel_id, local_path, supports_streaming=True)
+            if item_type == "audio":
+                return await telegram.tg_client.send_audio(channel_id, local_path)
+            if item_type == "image":
+                try:
+                    return await telegram.tg_client.send_photo(channel_id, local_path)
+                except Exception:
+                    logger.info("Pinterest image could not be sent as a photo; preserving it as a document", exc_info=True)
+                    return await telegram.tg_client.send_document(channel_id, local_path)
+            return await telegram.tg_client.send_document(channel_id, local_path)
         with tempfile.TemporaryDirectory(prefix="komod-link-") as temp_dir:
             target = str(Path(temp_dir) / filename)
             downloaded = await client.download_media(message, file_name=target)
@@ -625,7 +812,8 @@ class LinkImportService:
             target_channel_id = user.storage_channel_id or settings.telegram_storage_channel_id
             folder_id = job.folder_id if job.save_to_library else None
             if job.save_to_library and folder_id is None and job.default_folder:
-                default_name = "Youtube" if "youtu" in job.url.lower() else "Instagram"
+                platform = classify_import_url(job.url)
+                default_name = {"youtube": "Youtube", "instagram": "Instagram", "pinterest": "Pinterest"}.get(platform, "Links")
                 folder = (await db.execute(select(Folder).where(Folder.user_id == user.id, Folder.parent_id.is_(None), Folder.name == default_name))).scalar_one_or_none()
                 if folder is None:
                     folder = Folder(user_id=user.id, name=default_name, parent_id=None)
@@ -642,26 +830,31 @@ class LinkImportService:
                 await db.flush()
                 folder_id = collection.id
             for index, item in enumerate(items, 1):
-                suffix = ".mp4" if item["type"] == "video" else ".mp3" if item["type"] == "audio" else ".jpg"
+                source_suffix = Path(str(item.get("local_path") or "")).suffix
+                suffix = source_suffix if source_suffix else ".mp4" if item["type"] == "video" else ".mp3" if item["type"] == "audio" else ".jpg"
                 sequence = int(item.get("sequence") or index)
                 indexed = f" - {sequence:02d}" if len(items) > 1 else ""
                 filename = sanitize_filename(f"{item['title']}{indexed}{suffix}")
-                copied = await self._copy_to_storage(client, item["message"], item["type"], filename, target_channel_id)
+                copied = await self._copy_to_storage(client, item.get("message"), item["type"], filename, target_channel_id, item.get("local_path"))
                 media = copied.video or copied.audio or copied.voice or copied.document or (select_best_thumbnail(copied.photo.sizes) if copied.photo else None)
                 if media is None:
                     continue
-                is_youtube = "youtu" in (item.get("source_url") or job.url).lower()
-                global_key = "caption_template_youtube" if is_youtube else "caption_template_instagram"
+                source_platform = classify_import_url(item.get("source_url") or job.url) or "generic"
+                global_key = f"caption_template_{source_platform}"
                 global_template = await db.get(AppSetting, global_key)
-                caption_template = (
-                    global_template.value if global_template and global_template.value.strip()
-                    else user.youtube_caption_template if is_youtube else user.instagram_caption_template
-                )
+                if global_template and global_template.value.strip():
+                    caption_template = global_template.value
+                elif source_platform == "youtube":
+                    caption_template = user.youtube_caption_template
+                elif source_platform == "instagram":
+                    caption_template = user.instagram_caption_template
+                else:
+                    caption_template = "📝 [عنوان]\n📌 [پلتفرم]\n🔗 [لینک]"
                 description = render_link_caption(
                     caption_template,
                     title=item.get("title"), author=item.get("author"),
                     url=item.get("source_url") or job.url,
-                    platform="یوتیوب" if is_youtube else "اینستاگرام",
+                    platform={"youtube": "یوتیوب", "instagram": "اینستاگرام", "pinterest": "پینترست"}.get(source_platform, "وب"),
                     media_type={"video": "ویدیو", "audio": "صدا", "image": "عکس"}.get(item["type"], "فایل"),
                     quality="صدا" if job.quality == "audio" else f"{job.quality}p" if str(job.quality).isdigit() else job.quality,
                 )
