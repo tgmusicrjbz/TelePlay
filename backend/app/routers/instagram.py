@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import get_current_user
 from ..config import get_settings
 from ..database import get_db
-from ..instagram_inbox import dispatch_pending_events, extract_shared_posts, new_pairing_code, send_pairing_message, verify_meta_signature
+from ..instagram_inbox import dispatch_pending_events, extract_shared_posts, new_pairing_code, send_instagram_notice, send_pairing_message, verify_meta_signature
 from ..models import InstagramInboxEvent, InstagramInboxSender, User
 
 
@@ -32,9 +32,11 @@ class InstagramSenderUpdate(BaseModel):
     approved: bool | None = None
     blocked: bool | None = None
     save_to_library: bool | None = None
+    daily_limit: int | None = None
+    monthly_limit: int | None = None
 
 
-def sender_payload(sender: InstagramInboxSender, user: User | None = None) -> dict:
+def sender_payload(sender: InstagramInboxSender, user: User | None = None, *, daily_used: int = 0, monthly_used: int = 0) -> dict:
     return {
         "id": sender.id,
         "instagram_user_id": sender.instagram_user_id,
@@ -49,6 +51,10 @@ def sender_payload(sender: InstagramInboxSender, user: User | None = None) -> di
         "approved": sender.approved,
         "blocked": sender.blocked,
         "save_to_library": sender.save_to_library,
+        "daily_limit": sender.daily_limit,
+        "monthly_limit": sender.monthly_limit,
+        "daily_used": daily_used,
+        "monthly_used": monthly_used,
         "pairing_message_sent": sender.pairing_message_sent,
         "received_count": sender.received_count,
         "forwarded_count": sender.forwarded_count,
@@ -106,12 +112,50 @@ async def instagram_webhook(request: Request, background_tasks: BackgroundTasks,
             db.add(sender)
             await db.flush()
             new_senders.add(sender.id)
+        now = datetime.utcnow()
+        too_fast = bool(sender.last_message_at and (now - sender.last_message_at).total_seconds() < 3)
+        day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        month_start = day_start.replace(day=1)
+        daily_used = int((await db.execute(select(func.count()).select_from(InstagramInboxEvent).where(
+            InstagramInboxEvent.sender_id == sender.id,
+            InstagramInboxEvent.received_at >= day_start,
+            InstagramInboxEvent.status != "limited",
+        ))).scalar() or 0)
+        monthly_used = int((await db.execute(select(func.count()).select_from(InstagramInboxEvent).where(
+            InstagramInboxEvent.sender_id == sender.id,
+            InstagramInboxEvent.received_at >= month_start,
+            InstagramInboxEvent.status != "limited",
+        ))).scalar() or 0)
+        limited = too_fast or bool(sender.daily_limit and daily_used >= sender.daily_limit) or bool(sender.monthly_limit and monthly_used >= sender.monthly_limit)
+        previous = (await db.execute(select(InstagramInboxEvent).where(
+            InstagramInboxEvent.sender_id == sender.id,
+            InstagramInboxEvent.shared_url == shared["url"],
+            InstagramInboxEvent.cached_files_json != "[]",
+        ).order_by(InstagramInboxEvent.received_at.desc()).limit(1))).scalar_one_or_none()
+        already_processing = None if previous is not None else (await db.execute(select(InstagramInboxEvent.id).where(
+            InstagramInboxEvent.sender_id == sender.id,
+            InstagramInboxEvent.shared_url == shared["url"],
+            InstagramInboxEvent.status.in_(("pending", "queued")),
+        ).limit(1))).scalar_one_or_none()
+        duplicate_in_progress = already_processing is not None
+        limited = limited or duplicate_in_progress
         sender.received_count += 1
-        sender.last_message_at = datetime.utcnow()
+        sender.last_message_at = now
         db.add(InstagramInboxEvent(
-            sender_id=sender.id, event_id=shared["event_id"], shared_url=shared["url"], status="pending"
+            sender_id=sender.id, event_id=shared["event_id"], shared_url=shared["url"],
+            status="limited" if limited else "pending",
+            cached_files_json=previous.cached_files_json if previous is not None else "[]",
         ))
-        affected.add(sender.id)
+        if limited:
+            if duplicate_in_progress:
+                message = "این پست همین الان در حال آماده‌شدنه؛ لازم نیست دوباره بفرستیش. به‌محض آماده‌شدن توی تلگرام میاد ✨"
+            elif too_fast:
+                message = "چند لینک خیلی سریع پشت‌سرهم فرستادی؛ کمی صبر کن و دوباره بفرست 🙏"
+            else:
+                message = "سهمیهٔ دریافت پستت فعلاً پر شده. بعد از شروع بازهٔ بعدی دوباره می‌تونی بفرستی 🌱"
+            background_tasks.add_task(send_instagram_notice, sender.instagram_user_id, message)
+        else:
+            affected.add(sender.id)
         received += 1
     try:
         await db.commit()
@@ -151,7 +195,13 @@ async def instagram_senders(_: User = Depends(require_admin), db: AsyncSession =
         .outerjoin(User, User.id == InstagramInboxSender.telegram_user_id)
         .order_by(InstagramInboxSender.last_message_at.desc().nullslast())
     )).all()
-    return [sender_payload(sender, user) for sender, user in rows]
+    now=datetime.utcnow();day_start=now.replace(hour=0,minute=0,second=0,microsecond=0);month_start=day_start.replace(day=1)
+    result=[]
+    for sender,user in rows:
+        daily=int((await db.execute(select(func.count()).select_from(InstagramInboxEvent).where(InstagramInboxEvent.sender_id==sender.id,InstagramInboxEvent.received_at>=day_start,InstagramInboxEvent.status!="limited"))).scalar() or 0)
+        monthly=int((await db.execute(select(func.count()).select_from(InstagramInboxEvent).where(InstagramInboxEvent.sender_id==sender.id,InstagramInboxEvent.received_at>=month_start,InstagramInboxEvent.status!="limited"))).scalar() or 0)
+        result.append(sender_payload(sender,user,daily_used=daily,monthly_used=monthly))
+    return result
 
 
 @router.patch("/senders/{sender_id}")
@@ -176,6 +226,14 @@ async def update_instagram_sender(
             sender.approved = False
     if payload.save_to_library is not None:
         sender.save_to_library = payload.save_to_library
+    if payload.daily_limit is not None:
+        if not 0 <= payload.daily_limit <= 10_000:
+            raise HTTPException(status_code=400, detail="سقف روزانه معتبر نیست.")
+        sender.daily_limit = payload.daily_limit
+    if payload.monthly_limit is not None:
+        if not 0 <= payload.monthly_limit <= 100_000:
+            raise HTTPException(status_code=400, detail="سقف ماهانه معتبر نیست.")
+        sender.monthly_limit = payload.monthly_limit
     await db.commit()
     await db.refresh(sender)
     if sender.approved and not sender.blocked and sender.telegram_user_id is not None:

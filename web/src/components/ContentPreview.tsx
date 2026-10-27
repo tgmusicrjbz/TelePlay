@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlignCenter, AlignJustify, AlignLeft, AlignRight, ArrowRight, Bold, BookOpen, Braces, Check, ChevronLeft, ChevronRight, Code2, Copy, Download, ExternalLink, Eye, EyeOff, FileBox, Heading1, Image as ImageIcon, Italic, Link, Link2, List, ListChecks, ListOrdered, Maximize2, Minimize2, Minus, Moon, MoveHorizontal, Pencil, Plus, Quote, Redo2, Settings2, Smartphone, Sigma, Sparkles, Strikethrough, Sun, Table2, Underline, Undo2, Wand2, WrapText, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { AlignCenter, AlignJustify, AlignLeft, AlignRight, ArrowRight, Bold, BookOpen, Braces, Check, ChevronLeft, ChevronRight, Code2, Copy, Download, ExternalLink, Eye, EyeOff, FileBox, FileText, Heading1, Image as ImageIcon, Italic, Link, Link2, List, ListChecks, ListOrdered, Maximize2, Minimize2, Minus, Moon, MoveHorizontal, PanelBottomClose, Pencil, Plus, Quote, Redo2, Settings2, Smartphone, Sigma, Sparkles, Strikethrough, Sun, Table2, Underline, Undo2, Wand2, WrapText, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { api, canPreviewText, useFiles, useRefineSTTText, useUpdateFile } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { cacheTextFile, getOfflineText, updateOfflineTextDraft } from '../lib/offline';
@@ -12,7 +12,7 @@ import { getMarkdownSettings, getMarkdownThemeOptions, markdownFonts, MarkdownSe
 const readerFonts=markdownFonts;
 
 export default function ContentPreview() {
-    const { contentPreviewFile: file, contentPreviewHistory, setContentPreviewFile, goBackContentPreview, addToast } = useAppStore();
+    const { contentPreviewFile: file, contentPreviewHistory, setContentPreviewFile, goBackContentPreview, addToast, isContentPreviewMinimized, setContentPreviewMinimized, isPlayerMinimized, previewFile } = useAppStore();
     const [content, setContent] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
@@ -233,6 +233,7 @@ export default function ContentPreview() {
             // full-viewport reader still remains active.
         }
     };
+    const minimizeReader=async()=>{if(document.fullscreenElement)await document.exitFullscreen().catch(()=>undefined);setReaderFullscreen(false);setReaderChromeHidden(false);setContentPreviewMinimized(true)};
     const wordCount = content.trim() ? content.trim().split(/\s+/).length : 0;
     const insertMarkdown = (before: string, after = '', placeholder = 'متن', linePrefix = false) => {
         const editor = editorRef.current;
@@ -262,6 +263,8 @@ export default function ContentPreview() {
     const showAIVersion=(nextIndex:number)=>{const next=Math.max(0,Math.min(nextIndex,aiVersions.length-1));setAIVersion(next);setAIText(aiVersions[next]);setAIError('')};
     const saveAIResult=async()=>{if(!file||file.id<0||!aiText.trim())return;setAIError('');setAIStatus('در حال ذخیره در کمد…');try{if(textFirst){const updated=await updateFile.mutateAsync({id:file.id,description:aiText});const description=updated.description?.trim()||'';const label=file.file_type==='video'?'ویدیو':file.file_type==='audio'?'صدا':'فایل پیوست';const attachment=file.file_type==='image'?`![تصویر پیوست](/api/stream/${file.id})`:`[باز کردن ${label}](komod://file/${file.id})`;const nextContent=textAttachmentPosition==='start'?`${attachment}\n\n${description}`:`${description}\n\n${attachment}`;textLoadVersionRef.current+=1;setContent(nextContent);setDraft(description)}else{const {data}=await api.patch<{content:string}>(`/files/${file.id}/text`,{content:aiText});await cacheTextFile(file,data.content);textLoadVersionRef.current+=1;setContent(data.content);setDraft(data.content)}setShowAIEditor(false);addToast('نسخه ویرایش‌شده ذخیره شد.')}catch(reason:any){setAIStatus('');setAIError(reason?.response?.data?.detail||'ذخیره متن انجام نشد.')}};
 
+    if(isContentPreviewMinimized)return <div dir="rtl" className={`fixed inset-x-0 z-[235] border-t border-primary-400/20 bg-dark-900/95 px-3 py-2 shadow-2xl backdrop-blur-xl ${isPlayerMinimized&&previewFile?'bottom-[calc(10rem+env(safe-area-inset-bottom))] md:bottom-20':'bottom-[calc(5rem+env(safe-area-inset-bottom))] md:bottom-0'}`}><div className="mx-auto flex max-w-5xl items-center gap-3"><button onClick={()=>setContentPreviewMinimized(false)} className="flex min-w-0 flex-1 items-center gap-3 text-right"><span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-500/15 text-blue-300"><FileText className="h-5 w-5"/></span><span className="min-w-0 flex-1"><strong className="block truncate text-sm">{file.file_name}</strong><small className="mt-0.5 block text-dark-400">ادامهٔ مطالعه</small></span></button><button className="btn-secondary min-h-10 px-3 text-xs" onClick={()=>setContentPreviewMinimized(false)}>باز کردن</button><button className="btn-icon" title="بستن متن" onClick={()=>setContentPreviewFile(null)}><X className="h-5 w-5"/></button></div></div>;
+
     return (
         <div className={`fixed inset-0 z-[220] flex items-center justify-center bg-black/85 backdrop-blur-md ${readerFullscreen ? 'p-0' : 'p-3 sm:p-8'}`} onClick={() => setContentPreviewFile(null)}>
             <section ref={previewRef} className={`relative flex w-full flex-col overflow-hidden border border-white/10 bg-dark-900 shadow-2xl ${readerFullscreen ? 'h-dvh max-h-none max-w-none rounded-none border-0' : 'max-h-full max-w-5xl rounded-2xl'}`} onClick={(event) => event.stopPropagation()}>
@@ -272,6 +275,7 @@ export default function ContentPreview() {
                     </div>
                     <div className="flex shrink-0 items-center gap-1">
                         {contentPreviewHistory.length>0&&<button onClick={goBackContentPreview} className="flex min-h-9 items-center gap-1.5 rounded-xl bg-primary-500/12 px-2.5 text-xs text-primary-200" title="برگشت به متن قبلی"><ArrowRight className="h-4 w-4"/><span className="hidden sm:inline">برگشت به متن</span></button>}
+                        {textReader&&<button onClick={()=>void minimizeReader()} className="btn-icon" title="مینیمایز کردن متن"><PanelBottomClose className="h-5 w-5"/></button>}
                         {textReader && <><button onClick={openAIEditor} disabled={file.id<0||loading} className="btn-icon text-primary-200 disabled:opacity-30" title="ویرایش با هوش مصنوعی"><Sparkles className="h-5 w-5"/></button><button onClick={()=>setReaderToolsVisible(value=>!value)} className={`btn-icon ${readerToolsVisible?'text-primary-200':''}`} title={readerToolsVisible?'مخفی‌کردن تنظیمات مطالعه':'نمایش تنظیمات مطالعه'}><Settings2 className="h-5 w-5"/></button><button onClick={async () => { await navigator.clipboard.writeText(editing ? draft : content); addToast('متن کپی شد 📋'); }} className="btn-icon" title="کپی متن"><Copy className="h-5 w-5" /></button><button onClick={() => {if(!editing&&textFirst)setDraft(file.description?.trim()||'');setEditing(value => !value)}} className={`btn-secondary flex shrink-0 items-center gap-2 px-3 py-2 text-xs ${editing?'text-primary-200':''}`} title={editing?'حالت مطالعه':'ویرایش متن'}>{editing?<BookOpen className="h-4 w-4"/>:<Pencil className="h-4 w-4"/>}<span className="hidden sm:inline">{editing?'مطالعه':'ویرایش'}</span></button>{readerFullscreen&&<button onClick={()=>setReaderChromeHidden(true)} className="btn-icon" title="حالت مطالعه بدون نوار"><EyeOff className="h-5 w-5"/></button>}<button onClick={() => void toggleReaderFullscreen()} className="btn-icon" title={readerFullscreen ? 'خروج از تمام‌صفحه' : 'مطالعه در تمام‌صفحه'}>{readerFullscreen ? <Minimize2 className="h-5 w-5"/> : <Maximize2 className="h-5 w-5"/>}</button></>}
                         <button onClick={() => setContentPreviewFile(null)} className="btn-icon" title="بستن"><X className="w-5 h-5" /></button>
                     </div>

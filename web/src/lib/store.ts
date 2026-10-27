@@ -89,6 +89,8 @@ interface AppState {
     setPreviewFile: (file: TelegramFile | null) => void;
     contentPreviewFile: TelegramFile | null;
     setContentPreviewFile: (file: TelegramFile | null) => void;
+    isContentPreviewMinimized: boolean;
+    setContentPreviewMinimized: (minimized: boolean) => void;
     contentPreviewHistory: TelegramFile[];
     openLinkedContentFile: (file: TelegramFile) => void;
     goBackContentPreview: () => void;
@@ -236,10 +238,13 @@ export const useAppStore = create<AppState>((set) => ({
     previewFile: restoredPlayer.current,
     setPreviewFile: (file) => set({ previewFile: file }),
     contentPreviewFile: null,
+    isContentPreviewMinimized: false,
     contentPreviewHistory: [],
-    setContentPreviewFile: (file) => set(file ? { contentPreviewFile: file } : { contentPreviewFile: null, contentPreviewHistory: [] }),
+    setContentPreviewFile: (file) => set(file ? { contentPreviewFile: file, isContentPreviewMinimized: false } : { contentPreviewFile: null, contentPreviewHistory: [], isContentPreviewMinimized: false }),
+    setContentPreviewMinimized: (isContentPreviewMinimized) => set({isContentPreviewMinimized}),
     openLinkedContentFile: (file) => set((state) => ({
         contentPreviewFile: file,
+        isContentPreviewMinimized: false,
         contentPreviewHistory: state.contentPreviewFile
             ? [...state.contentPreviewHistory, state.contentPreviewFile].slice(-20)
             : state.contentPreviewHistory,

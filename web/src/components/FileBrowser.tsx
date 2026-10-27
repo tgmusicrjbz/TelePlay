@@ -4,7 +4,7 @@
 import { lazy, Suspense, useEffect, useCallback, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { FolderPlus, Folder as FolderIcon, Grid, LayoutGrid, List, Search, ChevronRight, ChevronDown, Home, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, StickyNote, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ArrowDownUp, ChevronUp, Plus, CheckSquare, Square, ListChecks, ListPlus, Upload, Star, RefreshCw, Link2, DownloadCloud, Download, Send, Eye, EyeOff, Minus, Play, Tags, Cloud, CloudOff, AudioLines, FileAudio, Sparkles, BookmarkPlus, Combine } from 'lucide-react';
-import { api, useFiles, useFolders, useFolderTree, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, useActivityFeed, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile, useImportLink, useTagSettings, useUnlockVault, useWorkspaces, sendFilesToTelegram, useTTSJobs, useSTTJobs, SavedFilter, useSavedFilters, useUpdateSavedFilters, usePacks, useExpandSmartSearch, formatFileSize } from '../lib/api';
+import { api, useFiles, useFolders, useFolderTree, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, Pack, useActivityFeed, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile, useImportLink, useTagSettings, useUnlockVault, useWorkspaces, sendFilesToTelegram, useTTSJobs, useSTTJobs, SavedFilter, useSavedFilters, useUpdateSavedFilters, usePacks, useExpandSmartSearch, formatFileSize } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { cacheAllTextNotes, queueOfflineText, saveFileOffline } from '../lib/offline';
 import FileCard from './FileCard';
@@ -176,6 +176,7 @@ export default function FileBrowser() {
     const [packFileIds,setPackFileIds]=useState<number[]>([]);
     const [openPackId, setOpenPackId] = useState<number|null>(null);
     const [selectionMode, setSelectionMode] = useState(false);
+    const [selectedPackIds,setSelectedPackIds]=useState<Set<number>>(new Set());
     const [pullDistance, setPullDistance] = useState(0);
     const pullStartY = useRef<number | null>(null);
     const [favoriteOnly, setFavoriteOnly] = useState(false);
@@ -474,7 +475,7 @@ export default function FileBrowser() {
     const { data: folders, isLoading: foldersLoading, error: foldersError, refetch: refetchFolders } = useFolders(currentFolderId, folderSortValue, favoriteOnly, showHidden);
     // When the default drawer is flattened into the root, files and packs must
     // use the same effective location. Otherwise the «pack» filter looks empty.
-    const { data: packs = [], refetch: refetchPacks } = usePacks(effectiveFolderId);
+    const { data: packs = [], refetch: refetchPacks } = usePacks(effectiveSearchQuery ? null : effectiveFolderId, Boolean(effectiveSearchQuery));
     const visibleFolders = (hiddenOnly ? hiddenFolderRoots : folders)?.filter(folder => {
         if (hiddenOnly && !folder.is_hidden) return false;
         if (currentFolderId === null && rootFilesMode === 'files' && folder.is_default) return false;
@@ -532,6 +533,7 @@ export default function FileBrowser() {
         if (activeSection !== 'files') {
             setSelectionMode(false);
             clearSelection();
+            setSelectedPackIds(new Set());
         }
     }, [activeSection, clearSelection]);
 
@@ -1148,7 +1150,9 @@ export default function FileBrowser() {
     const selectedTextFilesForActions = selectedFilesForActions.filter(file=>canPreviewText(file));
     const selectedPlayableFilesForActions = selectedFilesForActions.filter(file => file.file_type === 'audio' || file.file_type === 'video');
     const selectedFoldersForActions = folders?.filter(folder => selectedFolderIds.has(folder.id)) || [];
+    const selectedPacksForActions = visiblePacks.filter(pack=>selectedPackIds.has(pack.id));
     const selectedItems = [...selectedFilesForActions, ...selectedFoldersForActions];
+    const selectedItemCount=selectedItems.length+selectedPacksForActions.length;
     const combineSelectedTexts=async()=>{if(selectedTextFilesForActions.length<2)return;setCombiningTexts(true);try{const contents=await Promise.all(selectedTextFilesForActions.map(async file=>({file,content:(await api.get<{content:string}>(`/files/${file.id}/text`)).data.content})));const separator=combineSeparator==='line'?'\n\n---\n\n':combineSeparator==='blank'?'\n\n':'';const merged=contents.map(({file,content})=>`${combineIncludeNames?`## ${file.file_name}\n\n`:''}${content.trim()}`).join(separator);const raw=combineTitle.trim()||'متن ترکیبی';const name=/\.md$/i.test(raw)?raw:`${raw}.md`;await uploadFileMutation.mutateAsync({file:new File([merged],name,{type:'text/markdown;charset=utf-8'}),folderId:effectiveFolderId});setShowCombineTexts(false);cancelSelection();addToast('فایل ترکیبی ساخته شد.','success')}catch(error:any){addToast(error?.response?.data?.detail||'ترکیب متن‌ها انجام نشد.','error')}finally{setCombiningTexts(false)}};
     const selectFileRange=()=>{
         const ordered=(displayFiles||[]).map(file=>file.id);
@@ -1176,12 +1180,14 @@ export default function FileBrowser() {
         const allowed:SortField[]=scope==='files'?['name','type','size','duration','created','updated']:scope==='folders'?['name','count','created','updated']:['name','created','updated'];
         if(!allowed.includes(sortCriteria[0]?.field))setSortCriteria([{field:'created',direction:'desc'}]);
         clearSelection();
+        setSelectedPackIds(new Set());
     };
     const toggleFileType = (type: string | null) => {
         setActiveSavedFilterId(null);
         if (type !== null) setContentScope(type === 'pack' ? 'all' : 'files');
         setFileTypeFilter(type);
         clearSelection();
+        setSelectedPackIds(new Set());
     };
     const scopeSortFields:SortField[]=contentScope==='files'?['name','type','size','duration','created','updated']:contentScope==='folders'?['name','count','created','updated']:['name','created','updated'];
     const availableSortFields = scopeSortFields.filter(field => !sortCriteria.some(item => item.field === field));
@@ -1218,13 +1224,15 @@ export default function FileBrowser() {
     const visibleFileIds = showFiles ? displayFiles?.map(file => file.id) || [] : [];
     const visibleFolderIds = showFolders ? visibleFolders?.map(folder => folder.id) || [] : [];
     const totalSelectableFiles = showFiles ? (filesList?.total ?? visibleFileIds.length) : 0;
-    const visibleItemCount = totalSelectableFiles + visibleFolderIds.length;
+    const visiblePackIds = showPacks ? visiblePacks.map(pack=>pack.id) : [];
+    const visibleItemCount = totalSelectableFiles + visibleFolderIds.length + visiblePackIds.length;
     const allVisibleSelected = visibleItemCount > 0
         && selectedFileIds.size >= totalSelectableFiles
         && visibleFileIds.every(id => selectedFileIds.has(id))
-        && visibleFolderIds.every(id => selectedFolderIds.has(id));
+        && visibleFolderIds.every(id => selectedFolderIds.has(id))
+        && visiblePackIds.every(id=>selectedPackIds.has(id));
     const toggleSelectAll = async () => {
-        if (allVisibleSelected) clearSelection();
+        if (allVisibleSelected) {clearSelection();setSelectedPackIds(new Set());}
         else {
             try {
                 let fileIds = visibleFileIds;
@@ -1235,7 +1243,7 @@ export default function FileBrowser() {
                     for (let requestedPage = 1; requestedPage <= totalPages; requestedPage += 1) {
                         const params:Record<string,unknown> = {page:requestedPage,per_page:perPage};
                         if (!hiddenOnly && !activeSavedFilterId && !searchQuery.trim() && effectiveFolderId !== undefined) params.folder_id = effectiveFolderId;
-                        if (fileTypeFilter.length) params.file_type = fileTypeFilter.join(',');
+                        if (apiFileTypeFilter.length) params.file_type = apiFileTypeFilter.join(',');
                         if (searchQuery.trim()) params.search = searchQuery.trim();
                         if (sortValue) params.sort = sortValue;
                         if (favoriteOnly) params.favorite_only = true;
@@ -1247,18 +1255,24 @@ export default function FileBrowser() {
                     fileIds = Array.from(collected);
                 }
                 selectAll(fileIds, visibleFolderIds);
+                setSelectedPackIds(new Set(visiblePackIds));
             } catch {
                 addToast('انتخاب همهٔ نتایج انجام نشد؛ دوباره تلاش کن.', 'error');
             }
         }
     };
     const sendSelectedToTelegram = async (destinationIds?:number[]) => {
-        if (!selectedFilesForActions.length) return;
+        if (!selectedFilesForActions.length&&!selectedPacksForActions.length) return;
         if(destinationIds===undefined){setShowSendPicker(true);return}
         setSendingToTelegram(true);
         addToast('دارم فایل‌ها را به تلگرام می‌فرستم…', 'info');
         try {
-            const result = await sendFilesToTelegram(selectedFilesForActions.map(item => item.id),destinationIds);
+            const packDetails=await Promise.all(selectedPacksForActions.map(pack=>api.get<Pack>(`/packs/${pack.id}`).then(response=>response.data)));
+            const fileIds=Array.from(new Set([...selectedFilesForActions.map(item=>item.id),...packDetails.flatMap(pack=>pack.items.map(item=>item.file.id))]));
+            if(!fileIds.length)throw new Error('جعبه‌های انتخاب‌شده خالی هستند.');
+            let sent=0;const failed:number[]=[];
+            for(let offset=0;offset<fileIds.length;offset+=50){const result=await sendFilesToTelegram(fileIds.slice(offset,offset+50),destinationIds);sent+=result.sent;failed.push(...result.failed)}
+            const result={sent,failed};
             addToast(result.failed.length ? `${result.sent.toLocaleString('fa-IR')} فایل فرستاده شد؛ ${result.failed.length.toLocaleString('fa-IR')} مورد ناموفق بود.` : `${result.sent.toLocaleString('fa-IR')} فایل در تلگرام فرستاده شد.`);
             setShowSendPicker(false);
         } catch (error:any) {
@@ -1274,6 +1288,7 @@ export default function FileBrowser() {
     };
     const cancelSelection = () => {
         clearSelection();
+        setSelectedPackIds(new Set());
         setSelectionMode(false);
     };
     const hideSelectedItems = async () => {
@@ -1323,6 +1338,7 @@ export default function FileBrowser() {
     const toggleSelectionMode = () => {
         const nextMode = !selectionMode;
         clearSelection();
+        setSelectedPackIds(new Set());
         setSelectionMode(nextMode);
     };
 
@@ -1436,10 +1452,10 @@ export default function FileBrowser() {
                 >
                     {isFileDragOver&&<div className="pointer-events-none fixed inset-4 z-[220] flex items-center justify-center rounded-3xl border-2 border-dashed border-primary-400/60 bg-dark-950/80 backdrop-blur-sm"><div className="text-center"><Upload className="mx-auto h-10 w-10 text-primary-300"/><p className="mt-3 font-bold">فایل‌ها را اینجا رها کن</p><p className="mt-1 text-xs text-dark-400">چند فایل با هم هم پشتیبانی می‌شود</p></div></div>}
                     {pullEnabled && pullDistance > 0 && <div className="pointer-events-none fixed left-1/2 top-20 z-50 -translate-x-1/2 rounded-full border border-white/10 bg-dark-900/95 px-3 py-1.5 text-xs text-primary-200 shadow-xl backdrop-blur" style={{ transform: `translate(-50%, ${pullDistance / 3}px)` }}>{pullDistance >= 52 ? 'رها کن تا تازه بشه ✨' : 'برای تازه‌سازی پایین بکش'}</div>}
-                    {!readOnlyWorkspace && (selectionMode || selectedItems.length > 0) && activeSection === 'files' && (
+                    {!readOnlyWorkspace && (selectionMode || selectedItemCount > 0) && activeSection === 'files' && (
                         <div className="fixed inset-x-4 top-20 z-40 mx-auto flex min-h-14 w-auto max-w-7xl flex-nowrap items-center gap-1 overflow-x-auto rounded-2xl border border-primary-500/25 bg-dark-900/95 p-1.5 shadow-2xl backdrop-blur-xl sm:hidden">
-                            <span className="shrink-0 px-2 text-xs font-semibold text-primary-200">{selectedItems.length ? `${selectedItems.length.toLocaleString('fa-IR')} انتخاب` : 'یک کارت را لمس کن'}</span>
-                            {selectedItems.length === 1 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-200 hover:bg-white/10" aria-label="تغییر نام" title="تغییر نام" onClick={() => selectedFilesForActions[0] ? setRenameFile(selectedFilesForActions[0]) : setRenameFolder(selectedFoldersForActions[0])}><Pencil className="h-5 w-5" /></button>}
+                            <span className="shrink-0 px-2 text-xs font-semibold text-primary-200">{selectedItemCount ? `${selectedItemCount.toLocaleString('fa-IR')} انتخاب` : 'یک کارت را لمس کن'}</span>
+                            {selectedItems.length === 1&&selectedPacksForActions.length===0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-200 hover:bg-white/10" aria-label="تغییر نام" title="تغییر نام" onClick={() => selectedFilesForActions[0] ? setRenameFile(selectedFilesForActions[0]) : setRenameFolder(selectedFoldersForActions[0])}><Pencil className="h-5 w-5" /></button>}
                             {selectedFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-200 hover:bg-white/10" aria-label="تگ‌ها و ویرایش گروهی" title="افزودن، حذف یا جایگزینی تگ‌ها" onClick={() => setShowBatchEdit(true)}><Tags className="h-5 w-5" /></button>}
                             {selectedTextFilesForActions.length > 1 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-primary-200 hover:bg-primary-500/10" aria-label="ترکیب متن‌ها" title="ساخت یک فایل از متن‌های انتخابی" onClick={()=>setShowCombineTexts(true)}><Combine className="h-5 w-5"/></button>}
                             {selectedFileIds.size>=2&&<button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-primary-200 hover:bg-primary-500/10" aria-label="انتخاب فایل‌های میانی" title="انتخاب همه فایل‌های بین اولین و آخرین انتخاب" onClick={selectFileRange}><ListChecks className="h-5 w-5"/></button>}
@@ -1448,7 +1464,7 @@ export default function FileBrowser() {
                             {selectedPlayableFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-500/10 text-primary-200 hover:bg-primary-500/20" aria-label="افزودن به پلی‌لیست" title="افزودن فایل‌های صدا و ویدیو به پلی‌لیست" onClick={() => setPlaylistFiles(selectedPlayableFilesForActions)}><ListPlus className="h-5 w-5" /></button>}
                             {selectedFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-primary-200 hover:bg-primary-500/10" aria-label="ذخیره آفلاین" title="افزودن همه به صف ذخیره آفلاین" onClick={() => { selectedFilesForActions.forEach(file => void saveFileOffline(file)); addToast(`${selectedFilesForActions.length.toLocaleString('fa-IR')} فایل به صف ذخیره آفلاین اضافه شد.`); }}><DownloadCloud className="h-5 w-5" /></button>}
                              {selectedFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-200 hover:bg-white/10" aria-label="دانلود" title="دانلود فایل‌های انتخاب‌شده" onClick={() => void downloadSelectedFiles()}><Download className="h-5 w-5" /></button>}
-                             {selectedFilesForActions.length > 0 && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-sky-300 hover:bg-sky-500/10" aria-label="ارسال به تلگرام" title="ارسال فایل‌های انتخاب‌شده به تلگرام" onClick={() => void sendSelectedToTelegram()}><Send className="h-5 w-5" /></button>}
+                             {(selectedFilesForActions.length > 0||selectedPacksForActions.length>0) && <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-sky-300 hover:bg-sky-500/10" aria-label="ارسال به تلگرام" title="ارسال فایل‌ها و جعبه‌های انتخاب‌شده به تلگرام" onClick={() => void sendSelectedToTelegram()}><Send className="h-5 w-5" /></button>}
                             <button disabled={!selectedItems.length} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-200 hover:bg-white/10 disabled:opacity-30" aria-label="مخفی‌کردن" title="انتقال انتخاب‌ها به گاوصندوق" onClick={()=>void hideSelectedItems()}><EyeOff className="h-5 w-5"/></button>
                             <button disabled={!selectedItems.length} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-200 hover:bg-white/10 disabled:opacity-30" aria-label="جابه‌جایی" title="جابه‌جایی" onClick={() => setMoveItems({ files: selectedFilesForActions, folders: selectedFoldersForActions })}><FolderInput className="h-5 w-5" /></button>
                             <button disabled={!selectedItems.length} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-red-300 hover:bg-red-500/10 disabled:opacity-30" aria-label="حذف" title="حذف" onClick={() => setDeleteConfirm({ type: selectedFoldersForActions.length && selectedFilesForActions.length ? 'multiple' : selectedFoldersForActions.length ? 'folder' : 'file', items: selectedItems })}><Trash2 className="h-5 w-5" /></button>
@@ -1461,10 +1477,10 @@ export default function FileBrowser() {
                             <h1 className="truncate text-2xl font-bold tracking-tight text-white sm:text-3xl">{sectionTitle}</h1>
                             {activeSection !== 'activity' && <span className="shrink-0 rounded-full border border-white/[0.07] bg-dark-800/70 px-2.5 py-1 text-xs text-dark-300">{(shownFolderCount + shownPackCount + shownFileCount).toLocaleString('fa-IR')} مورد</span>}
                         </div>
-                        {selectedItems.length > 0 ? (
+                        {selectedItemCount > 0 ? (
                             <div className="fixed left-6 right-6 top-20 z-40 mx-auto hidden max-w-7xl flex-wrap items-center gap-1.5 rounded-2xl border border-primary-500/20 bg-dark-900/95 p-1.5 shadow-2xl backdrop-blur-xl sm:flex md:right-32 lg:left-8">
-                                <span className="text-sm font-medium text-primary-200 px-2">{selectedItems.length.toLocaleString('fa-IR')} مورد انتخاب شده</span>
-                                {selectedItems.length === 1 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => selectedFilesForActions[0] ? setRenameFile(selectedFilesForActions[0]) : setRenameFolder(selectedFoldersForActions[0])}><Pencil className="w-4 h-4" /> تغییر نام</button>}
+                                <span className="text-sm font-medium text-primary-200 px-2">{selectedItemCount.toLocaleString('fa-IR')} مورد انتخاب شده</span>
+                                {selectedItems.length === 1&&selectedPacksForActions.length===0 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => selectedFilesForActions[0] ? setRenameFile(selectedFilesForActions[0]) : setRenameFolder(selectedFoldersForActions[0])}><Pencil className="w-4 h-4" /> تغییر نام</button>}
                                 {selectedFilesForActions.length > 0 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => setShowBatchEdit(true)}><Tags className="w-4 h-4" /> تگ‌ها و ویرایش</button>}
                                 {selectedTextFilesForActions.length > 1 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2 text-primary-200" onClick={()=>setShowCombineTexts(true)}><Combine className="h-4 w-4"/> ترکیب متن‌ها</button>}
                                 {selectedFileIds.size>=2&&<button className="btn-secondary shrink-0 text-sm flex items-center gap-2 text-primary-200" onClick={selectFileRange}><ListChecks className="h-4 w-4"/> انتخاب فاصله</button>}
@@ -1473,10 +1489,10 @@ export default function FileBrowser() {
                                 {selectedPlayableFilesForActions.length > 0 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => setPlaylistFiles(selectedPlayableFilesForActions)}><ListPlus className="w-4 h-4" /> افزودن به پلی‌لیست</button>}
                                 {selectedFilesForActions.length > 0 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => { selectedFilesForActions.forEach(file => void saveFileOffline(file)); addToast(`${selectedFilesForActions.length.toLocaleString('fa-IR')} فایل به صف ذخیره آفلاین اضافه شد.`); }}><DownloadCloud className="w-4 h-4" /> ذخیره آفلاین</button>}
                                  {selectedFilesForActions.length > 0 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => void downloadSelectedFiles()}><Download className="w-4 h-4" /> دانلود</button>}
-                                 {selectedFilesForActions.length > 0 && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2 text-sky-200" onClick={() => void sendSelectedToTelegram()}><Send className="w-4 h-4" /> ارسال به تلگرام</button>}
-                                <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={()=>void hideSelectedItems()}><EyeOff className="w-4 h-4"/> مخفی‌کردن</button>
-                                <button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => setMoveItems({ files: selectedFilesForActions, folders: selectedFoldersForActions })}><FolderInput className="w-4 h-4" /> جابه‌جایی</button>
-                                <button className="btn-secondary shrink-0 text-sm flex items-center gap-2 text-red-300" onClick={() => setDeleteConfirm({ type: selectedFoldersForActions.length && selectedFilesForActions.length ? 'multiple' : selectedFoldersForActions.length ? 'folder' : 'file', items: selectedItems })}><Trash2 className="w-4 h-4" /> حذف</button>
+                                 {(selectedFilesForActions.length > 0||selectedPacksForActions.length>0) && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2 text-sky-200" onClick={() => void sendSelectedToTelegram()}><Send className="w-4 h-4" /> ارسال به تلگرام</button>}
+                                {selectedItems.length>0&&<button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={()=>void hideSelectedItems()}><EyeOff className="w-4 h-4"/> مخفی‌کردن</button>}
+                                {selectedItems.length>0&&<button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => setMoveItems({ files: selectedFilesForActions, folders: selectedFoldersForActions })}><FolderInput className="w-4 h-4" /> جابه‌جایی</button>}
+                                {selectedItems.length>0&&<button className="btn-secondary shrink-0 text-sm flex items-center gap-2 text-red-300" onClick={() => setDeleteConfirm({ type: selectedFoldersForActions.length && selectedFilesForActions.length ? 'multiple' : selectedFoldersForActions.length ? 'folder' : 'file', items: selectedItems })}><Trash2 className="w-4 h-4" /> حذف</button>}
                                 <button className="btn-icon shrink-0" title="پایان انتخاب" onClick={cancelSelection}><X className="w-4 h-4" /></button>
                             </div>
                         ) : null}
@@ -1655,7 +1671,7 @@ export default function FileBrowser() {
                                     ))}
 
                                     {/* Mixed-media packs live beside folders. */}
-                                    {showPacks && visiblePacks.map(pack => <PackCard key={`pack-${pack.id}`} pack={pack} viewMode={viewMode} onOpen={()=>setOpenPackId(pack.id)}/>)}
+                                    {showPacks && visiblePacks.map(pack => <PackCard key={`pack-${pack.id}`} pack={pack} viewMode={viewMode} selected={selectedPackIds.has(pack.id)} selectionMode={selectionMode} onSelect={()=>{setSelectionMode(true);setSelectedPackIds(current=>{const next=new Set(current);if(next.has(pack.id))next.delete(pack.id);else next.add(pack.id);return next})}} onOpen={()=>setOpenPackId(pack.id)}/>)}
                                     
                                     {/* Files */}
                                     {showFiles && displayFiles?.map((file) => (
@@ -1786,7 +1802,7 @@ export default function FileBrowser() {
             {showVaultPrompt && <div className="fixed inset-0 z-[190] flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-4" onClick={()=>setShowVaultPrompt(false)}><div className="w-full max-w-sm rounded-t-3xl border border-white/10 bg-dark-900 p-5 sm:rounded-3xl" onClick={event=>event.stopPropagation()}><div className="flex items-center gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary-500/15 text-primary-200"><EyeOff className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h2 className="font-bold">گاوصندوق</h2><p className="text-xs text-dark-400">موارد مخفی را کنار بقیهٔ فایل‌ها ببین.</p></div><button className="btn-icon" onClick={()=>setShowVaultPrompt(false)}><X className="h-5 w-5"/></button></div>{!sessionStorage.getItem('komod-vault-token')&&<input autoFocus type="password" value={vaultPassword} onChange={event=>setVaultPassword(event.target.value)} className="input mt-4 w-full" placeholder="رمز گاوصندوق"/>}<div className="mt-4 grid gap-2"><button disabled={unlockVault.isPending||(!sessionStorage.getItem('komod-vault-token')&&!vaultPassword)} onClick={()=>void showVaultItems()} className="btn-primary min-h-11 disabled:opacity-40">نمایش موارد مخفی</button>{showHidden&&<button onClick={closeVaultItems} className="min-h-10 rounded-xl text-sm text-red-300 hover:bg-red-500/10">بستن گاوصندوق</button>}</div></div></div>}
             {showAddMenu && createPortal(<div className="fixed inset-0 z-[260] flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-5" onClick={() => setShowAddMenu(false)}><div className="max-h-[min(86vh,42rem)] w-full max-w-md overflow-y-auto rounded-t-3xl border border-white/10 bg-dark-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl sm:rounded-3xl" onClick={event => event.stopPropagation()}><div className="mx-auto mb-4 h-1 w-12 rounded-full bg-white/20 sm:hidden"/><div className="flex items-center justify-between"><div><h2 className="font-bold">افزودن به کمد</h2><p className="mt-1 text-xs text-dark-500">چه چیزی می‌خواهی اضافه کنی؟</p></div><button className="btn-icon" onClick={() => setShowAddMenu(false)}><X className="h-5 w-5"/></button></div><div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-1">{[{label:'آپلود فایل',icon:<Upload className="h-5 w-5"/>,action:()=>uploadInputRef.current?.click()},{label:'یادداشت متنی',icon:<StickyNote className="h-5 w-5"/>,action:()=>{setTextFolder(incomingFolderId);setShowTextComposer(true)}},{label:'ساخت کشو',icon:<FolderPlus className="h-5 w-5"/>,action:()=>setShowNewFolder(true)},{label:'ذخیره از لینک',icon:<Link2 className="h-5 w-5"/>,action:openImportLink},{label:'از گوگل درایو',icon:<Cloud className="h-5 w-5"/>,action:openImportDrive},{label:'ساخت صدا از متن',icon:<AudioLines className="h-5 w-5"/>,action:()=>openSpeechTools('tts')},{label:'استخراج متن از صدا',icon:<FileAudio className="h-5 w-5"/>,action:()=>openSpeechTools('stt')}].map(item=><button key={item.label} className="flex min-h-16 items-center gap-3 rounded-2xl border border-white/[.07] bg-dark-800/60 px-3 text-right text-sm transition hover:border-primary-400/20 hover:bg-primary-500/[.07] sm:min-h-14" onClick={()=>{setShowAddMenu(false);item.action()}}><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-500/10 text-primary-300">{item.icon}</span><span>{item.label}</span></button>)}</div></div></div>, document.body)}
             {uploadProgress&&uploadPanelMode!=='hidden'&&(uploadPanelMode==='collapsed'?<button onClick={()=>setUploadPanelMode('open')} className="fixed bottom-24 left-3 z-[175] flex h-12 items-center gap-2 rounded-full border border-primary-500/25 bg-dark-900/95 px-3 text-xs shadow-2xl backdrop-blur-xl" title="نمایش جزئیات آپلود"><Upload className="h-4 w-4 animate-pulse text-primary-300"/><span>{uploadProgress.index.toLocaleString('fa-IR')}/{uploadProgress.total.toLocaleString('fa-IR')}</span><span dir="ltr" className="font-bold text-primary-200">{uploadProgress.phase==="processing"?"…":uploadProgress.percent+"%"}</span><ChevronUp className="h-3.5 w-3.5"/></button>:<div className="fixed bottom-24 left-4 right-4 z-[175] mx-auto max-w-md rounded-2xl border border-primary-500/25 bg-dark-900/95 p-3 shadow-2xl backdrop-blur-xl"><div className="flex items-center gap-3"><Upload className="h-5 w-5 text-primary-300"/><div className="min-w-0 flex-1"><div className="flex justify-between gap-2 text-xs"><span className="truncate">{uploadProgress.name}</span><span dir="ltr">{uploadProgress.index}/{uploadProgress.total} · {uploadProgress.phase==="processing"?"…":uploadProgress.percent+"%"}</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-dark-700"><div className="h-full rounded-full bg-primary-500 transition-[width]" style={{width:`${uploadProgress.percent}%`}}/></div><p className="mt-1 text-[10px] text-dark-500">{uploadProgress.phase==="processing"?"ارسال تمام شد؛ در حال ذخیره نهایی…":"در حال ارسال فایل جاری"}</p></div><button className="btn-icon h-8 w-8" onClick={()=>setUploadPanelMode('collapsed')} title="نمایش خیلی کوچک"><Minus className="h-4 w-4"/></button><button className="btn-icon h-8 w-8" onClick={()=>setUploadPanelMode('hidden')} title="بستن وضعیت"><Eye className="h-4 w-4"/></button><button onClick={() => uploadAbortRef.current?.abort()} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-red-500/10 text-red-300 hover:bg-red-500/20" title="لغو آپلود"><X className="h-4 w-4"/></button></div></div>)}
-            {showSendPicker&&<div className="fixed inset-0 z-[280] flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-4" onClick={()=>setShowSendPicker(false)}><section dir="rtl" className="w-full max-w-md rounded-t-3xl border border-white/10 bg-dark-900 p-5 shadow-2xl sm:rounded-3xl" onClick={event=>event.stopPropagation()}><header className="flex items-center gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary-500/15 text-primary-200"><Send className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h2 className="font-bold">ارسال به تلگرام</h2><p className="mt-1 text-xs text-dark-400">{selectedFilesForActions.length.toLocaleString('fa-IR')} فایل آماده ارسال است.</p></div><button className="btn-icon" onClick={()=>setShowSendPicker(false)}><X className="h-5 w-5"/></button></header><DeliveryTargetPicker value={sendDestinationIds} onChange={setSendDestinationIds}/><div className="mt-5 grid grid-cols-2 gap-2"><button disabled={sendingToTelegram} onClick={()=>void sendSelectedToTelegram(sendDestinationIds)} className="btn-primary min-h-11 disabled:opacity-40">{sendingToTelegram?'در حال ارسال…':'ارسال'}</button><button className="btn-secondary" onClick={()=>setShowSendPicker(false)}>لغو</button></div></section></div>}
+            {showSendPicker&&<div className="fixed inset-0 z-[280] flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-4" onClick={()=>setShowSendPicker(false)}><section dir="rtl" className="w-full max-w-md rounded-t-3xl border border-white/10 bg-dark-900 p-5 shadow-2xl sm:rounded-3xl" onClick={event=>event.stopPropagation()}><header className="flex items-center gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary-500/15 text-primary-200"><Send className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h2 className="font-bold">ارسال به تلگرام</h2><p className="mt-1 text-xs text-dark-400">{selectedFilesForActions.length.toLocaleString('fa-IR')} فایل و {selectedPacksForActions.length.toLocaleString('fa-IR')} جعبه انتخاب شده است.</p></div><button className="btn-icon" onClick={()=>setShowSendPicker(false)}><X className="h-5 w-5"/></button></header><DeliveryTargetPicker value={sendDestinationIds} onChange={setSendDestinationIds}/><div className="mt-5 grid grid-cols-2 gap-2"><button disabled={sendingToTelegram} onClick={()=>void sendSelectedToTelegram(sendDestinationIds)} className="btn-primary min-h-11 disabled:opacity-40">{sendingToTelegram?'در حال ارسال…':'ارسال'}</button><button className="btn-secondary" onClick={()=>setShowSendPicker(false)}>لغو</button></div></section></div>}
             {importJobs.length>0&&importPanelMode!=='hidden'&&(importPanelMode==='collapsed'?
                 <button onClick={()=>setImportPanelMode('open')} className="fixed bottom-24 left-3 z-[174] flex h-12 items-center gap-2 rounded-full border border-white/10 bg-dark-900/95 px-3 text-xs shadow-2xl backdrop-blur-xl" title="نمایش صف لینک‌ها"><Link2 className="h-4 w-4 animate-pulse text-primary-300"/><span>{importJobs.filter(job=>!['done','error','cancelled'].includes(job.state)).length.toLocaleString('fa-IR')} فعال</span><ChevronUp className="h-3.5 w-3.5"/></button>:
                 <div className="fixed bottom-24 left-3 z-[174] w-[min(22rem,calc(100vw-1.5rem))] overflow-hidden rounded-2xl border border-white/10 bg-dark-900/95 shadow-2xl backdrop-blur-xl">

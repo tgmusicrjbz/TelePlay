@@ -1,4 +1,4 @@
-import { CheckCircle2, Copy, Instagram, Link2, Loader2, MessageCircleMore, RefreshCw, Save, ShieldCheck, XCircle } from 'lucide-react';
+import { CalendarDays, CheckCircle2, ChevronDown, Copy, Instagram, Link2, Loader2, MessageCircleMore, RefreshCw, Save, ShieldCheck, UserRound, XCircle } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { AdminUser, InstagramInboxSender, useAdminUsers, useInstagramInboxSenders, useInstagramInboxStatus, useRetryInstagramPairingMessage, useUpdateInstagramInboxSender } from '../lib/api';
 import { useAppStore } from '../lib/store';
@@ -15,21 +15,31 @@ function SenderCard({sender,users}:{sender:InstagramInboxSender;users:AdminUser[
     const retry=useRetryInstagramPairingMessage();
     const addToast=useAppStore(state=>state.addToast);
     const [userId,setUserId]=useState<number>(sender.telegram_user_id||0);
+    const [expanded,setExpanded]=useState(false);
+    const [dailyLimit,setDailyLimit]=useState(sender.daily_limit);
+    const [monthlyLimit,setMonthlyLimit]=useState(sender.monthly_limit);
     useEffect(()=>setUserId(sender.telegram_user_id||0),[sender.telegram_user_id]);
+    useEffect(()=>{setDailyLimit(sender.daily_limit);setMonthlyLimit(sender.monthly_limit)},[sender.daily_limit,sender.monthly_limit]);
     const save=async(payload:Parameters<typeof update.mutateAsync>[0])=>{
         try{await update.mutateAsync(payload);addToast('تنظیمات فرستنده ذخیره شد.','success')}
         catch(error:any){addToast(error?.response?.data?.detail||'ذخیره تنظیمات انجام نشد.','error')}
     };
     const copyCode=async()=>{await navigator.clipboard.writeText(`/instagram ${sender.pairing_code}`);addToast('دستور اتصال کپی شد.','success')};
-    return <article className="rounded-2xl border border-white/[.07] bg-dark-950/35 p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0"><strong className="block truncate text-sm">{sender.username?`@${sender.username}`:`فرستنده ${sender.instagram_user_id}`}</strong><p className="mt-1 text-xs text-dark-500">{sender.received_count.toLocaleString('fa-IR')} دریافت · {sender.forwarded_count.toLocaleString('fa-IR')} ارسال</p></div>
+    const status=sender.blocked?'مسدود':sender.approved&&sender.telegram_user_id?'فعال':'منتظر اتصال یا تأیید';
+    return <article className={`overflow-hidden rounded-3xl border transition ${expanded?'border-fuchsia-400/20 bg-gradient-to-b from-fuchsia-500/[.07] to-dark-950/55 shadow-xl':'border-white/[.07] bg-dark-950/35 hover:border-white/[.13]'}`}>
+        <button type="button" onClick={()=>setExpanded(value=>!value)} className="flex w-full items-center gap-3 p-3.5 text-right">
+            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-fuchsia-500/25 to-orange-500/15 text-fuchsia-200 shadow-inner"><UserRound className="h-5 w-5"/></span>
+            <span className="min-w-0 flex-1"><strong className="block truncate text-sm">{sender.username?`@${sender.username}`:`فرستنده ${sender.instagram_user_id}`}</strong><span className="mt-1 block truncate text-[11px] text-dark-500">{sender.telegram_name||'هنوز به تلگرام وصل نشده'} · {sender.forwarded_count.toLocaleString('fa-IR')} ارسال</span></span>
             <span className={`rounded-full px-2.5 py-1 text-[11px] ${sender.blocked?'bg-red-500/10 text-red-300':sender.approved&&sender.telegram_user_id?'bg-emerald-500/10 text-emerald-300':'bg-amber-500/10 text-amber-300'}`}>{sender.blocked?'مسدود':sender.approved&&sender.telegram_user_id?'فعال':'منتظر اتصال یا تأیید'}</span>
-        </div>
+            <ChevronDown className={`h-4 w-4 shrink-0 text-dark-400 transition ${expanded?'rotate-180':''}`}/>
+        </button>
+        {expanded&&<div className="border-t border-white/[.06] p-4 pt-3">
+        <div className="grid gap-2 sm:grid-cols-2"><UsageCard label="امروز" used={sender.daily_used} limit={sender.daily_limit}/><UsageCard label="این ماه" used={sender.monthly_used} limit={sender.monthly_limit}/></div>
         <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto]">
             <CustomSelect value={userId} onChange={setUserId} label="حساب تلگرام مقصد" options={[{value:0,label:'هنوز متصل نشده'},...users.filter(user=>user.is_active&&user.telegram_id>0).map(user=>({value:user.id,label:userLabel(user)}))]}/>
             <button disabled={!userId||update.isPending} onClick={()=>void save({id:sender.id,telegram_user_id:userId})} className="btn-secondary mt-auto flex h-11 items-center justify-center gap-2 px-4 disabled:opacity-40"><Save className="h-4 w-4"/> اتصال</button>
         </div>
+        <div className="mt-3 rounded-2xl border border-white/[.06] bg-dark-950/40 p-3"><div className="mb-3 flex items-center gap-2 text-xs text-dark-300"><CalendarDays className="h-4 w-4 text-fuchsia-300"/>سهمیه ارسال پست</div><div className="grid grid-cols-2 gap-2"><LimitField label="سقف روزانه" value={dailyLimit} onChange={setDailyLimit}/><LimitField label="سقف ماهانه" value={monthlyLimit} onChange={setMonthlyLimit}/></div><button disabled={update.isPending} onClick={()=>void save({id:sender.id,daily_limit:dailyLimit,monthly_limit:monthlyLimit})} className="btn-secondary mt-3 flex min-h-10 w-full items-center justify-center gap-2 text-xs"><Save className="h-4 w-4"/>ذخیره سهمیه‌ها</button><p className="mt-2 text-[10px] text-dark-500">صفر یعنی نامحدود؛ ارسال‌های خیلی سریع هم خودکار متوقف می‌شوند.</p></div>
         <div className="mt-3 flex flex-wrap gap-2">
             <button onClick={()=>void copyCode()} className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-xs"><Copy className="h-4 w-4"/><span dir="ltr">/instagram {sender.pairing_code}</span></button>
             <button disabled={retry.isPending} onClick={async()=>{try{await retry.mutateAsync(sender.id);addToast('پیام اتصال در اینستاگرام ارسال شد.','success')}catch(error:any){addToast(error?.response?.data?.detail||'ارسال پیام انجام نشد.','error')}}} className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-xs disabled:opacity-40"><MessageCircleMore className="h-4 w-4"/> ارسال دوباره راهنما</button>
@@ -39,8 +49,13 @@ function SenderCard({sender,users}:{sender:InstagramInboxSender;users:AdminUser[
             <button disabled={update.isPending} onClick={()=>void save({id:sender.id,save_to_library:!sender.save_to_library})} className={`flex min-h-11 items-center justify-center gap-2 rounded-xl border px-3 text-xs transition ${sender.save_to_library?'border-primary-400/30 bg-primary-500/10 text-primary-200':'border-white/[.08] bg-dark-800/60 text-dark-300'}`}><Link2 className="h-4 w-4"/>{sender.save_to_library?'ارسال و ذخیره در کمد':'فقط ارسال تلگرام'}</button>
             <button disabled={update.isPending} onClick={()=>void save({id:sender.id,blocked:!sender.blocked})} className={`flex min-h-11 items-center justify-center gap-2 rounded-xl border px-3 text-xs transition ${sender.blocked?'border-red-400/30 bg-red-500/10 text-red-200':'border-white/[.08] bg-dark-800/60 text-dark-300'}`}><XCircle className="h-4 w-4"/>{sender.blocked?'رفع مسدودی':'مسدود کردن'}</button>
         </div>
+        <p className="mt-3 text-[10px] text-dark-500">وضعیت فعلی: {status} · {sender.received_count.toLocaleString('fa-IR')} پیام دریافت شده</p>
+        </div>}
     </article>;
 }
+
+function LimitField({label,value,onChange}:{label:string;value:number;onChange:(value:number)=>void}){return <label className="rounded-xl bg-white/[.035] px-3 py-2 text-[10px] text-dark-400">{label}<input dir="ltr" type="number" min="0" max="100000" value={value} onChange={event=>onChange(Math.max(0,Number(event.target.value)||0))} className="mt-1 w-full bg-transparent text-center text-sm font-bold text-white outline-none"/></label>}
+function UsageCard({label,used,limit}:{label:string;used:number;limit:number}){const percent=limit?Math.min(100,Math.round(used/limit*100)):0;return <div className="rounded-2xl border border-white/[.06] bg-dark-950/35 p-3"><div className="flex items-center justify-between text-xs"><span className="text-dark-400">{label}</span><strong>{used.toLocaleString('fa-IR')} از {limit?limit.toLocaleString('fa-IR'):'∞'}</strong></div><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-dark-800"><div className="h-full rounded-full bg-gradient-to-l from-fuchsia-500 to-orange-400" style={{width:`${percent}%`}}/></div></div>}
 
 export default function InstagramInboxSettings(){
     const {data:status,isLoading:statusLoading,refetch:refetchStatus}=useInstagramInboxStatus(true);

@@ -376,6 +376,13 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
             setDuration(nextDuration);
             setCurrentTime(current => nextDuration > 0 ? Math.min(current, nextDuration) : current);
             videoRef.current.playbackRate = playbackSpeed;
+            const resumeKey = `komod-player-resume-${file.id}`;
+            const resumeAt = Number(sessionStorage.getItem(resumeKey) || 0);
+            if (!inline && Number.isFinite(resumeAt) && resumeAt > 0) {
+                videoRef.current.currentTime = nextDuration > 0 ? Math.min(resumeAt, Math.max(0, nextDuration - .1)) : resumeAt;
+                setCurrentTime(videoRef.current.currentTime);
+                sessionStorage.removeItem(resumeKey);
+            }
             const carry = crossfadeCarry.current;
             if (carry?.fileId === file.id) {
                 videoRef.current.currentTime = Math.min(carry.time, Math.max(0, nextDuration - .1));

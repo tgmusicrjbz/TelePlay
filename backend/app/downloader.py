@@ -52,6 +52,8 @@ class ImportJob:
     send_to_telegram: bool = False
     destination_ids: list[int] = field(default_factory=list)
     retry_count: int = 0
+    instagram_sender_id: int | None = None
+    instagram_event_id: int | None = None
     id: str = ""
 
 
@@ -203,6 +205,8 @@ class LinkImportService:
                 send_to_telegram=bool(payload.get("send_to_telegram", False)),
                 destination_ids=[int(value) for value in payload.get("destination_ids", []) if str(value).isdigit()],
                 retry_count=int(status.get("retry_count") or 0), id=job_id,
+                instagram_sender_id=payload.get("instagram_sender_id"),
+                instagram_event_id=payload.get("instagram_event_id"),
             )
             status["visible_to_user"] = job.visible_to_user
             status.update(state="queued", message="ادامه پس از راه‌اندازی دوباره", progress=0)
@@ -237,7 +241,9 @@ class LinkImportService:
                      "notification_chat_id": job.notification_chat_id,
                      "visible_to_user": job.visible_to_user,
                      "save_to_library": job.save_to_library, "send_to_telegram": job.send_to_telegram,
-                     "destination_ids": job.destination_ids},
+                     "destination_ids": job.destination_ids,
+                     "instagram_sender_id": job.instagram_sender_id,
+                     "instagram_event_id": job.instagram_event_id},
             status=self.statuses[job.id],
         )
         self.durable_job_ids.add(job.id)
@@ -383,8 +389,11 @@ class LinkImportService:
                     raise RuntimeError("هیچ فایل قابل ذخیره‌ای در پاسخ پیدا نشد")
                 if job.send_to_telegram:
                     await self._send_to_user(job, saved)
+                if job.instagram_event_id:
+                    from .instagram_inbox import record_instagram_delivery
+                    await record_instagram_delivery(job.instagram_event_id, saved)
                 if not job.save_to_library:
-                    await self._discard_library_copies(saved)
+                    await self._discard_library_copies(saved, keep_storage=bool(job.instagram_event_id))
                 if job.notify:
                     count = str(len(saved)).translate(str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹"))
                     destination = "در تلگرام فرستاده و در کمد ذخیره شد" if job.send_to_telegram and job.save_to_library else "در تلگرام فرستاده شد" if job.send_to_telegram else "به کمد اضافه شد"
@@ -398,9 +407,10 @@ class LinkImportService:
                 await self._persist_status(job.id)
             except Exception as error:
                 friendly_error = _friendly_import_error(error)
-                if isinstance(error, TimeoutError) and job.retry_count < 2 and not self.controls.get(job.id, {}).get("cancelled"):
+                retryable = isinstance(error, TimeoutError) or bool(job.instagram_event_id)
+                if retryable and job.retry_count < 2 and not self.controls.get(job.id, {}).get("cancelled"):
                     job.retry_count += 1
-                    logger.warning("Link import timed out; retrying %s (%s/2)", job.url, job.retry_count)
+                    logger.warning("Link import failed; retrying %s (%s/2): %s", job.url, job.retry_count, error)
                     self.statuses[job.id].update(
                         state="queued", message=f"تلاش دوباره ({job.retry_count + 1} از 3)",
                         progress=0, retry_count=job.retry_count,
@@ -413,6 +423,12 @@ class LinkImportService:
                 logger.exception("Link import failed for %s", job.url)
                 if job.notify:
                     await self._notify(job, await bot_message("link_failed", error=friendly_error))
+                if job.instagram_event_id:
+                    from .instagram_inbox import mark_instagram_delivery_failed
+                    await mark_instagram_delivery_failed(job.instagram_event_id, friendly_error)
+                if job.instagram_sender_id:
+                    from .instagram_inbox import send_instagram_sender_notice
+                    await send_instagram_sender_notice(job.instagram_sender_id, "این بار دریافت پست به مشکل خورد. چند بار دوباره امتحان کردم، ولی آماده نشد؛ لطفاً کمی بعد دوباره همون لینک رو بفرست 🙏")
                 self.statuses[job.id].update(state="error", message=friendly_error, finished_at=datetime.utcnow().isoformat())
                 await self._persist_status(job.id)
             finally:
@@ -703,7 +719,7 @@ class LinkImportService:
                     caption=file.description or "",
                 )
 
-    async def _discard_library_copies(self, files: list[File]) -> None:
+    async def _discard_library_copies(self, files: list[File], *, keep_storage: bool = False) -> None:
         """Remove temporary storage records after Telegram-only delivery."""
         async with async_session() as db:
             for file in files:
@@ -711,7 +727,7 @@ class LinkImportService:
                 if stored is not None:
                     await db.delete(stored)
             await db.commit()
-        if telegram.tg_client is None:
+        if keep_storage or telegram.tg_client is None:
             return
         for file in files:
             try:

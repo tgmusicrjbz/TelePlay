@@ -14,6 +14,7 @@ from urllib.request import Request, urlopen
 
 from sqlalchemy import select
 
+from . import telegram
 from .config import get_settings
 from .database import async_session
 from .downloader import ImportJob, link_importer
@@ -91,6 +92,22 @@ async def dispatch_pending_events(sender_id: int) -> int:
         )).scalars().all()
         for event in events:
             try:
+                cached = json.loads(event.cached_files_json or "[]")
+                if cached:
+                    for item in cached:
+                        await telegram.copy_message_balanced(
+                            chat_id=user.telegram_id,
+                            from_chat_id=int(item["storage_channel_id"]),
+                            message_id=int(item["channel_message_id"]),
+                            caption=str(item.get("description") or ""),
+                        )
+                    event.status = "reused"
+                    event.queued_at = datetime.utcnow()
+                    event.error = None
+                    sender.forwarded_count += 1
+                    queued += 1
+                    await db.commit()
+                    continue
                 job = ImportJob(
                     url=event.shared_url,
                     user_id=user.id,
@@ -102,6 +119,8 @@ async def dispatch_pending_events(sender_id: int) -> int:
                     default_folder=sender.save_to_library,
                     save_to_library=sender.save_to_library,
                     send_to_telegram=True,
+                    instagram_sender_id=sender.id,
+                    instagram_event_id=event.id,
                 )
                 await link_importer.enqueue(job)
                 event.status = "queued"
@@ -117,6 +136,33 @@ async def dispatch_pending_events(sender_id: int) -> int:
                 await db.commit()
                 logger.exception("Could not queue Instagram inbox event %s", event.id)
     return queued
+
+
+async def record_instagram_delivery(event_id: int, files: list) -> None:
+    """Keep Telegram storage references so repeated shares need no download."""
+    async with async_session() as db:
+        event = await db.get(InstagramInboxEvent, event_id)
+        if event is None:
+            return
+        event.cached_files_json = json.dumps([{
+            "storage_channel_id": int(file.storage_channel_id),
+            "channel_message_id": int(file.channel_message_id),
+            "description": file.description or "",
+        } for file in files], ensure_ascii=False)
+        event.status = "delivered"
+        event.error = None
+        await db.commit()
+
+
+async def mark_instagram_delivery_failed(event_id: int, error: str) -> None:
+    """Persist the final importer failure after all automatic retries are exhausted."""
+    async with async_session() as db:
+        event = await db.get(InstagramInboxEvent, event_id)
+        if event is None:
+            return
+        event.status = "failed"
+        event.error = str(error)[:1000]
+        await db.commit()
 
 
 async def pair_sender_with_telegram(pairing_code: str, telegram_id: int) -> tuple[str, InstagramInboxSender | None]:
@@ -145,7 +191,7 @@ async def pair_sender_with_telegram(pairing_code: str, telegram_id: int) -> tupl
     return "pending_approval", sender
 
 
-def _send_pairing_message_sync(instagram_user_id: str, pairing_code: str) -> bool:
+def _send_instagram_text_sync(instagram_user_id: str, text: str) -> bool:
     if not settings.instagram_access_token or not settings.instagram_account_id:
         return False
     endpoint = (
@@ -154,11 +200,7 @@ def _send_pairing_message_sync(instagram_user_id: str, pairing_code: str) -> boo
     )
     body = json.dumps({
         "recipient": {"id": instagram_user_id},
-        "message": {"text": (
-            "برای دریافت پست در تلگرام، ربات کمد را باز کن و این دستور را بفرست:\n"
-            f"/instagram {pairing_code}\n"
-            "پس از تأیید مدیر، پست‌های بعدی و همین پست برایت ارسال می‌شوند."
-        )},
+        "message": {"text": text},
     }).encode("utf-8")
     request = Request(endpoint, data=body, method="POST", headers={
         "Authorization": f"Bearer {settings.instagram_access_token}",
@@ -167,6 +209,30 @@ def _send_pairing_message_sync(instagram_user_id: str, pairing_code: str) -> boo
     with urlopen(request, timeout=15) as response:
         response.read()
     return True
+
+
+def _send_pairing_message_sync(instagram_user_id: str, pairing_code: str) -> bool:
+    return _send_instagram_text_sync(instagram_user_id, (
+        "سلام 👋 پستت رسید!\n\n"
+        "برای اینکه ویدیوها مستقیم توی تلگرامت بیان، ربات کمد رو باز کن و این پیام آماده رو براش بفرست:\n\n"
+        f"/instagram {pairing_code}\n\n"
+        "بعد از تأیید مدیر، همین پست و پست‌های بعدی برات فرستاده می‌شن ✨"
+    ))
+
+
+async def send_instagram_notice(instagram_user_id: str, text: str) -> bool:
+    try:
+        return await asyncio.to_thread(_send_instagram_text_sync, instagram_user_id, text)
+    except Exception:
+        logger.warning("Could not send Instagram notice to %s", instagram_user_id, exc_info=True)
+        return False
+
+
+async def send_instagram_sender_notice(sender_id: int, text: str) -> bool:
+    async with async_session() as db:
+        sender = await db.get(InstagramInboxSender, sender_id)
+        instagram_user_id = sender.instagram_user_id if sender else ""
+    return await send_instagram_notice(instagram_user_id, text) if instagram_user_id else False
 
 
 async def send_pairing_message(sender_id: int) -> bool:
