@@ -221,6 +221,10 @@ class InstagramInboxSender(Base):
     approved: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     blocked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     save_to_library: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    selected_destination_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("telegram_destinations.id", ondelete="SET NULL"), index=True
+    )
+    hourly_limit: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
     daily_limit: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
     monthly_limit: Mapped[int] = mapped_column(Integer, default=50, nullable=False)
     daily_quota_reset_at: Mapped[Optional[datetime]] = mapped_column(DateTime)

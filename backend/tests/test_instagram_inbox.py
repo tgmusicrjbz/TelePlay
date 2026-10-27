@@ -2,9 +2,9 @@ import hashlib
 import hmac
 from datetime import datetime, timedelta
 
-from app.instagram_inbox import extract_shared_posts, normalize_instagram_post_url, verify_meta_signature
+from app.instagram_inbox import extract_shared_posts, extract_text_messages, normalize_instagram_post_url, verify_meta_signature
 from app.models import InstagramInboxSender
-from app.routers.instagram import daily_usage_start
+from app.routers.instagram import daily_usage_start, quota_limit_reason
 
 
 def test_normalize_instagram_post_url_accepts_posts_and_drops_tracking():
@@ -38,6 +38,19 @@ def test_extract_shared_posts_handles_meta_share_attachment_and_deduplicates_url
     }]
 
 
+def test_extract_text_messages_keeps_commands_and_ignores_shared_post_text():
+    payload = {
+        "object": "instagram",
+        "entry": [{"messaging": [
+            {"sender": {"id": "sender"}, "message": {"mid": "command-1", "text": "مقصد ۲"}},
+            {"sender": {"id": "sender"}, "message": {"mid": "post-1", "text": "https://instagram.com/p/ABC/"}},
+        ]}],
+    }
+    assert extract_text_messages(payload) == [{
+        "sender_id": "sender", "event_id": "command-1", "text": "مقصد ۲",
+    }]
+
+
 def test_webhook_signature_formula_matches_meta_sha256_header():
     raw = b'{"object":"instagram"}'
     secret = "app-secret"
@@ -56,3 +69,18 @@ def test_daily_usage_reset_only_moves_the_current_day_boundary_forward():
     assert daily_usage_start(sender, now) == datetime(2026, 10, 27, 16, 30)
     sender.daily_quota_reset_at = now - timedelta(days=1)
     assert daily_usage_start(sender, now) == datetime(2026, 10, 27)
+
+
+def test_instagram_quota_checks_hourly_before_daily_and_zero_is_unlimited():
+    sender = InstagramInboxSender(
+        instagram_user_id="sender", pairing_code="ABCDEFGH",
+        hourly_limit=2, daily_limit=5, monthly_limit=20,
+    )
+    assert quota_limit_reason(sender, 1, 4, 19) is None
+    assert quota_limit_reason(sender, 2, 5, 20) == "hourly"
+    sender.hourly_limit = 0
+    assert quota_limit_reason(sender, 99, 5, 20) == "daily"
+    sender.daily_limit = 0
+    assert quota_limit_reason(sender, 99, 99, 20) == "monthly"
+    sender.monthly_limit = 0
+    assert quota_limit_reason(sender, 99, 99, 99) is None

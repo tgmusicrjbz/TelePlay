@@ -15,10 +15,11 @@ import BotMessagesSettings from './BotMessagesSettings';
 import AdminGroupsSettings from './AdminGroupsSettings';
 import AIModelsAdminPanel from './AIModelsAdminPanel';
 import InstagramInboxSettings from './InstagramInboxSettings';
+import HelpCenter from './HelpCenter';
 import { useAppStore } from '../lib/store';
 import { folderTreeLabel } from '../lib/folderTreeLabel';
 
-type SettingsView = 'home' | 'accounts' | 'security' | 'sessions' | 'access' | 'storage' | 'files' | 'links' | 'appearance' | 'markdown' | 'connection' | 'admin' | 'admin-users' | 'admin-groups' | 'admin-messages' | 'admin-captions' | 'admin-ai-models' | 'admin-instagram' | 'tags' | 'transfers' | 'tts';
+type SettingsView = 'home' | 'accounts' | 'security' | 'sessions' | 'access' | 'storage' | 'files' | 'links' | 'appearance' | 'markdown' | 'connection' | 'admin' | 'admin-users' | 'admin-groups' | 'admin-messages' | 'admin-captions' | 'admin-ai-models' | 'admin-instagram' | 'tags' | 'transfers' | 'tts' | 'help';
 type SettingsHomeLayout = 'cards' | 'list' | 'compact';
 type Permission = 'read' | 'write';
 type SavedColor = { color: string; name: string };
@@ -342,6 +343,7 @@ export default function SettingsPage() {
 
             <SettingsGroup title="ابزارها" text="کارهای هوشمند و قابلیت‌های دستگاه" icon={<AudioLines/>} layout={homeLayout}>
                 <SettingsButton layout={homeLayout} icon={<AudioLines/>} title="متن و صدا" text="ساخت صدا و استخراج متن از صوت یا ویدیو" onClick={() => setView('tts')} />
+                <SettingsButton layout={homeLayout} icon={<BookOpen/>} title="راهنمای کمد" text="توضیح ساده یا کامل همه بخش‌ها و امکانات" onClick={() => setView('help')} />
                 <SettingsButton layout={homeLayout} icon={<Download/>} title="نصب کمد" text="افزودن برنامه به صفحه اصلی این دستگاه" onClick={() => window.dispatchEvent(new Event('komod-install-request'))} />
             </SettingsGroup>
 
@@ -459,13 +461,14 @@ export default function SettingsPage() {
         {view === 'admin-ai-models' && user?.is_admin && <AIModelsAdminPanel/>}
         {view === 'admin-instagram' && user?.is_admin && <InstagramInboxSettings/>}
         {view === 'admin-groups' && user?.is_admin && <AdminGroupsSettings/>}
+        {view === 'help' && <HelpCenter isAdmin={Boolean(user?.is_admin)}/>}
 
         {confirmation && <div className="fixed inset-0 z-[180] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={() => setConfirmation(null)}><div className="w-full max-w-sm rounded-2xl border border-white/10 bg-dark-900 p-5" onClick={event=>event.stopPropagation()}><h2 className="text-lg font-bold">{confirmation==='all'?'خروج از همه دستگاه‌ها؟':'از این دستگاه خارج می‌شی؟'}</h2><p className="mt-2 text-sm text-dark-300">فایل‌ها و اطلاعات کمد حذف نمی‌شوند.</p><div className="mt-5 flex gap-2"><button className="flex-1 rounded-xl bg-red-500 px-4 py-2.5" onClick={() => confirmation==='all'?void logoutEverywhere():void logoutThisDevice()}>خروج</button><button className="btn-secondary flex-1" onClick={()=>setConfirmation(null)}>بی‌خیال</button></div></div></div>}
     </div></SettingsSectionContext.Provider>;
 }
 
-function viewTitle(view: SettingsView) { return ({ home:'تنظیمات', accounts:'حساب‌ها', security:'ورود و امنیت', sessions:'مدیریت نشست‌ها', access:'دسترسی و اشتراک‌گذاری', storage:'فضای ذخیره‌سازی', files:'فایل‌ها و مقصدها', links:'لینک‌ها و پایش', appearance:'ظاهر برنامه', markdown:'مطالعه و Markdown', connection:'اتصال برنامه', admin:'گزارش و سلامت', 'admin-users':'مدیریت کاربران', 'admin-groups':'مدیریت گروه‌ها', 'admin-messages':'پیام‌های ربات', 'admin-captions':'متن خروجی فایل‌ها', 'admin-ai-models':'مدل‌های هوش مصنوعی', 'admin-instagram':'دریافت از اینستاگرام', tags:'مدیریت تگ‌ها', transfers:'مرکز انتقال‌ها', tts:'متن و صدا' })[view]; }
-function viewSubtitle(view: SettingsView) { return ({ home:'', accounts:'', security:'', sessions:'', access:'مشخص کن چه کسی کمدت را ببیند یا داخلش فایل ذخیره کند.', storage:'', files:'مقصد فایل‌های تازه و لینک‌ها را انتخاب کن.', links:'', appearance:'', markdown:'', connection:'آدرس اصلی و مسیرهای جایگزین HTTPS را مدیریت کن.', admin:'', 'admin-users':'', 'admin-groups':'', 'admin-messages':'', 'admin-captions':'متن زیر فایل‌های خروجی را برای همه کاربران تنظیم کن.', 'admin-ai-models':'', 'admin-instagram':'', tags:'', transfers:'همه انتقال‌های فعال و اخیر را یکجا مدیریت کن.', tts:'' })[view]; }
+function viewTitle(view: SettingsView) { return ({ home:'تنظیمات', accounts:'حساب‌ها', security:'ورود و امنیت', sessions:'مدیریت نشست‌ها', access:'دسترسی و اشتراک‌گذاری', storage:'فضای ذخیره‌سازی', files:'فایل‌ها و مقصدها', links:'لینک‌ها و پایش', appearance:'ظاهر برنامه', markdown:'مطالعه و Markdown', connection:'اتصال برنامه', admin:'گزارش و سلامت', 'admin-users':'مدیریت کاربران', 'admin-groups':'مدیریت گروه‌ها', 'admin-messages':'پیام‌های ربات', 'admin-captions':'متن خروجی فایل‌ها', 'admin-ai-models':'مدل‌های هوش مصنوعی', 'admin-instagram':'دریافت از اینستاگرام', tags:'مدیریت تگ‌ها', transfers:'مرکز انتقال‌ها', tts:'متن و صدا', help:'راهنمای کمد' })[view]; }
+function viewSubtitle(view: SettingsView) { return ({ home:'', accounts:'', security:'', sessions:'', access:'مشخص کن چه کسی کمدت را ببیند یا داخلش فایل ذخیره کند.', storage:'', files:'مقصد فایل‌های تازه و لینک‌ها را انتخاب کن.', links:'', appearance:'', markdown:'', connection:'آدرس اصلی و مسیرهای جایگزین HTTPS را مدیریت کن.', admin:'', 'admin-users':'', 'admin-groups':'', 'admin-messages':'', 'admin-captions':'متن زیر فایل‌های خروجی را برای همه کاربران تنظیم کن.', 'admin-ai-models':'', 'admin-instagram':'', tags:'', transfers:'همه انتقال‌های فعال و اخیر را یکجا مدیریت کن.', tts:'', help:'' })[view]; }
 function securityEventLabel(type: string) { return ({ login_success:'ورود موفق به حساب', login_failed:'تلاش ناموفق برای ورود', credentials_updated:'تغییر اطلاعات ورود', two_factor_enabled:'فعال‌سازی تأیید دومرحله‌ای', two_factor_disabled:'غیرفعال‌سازی تأیید دومرحله‌ای', sessions_revoked_all:'خروج از همه نشست‌ها', sessions_revoked_others:'خروج از نشست‌های دیگر', session_revoked:'لغو یک نشست', public_link_created:'ساخت پیوند عمومی', public_link_revoked:'لغو پیوند عمومی', public_links_revoked:'لغو گروهی پیوندهای عمومی', public_link_unlocked:'باز شدن پیوند رمزدار', public_link_password_failed:'رمز اشتباه برای پیوند عمومی', public_view:'مشاهده پیوند عمومی', account_backup_restored:'بازیابی نسخه پشتیبان حساب', workspace_grant_updated:'تغییر دسترسی اشتراک‌گذاری', workspace_grant_revoked:'لغو دسترسی اشتراک‌گذاری', vault_password_updated:'تغییر رمز گاوصندوق', vault_unlocked:'باز شدن گاوصندوق', vault_unlock_failed:'رمز اشتباه گاوصندوق' } as Record<string,string>)[type] || 'رویداد امنیتی'; }
 function permissionLabel(permission: 'owner' | Permission) { return permission === 'owner' ? 'کمد خودم' : permission === 'write' ? 'مشاهده و ذخیره' : 'فقط مشاهده'; }
 function PermissionSelect({ value, onChange }:{ value:Permission; onChange:(value:Permission)=>void }) { return <CustomSelect value={value} onChange={onChange} options={[{value:'read',label:'👁️ فقط مشاهده'},{value:'write',label:'📥 مشاهده و ذخیره'}]}/>; }

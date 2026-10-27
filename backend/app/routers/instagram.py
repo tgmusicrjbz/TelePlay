@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import hmac
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
@@ -13,12 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import get_current_user
 from ..config import get_settings
 from ..database import get_db
-from ..instagram_inbox import dispatch_pending_events, extract_shared_posts, new_pairing_code, send_instagram_notice, send_pairing_message, verify_meta_signature
-from ..models import AppSetting, InstagramInboxEvent, InstagramInboxSender, User
+from ..instagram_inbox import dispatch_pending_events, extract_shared_posts, extract_text_messages, instagram_destination_reply, new_pairing_code, send_instagram_notice, send_pairing_message, verify_meta_signature
+from ..models import AppSetting, InstagramInboxEvent, InstagramInboxSender, TelegramDestination, User
 
 
 router = APIRouter(prefix="/instagram", tags=["Instagram inbox"])
 settings = get_settings()
+DEFAULT_HOURLY_LIMIT_KEY = "instagram_default_hourly_limit"
 DEFAULT_DAILY_LIMIT_KEY = "instagram_default_daily_limit"
 DEFAULT_MONTHLY_LIMIT_KEY = "instagram_default_monthly_limit"
 
@@ -34,12 +35,14 @@ class InstagramSenderUpdate(BaseModel):
     approved: bool | None = None
     blocked: bool | None = None
     save_to_library: bool | None = None
+    hourly_limit: int | None = None
     daily_limit: int | None = None
     monthly_limit: int | None = None
     display_name: str | None = None
 
 
 class InstagramDefaultsUpdate(BaseModel):
+    hourly_limit: int = Field(ge=0, le=10_000)
     daily_limit: int = Field(ge=0, le=10_000)
     monthly_limit: int = Field(ge=0, le=100_000)
 
@@ -51,12 +54,13 @@ def _bounded_limit(value: object, fallback: int, maximum: int) -> int:
         return fallback
 
 
-async def instagram_default_limits(db: AsyncSession) -> tuple[int, int]:
+async def instagram_default_limits(db: AsyncSession) -> tuple[int, int, int]:
     rows = (await db.execute(select(AppSetting).where(AppSetting.key.in_((
-        DEFAULT_DAILY_LIMIT_KEY, DEFAULT_MONTHLY_LIMIT_KEY,
+        DEFAULT_HOURLY_LIMIT_KEY, DEFAULT_DAILY_LIMIT_KEY, DEFAULT_MONTHLY_LIMIT_KEY,
     ))))).scalars().all()
     values = {row.key: row.value for row in rows}
     return (
+        _bounded_limit(values.get(DEFAULT_HOURLY_LIMIT_KEY), 2, 10_000),
         _bounded_limit(values.get(DEFAULT_DAILY_LIMIT_KEY), 5, 10_000),
         _bounded_limit(values.get(DEFAULT_MONTHLY_LIMIT_KEY), 50, 100_000),
     )
@@ -68,7 +72,17 @@ def daily_usage_start(sender: InstagramInboxSender, now: datetime) -> datetime:
     return reset_at if reset_at and reset_at > day_start else day_start
 
 
-def sender_payload(sender: InstagramInboxSender, user: User | None = None, *, daily_used: int = 0, monthly_used: int = 0) -> dict:
+def quota_limit_reason(sender: InstagramInboxSender, hourly_used: int, daily_used: int, monthly_used: int) -> str | None:
+    if sender.hourly_limit and hourly_used >= sender.hourly_limit:
+        return "hourly"
+    if sender.daily_limit and daily_used >= sender.daily_limit:
+        return "daily"
+    if sender.monthly_limit and monthly_used >= sender.monthly_limit:
+        return "monthly"
+    return None
+
+
+def sender_payload(sender: InstagramInboxSender, user: User | None = None, destination: TelegramDestination | None = None, *, hourly_used: int = 0, daily_used: int = 0, monthly_used: int = 0) -> dict:
     return {
         "id": sender.id,
         "instagram_user_id": sender.instagram_user_id,
@@ -84,8 +98,12 @@ def sender_payload(sender: InstagramInboxSender, user: User | None = None, *, da
         "approved": sender.approved,
         "blocked": sender.blocked,
         "save_to_library": sender.save_to_library,
+        "selected_destination_id": sender.selected_destination_id,
+        "selected_destination_name": destination.name if destination else None,
+        "hourly_limit": sender.hourly_limit,
         "daily_limit": sender.daily_limit,
         "monthly_limit": sender.monthly_limit,
+        "hourly_used": hourly_used,
         "daily_used": daily_used,
         "monthly_used": monthly_used,
         "pairing_message_sent": sender.pairing_message_sent,
@@ -127,7 +145,16 @@ async def instagram_webhook(request: Request, background_tasks: BackgroundTasks,
     affected: set[int] = set()
     new_senders: set[int] = set()
     received = 0
-    default_daily_limit, default_monthly_limit = await instagram_default_limits(db)
+    default_hourly_limit, default_daily_limit, default_monthly_limit = await instagram_default_limits(db)
+    for incoming in extract_text_messages(payload):
+        sender = (await db.execute(select(InstagramInboxSender).where(
+            InstagramInboxSender.instagram_user_id == incoming["sender_id"]
+        ))).scalar_one_or_none()
+        if sender is None:
+            continue
+        reply = await instagram_destination_reply(db, sender, incoming["text"])
+        if reply:
+            background_tasks.add_task(send_instagram_notice, sender.instagram_user_id, reply)
     for shared in extract_shared_posts(payload):
         existing = (await db.execute(select(InstagramInboxEvent.id).where(
             InstagramInboxEvent.event_id == shared["event_id"]
@@ -144,7 +171,7 @@ async def instagram_webhook(request: Request, background_tasks: BackgroundTasks,
                     break
             sender = InstagramInboxSender(
                 instagram_user_id=shared["sender_id"], pairing_code=code,
-                daily_limit=default_daily_limit, monthly_limit=default_monthly_limit,
+                hourly_limit=default_hourly_limit, daily_limit=default_daily_limit, monthly_limit=default_monthly_limit,
             )
             db.add(sender)
             await db.flush()
@@ -154,6 +181,11 @@ async def instagram_webhook(request: Request, background_tasks: BackgroundTasks,
         calendar_day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         day_start = daily_usage_start(sender, now)
         month_start = calendar_day_start.replace(day=1)
+        hourly_used = int((await db.execute(select(func.count()).select_from(InstagramInboxEvent).where(
+            InstagramInboxEvent.sender_id == sender.id,
+            InstagramInboxEvent.received_at >= now - timedelta(hours=1),
+            InstagramInboxEvent.status != "limited",
+        ))).scalar() or 0)
         daily_used = int((await db.execute(select(func.count()).select_from(InstagramInboxEvent).where(
             InstagramInboxEvent.sender_id == sender.id,
             InstagramInboxEvent.received_at >= day_start,
@@ -164,7 +196,8 @@ async def instagram_webhook(request: Request, background_tasks: BackgroundTasks,
             InstagramInboxEvent.received_at >= month_start,
             InstagramInboxEvent.status != "limited",
         ))).scalar() or 0)
-        limited = too_fast or bool(sender.daily_limit and daily_used >= sender.daily_limit) or bool(sender.monthly_limit and monthly_used >= sender.monthly_limit)
+        limit_reason = quota_limit_reason(sender, hourly_used, daily_used, monthly_used)
+        limited = too_fast or limit_reason is not None
         previous = (await db.execute(select(InstagramInboxEvent).where(
             InstagramInboxEvent.sender_id == sender.id,
             InstagramInboxEvent.shared_url == shared["url"],
@@ -189,8 +222,12 @@ async def instagram_webhook(request: Request, background_tasks: BackgroundTasks,
                 message = "این پست همین الان در حال آماده‌شدنه؛ لازم نیست دوباره بفرستیش. به‌محض آماده‌شدن توی تلگرام میاد ✨"
             elif too_fast:
                 message = "چند لینک خیلی سریع پشت‌سرهم فرستادی؛ کمی صبر کن و دوباره بفرست 🙏"
+            elif limit_reason == "hourly":
+                message = "سهمیه یک ساعت اخیرت پر شده. کمی بعد دوباره می‌تونی پست بفرستی ⏳"
+            elif limit_reason == "daily":
+                message = "سهمیه امروزت پر شده. از شروع روز بعد دوباره می‌تونی پست بفرستی 🌱"
             else:
-                message = "سهمیهٔ دریافت پستت فعلاً پر شده. بعد از شروع بازهٔ بعدی دوباره می‌تونی بفرستی 🌱"
+                message = "سهمیه این ماهت پر شده. از شروع ماه بعد دوباره می‌تونی پست بفرستی 🌱"
             background_tasks.add_task(send_instagram_notice, sender.instagram_user_id, message)
         else:
             affected.add(sender.id)
@@ -217,13 +254,14 @@ async def instagram_status(_: User = Depends(require_admin), db: AsyncSession = 
     base = settings.web_base_url.rstrip("/")
     if base and not base.startswith(("http://", "https://")):
         base = "https://" + base
-    default_daily_limit, default_monthly_limit = await instagram_default_limits(db)
+    default_hourly_limit, default_daily_limit, default_monthly_limit = await instagram_default_limits(db)
     return {
         "configured": bool(settings.instagram_app_secret and settings.instagram_webhook_verify_token),
         "reply_configured": bool(settings.instagram_access_token and settings.instagram_account_id),
         "callback_url": f"{base}/api/instagram/webhook" if base else "",
         "total_senders": total,
         "pending_senders": pending,
+        "default_hourly_limit": default_hourly_limit,
         "default_daily_limit": default_daily_limit,
         "default_monthly_limit": default_monthly_limit,
     }
@@ -240,9 +278,14 @@ async def instagram_senders(_: User = Depends(require_admin), db: AsyncSession =
     result=[]
     for sender,user in rows:
         sender_day_start=daily_usage_start(sender,now)
+        hourly=int((await db.execute(select(func.count()).select_from(InstagramInboxEvent).where(InstagramInboxEvent.sender_id==sender.id,InstagramInboxEvent.received_at>=now-timedelta(hours=1),InstagramInboxEvent.status!="limited"))).scalar() or 0)
         daily=int((await db.execute(select(func.count()).select_from(InstagramInboxEvent).where(InstagramInboxEvent.sender_id==sender.id,InstagramInboxEvent.received_at>=sender_day_start,InstagramInboxEvent.status!="limited"))).scalar() or 0)
         monthly=int((await db.execute(select(func.count()).select_from(InstagramInboxEvent).where(InstagramInboxEvent.sender_id==sender.id,InstagramInboxEvent.received_at>=month_start,InstagramInboxEvent.status!="limited"))).scalar() or 0)
-        result.append(sender_payload(sender,user,daily_used=daily,monthly_used=monthly))
+        destination = (await db.execute(select(TelegramDestination).where(
+            TelegramDestination.id == sender.selected_destination_id,
+            TelegramDestination.user_id == sender.telegram_user_id,
+        ))).scalar_one_or_none() if sender.selected_destination_id and sender.telegram_user_id else None
+        result.append(sender_payload(sender,user,destination,hourly_used=hourly,daily_used=daily,monthly_used=monthly))
     return result
 
 
@@ -268,6 +311,10 @@ async def update_instagram_sender(
             sender.approved = False
     if payload.save_to_library is not None:
         sender.save_to_library = payload.save_to_library
+    if payload.hourly_limit is not None:
+        if not 0 <= payload.hourly_limit <= 10_000:
+            raise HTTPException(status_code=400, detail="سقف ساعتی معتبر نیست.")
+        sender.hourly_limit = payload.hourly_limit
     if payload.daily_limit is not None:
         if not 0 <= payload.daily_limit <= 10_000:
             raise HTTPException(status_code=400, detail="سقف روزانه معتبر نیست.")
@@ -284,23 +331,28 @@ async def update_instagram_sender(
         background_tasks.add_task(dispatch_pending_events, sender.id)
     if user is None and sender.telegram_user_id is not None:
         user = await db.get(User, sender.telegram_user_id)
-    return sender_payload(sender, user)
+    destination = (await db.execute(select(TelegramDestination).where(
+        TelegramDestination.id == sender.selected_destination_id,
+        TelegramDestination.user_id == sender.telegram_user_id,
+    ))).scalar_one_or_none() if sender.selected_destination_id and sender.telegram_user_id else None
+    return sender_payload(sender, user, destination)
 
 
 @router.put("/settings")
 async def update_instagram_defaults(
     payload: InstagramDefaultsUpdate, _: User = Depends(require_admin), db: AsyncSession = Depends(get_db),
 ):
+    hourly = payload.hourly_limit
     daily = payload.daily_limit
     monthly = payload.monthly_limit
-    for key, value in ((DEFAULT_DAILY_LIMIT_KEY, daily), (DEFAULT_MONTHLY_LIMIT_KEY, monthly)):
+    for key, value in ((DEFAULT_HOURLY_LIMIT_KEY, hourly), (DEFAULT_DAILY_LIMIT_KEY, daily), (DEFAULT_MONTHLY_LIMIT_KEY, monthly)):
         row = await db.get(AppSetting, key)
         if row is None:
             db.add(AppSetting(key=key, value=str(value)))
         else:
             row.value = str(value)
     await db.commit()
-    return {"daily_limit": daily, "monthly_limit": monthly}
+    return {"hourly_limit": hourly, "daily_limit": daily, "monthly_limit": monthly}
 
 
 @router.post("/senders/reset-daily")
