@@ -1,7 +1,10 @@
 import hashlib
 import hmac
+from datetime import datetime, timedelta
 
 from app.instagram_inbox import extract_shared_posts, normalize_instagram_post_url, verify_meta_signature
+from app.models import InstagramInboxSender
+from app.routers.instagram import daily_usage_start
 
 
 def test_normalize_instagram_post_url_accepts_posts_and_drops_tracking():
@@ -43,3 +46,13 @@ def test_webhook_signature_formula_matches_meta_sha256_header():
     assert hmac.compare_digest(expected, signature)
     assert verify_meta_signature(raw, signature, secret)
     assert not verify_meta_signature(raw + b" ", signature, secret)
+
+
+def test_daily_usage_reset_only_moves_the_current_day_boundary_forward():
+    now = datetime(2026, 10, 27, 18, 30)
+    sender = InstagramInboxSender(instagram_user_id="sender", pairing_code="ABCDEFGH")
+    assert daily_usage_start(sender, now) == datetime(2026, 10, 27)
+    sender.daily_quota_reset_at = now - timedelta(hours=2)
+    assert daily_usage_start(sender, now) == datetime(2026, 10, 27, 16, 30)
+    sender.daily_quota_reset_at = now - timedelta(days=1)
+    assert daily_usage_start(sender, now) == datetime(2026, 10, 27)

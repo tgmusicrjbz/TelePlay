@@ -213,6 +213,7 @@ class InstagramInboxSender(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     instagram_user_id: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
     username: Mapped[Optional[str]] = mapped_column(String(255))
+    display_name: Mapped[Optional[str]] = mapped_column(String(120))
     telegram_user_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), index=True
     )
@@ -222,6 +223,7 @@ class InstagramInboxSender(Base):
     save_to_library: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     daily_limit: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
     monthly_limit: Mapped[int] = mapped_column(Integer, default=50, nullable=False)
+    daily_quota_reset_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     pairing_message_sent: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     received_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     forwarded_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
