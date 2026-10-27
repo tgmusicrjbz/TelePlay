@@ -15,7 +15,7 @@ os.environ.setdefault("JWT_SECRET", "test-secret")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.database import Base, async_session, engine
-from app.downloader import LinkImportService, _PinterestMetaParser, _validate_pinterest_pin_url, classify_import_url
+from app.downloader import LinkImportService, _PinterestMetaParser, _pinterest_image_url, _pinterest_video_url, _validate_pinterest_pin_url, classify_import_url
 from app.models import ProcessingJob, User
 from app.processing_jobs import create_job
 
@@ -97,6 +97,17 @@ class LinkImportDurabilityTests(unittest.IsolatedAsyncioTestCase):
         parser.feed('<meta property="og:title" content="نمونه"><meta property="og:image" content="https://i.pinimg.com/a.jpg">')
         self.assertEqual(parser.values["og:title"], "نمونه")
         self.assertEqual(parser.values["og:image"], "https://i.pinimg.com/a.jpg")
+
+    def test_pinterest_resource_prefers_mp4_over_cover_image(self):
+        pin = {
+            "images": {"orig": {"url": "https://i.pinimg.com/originals/cover.jpg", "width": 800, "height": 1200}},
+            "videos": {"video_list": {
+                "V_HLS": {"url": "https://v1.pinimg.com/video.m3u8", "width": 1920, "height": 1080},
+                "V_720P": {"url": "https://v1.pinimg.com/video.mp4", "width": 1280, "height": 720},
+            }},
+        }
+        self.assertEqual(_pinterest_video_url(pin), "https://v1.pinimg.com/video.mp4")
+        self.assertEqual(_pinterest_image_url(pin), "https://i.pinimg.com/originals/cover.jpg")
 
 
 if __name__ == "__main__":

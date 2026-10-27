@@ -105,6 +105,72 @@ def _read_pinterest_page(url: str) -> tuple[str, dict[str, str]]:
     return final_url, parser.values
 
 
+def _pinterest_pin_data(url: str) -> dict:
+    """Read the public Pin resource used by Pinterest's own web client."""
+    match = re.search(r"/pin/(?:[\w-]+--)?(?P<id>\d+)", urlparse(url).path, re.IGNORECASE)
+    if not match:
+        raise ValueError("شناسه این پین پیدا نشد.")
+    options = json.dumps({"options": {"field_set_key": "unauth_react_main_pin", "id": match.group("id")}})
+    endpoint = "https://www.pinterest.com/resource/PinResource/get/?" + urlencode({"data": options})
+    request = Request(endpoint, headers={
+        "User-Agent": "Mozilla/5.0 Komod/1.0",
+        "Accept": "application/json",
+        "X-Pinterest-PWS-Handler": "www/[username].js",
+    })
+    with urlopen(request, timeout=25) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    data = ((payload.get("resource_response") or {}).get("data") or {})
+    if not isinstance(data, dict) or not data:
+        raise RuntimeError("پاسخ پینترست اطلاعات این پین را نداشت.")
+    return data
+
+
+def _pinterest_video_url(data: dict) -> str | None:
+    video_lists: list[dict] = []
+    regular = ((data.get("videos") or {}).get("video_list") or {})
+    if isinstance(regular, dict):
+        video_lists.append(regular)
+    for page in ((data.get("story_pin_data") or {}).get("pages") or []):
+        for block in (page.get("blocks") or []) if isinstance(page, dict) else []:
+            video_list = (((block.get("video") or {}).get("video_list")) if isinstance(block, dict) else None) or {}
+            if isinstance(video_list, dict):
+                video_lists.append(video_list)
+    candidates: list[tuple[int, str]] = []
+    for video_list in video_lists:
+        for format_data in video_list.values():
+            if not isinstance(format_data, dict):
+                continue
+            candidate = str(format_data.get("url") or "").strip()
+            if not candidate or ".m3u8" in candidate.lower():
+                continue
+            parsed = urlparse(candidate)
+            if not (parsed.hostname or "").lower().endswith(".pinimg.com"):
+                continue
+            score = int(format_data.get("width") or 0) * int(format_data.get("height") or 0)
+            candidates.append((score, candidate))
+    return max(candidates, default=(0, None), key=lambda item: item[0])[1]
+
+
+def _pinterest_image_url(data: dict) -> str | None:
+    candidates: list[tuple[int, str]] = []
+    for image_data in (data.get("images") or {}).values():
+        if not isinstance(image_data, dict):
+            continue
+        candidate = str(image_data.get("url") or "").strip()
+        if not candidate or not (urlparse(candidate).hostname or "").lower().endswith(".pinimg.com"):
+            continue
+        score = int(image_data.get("width") or 0) * int(image_data.get("height") or 0)
+        candidates.append((score, candidate))
+    return max(candidates, default=(0, None), key=lambda item: item[0])[1]
+
+
+def _pinterest_title_and_author(data: dict, fallback: str) -> tuple[str, str | None]:
+    title = sanitize_filename(str(data.get("title") or data.get("grid_title") or data.get("seo_description") or fallback).splitlines()[0])[:220]
+    attribution = data.get("closeup_attribution") or {}
+    author = _clean_source_author(attribution.get("full_name") if isinstance(attribution, dict) else None)
+    return title or fallback, author
+
+
 def _download_public_media(url: str, directory: Path, stem: str, max_bytes: int = PINTEREST_MAX_BYTES) -> Path:
     media_host = (urlparse(url).hostname or "").lower().rstrip(".")
     if not (media_host == "pinimg.com" or media_host.endswith(".pinimg.com") or media_host == "pinterest.com" or media_host.endswith(".pinterest.com")):
@@ -168,19 +234,25 @@ def _download_pinterest(url: str) -> list[dict]:
             logger.debug("Pinterest video extraction was unavailable; trying public page media", exc_info=True)
 
         if local_path is None:
-            if not metadata:
-                canonical_url, metadata = _read_pinterest_page(canonical_url)
-            title = sanitize_filename(
-                metadata.get("og:title") or metadata.get("twitter:title")
-                or metadata.get("og:description") or title
-            )[:220]
-            video_url = metadata.get("og:video:secure_url") or metadata.get("og:video") or metadata.get("twitter:player:stream")
-            image_url = metadata.get("og:image:secure_url") or metadata.get("og:image") or metadata.get("twitter:image")
-            media_url = video_url or image_url
-            if not media_url:
-                raise RuntimeError("رسانه قابل دریافت در این پین پیدا نشد؛ ممکن است خصوصی یا محدود شده باشد.")
-            media_type = "video" if video_url else "image"
-            local_path = _download_public_media(media_url, temp_dir, "pinterest")
+            # A Pinterest page's OpenGraph media is usually a cover image even
+            # for a video Pin. Ask the Pin resource itself before choosing a
+            # fallback, otherwise a temporary yt-dlp error silently saves the
+            # wrong media type.
+            pin_data = _pinterest_pin_data(canonical_url)
+            title, api_author = _pinterest_title_and_author(pin_data, title)
+            author = author or api_author
+            video_url = _pinterest_video_url(pin_data)
+            if video_url:
+                media_type = "video"
+                local_path = _download_public_media(video_url, temp_dir, "pinterest")
+            elif pin_data.get("is_video"):
+                raise RuntimeError("ویدیوی این پین در دسترس نیست؛ کمی بعد دوباره امتحان کن.")
+            else:
+                image_url = _pinterest_image_url(pin_data)
+                if not image_url:
+                    raise RuntimeError("رسانه قابل دریافت در این پین پیدا نشد؛ ممکن است خصوصی یا محدود شده باشد.")
+                media_type = "image"
+                local_path = _download_public_media(image_url, temp_dir, "pinterest")
         elif local_path.suffix.casefold() in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
             media_type = "image"
 
