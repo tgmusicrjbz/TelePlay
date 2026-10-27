@@ -175,6 +175,7 @@ export default function FileBrowser() {
     const [combiningTexts,setCombiningTexts]=useState(false);
     const [packFileIds,setPackFileIds]=useState<number[]>([]);
     const [openPackId, setOpenPackId] = useState<number|null>(null);
+    const [restorePackFileId,setRestorePackFileId]=useState<number|null>(null);
     const [selectionMode, setSelectionMode] = useState(false);
     const [selectedPackIds,setSelectedPackIds]=useState<Set<number>>(new Set());
     const [pullDistance, setPullDistance] = useState(0);
@@ -225,6 +226,7 @@ export default function FileBrowser() {
     const [forceOffline, setForceOffline] = useState(() => localStorage.getItem('komod-force-offline') === '1');
     useEffect(()=>{const params=new URLSearchParams(window.location.search);const drive=params.get('drive');if(!drive)return;addToast(drive==='connected'?'حساب گوگل با موفقیت متصل شد.':'اتصال حساب گوگل کامل نشد؛ دوباره تلاش کن.',drive==='connected'?'success':'error');params.delete('drive');const query=params.toString();window.history.replaceState({},'',`${window.location.pathname}${query?`?${query}`:''}${window.location.hash}`)},[addToast]);
     useEffect(()=>{const open=(event:Event)=>{const ids=(event as CustomEvent<{fileIds:number[]}>).detail?.fileIds||[];if(ids.length){setPackFileIds(ids);setShowCreatePack(true)}};window.addEventListener('komod-add-to-pack',open);return()=>window.removeEventListener('komod-add-to-pack',open)},[]);
+    useEffect(()=>{const restore=(event:Event)=>{const detail=(event as CustomEvent<{packId:number;fileId:number}>).detail;if(!detail?.packId||!detail.fileId)return;setRestorePackFileId(detail.fileId);setOpenPackId(detail.packId)};window.addEventListener('komod-pack-restore',restore);return()=>window.removeEventListener('komod-pack-restore',restore)},[]);
     // Vault views are deliberately ephemeral. Persisting this state used to
     // reopen the app inside an empty hidden-only view after refresh/login.
     const [showHidden, setShowHidden] = useState(false);
@@ -422,7 +424,7 @@ export default function FileBrowser() {
     const effectiveSearchQuery=smartSearchQuery||debouncedSearchQuery;
     const { data: filesList, isLoading: filesLoading, isFetching: filesFetching, error: filesError, refetch: refetchFiles } = useFiles(hiddenOnly || effectiveSearchQuery || activeSavedFilterId ? undefined : effectiveFolderId, apiFileTypeFilter.join(',') || undefined, effectiveSearchQuery || undefined, page, sortValue, favoriteOnly, false, showHidden, hiddenOnly);
     const { data: activityFeed, isLoading: activityLoading, isError: activityError, refetch: refetchActivity } = useActivityFeed(activeSection === 'activity', 50);
-    
+
 
     // For files section, accumulate files from all pages
     useEffect(() => {
@@ -494,7 +496,7 @@ export default function FileBrowser() {
 
     // Combined loading state
     isLoading = isLoading || (activeSection === 'files' && ((showFolders && foldersLoading) || (hiddenOnly && folderTreeLoading)));
-    
+
     // Mutations
     const deleteFilesMutation = useDeleteFiles();
     const deleteFolderMutation = useDeleteFolder();
@@ -702,7 +704,7 @@ export default function FileBrowser() {
     const handleDeleteConfirm = async (deleteContents: boolean) => {
         if (!deleteConfirm) return;
         const { type, items } = deleteConfirm;
-        
+
         try {
             if (type === 'file') {
                 const ids = items.map(i => i.id);
@@ -718,7 +720,7 @@ export default function FileBrowser() {
                  // Split into files and folders
                  const fileIds = items.filter(i => 'file_name' in i).map(i => i.id);
                  const folderIds = items.filter(i => 'name' in i && !('file_name' in i)).map(i => i.id);
-                 
+
                  if (folderIds.length > 0) await deleteFoldersMutation.mutateAsync({ ids: folderIds, deleteContents });
                  if (fileIds.length > 0) await deleteFilesMutation.mutateAsync(fileIds);
             }
@@ -779,7 +781,7 @@ export default function FileBrowser() {
             selectionStart.current = { x: startX, y: startY };
             setSelectionBox({ x1: startX, y1: startY, x2: startX, y2: startY, active: true });
         }
-        
+
         if (!e.ctrlKey && !e.metaKey && !e.shiftKey) {
             clearSelection();
         }
@@ -787,7 +789,7 @@ export default function FileBrowser() {
 
     const handleMouseMove = (e: React.MouseEvent) => {
         if (!isSelecting || !containerRef.current) return;
-        
+
         const rect = containerRef.current.getBoundingClientRect();
         const currentX = e.clientX - rect.left + containerRef.current.scrollLeft;
         const currentY = e.clientY - rect.top + containerRef.current.scrollTop;
@@ -810,7 +812,7 @@ export default function FileBrowser() {
 
         const fileIdsToSelect: number[] = [];
         const folderIdsToSelect: number[] = [];
-        
+
         // Check files
         const fileElements = containerRef.current.querySelectorAll('[data-file-id]');
         fileElements.forEach((el) => {
@@ -1107,10 +1109,10 @@ export default function FileBrowser() {
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [
-        previewFile, showNewFolder, moveItems, deleteConfirm, 
-        selectedFileIds, displayFiles, breadcrumbs, clipboard, 
+        previewFile, showNewFolder, moveItems, deleteConfirm,
+        selectedFileIds, displayFiles, breadcrumbs, clipboard,
         currentFolderId, handlePaste, handleRefresh,
-        setPreviewFile, setShowNewFolder, setMoveItems, setDeleteConfirm, 
+        setPreviewFile, setShowNewFolder, setMoveItems, setDeleteConfirm,
         clearSelection, selectAll, setRenameFile, navigateToBreadcrumb, setClipboard, folders
     ]);
 
@@ -1346,7 +1348,7 @@ export default function FileBrowser() {
         <div dir="rtl" className="flex h-screen bg-dark-950 text-white selection:bg-primary-500/30 overflow-hidden">
             {hiddenOnly && createPortal(<div className="fixed inset-x-3 top-[calc(env(safe-area-inset-top)+.75rem)] z-[270] mx-auto flex max-w-xl items-center gap-3 rounded-2xl border border-amber-300/25 bg-dark-950/95 p-2.5 text-amber-100 shadow-2xl backdrop-blur-xl"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-400/10"><EyeOff className="h-4 w-4"/></span><div className="min-w-0 flex-1"><strong className="block text-xs">فقط موارد مخفی</strong><span className="block truncate text-[10px] text-amber-100/60">{filesLoading||foldersLoading||folderTreeLoading?'در حال دریافت…':filesError||foldersError||folderTreeError?'نمایش موارد مخفی با خطا روبه‌رو شد':`${(shownFolderCount+shownFileCount).toLocaleString('fa-IR')} مورد`}</span></div><button type="button" onClick={closeVaultItems} className="flex min-h-9 shrink-0 items-center gap-1 rounded-xl bg-white/[.08] px-3 text-xs font-semibold hover:bg-white/[.13]" aria-label="خروج از نمایش موارد مخفی"><ChevronRight className="h-4 w-4"/>بازگشت</button></div>, document.body)}
             <Sidebar />
-            
+
             <main className="relative flex min-w-0 flex-1 flex-col bg-gradient-to-br from-dark-950 to-dark-900 md:mr-24">
                 {/* Header */}
                 <header className="h-16 border-b border-white/[0.06] flex items-center justify-between px-4 sm:px-6 bg-dark-900/50 backdrop-blur-sm z-30 sticky top-0">
@@ -1392,7 +1394,7 @@ export default function FileBrowser() {
                             {breadcrumbs.map((crumb, index) => (
                                 <div key={crumb.id || 'root'} className="flex items-center min-w-0">
                                     {index > 0 && <ChevronRight className="w-4 h-4 text-dark-600 mx-1 shrink-0 rotate-180" />}
-                                    <button 
+                                    <button
                                         onClick={() => navigateToBreadcrumb(index)}
                                         className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-sm truncate max-w-[150px] transition-colors ${index === breadcrumbs.length - 1
                                             ? 'text-white font-medium bg-white/[0.05]'
@@ -1431,7 +1433,7 @@ export default function FileBrowser() {
                 </header>
 
                 {/* Content Area */}
-                <div 
+                <div
                     ref={containerRef}
                     data-main-scroll="true"
                     className={`relative flex-1 overflow-auto overscroll-y-contain p-4 pb-28 outline-none transition sm:p-6 md:pb-6 lg:p-8 ${isFileDragOver?'ring-2 ring-inset ring-primary-400/60 bg-primary-500/[.04]':''}`}
@@ -1672,7 +1674,7 @@ export default function FileBrowser() {
 
                                     {/* Mixed-media packs live beside folders. */}
                                     {showPacks && visiblePacks.map(pack => <PackCard key={`pack-${pack.id}`} pack={pack} viewMode={viewMode} selected={selectedPackIds.has(pack.id)} selectionMode={selectionMode} onSelect={()=>{setSelectionMode(true);setSelectedPackIds(current=>{const next=new Set(current);if(next.has(pack.id))next.delete(pack.id);else next.add(pack.id);return next})}} onOpen={()=>setOpenPackId(pack.id)}/>)}
-                                    
+
                                     {/* Files */}
                                     {showFiles && displayFiles?.map((file) => (
                                         <FileCard
@@ -1703,7 +1705,7 @@ export default function FileBrowser() {
 
                             {/* Selection Rectangle Overlay */}
                             {selectionBox?.active && (
-                                <div 
+                                <div
                                     className="absolute bg-primary-500/10 border border-primary-500/30 pointer-events-none rounded sm z-50 backdrop-blur-[1px]"
                                     style={{
                                         left: Math.min(selectionBox.x1, selectionBox.x2),
@@ -1732,7 +1734,7 @@ export default function FileBrowser() {
                     </>}
                 </div>
             </main>
-            
+
             <Toasts />
 
             {/* Modals */}
@@ -1754,7 +1756,7 @@ export default function FileBrowser() {
                 <DeleteConfirmModal
                     type={deleteConfirm.type}
                     count={deleteConfirm.items.length}
-                    name={deleteConfirm.items.length === 1 
+                    name={deleteConfirm.items.length === 1
                         ? (deleteConfirm.type === 'file' ? (deleteConfirm.items[0] as TelegramFile).file_name : (deleteConfirm.items[0] as Folder).name)
                         : undefined
                     }
@@ -1797,7 +1799,7 @@ export default function FileBrowser() {
             {showCombineTexts&&<div className="fixed inset-0 z-[260] flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-4" onClick={()=>setShowCombineTexts(false)}><section dir="rtl" className="w-full max-w-md rounded-t-3xl border border-white/10 bg-dark-900 p-5 text-right shadow-2xl sm:rounded-3xl" onClick={event=>event.stopPropagation()}><header className="flex items-center gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary-500/15 text-primary-200"><Combine className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h2 className="font-bold">ترکیب متن‌ها</h2><p className="mt-1 text-xs text-dark-400">{selectedTextFilesForActions.length.toLocaleString('fa-IR')} متن، به ترتیب نمایش فعلی</p></div><button className="btn-icon" onClick={()=>setShowCombineTexts(false)}><X className="h-5 w-5"/></button></header><label className="mt-4 block text-xs text-dark-400">نام فایل تازه<input value={combineTitle} onChange={event=>setCombineTitle(event.target.value)} className="input mt-1.5 w-full text-right" maxLength={180}/></label><div className="mt-4"><p className="mb-2 text-xs text-dark-400">جداکننده متن‌ها</p><div className="grid grid-cols-3 gap-1 rounded-2xl border border-white/[.07] bg-dark-950/40 p-1">{([{value:'line',label:'خط جداکننده'},{value:'blank',label:'فاصله خالی'},{value:'none',label:'بدون فاصله'}] as const).map(option=><button key={option.value} onClick={()=>setCombineSeparator(option.value)} className={`min-h-10 rounded-xl px-2 text-[11px] ${combineSeparator===option.value?'bg-primary-500 text-white':'text-dark-400'}`}>{option.label}</button>)}</div></div><label className="mt-4 flex min-h-12 items-center gap-3 rounded-2xl bg-white/[.035] px-3"><input type="checkbox" checked={combineIncludeNames} onChange={event=>setCombineIncludeNames(event.target.checked)} className="h-5 w-5 accent-primary-500"/><span className="text-sm">نام هر فایل بالای متنش نوشته شود</span></label><div className="mt-5 grid grid-cols-2 gap-2"><button disabled={combiningTexts} onClick={()=>void combineSelectedTexts()} className="btn-primary min-h-11 disabled:opacity-40">{combiningTexts?'در حال ساخت…':'ساخت فایل'}</button><button className="btn-secondary" onClick={()=>setShowCombineTexts(false)}>لغو</button></div></section></div>}
             <Suspense fallback={null}>
                 {showCreatePack && <CreatePackModal fileIds={packFileIds.length?packFileIds:selectedFilesForActions.map(file=>file.id)} parentFolderId={effectiveFolderId} packs={packs} onClose={()=>{setShowCreatePack(false);setPackFileIds([])}} onCreated={pack=>{setShowCreatePack(false);setPackFileIds([]);cancelSelection();setOpenPackId(pack.id);addToast('جعبه به‌روز شد 📦','success')}}/>}
-                {openPackId!==null&&<PackViewer packId={openPackId} onClose={()=>setOpenPackId(null)} onOpenFile={handleFileOpen}/>} 
+                {openPackId!==null&&<PackViewer packId={openPackId} initialFileId={restorePackFileId} onClose={()=>{setOpenPackId(null);setRestorePackFileId(null)}} onOpenFile={handleFileOpen}/>}
             </Suspense>
             {showVaultPrompt && <div className="fixed inset-0 z-[190] flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-4" onClick={()=>setShowVaultPrompt(false)}><div className="w-full max-w-sm rounded-t-3xl border border-white/10 bg-dark-900 p-5 sm:rounded-3xl" onClick={event=>event.stopPropagation()}><div className="flex items-center gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary-500/15 text-primary-200"><EyeOff className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h2 className="font-bold">گاوصندوق</h2><p className="text-xs text-dark-400">موارد مخفی را کنار بقیهٔ فایل‌ها ببین.</p></div><button className="btn-icon" onClick={()=>setShowVaultPrompt(false)}><X className="h-5 w-5"/></button></div>{!sessionStorage.getItem('komod-vault-token')&&<input autoFocus type="password" value={vaultPassword} onChange={event=>setVaultPassword(event.target.value)} className="input mt-4 w-full" placeholder="رمز گاوصندوق"/>}<div className="mt-4 grid gap-2"><button disabled={unlockVault.isPending||(!sessionStorage.getItem('komod-vault-token')&&!vaultPassword)} onClick={()=>void showVaultItems()} className="btn-primary min-h-11 disabled:opacity-40">نمایش موارد مخفی</button>{showHidden&&<button onClick={closeVaultItems} className="min-h-10 rounded-xl text-sm text-red-300 hover:bg-red-500/10">بستن گاوصندوق</button>}</div></div></div>}
             {showAddMenu && createPortal(<div className="fixed inset-0 z-[260] flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-5" onClick={() => setShowAddMenu(false)}><div className="max-h-[min(86vh,42rem)] w-full max-w-md overflow-y-auto rounded-t-3xl border border-white/10 bg-dark-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl sm:rounded-3xl" onClick={event => event.stopPropagation()}><div className="mx-auto mb-4 h-1 w-12 rounded-full bg-white/20 sm:hidden"/><div className="flex items-center justify-between"><div><h2 className="font-bold">افزودن به کمد</h2><p className="mt-1 text-xs text-dark-500">چه چیزی می‌خواهی اضافه کنی؟</p></div><button className="btn-icon" onClick={() => setShowAddMenu(false)}><X className="h-5 w-5"/></button></div><div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-1">{[{label:'آپلود فایل',icon:<Upload className="h-5 w-5"/>,action:()=>uploadInputRef.current?.click()},{label:'یادداشت متنی',icon:<StickyNote className="h-5 w-5"/>,action:()=>{setTextFolder(incomingFolderId);setShowTextComposer(true)}},{label:'ساخت کشو',icon:<FolderPlus className="h-5 w-5"/>,action:()=>setShowNewFolder(true)},{label:'ذخیره از لینک',icon:<Link2 className="h-5 w-5"/>,action:openImportLink},{label:'از گوگل درایو',icon:<Cloud className="h-5 w-5"/>,action:openImportDrive},{label:'ساخت صدا از متن',icon:<AudioLines className="h-5 w-5"/>,action:()=>openSpeechTools('tts')},{label:'استخراج متن از صدا',icon:<FileAudio className="h-5 w-5"/>,action:()=>openSpeechTools('stt')}].map(item=><button key={item.label} className="flex min-h-16 items-center gap-3 rounded-2xl border border-white/[.07] bg-dark-800/60 px-3 text-right text-sm transition hover:border-primary-400/20 hover:bg-primary-500/[.07] sm:min-h-14" onClick={()=>{setShowAddMenu(false);item.action()}}><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-500/10 text-primary-300">{item.icon}</span><span>{item.label}</span></button>)}</div></div></div>, document.body)}

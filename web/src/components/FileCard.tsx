@@ -74,7 +74,7 @@ export default function FileCard({
     const fallbackThumbnail = (large = false) => <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-gradient-to-br from-primary-500/25 via-dark-900 to-pink-500/20"><div className="absolute -left-6 -top-6 h-20 w-20 rounded-full bg-primary-400/10 blur-2xl"/><div className="absolute -bottom-7 -right-5 h-20 w-20 rounded-full bg-pink-400/10 blur-2xl"/><span className={`relative flex items-center justify-center rounded-2xl border border-white/10 bg-black/20 text-primary-200 shadow-xl ${large ? 'h-16 w-16' : 'h-10 w-10'}`}>{getIcon()}</span></div>;
 
     const getIcon = () => {
-        if (textFirst) return <MarkdownFileIcon large />;
+        if (textFirst) return <FileText className="w-8 h-8 text-blue-400" />;
         switch (file.file_type) {
             case 'video': return <Film className="w-8 h-8 text-primary-400" />;
             case 'audio': return <Music className="w-8 h-8 text-pink-400" />;
@@ -84,7 +84,7 @@ export default function FileCard({
     };
 
     const getSmallIcon = () => {
-        if (textFirst) return <MarkdownFileIcon />;
+        if (textFirst) return <FileText className="w-3 h-3 text-blue-400" />;
         switch (file.file_type) {
             case 'video': return <Film className="w-3 h-3 text-primary-400" />;
             case 'audio': return <Music className="w-3 h-3 text-pink-400" />;
@@ -93,7 +93,7 @@ export default function FileCard({
         }
     };
 
-    const typeLabel = textFirst ? 'Markdown' : (({ video: 'ویدیو', audio: 'صدا', image: 'عکس', document: 'سند', text: 'متن' } as Record<string, string>)[file.file_type] || 'فایل');
+    const typeLabel = textFirst ? 'متن' : (({ video: 'ویدیو', audio: 'صدا', image: 'عکس', document: 'سند', text: 'متن' } as Record<string, string>)[file.file_type] || 'فایل');
 
     if (viewMode === 'list') {
         return (
@@ -205,8 +205,8 @@ export default function FileCard({
                 {/* Progress Bar */}
                 {!textFirst&&cardDisplay.fileProgress&&file.last_pos && file.duration && (file.last_pos / file.duration > 0.05) && (
                     <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/40">
-                        <div 
-                            className="h-full bg-primary-500" 
+                        <div
+                            className="h-full bg-primary-500"
                             style={{ width: `${Math.min(100, (file.last_pos / file.duration) * 100)}%` }}
                         />
                     </div>
@@ -238,8 +238,8 @@ export default function FileCard({
                     {!dense&&cardDisplay.fileTags&&<TagChips tags={file.tags} compact/>}
                     <div className="flex items-center gap-2 mt-1">
                         {cardDisplay.fileType&&<span className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md border ${
-                            selected 
-                            ? 'bg-primary-500/20 border-primary-500/20 text-primary-300' 
+                            selected
+                            ? 'bg-primary-500/20 border-primary-500/20 text-primary-300'
                             : 'bg-dark-800 border-white/[0.05] text-dark-400 group-hover:border-white/[0.1]'
                         }`}>
                             {getSmallIcon()}
@@ -265,18 +265,9 @@ export default function FileCard({
                         className={`p-1.5 rounded-lg transition-colors ${showMenu ? 'bg-white/10 text-white' : 'hover:bg-white/[0.08] text-dark-300'}`}
                     >
                         <MoreVertical className="w-4 h-4" />
-                    </button> 
+                    </button>
                 </div>
             </div>
         </div>
-    );
-}
-
-function MarkdownFileIcon({ large = false }: { large?: boolean }) {
-    return (
-        <span className={`relative inline-flex shrink-0 items-center justify-center text-blue-400 ${large ? 'h-9 w-9' : 'h-4 w-4'}`} aria-label="فایل Markdown">
-            <FileText className={large ? 'h-8 w-8' : 'h-3.5 w-3.5'} />
-            <span className={`absolute rounded bg-blue-500 font-bold leading-none text-white shadow-sm ${large ? '-bottom-1 -right-2 px-1 py-0.5 text-[7px]' : '-bottom-0.5 -right-1.5 px-0.5 text-[4px]'}`}>MD</span>
-        </span>
     );
 }

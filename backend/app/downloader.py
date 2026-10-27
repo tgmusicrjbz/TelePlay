@@ -682,7 +682,13 @@ class LinkImportService:
                     height=getattr(media, "height", None),
                     thumbnail_file_id=(select_best_thumbnail(getattr(media, "thumbs", None)).file_id if select_best_thumbnail(getattr(media, "thumbs", None)) else media.file_id if item["type"] == "image" else None),
                 )
-                db.add(stored)
+                # Group deliveries are temporary transport objects. Persisting
+                # them even briefly made another member's links appear in the
+                # connected owner's library until cleanup finished (or forever
+                # when cleanup failed). Instagram keeps a record for its cache;
+                # ordinary Telegram-only group delivery does not.
+                if job.save_to_library or job.instagram_event_id:
+                    db.add(stored)
                 saved.append(stored)
             await db.commit()
         return saved
@@ -723,7 +729,7 @@ class LinkImportService:
         """Remove temporary storage records after Telegram-only delivery."""
         async with async_session() as db:
             for file in files:
-                stored = await db.get(File, file.id)
+                stored = await db.get(File, file.id) if file.id is not None else None
                 if stored is not None:
                     await db.delete(stored)
             await db.commit()

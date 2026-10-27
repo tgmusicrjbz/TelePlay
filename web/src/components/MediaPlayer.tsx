@@ -15,7 +15,7 @@ export default function MediaPlayer() {
 
     if (!file || (file.file_type !== 'video' && file.file_type !== 'audio')) return null;
 
-    return <MediaPlayerContent file={file} onClose={() => { setPreviewFile(null); clearQueue(); }} isMinimized={isPlayerMinimized} setMinimized={setPlayerMinimized} />;
+    return <MediaPlayerContent file={file} onClose={() => { sessionStorage.removeItem('komod-pack-preview-origin'); setPreviewFile(null); clearQueue(); }} isMinimized={isPlayerMinimized} setMinimized={setPlayerMinimized} />;
 }
 
 interface MediaPlayerContentProps {
@@ -672,6 +672,20 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
         ? Math.max(0, safeDuration > 0 ? Math.min(currentTime, safeDuration) : currentTime)
         : 0;
     const progressPercent = safeDuration > 0 ? Math.min(100, (safeCurrentTime / safeDuration) * 100) : 0;
+    const restoreFromMinimized=()=>{
+        try {
+            const origin=JSON.parse(sessionStorage.getItem('komod-pack-preview-origin')||'null') as {packId?:number;fileId?:number}|null;
+            if(origin?.packId&&origin.fileId===file.id){
+                const position=videoRef.current?.currentTime??safeCurrentTime;
+                if(Number.isFinite(position)&&position>0)sessionStorage.setItem(`komod-player-resume-${file.id}`,String(position));
+                sessionStorage.removeItem('komod-pack-preview-origin');
+                window.dispatchEvent(new CustomEvent('komod-pack-restore',{detail:{packId:origin.packId,fileId:origin.fileId}}));
+                onClose();
+                return;
+            }
+        } catch { sessionStorage.removeItem('komod-pack-preview-origin'); }
+        setMinimized(false);
+    };
     const cleanFileName = (extendedFile?.file_name || file.file_name).replace(/^[a-f\d]{24,}[-_. ]+/i, '').trim() || file.file_name;
     const queuePosition = hasQueue && queueIndex >= 0 ? queueIndex + 1 : 1;
     const queueLength = hasQueue ? playQueue.length : 1;
@@ -875,7 +889,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
             {/* Minimized Controls */}
             {isMinimized && (
                 <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-4 p-3 h-full">
-                    <div className="flex items-center gap-3 overflow-hidden flex-1 cursor-pointer" onClick={() => setMinimized(false)}>
+                    <div className="flex items-center gap-3 overflow-hidden flex-1 cursor-pointer" onClick={restoreFromMinimized}>
                          {/* Thumbnail/Icon */}
                         <div className="w-12 h-12 rounded-lg bg-dark-800 flex items-center justify-center flex-shrink-0 overflow-hidden border border-white/5 relative">
                             {authorizedThumbnailUrl && !thumbnailFailed ? (
@@ -907,7 +921,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
                     </div>
 
                     <div className="flex items-center gap-1 sm:gap-2 border-l border-white/10 pl-1 sm:pl-4">
-                         <button onClick={() => setMinimized(false)} className="p-2 text-dark-400 hover:text-white" title="بزرگ‌نمایی">
+                         <button onClick={restoreFromMinimized} className="p-2 text-dark-400 hover:text-white" title="بازگشت به جعبه">
                             <ChevronUp className="w-5 h-5" />
                         </button>
                         <button onClick={onClose} className="p-2 text-dark-400 hover:text-red-400" title="بستن">

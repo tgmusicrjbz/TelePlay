@@ -225,7 +225,7 @@ export const useAppStore = create<AppState>((set) => ({
         return { selectedFolderIds: newSet };
     }),
     clearSelection: () => set({ selectedFileIds: new Set(), selectedFolderIds: new Set() }),
-    selectAll: (fileIds, folderIds = []) => set({ 
+    selectAll: (fileIds, folderIds = []) => set({
         selectedFileIds: new Set(fileIds),
         selectedFolderIds: new Set(folderIds)
     }),
@@ -240,7 +240,7 @@ export const useAppStore = create<AppState>((set) => ({
     contentPreviewFile: null,
     isContentPreviewMinimized: false,
     contentPreviewHistory: [],
-    setContentPreviewFile: (file) => set(file ? { contentPreviewFile: file, isContentPreviewMinimized: false } : { contentPreviewFile: null, contentPreviewHistory: [], isContentPreviewMinimized: false }),
+    setContentPreviewFile: (file) => { if(!file)sessionStorage.removeItem('komod-pack-preview-origin'); set(file ? { contentPreviewFile: file, isContentPreviewMinimized: false } : { contentPreviewFile: null, contentPreviewHistory: [], isContentPreviewMinimized: false }); },
     setContentPreviewMinimized: (isContentPreviewMinimized) => set({isContentPreviewMinimized}),
     openLinkedContentFile: (file) => set((state) => ({
         contentPreviewFile: file,
