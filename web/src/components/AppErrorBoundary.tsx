@@ -22,6 +22,13 @@ export default class AppErrorBoundary extends React.Component<React.PropsWithChi
         }).then(async response=>{if(!response.ok)return;const data=await response.json();if(data.error_id&&data.error_id!==this.state.errorId)this.setState({errorId:data.error_id})}).catch(()=>undefined);
     }
 
+    private recover(path?: string) {
+        Object.keys(sessionStorage).filter(key => key.startsWith('komod-lazy-retry:')).forEach(key => sessionStorage.removeItem(key));
+        const target = path || `${window.location.pathname}${window.location.search}`;
+        const separator = target.includes('?') ? '&' : '?';
+        window.location.replace(`${target}${separator}recover=${Date.now()}`);
+    }
+
     render() {
         if (!this.state.failed) return this.props.children;
         const offline = !navigator.onLine || localStorage.getItem('komod-force-offline') === '1';
@@ -33,8 +40,8 @@ export default class AppErrorBoundary extends React.Component<React.PropsWithChi
                     <p className="mt-2 text-sm leading-7 text-dark-300">{offline ? 'اطلاعات ذخیره‌شده روی دستگاه سالمه. یک‌بار برنامه رو دوباره باز کن.' : 'برنامه رو دوباره باز کن؛ اطلاعاتت حذف نمی‌شه.'}</p>
                     <code dir="ltr" className="mt-3 inline-block rounded-lg bg-black/20 px-2 py-1 text-[11px] text-dark-400">{this.state.errorId}</code>
                     <div className="mt-5 grid grid-cols-2 gap-2">
-                        <button className="rounded-2xl bg-primary-500 px-4 py-3 text-sm font-semibold text-white" onClick={() => window.location.reload()}>تلاش دوباره</button>
-                        <button className="rounded-2xl bg-white/[.07] px-4 py-3 text-sm font-semibold" onClick={() => window.location.assign('/')}>رفتن به کمد</button>
+                        <button className="rounded-2xl bg-primary-500 px-4 py-3 text-sm font-semibold text-white" onClick={() => this.recover()}>تلاش دوباره</button>
+                        <button className="rounded-2xl bg-white/[.07] px-4 py-3 text-sm font-semibold" onClick={() => this.recover('/')}>بازگردانی کمد</button>
                     </div>
                 </section>
             </main>

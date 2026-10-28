@@ -15,6 +15,9 @@ async function walk(directory) {
 if (worker.includes('__KOMOD_BUILD_ASSETS__')) {
     throw new Error('Offline asset placeholder was not replaced.');
 }
+if (!worker.includes('previousShell') || !worker.includes("key.startsWith('komod-shell-')")) {
+    throw new Error('Service worker does not retain the previous shell for open offline clients.');
+}
 
 const cacheable = (await walk(path.join(root, 'assets')))
     .map(file => `/${path.relative(root, file).replace(/\\/g, '/')}`)

@@ -44,7 +44,11 @@ export default function PwaManager() {
                     scope: '/',
                     updateViaCache: 'none',
                 });
-                await registration.update();
+                await registration.update().catch(() => undefined);
+                await navigator.serviceWorker.ready;
+                // Ask the browser to avoid evicting downloaded media and the
+                // complete application shell under storage pressure.
+                await navigator.storage?.persist?.().catch(() => false);
                 if (registration.waiting) setWaitingWorker(registration.waiting);
                 registration.addEventListener('updatefound', () => {
                     const worker = registration.installing;

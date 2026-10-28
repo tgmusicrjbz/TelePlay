@@ -98,6 +98,24 @@ class LinkImportDurabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(parser.values["og:title"], "نمونه")
         self.assertEqual(parser.values["og:image"], "https://i.pinimg.com/a.jpg")
 
+    def test_pinterest_metadata_parser_reads_video_object_from_share_page(self):
+        parser = _PinterestMetaParser()
+        parser.feed('''<script data-test-id="video-snippet" type="application/ld+json">{
+            "@type":"VideoObject", "name":"Origami: Fox",
+            "contentUrl":"https://v1.pinimg.com/videos/example_720w.mp4",
+            "creator":{"@type":"Person","name":"AV. Origami"}
+        }</script>''')
+        self.assertEqual(parser.values["pinterest:video"], "https://v1.pinimg.com/videos/example_720w.mp4")
+        self.assertEqual(parser.values["pinterest:title"], "Origami: Fox")
+        self.assertEqual(parser.values["pinterest:author"], "AV. Origami")
+
+    def test_pinterest_metadata_parser_rejects_non_pinterest_video_object(self):
+        parser = _PinterestMetaParser()
+        parser.feed('''<script type="application/ld+json">{
+            "@type":"VideoObject", "contentUrl":"https://example.com/untrusted.mp4"
+        }</script>''')
+        self.assertNotIn("pinterest:video", parser.values)
+
     def test_pinterest_resource_prefers_mp4_over_cover_image(self):
         pin = {
             "images": {"orig": {"url": "https://i.pinimg.com/originals/cover.jpg", "width": 800, "height": 1200}},

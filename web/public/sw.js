@@ -1,4 +1,4 @@
-const CACHE_NAME = 'komod-shell-v18';
+const CACHE_NAME = 'komod-shell-v19';
 const COVER_CACHE = 'komod-covers-v3';
 const CORE_ASSETS = ['/', '/index.html', '/offline.html', '/manifest.webmanifest', '/komod.svg'];
 // Replaced with every emitted JS/CSS chunk by the Vite build plugin. Keeping
@@ -30,8 +30,18 @@ self.addEventListener('install', event => {
 
 self.addEventListener('activate', event => {
   event.waitUntil(
-    caches.keys()
-      .then(keys => Promise.all(keys.filter(key => (key.startsWith('komod-shell-') && key !== CACHE_NAME) || (key.startsWith('komod-covers-') && key !== COVER_CACHE)).map(key => caches.delete(key))))
+    caches.keys().then(keys => {
+      // Keep the immediately previous shell. An already-open client can still
+      // request one of its lazy chunks after a deployment; deleting that cache
+      // made Downloads/MediaPlayer crash whenever the network was unavailable.
+      const previousShell = keys
+        .filter(key => key.startsWith('komod-shell-') && key !== CACHE_NAME)
+        .sort((a, b) => Number((b.match(/v(\d+)$/) || [])[1] || 0) - Number((a.match(/v(\d+)$/) || [])[1] || 0))[0];
+      const keep = new Set([CACHE_NAME, previousShell, COVER_CACHE].filter(Boolean));
+      return Promise.all(keys.filter(key =>
+        ((key.startsWith('komod-shell-') || key.startsWith('komod-covers-')) && !keep.has(key))
+      ).map(key => caches.delete(key)));
+    })
       .then(() => self.clients.claim())
   );
 });

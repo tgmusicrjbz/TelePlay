@@ -71,15 +71,50 @@ class _PinterestMetaParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
         self.values: dict[str, str] = {}
+        self._json_ld_chunks: list[str] | None = None
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag.casefold() != "meta":
-            return
+        normalized_tag = tag.casefold()
         attributes = {str(key).casefold(): str(value or "") for key, value in attrs}
+        if normalized_tag == "script" and attributes.get("type", "").casefold() == "application/ld+json":
+            self._json_ld_chunks = []
+            return
+        if normalized_tag != "meta":
+            return
         key = (attributes.get("property") or attributes.get("name") or "").casefold()
         content = attributes.get("content", "").strip()
         if key and content and key not in self.values:
             self.values[key] = content
+
+    def handle_data(self, data: str) -> None:
+        if self._json_ld_chunks is not None:
+            self._json_ld_chunks.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.casefold() != "script" or self._json_ld_chunks is None:
+            return
+        raw = "".join(self._json_ld_chunks).strip()
+        self._json_ld_chunks = None
+        if not raw:
+            return
+        try:
+            payload = json.loads(raw)
+        except (TypeError, ValueError):
+            return
+        entries = payload if isinstance(payload, list) else [payload]
+        for entry in entries:
+            if not isinstance(entry, dict) or str(entry.get("@type") or "").casefold() != "videoobject":
+                continue
+            content_url = str(entry.get("contentUrl") or "").strip()
+            host = (urlparse(content_url).hostname or "").lower().rstrip(".")
+            if content_url and (host == "pinimg.com" or host.endswith(".pinimg.com")):
+                self.values.setdefault("pinterest:video", content_url)
+            title = str(entry.get("name") or "").strip()
+            if title:
+                self.values.setdefault("pinterest:title", title)
+            creator = entry.get("creator") or {}
+            if isinstance(creator, dict) and str(creator.get("name") or "").strip():
+                self.values.setdefault("pinterest:author", str(creator["name"]).strip())
 
 
 class _QuietYTDLPLogger:
@@ -202,9 +237,14 @@ def _download_public_media(url: str, directory: Path, stem: str, max_bytes: int 
         if size and size > max_bytes:
             raise RuntimeError("حجم این پین از سقف ۲۰۰ مگابایت بیشتر است.")
         content_type = (response.headers.get_content_type() or "application/octet-stream").lower()
-        if not (content_type.startswith("image/") or content_type.startswith("video/")):
+        source_extension = Path(urlparse(response.geturl()).path).suffix.casefold()
+        media_extensions = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".mp4", ".webm", ".mov", ".m4v"}
+        # Pinterest's CDN intermittently labels the same immutable MP4 as an
+        # octet stream. The host has already been allow-listed above, so its
+        # media extension is a safe and more stable fallback than rejecting it.
+        if not (content_type.startswith("image/") or content_type.startswith("video/") or source_extension in media_extensions):
             raise RuntimeError("پاسخ پینترست فایل تصویری یا ویدیویی نبود.")
-        extension = mimetypes.guess_extension(content_type) or Path(urlparse(response.geturl()).path).suffix or ".bin"
+        extension = source_extension if source_extension in media_extensions else mimetypes.guess_extension(content_type) or ".bin"
         if extension == ".jpe":
             extension = ".jpg"
         target = directory / f"{stem}{extension[:8]}"
@@ -223,27 +263,40 @@ def _download_pinterest(url: str) -> list[dict]:
     temp_dir = Path(tempfile.mkdtemp(prefix="komod-pinterest-"))
     try:
         source_host = (urlparse(url).hostname or "").lower().rstrip(".")
+        page_meta: dict[str, str] = {}
         if source_host == "pin.it":
-            canonical_url, _ = _read_pinterest_page(url)
+            canonical_url, page_meta = _read_pinterest_page(url)
         else:
             canonical_url = _validate_pinterest_pin_url(url)
-        title = "پین پینترست"
-        author: str | None = None
+        title = sanitize_filename(page_meta.get("pinterest:title") or page_meta.get("og:title") or "پین پینترست")[:220]
+        author: str | None = _clean_source_author(page_meta.get("pinterest:author"))
         local_path: Path | None = None
         media_type = "video"
         pin_data: dict | None = None
+        # Short share pages can contain the actual VideoObject while the old
+        # unauthenticated PinResource endpoint reports the same Idea Pin as a
+        # static cover. Prefer the page's explicit MP4 in that case.
+        page_video = page_meta.get("pinterest:video")
+        if page_video:
+            try:
+                local_path = _download_public_media(page_video, temp_dir, "pinterest")
+            except Exception:
+                logger.debug("Pinterest page MP4 was temporarily unavailable; trying extractors", exc_info=True)
         try:
             pin_data = _pinterest_pin_data(canonical_url)
-            title, author = _pinterest_title_and_author(pin_data, title)
-            video_url = _pinterest_video_url(pin_data)
-            if video_url:
-                local_path = _download_public_media(video_url, temp_dir, "pinterest")
-                media_type = "video"
-            elif not pin_data.get("is_video"):
-                image_url = _pinterest_image_url(pin_data)
-                if image_url:
-                    local_path = _download_public_media(image_url, temp_dir, "pinterest")
-                    media_type = "image"
+            resource_title, resource_author = _pinterest_title_and_author(pin_data, title)
+            title = title if page_meta.get("pinterest:title") else resource_title
+            author = author or resource_author
+            if local_path is None:
+                video_url = _pinterest_video_url(pin_data)
+                if video_url:
+                    local_path = _download_public_media(video_url, temp_dir, "pinterest")
+                    media_type = "video"
+                elif not pin_data.get("is_video") and not page_video:
+                    image_url = _pinterest_image_url(pin_data)
+                    if image_url:
+                        local_path = _download_public_media(image_url, temp_dir, "pinterest")
+                        media_type = "image"
         except Exception:
             logger.debug("Pinterest public resource was unavailable; trying yt-dlp", exc_info=True)
 
@@ -279,7 +332,7 @@ def _download_pinterest(url: str) -> list[dict]:
             if video_url:
                 media_type = "video"
                 local_path = _download_public_media(video_url, temp_dir, "pinterest")
-            elif pin_data.get("is_video"):
+            elif pin_data.get("is_video") or page_video:
                 raise RuntimeError("ویدیوی این پین در دسترس نیست؛ کمی بعد دوباره امتحان کن.")
             else:
                 image_url = _pinterest_image_url(pin_data)
@@ -291,7 +344,7 @@ def _download_pinterest(url: str) -> list[dict]:
             # A video Pin must never degrade to its OpenGraph cover. If the
             # public resource identified it as video, surface a retryable error
             # instead of silently saving the wrong file.
-            if pin_data and pin_data.get("is_video"):
+            if page_video or (pin_data and pin_data.get("is_video")):
                 local_path.unlink(missing_ok=True)
                 raise RuntimeError("فایل ویدیویی این پین آماده نشد؛ کاور عکس ذخیره نشد. کمی بعد دوباره امتحان کن.")
             media_type = "image"
