@@ -1,23 +1,25 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, lazy, Suspense, useContext, useEffect, useMemo, useState } from 'react';
 import { Activity, AlertTriangle, ArrowRight, AtSign, BookOpen, BrainCircuit, ChevronDown, ChevronLeft, AudioLines, Check, CheckCircle2, Copy, Database, Download, ExternalLink, FileStack, FileText, FoldVertical, FolderPlus, Gauge, Globe2, Grid2X2, HardDrive, Instagram, KeyRound, LayoutGrid, List, ListRestart, LockKeyhole, LogOut, MessageSquareText, MonitorSmartphone, Moon, MoreVertical, Palette, Pencil, Plus, RefreshCw, Search, Shield, Smartphone, Sun, Tags, Trash2, UnfoldVertical, UserRoundCog, Users, Warehouse, Wifi, WifiOff, XCircle } from 'lucide-react';
 import { AdminUser, Folder, PublicShareItem, TelegramFile, TwoFactorSetup, api, formatFileSize, formatIranTime, formatPersianDate, useAccountPreferences, useAddAdminUser, useAdminErrors, useAdminHealth, useAdminStats, useAdminUsers, useClearAdminErrors, useClearSecurityEvents, useCredentials, useCurrentUser, useDisableTwoFactor, useEnableTwoFactor, useFiles, useFolderTree, useGrantWorkspace, useLogoutAll, useLogoutOthers, usePublicShares, useRemoveAdminUser, useRemoveStorageChannel, useResetStorageChannel, useResolveAdminError, useRevokePublicShares, useRevokeSession, useRevokeWorkspace, useSecurityEvents, useSessions, useSetStorageChannel, useSetVaultPassword, useSetupTwoFactor, useStorageChannel, useStorageStats, useUnlockVault, useUpdateAccountPreferences, useUpdateAdminUser, useUpdateCredentials, useVaultStatus, useWorkspaceGrants, useWorkspaces } from '../lib/api';
 import { activateAccount, forgetAccount, savedAccounts, saveAuthenticatedAccount, syncCurrentAccount } from '../lib/accounts';
 import { applyAppearanceMode, applyCustomTheme, applyTheme, appearanceThemes, colorThemes, ActiveTheme, AppearanceMode, ColorTheme, getStoredAppearanceMode, getStoredTheme } from '../lib/theme';
 import CustomSelect from './CustomSelect';
-import TagSettingsPanel, { TagDisplaySettingsPanel } from './TagSettingsPanel';
-import TransferCenter from './TransferCenter';
-import TTSSettingsPanel from './TTSSettingsPanel';
-import MarkdownSettingsPanel from './MarkdownSettingsPanel';
-import LinkCaptionSettings from './LinkCaptionSettings';
-import CardDisplaySettings from './CardDisplaySettings';
-import DeliverySettingsPanel from './DeliverySettingsPanel';
-import BotMessagesSettings from './BotMessagesSettings';
-import AdminGroupsSettings from './AdminGroupsSettings';
-import AIModelsAdminPanel from './AIModelsAdminPanel';
-import InstagramInboxSettings from './InstagramInboxSettings';
-import HelpCenter from './HelpCenter';
 import { useAppStore } from '../lib/store';
 import { folderTreeLabel } from '../lib/folderTreeLabel';
+
+const TagSettingsPanel=lazy(()=>import('./TagSettingsPanel'));
+const TagDisplaySettingsPanel=lazy(()=>import('./TagSettingsPanel').then(module=>({default:module.TagDisplaySettingsPanel})));
+const TransferCenter=lazy(()=>import('./TransferCenter'));
+const TTSSettingsPanel=lazy(()=>import('./TTSSettingsPanel'));
+const MarkdownSettingsPanel=lazy(()=>import('./MarkdownSettingsPanel'));
+const LinkCaptionSettings=lazy(()=>import('./LinkCaptionSettings'));
+const CardDisplaySettings=lazy(()=>import('./CardDisplaySettings'));
+const DeliverySettingsPanel=lazy(()=>import('./DeliverySettingsPanel'));
+const BotMessagesSettings=lazy(()=>import('./BotMessagesSettings'));
+const AdminGroupsSettings=lazy(()=>import('./AdminGroupsSettings'));
+const AIModelsAdminPanel=lazy(()=>import('./AIModelsAdminPanel'));
+const InstagramInboxSettings=lazy(()=>import('./InstagramInboxSettings'));
+const HelpCenter=lazy(()=>import('./HelpCenter'));
 
 type SettingsView = 'home' | 'accounts' | 'security' | 'sessions' | 'access' | 'storage' | 'files' | 'links' | 'appearance' | 'markdown' | 'admin' | 'admin-users' | 'admin-groups' | 'admin-messages' | 'admin-captions' | 'admin-ai-models' | 'admin-instagram' | 'tags' | 'transfers' | 'tts' | 'help';
 type SettingsHomeLayout = 'cards' | 'list' | 'compact';
@@ -50,21 +52,28 @@ const settingsSearchIndex: Array<{view:SettingsView;title:string;text:string;adm
 
 export default function SettingsPage() {
     const setActiveSection = useAppStore(state => state.setActiveSection);
+    const [view, setView] = useState<SettingsView>(() => {
+        const target = localStorage.getItem('komod-settings-target') as SettingsView | null;
+        localStorage.removeItem('komod-settings-target');
+        if (target === 'tts') return 'tts';
+        const requested = new URLSearchParams(window.location.search).get('settings') as SettingsView | null;
+        return requested && settingsViews.includes(requested) ? requested : 'home';
+    });
     const { data: storage } = useStorageStats();
     const { data: user } = useCurrentUser();
-    const { data: sessions = [] } = useSessions();
-    const { data: securityEvents = [] } = useSecurityEvents();
+    const { data: sessions = [] } = useSessions(view==='sessions');
+    const { data: securityEvents = [] } = useSecurityEvents(view==='sessions');
     const clearSecurityEvents = useClearSecurityEvents();
-    const { data: workspaces = [] } = useWorkspaces();
-    const { data: folderTree = [] } = useFolderTree();
-    const { data: grants = [] } = useWorkspaceGrants();
-    const { data: adminUsers = [], isLoading: adminUsersLoading, isError: adminUsersError, refetch: refetchAdminUsers } = useAdminUsers(Boolean(user?.is_admin));
-    const { data: adminStats, isLoading: adminStatsLoading, refetch: refetchAdminStats } = useAdminStats(Boolean(user?.is_admin));
-    const { data: adminHealth, isLoading: adminHealthLoading, isError: adminHealthError, isFetching: adminHealthFetching, refetch: refetchAdminHealth } = useAdminHealth(Boolean(user?.is_admin));
-    const { data: accountPreferences } = useAccountPreferences();
-    const { data: storageChannel } = useStorageChannel();
-    const { data: credentials } = useCredentials();
-    const { data: vaultStatus } = useVaultStatus();
+    const { data: workspaces = [] } = useWorkspaces(view==='access');
+    const { data: folderTree = [] } = useFolderTree(false,view==='access');
+    const { data: grants = [] } = useWorkspaceGrants(view==='access');
+    const { data: adminUsers = [], isLoading: adminUsersLoading, isError: adminUsersError, refetch: refetchAdminUsers } = useAdminUsers(Boolean(user?.is_admin&&view==='admin-users'));
+    const { data: adminStats, isLoading: adminStatsLoading, refetch: refetchAdminStats } = useAdminStats(Boolean(user?.is_admin&&view==='admin'));
+    const { data: adminHealth, isLoading: adminHealthLoading, isError: adminHealthError, isFetching: adminHealthFetching, refetch: refetchAdminHealth } = useAdminHealth(Boolean(user?.is_admin&&view==='admin'));
+    const { data: accountPreferences } = useAccountPreferences(view==='storage');
+    const { data: storageChannel } = useStorageChannel(view==='storage');
+    const { data: credentials } = useCredentials(view==='security');
+    const { data: vaultStatus } = useVaultStatus(view==='security');
     const logoutAll = useLogoutAll();
     const logoutOthers = useLogoutOthers();
     const revokeSession = useRevokeSession();
@@ -83,13 +92,6 @@ export default function SettingsPage() {
     const updateAccountPreferences = useUpdateAccountPreferences();
     const setVaultPassword = useSetVaultPassword();
     const unlockVault = useUnlockVault();
-    const [view, setView] = useState<SettingsView>(() => {
-        const target = localStorage.getItem('komod-settings-target') as SettingsView | null;
-        localStorage.removeItem('komod-settings-target');
-        if (target === 'tts') return 'tts';
-        const requested = new URLSearchParams(window.location.search).get('settings') as SettingsView | null;
-        return requested && settingsViews.includes(requested) ? requested : 'home';
-    });
     const [theme, setTheme] = useState<ActiveTheme>(getStoredTheme);
     const [appearanceMode, setAppearanceMode] = useState<AppearanceMode>(getStoredAppearanceMode);
     const [forceOffline, setForceOffline] = useState(() => localStorage.getItem('komod-force-offline') === '1');
@@ -108,7 +110,7 @@ export default function SettingsPage() {
     const [sharePickerTab, setSharePickerTab] = useState<'folders' | 'files'>('folders');
     const [editingGrantId, setEditingGrantId] = useState<number|null>(null);
     const [selectingAllShareFiles, setSelectingAllShareFiles] = useState(false);
-    const { data: shareFileResults } = useFiles(undefined, undefined, shareFileSearch.trim() || '__no_file_selected__', 1);
+    const { data: shareFileResults } = useFiles(undefined, undefined, shareFileSearch.trim() || undefined, 1, '', false, false, false, false, false, view==='access'&&sharePickerOpen);
     const [accessMessage, setAccessMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
     const [adminQuery, setAdminQuery] = useState('');
     const [newAdminTelegramId, setNewAdminTelegramId] = useState('');
@@ -409,8 +411,8 @@ export default function SettingsPage() {
             <Card id="accounts-backup" icon={<Database/>} title="پشتیبان حساب" subtitle="کشوها، پلی‌لیست‌ها، تگ‌ها و اطلاعات فایل‌ها را جابه‌جا کن."><div className="mt-4 grid gap-2 sm:grid-cols-2"><button className="flex min-h-11 items-center justify-center gap-2 rounded-xl border border-primary-400/20 bg-primary-500/[.09] px-4 text-xs font-semibold text-primary-100 transition hover:bg-primary-500/15" onClick={async()=>{try{const response=await api.get('/accounts/export',{responseType:'blob'});const url=URL.createObjectURL(response.data);const anchor=document.createElement('a');anchor.href=url;anchor.download=`komod-backup-${user?.telegram_id||'account'}.json`;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch{useAppStore.getState().addToast('گرفتن نسخه پشتیبان انجام نشد.','error');}}}><Download className="h-4 w-4"/>گرفتن نسخه پشتیبان</button><label className={`flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-primary-400/20 bg-primary-500/[.09] px-4 text-xs font-semibold text-primary-100 transition hover:bg-primary-500/15 ${importingBackup?'pointer-events-none opacity-50':''}`}><RefreshCw className={`h-4 w-4 ${importingBackup?'animate-spin':''}`}/>{importingBackup?'در حال بازیابی…':'بازیابی نسخه'}<input type="file" accept="application/json,.json" className="hidden" onChange={event=>{void restoreBackup(event.target.files?.[0]);event.currentTarget.value='';}}/></label></div><p className="mt-3 text-xs leading-6 text-dark-500">رمزها و کلیدهای خصوصی داخل فایل پشتیبان قرار نمی‌گیرند.</p></Card>
         </div>}
 
-        {view === 'tags' && <TagSettingsPanel activeSection={selectedSubsection}/>}
-        {view === 'transfers' && <TransferCenter/>}
+        {view === 'tags' && <SettingsLazy><TagSettingsPanel activeSection={selectedSubsection}/></SettingsLazy>}
+        {view === 'transfers' && <SettingsLazy><TransferCenter/></SettingsLazy>}
 
         {view === 'security' && <div className="space-y-4"><Card id="security-login" icon={<KeyRound/>} title={credentials?.enabled?'تغییر اطلاعات ورود':'فعال‌کردن ورود مستقل'}><div className="mt-4 space-y-3"><label className="block text-xs text-dark-400">نام کاربری<input dir="rtl" autoComplete="username" value={credentialUsername} onChange={event=>setCredentialUsername(event.target.value.toLowerCase())} className="input mt-1.5 w-full text-right" placeholder="komod_user"/></label>{credentials?.enabled&&<label className="block text-xs text-dark-400">رمز فعلی<input dir="rtl" type="password" autoComplete="current-password" value={currentPassword} onChange={event=>setCurrentPassword(event.target.value)} className="input mt-1.5 w-full text-right" placeholder="برای تأیید تغییرات"/></label>}<div className="grid gap-3 sm:grid-cols-2"><label className="block text-xs text-dark-400">رمز جدید<input dir="rtl" type="password" autoComplete="new-password" value={newPassword} onChange={event=>setNewPassword(event.target.value)} className="input mt-1.5 w-full text-right" placeholder="حداقل ۸ نویسه"/></label><label className="block text-xs text-dark-400">تکرار رمز جدید<input dir="rtl" type="password" autoComplete="new-password" value={repeatPassword} onChange={event=>setRepeatPassword(event.target.value)} className="input mt-1.5 w-full text-right" placeholder="تکرار رمز"/></label></div><button disabled={updateCredentials.isPending||credentialUsername.trim().length<4||(!credentials?.enabled&&newPassword.length<8)||(credentials?.enabled&&!currentPassword)} onClick={()=>void saveCredentials()} className="btn-primary min-h-11 w-full disabled:opacity-50">{updateCredentials.isPending?'در حال ذخیره…':'ذخیره اطلاعات ورود'}</button>{credentialMessage&&<p className={`rounded-xl px-3 py-2 text-sm ${credentialMessage.kind==='ok'?'bg-emerald-500/10 text-emerald-300':'bg-red-500/10 text-red-300'}`}>{credentialMessage.text}</p>}</div></Card><Card id="security-vault" icon={<LockKeyhole/>} title="گاوصندوق فایل‌ها" subtitle="فایل‌ها و کشوهای مخفی بدون رمز در فهرست و API نمایش داده نمی‌شوند."><div className="mt-4 space-y-3"><input dir="rtl" type="password" value={vaultPassword} onChange={event=>setVaultPasswordValue(event.target.value)} className="input w-full text-right" placeholder={vaultStatus?.configured?'رمز گاوصندوق':'یک رمز حداقل ۶ نویسه‌ای'}/><div className="grid grid-cols-2 gap-2"><button disabled={vaultPassword.length<6||unlockVault.isPending} className="btn-secondary min-h-11 disabled:opacity-40" onClick={async()=>{try{await unlockVault.mutateAsync(vaultPassword);setVaultMessage({kind:'ok',text:'گاوصندوق برای این نشست باز شد.'});setVaultPasswordValue('');window.dispatchEvent(new Event('komod-vault-changed'));}catch(error:any){setVaultMessage({kind:'error',text:error?.response?.data?.detail||'رمز درست نیست.'});}}}>باز کردن</button><button disabled={vaultPassword.length<6||setVaultPassword.isPending} className="btn-primary min-h-11 disabled:opacity-40" onClick={async()=>{try{await setVaultPassword.mutateAsync(vaultPassword);setVaultMessage({kind:'ok',text:vaultStatus?.configured?'رمز گاوصندوق عوض شد.':'گاوصندوق فعال شد.'});setVaultPasswordValue('');window.dispatchEvent(new Event('komod-vault-changed'));}catch(error:any){setVaultMessage({kind:'error',text:error?.response?.data?.detail||'ذخیره رمز انجام نشد.'});}}}>{vaultStatus?.configured?'تغییر رمز':'ساخت گاوصندوق'}</button></div>{vaultMessage&&<p className={`rounded-xl px-3 py-2 text-sm ${vaultMessage.kind==='ok'?'bg-emerald-500/10 text-emerald-300':'bg-red-500/10 text-red-300'}`}>{vaultMessage.text}</p>}</div></Card><Card id="security-vault" icon={<Shield/>} title="محافظت از حساب"><ul className="mt-3 list-disc space-y-2 pr-5 text-sm leading-7 text-dark-400"><li>پس از پنج تلاش ناموفق، ورود ۱۵ دقیقه قفل می‌شود.</li><li>ورودهای هر دستگاه در بخش نشست‌ها قابل مشاهده و لغو هستند.</li><li>اگر رمز را فراموش کردی، ورود با تلگرام همچنان مسیر بازیابی امن است.</li></ul></Card></div>}
 
@@ -446,12 +448,12 @@ export default function SettingsPage() {
             {sharePickerOpen&&<SharingScopePicker folders={shareFolders} folderIds={shareFolderIds} setFolderIds={setShareFolderIds} fileIds={shareFileIds} setFileIds={setShareFileIds} fileSearch={shareFileSearch} setFileSearch={setShareFileSearch} files={shareFileResults?.files||[]} activeTab={sharePickerTab} setActiveTab={setSharePickerTab} selectingAll={selectingAllShareFiles} addAllFiles={addAllMatchingShareFiles} onClose={()=>setSharePickerOpen(false)}/>}
         </div>}
 
-        {view === 'tts' && <TTSSettingsPanel/>}
-        {view === 'admin-captions' && user?.is_admin && <DeliverySettingsPanel section="captions"/>}
-        {view === 'markdown' && <MarkdownSettingsPanel/>}
+        {view === 'tts' && <SettingsLazy><TTSSettingsPanel/></SettingsLazy>}
+        {view === 'admin-captions' && user?.is_admin && <SettingsLazy><DeliverySettingsPanel section="captions"/></SettingsLazy>}
+        {view === 'markdown' && <SettingsLazy><MarkdownSettingsPanel/></SettingsLazy>}
 
         {view === 'appearance' && <div className="space-y-4"><Card id="appearance-surface" icon={<Moon/>} title="پوسته برنامه" subtitle="زمینه و سطح کارت‌ها را انتخاب کن؛ رنگ اصلی جداگانه قابل تغییر است."><div className="mt-4 grid gap-2 sm:grid-cols-2">{(Object.entries(appearanceThemes) as [AppearanceMode, typeof appearanceThemes[AppearanceMode]][]).map(([key,item]) => <button key={key} onClick={()=>chooseAppearanceMode(key)} className={`group flex min-h-20 items-center gap-3 rounded-2xl border p-3 text-right transition ${appearanceMode===key?'border-primary-300/45 bg-primary-500/10 shadow-lg shadow-primary-950/15':'border-white/[.07] bg-dark-800/45 hover:border-white/15'}`}><span className="relative h-12 w-16 shrink-0 overflow-hidden rounded-xl border border-white/10 shadow-inner" style={{background:`linear-gradient(145deg, ${item.colors[0]}, ${item.colors[1]})`}}><span className="absolute bottom-2 right-2 h-3 w-8 rounded-full" style={{backgroundColor:item.colors[2]}}/><span className="absolute left-2 top-2 h-4 w-4 rounded-md bg-white/20"/></span><span className="min-w-0 flex-1"><strong className="block text-sm">{item.label}</strong><small className="mt-1 block text-[10px] leading-5 text-dark-500">{item.description}</small></span>{appearanceMode===key&&<Check className="h-4 w-4 shrink-0 text-primary-200"/>}</button>)}</div></Card><Card id="appearance-color" icon={<Palette/>} title="رنگ کمد" subtitle="یکی از رنگ‌های آماده را انتخاب کن یا رنگ خودت را با نام دلخواه بساز."><div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">{(Object.entries(colorThemes) as [ColorTheme, typeof colorThemes[ColorTheme]][]).map(([key,item]) => <button key={key} onClick={() => chooseTheme(key)} className={`flex min-h-12 items-center justify-between gap-2 rounded-2xl border px-3 transition ${theme===key?'border-primary-300/50 bg-primary-500/15 text-white shadow-lg shadow-primary-950/20':'border-white/[.07] bg-dark-800/60 text-dark-200 hover:border-white/15'}`}><span className="flex items-center gap-2"><span className="h-6 w-6 rounded-xl ring-2 ring-white/10" style={{backgroundColor:item.dot}}/>{item.label}</span>{theme===key&&<Check className="h-4 w-4 text-primary-200"/>}</button>)}</div></Card></div>}
-        {view === 'appearance' && <Card id="appearance-display" icon={<FileStack/>} title="موارد قابل نمایش" subtitle="اطلاعاتی را که روی فایل‌ها و کشوها می‌بینی انتخاب کن."><CardDisplaySettings><TagDisplaySettingsPanel/></CardDisplaySettings></Card>}
+        {view === 'appearance' && <Card id="appearance-display" icon={<FileStack/>} title="موارد قابل نمایش" subtitle="اطلاعاتی را که روی فایل‌ها و کشوها می‌بینی انتخاب کن."><SettingsLazy><CardDisplaySettings><TagDisplaySettingsPanel/></CardDisplaySettings></SettingsLazy></Card>}
 
 
 
@@ -461,9 +463,9 @@ export default function SettingsPage() {
 
         {view === 'files' && <Card id="files-links" icon={<Download/>} title="مقصد لینک‌ها" subtitle="برای هر سرویس کشوی پیش‌فرض جداگانه تعیین کن."><div className="mt-4 grid gap-3 sm:grid-cols-2"><CustomSelect label="لینک‌های یوتیوب" value={youtubeFolder} onChange={value=>{setYoutubeFolder(String(value));localStorage.setItem('komod-youtube-folder',String(value));}} options={[{value:'none',label:'هر بار انتخاب می‌کنم'},...incomingFolderOptions]}/><CustomSelect label="لینک‌های اینستاگرام" value={instagramFolder} onChange={value=>{setInstagramFolder(String(value));localStorage.setItem('komod-instagram-folder',String(value));}} options={[{value:'none',label:'هر بار انتخاب می‌کنم'},...incomingFolderOptions]}/><CustomSelect label="لینک‌های پینترست" value={pinterestFolder} onChange={value=>{setPinterestFolder(String(value));localStorage.setItem('komod-pinterest-folder',String(value));}} options={[{value:'none',label:'هر بار انتخاب می‌کنم'},...incomingFolderOptions]}/></div></Card>}
 
-        {view === 'files' && selectedSubsection === 'files-destinations' && <DeliverySettingsPanel section="destinations"/>}
-        {view === 'links' && selectedSubsection === 'links-caption' && <LinkCaptionSettings/>}
-        {view === 'links' && selectedSubsection === 'links-monitors' && <DeliverySettingsPanel section="monitors"/>}
+        {view === 'files' && selectedSubsection === 'files-destinations' && <SettingsLazy><DeliverySettingsPanel section="destinations"/></SettingsLazy>}
+        {view === 'links' && selectedSubsection === 'links-caption' && <SettingsLazy><LinkCaptionSettings/></SettingsLazy>}
+        {view === 'links' && selectedSubsection === 'links-monitors' && <SettingsLazy><DeliverySettingsPanel section="monitors"/></SettingsLazy>}
 
 
         {view === 'admin-users' && user?.is_admin && <div className="space-y-4">
@@ -490,14 +492,18 @@ export default function SettingsPage() {
                 </>}
             </section>}
         </div>}
-        {view === 'admin-messages' && user?.is_admin && <BotMessagesSettings/>}
-        {view === 'admin-ai-models' && user?.is_admin && <AIModelsAdminPanel/>}
-        {view === 'admin-instagram' && user?.is_admin && <InstagramInboxSettings/>}
-        {view === 'admin-groups' && user?.is_admin && <AdminGroupsSettings/>}
-        {view === 'help' && <HelpCenter isAdmin={Boolean(user?.is_admin)}/>}
+        {view === 'admin-messages' && user?.is_admin && <SettingsLazy><BotMessagesSettings/></SettingsLazy>}
+        {view === 'admin-ai-models' && user?.is_admin && <SettingsLazy><AIModelsAdminPanel/></SettingsLazy>}
+        {view === 'admin-instagram' && user?.is_admin && <SettingsLazy><InstagramInboxSettings/></SettingsLazy>}
+        {view === 'admin-groups' && user?.is_admin && <SettingsLazy><AdminGroupsSettings/></SettingsLazy>}
+        {view === 'help' && <SettingsLazy><HelpCenter isAdmin={Boolean(user?.is_admin)}/></SettingsLazy>}
 
         {confirmation && <div className="fixed inset-0 z-[180] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={() => setConfirmation(null)}><div className="w-full max-w-sm rounded-2xl border border-white/10 bg-dark-900 p-5" onClick={event=>event.stopPropagation()}><h2 className="text-lg font-bold">{confirmation==='all'?'خروج از همه دستگاه‌ها؟':'از این دستگاه خارج می‌شی؟'}</h2><p className="mt-2 text-sm text-dark-300">فایل‌ها و اطلاعات کمد حذف نمی‌شوند.</p><div className="mt-5 flex gap-2"><button className="flex-1 rounded-xl bg-red-500 px-4 py-2.5" onClick={() => confirmation==='all'?void logoutEverywhere():void logoutThisDevice()}>خروج</button><button className="btn-secondary flex-1" onClick={()=>setConfirmation(null)}>بی‌خیال</button></div></div></div>}
     </div></SettingsSectionContext.Provider>;
+}
+
+function SettingsLazy({children}:{children:React.ReactNode}) {
+    return <Suspense fallback={<div className="space-y-3" aria-label="در حال بارگذاری بخش تنظیمات"><div className="h-28 animate-pulse rounded-2xl border border-white/[.06] bg-dark-900/55"/><div className="h-20 animate-pulse rounded-2xl border border-white/[.06] bg-dark-900/40"/></div>}>{children}</Suspense>;
 }
 
 function viewTitle(view: SettingsView) { return ({ home:'تنظیمات', accounts:'حساب‌ها', security:'ورود و امنیت', sessions:'مدیریت نشست‌ها', access:'دسترسی و اشتراک‌گذاری', storage:'فضای ذخیره‌سازی', files:'فایل‌ها و مقصدها', links:'لینک‌ها و پایش', appearance:'ظاهر برنامه', markdown:'مطالعه و Markdown', admin:'گزارش و سلامت', 'admin-users':'مدیریت کاربران', 'admin-groups':'مدیریت گروه‌ها', 'admin-messages':'پیام‌های ربات', 'admin-captions':'متن خروجی فایل‌ها', 'admin-ai-models':'مدل‌های هوش مصنوعی', 'admin-instagram':'دریافت از اینستاگرام', tags:'مدیریت تگ‌ها', transfers:'مرکز انتقال‌ها', tts:'متن و صدا', help:'راهنمای کمد' })[view]; }

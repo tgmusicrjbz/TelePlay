@@ -460,15 +460,6 @@ export default function FileBrowser() {
         }
     }, [filesList, activeSection]);
 
-    // Fetch remaining pages sequentially in the background. This keeps each
-    // response small while making selection/search within a folder complete
-    // without forcing the user to scroll to the bottom first.
-    useEffect(()=>{
-        if(activeSection!=='files'||!hasMore||filesFetching||!filesList||filesList.page!==page)return;
-        const timer=window.setTimeout(()=>setPage(current=>current===page?current+1:current),140);
-        return()=>window.clearTimeout(timer);
-    },[activeSection,filesFetching,filesList,hasMore,page]);
-
     // Determine which files to show
     let displayFiles: TelegramFile[] | undefined;
     let isLoading = false;
@@ -1180,11 +1171,10 @@ export default function FileBrowser() {
     // Infinite scrolling
     useEffect(() => {
         const handleScroll = () => {
-            if (containerRef.current && !isLoading && hasMore && activeSection === 'files') {
+            if (containerRef.current && !isLoading && !filesFetching && hasMore && activeSection === 'files' && filesList?.page === page) {
                 const { scrollTop, scrollHeight, clientHeight } = containerRef.current;
                 if (scrollTop + clientHeight >= scrollHeight - 100) {
-                    // Load more files
-                    setPage(prev => prev + 1);
+                    setPage(current => current === page ? current + 1 : current);
                 }
             }
         };
@@ -1194,7 +1184,7 @@ export default function FileBrowser() {
             container.addEventListener('scroll', handleScroll);
             return () => container.removeEventListener('scroll', handleScroll);
         }
-    }, [isLoading, hasMore, activeSection]);
+    }, [isLoading, filesFetching, filesList?.page, hasMore, activeSection, page]);
 
     // Reset pagination when the query changes. Page-one data replaces the old list
     // when it arrives; clearing here could race with that response and hide results.
@@ -1769,7 +1759,7 @@ export default function FileBrowser() {
                     )}
 
                     {/* Loading indicator for infinite scroll */}
-                    {activeSection === 'files' && showFiles && isLoading && hasMore && (
+                    {activeSection === 'files' && showFiles && filesFetching && page > 1 && hasMore && (
                         <div className="flex justify-center py-4">
                             <div className="w-6 h-6 border-2 border-primary-500/30 border-t-primary-500 rounded-full animate-spin"></div>
                         </div>

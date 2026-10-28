@@ -14,7 +14,13 @@ const queryClient = new QueryClient({
     defaultOptions: {
         queries: {
             staleTime: 1000 * 60 * 5, // 5 minutes
+            gcTime: 1000 * 60 * 30,
             retry: 1,
+            // Telegram WebView fires focus repeatedly while sheets and native
+            // pickers open. Mutations already invalidate affected queries, so
+            // refetching every visible query on each focus only creates bursts.
+            refetchOnWindowFocus: false,
+            refetchOnReconnect: true,
         },
     },
 })

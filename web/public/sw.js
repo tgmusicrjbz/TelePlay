@@ -1,10 +1,18 @@
-const CACHE_NAME = 'komod-shell-v19';
-const COVER_CACHE = 'komod-covers-v3';
+const CACHE_NAME = 'komod-shell-v20';
+const COVER_CACHE = 'komod-covers-v4';
+const MAX_COVER_ENTRIES = 250;
 const CORE_ASSETS = ['/', '/index.html', '/offline.html', '/manifest.webmanifest', '/komod.svg'];
 // Replaced with every emitted JS/CSS chunk by the Vite build plugin. Keeping
 // this list in the service worker makes installation atomic: a new worker is
 // activated only after the complete application shell is available offline.
 const BUILD_ASSETS = /*__KOMOD_BUILD_ASSETS__*/ [];
+
+async function trimCache(cacheName, maximumEntries) {
+  const cache = await caches.open(cacheName);
+  const keys = await cache.keys();
+  if (keys.length <= maximumEntries) return;
+  await Promise.all(keys.slice(0, keys.length - maximumEntries).map(key => cache.delete(key)));
+}
 
 self.addEventListener('install', event => {
   event.waitUntil(
@@ -71,7 +79,9 @@ self.addEventListener('fetch', event => {
   const url = requestUrl;
   if (url.origin !== self.location.origin) return;
 
-  const isCoverRequest = request.destination === 'image' && url.pathname.startsWith('/api/stream/');
+  // Cache only small thumbnails. Full image/media streams can be very large and
+  // belong to the explicit offline-download store instead of the shell cache.
+  const isCoverRequest = request.destination === 'image' && /^\/api\/stream\/\d+\/thumbnail$/.test(url.pathname);
   if (isCoverRequest) {
     event.respondWith(
       caches.open(COVER_CACHE).then(async cache => {
@@ -81,8 +91,11 @@ self.addEventListener('fetch', event => {
         cacheUrl.searchParams.delete('token');
         const cacheKey = new Request(cacheUrl.toString(), { method: 'GET' });
         const cached = await cache.match(cacheKey);
-        const network = fetch(request).then(response => {
-          if (response.ok) cache.put(cacheKey, response.clone());
+        const network = fetch(request).then(async response => {
+          if (response.ok) {
+            await cache.put(cacheKey, response.clone());
+            await trimCache(COVER_CACHE, MAX_COVER_ENTRIES);
+          }
           return response;
         }).catch(() => cached);
         return cached || network;

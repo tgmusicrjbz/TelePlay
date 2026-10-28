@@ -556,7 +556,7 @@ export const useVerifyLoginCode = () => {
 
 // ============== Files Hooks ==============
 
-export const useFiles = (folderId?: number | null, fileType?: string, search?: string, page = 1, sort = '', favoriteOnly = false, includePlaylistCovers = false, includeHidden = false, hiddenOnly = false, allLevels = false) => {
+export const useFiles = (folderId?: number | null, fileType?: string, search?: string, page = 1, sort = '', favoriteOnly = false, includePlaylistCovers = false, includeHidden = false, hiddenOnly = false, allLevels = false, enabled = true) => {
     const cacheKey = libraryFileCacheKey(folderId,fileType,search,page,sort,favoriteOnly,includePlaylistCovers,includeHidden,hiddenOnly,allLevels);
     const cacheable = page === 1 && !search;
     return useQuery({
@@ -582,6 +582,7 @@ export const useFiles = (folderId?: number | null, fileType?: string, search?: s
         initialData: () => cacheable?readJsonCache<FileListResponse>(cacheKey):undefined,
         initialDataUpdatedAt: 0,
         staleTime: 30000,
+        enabled,
     });
 };
 
@@ -827,7 +828,7 @@ export const useFolders = (parentId?: number | null, sort = '', favoriteOnly = f
     });
 };
 
-export const useFolderTree = (includeHidden = false) => {
+export const useFolderTree = (includeHidden = false, enabled = true) => {
     const cacheKey=libraryFolderTreeCacheKey(includeHidden);
     return useQuery({
         queryKey: ['folderTree', includeHidden],
@@ -840,6 +841,7 @@ export const useFolderTree = (includeHidden = false) => {
         initialData:()=>readJsonCache<Folder[]>(cacheKey),
         initialDataUpdatedAt:0,
         staleTime: 60000,
+        enabled,
     });
 };
 
@@ -1121,9 +1123,11 @@ export const useRegisterAccount = () => useMutation({
     mutationFn: async (payload: { username: string; password: string; display_name:string }) => (await api.post<PasswordRegistrationResponse>('/auth/password/register', payload)).data,
 });
 
-export const useCredentials = () => useQuery({
+export const useCredentials = (enabled = true) => useQuery({
     queryKey: ['credentials'],
     queryFn: async () => (await api.get<CredentialsStatus>('/auth/credentials')).data,
+    enabled,
+    staleTime: 60_000,
 });
 
 export const useUpdateCredentials = () => {
@@ -1412,7 +1416,7 @@ export const useDeleteTags = () => {
     });
 };
 
-export const useSessions = () => useQuery({ queryKey: ['sessions'], queryFn: async () => (await api.get<AuthSession[]>('/auth/sessions')).data });
+export const useSessions = (enabled = true) => useQuery({ queryKey: ['sessions'], queryFn: async () => (await api.get<AuthSession[]>('/auth/sessions')).data, enabled, staleTime: 30_000 });
 export interface SecurityEvent {
     id: number;
     event_type: string;
@@ -1456,9 +1460,11 @@ export const useRevokePublicShares = () => { const queryClient=useQueryClient();
         queryClient.invalidateQueries({queryKey:['security-events']});
     },
 }); };
-export const useSecurityEvents = () => useQuery({
+export const useSecurityEvents = (enabled = true) => useQuery({
     queryKey: ['security-events'],
     queryFn: async () => (await api.get<SecurityEvent[]>('/accounts/security-events?limit=30')).data,
+    enabled,
+    staleTime: 30_000,
 });
 export const useClearSecurityEvents = () => { const queryClient=useQueryClient(); return useMutation({
     mutationFn: async () => (await api.delete('/accounts/security-events')).data,
@@ -1468,7 +1474,7 @@ export const useRevokeSession = () => {
     const queryClient = useQueryClient();
     return useMutation({ mutationFn: async (id: string) => api.delete(`/auth/sessions/${id}`), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['sessions'] }) });
 };
-export const useWorkspaces = () => useQuery({ queryKey: ['workspaces'], queryFn: async () => {
+export const useWorkspaces = (enabled = true) => useQuery({ queryKey: ['workspaces'], enabled, staleTime: 60_000, queryFn: async () => {
     const spaces = (await api.get<Workspace[]>('/accounts/workspaces')).data;
     const active = Number(localStorage.getItem('komod-active-workspace') || 0);
     const selected = spaces.find(space => space.user_id === active);
@@ -1476,7 +1482,7 @@ export const useWorkspaces = () => useQuery({ queryKey: ['workspaces'], queryFn:
     else localStorage.removeItem('komod-active-workspace-permission');
     return spaces;
 } });
-export const useWorkspaceGrants = () => useQuery({ queryKey: ['workspaceGrants'], queryFn: async () => (await api.get<Workspace[]>('/accounts/grants')).data });
+export const useWorkspaceGrants = (enabled = true) => useQuery({ queryKey: ['workspaceGrants'], queryFn: async () => (await api.get<Workspace[]>('/accounts/grants')).data, enabled, staleTime: 30_000 });
 export const useGrantWorkspace = () => {
     const queryClient = useQueryClient();
     return useMutation({ mutationFn: async (payload: { telegram_id?: number; identifier?: string; permission: 'read' | 'write'; folder_ids?: number[]; file_ids?: number[] }) => (await api.post<Workspace>('/accounts/grants', payload)).data, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['workspaceGrants'] }) });
@@ -1520,8 +1526,8 @@ export type AdminTelegramGroupUpdate = Partial<Pick<AdminTelegramGroup,'approved
 export const useAdminTelegramGroups = (enabled=true) => useQuery({queryKey:['adminTelegramGroups'],enabled,queryFn:async()=>(await api.get<AdminTelegramGroup[]>('/admin/groups')).data});
 export const useUpdateAdminTelegramGroup = () => {const queryClient=useQueryClient();return useMutation({mutationFn:async({chatId,payload}:{chatId:number;payload:AdminTelegramGroupUpdate})=>(await api.patch<AdminTelegramGroup>(`/admin/groups/${chatId}`,payload)).data,onSuccess:()=>queryClient.invalidateQueries({queryKey:['adminTelegramGroups']})})};
 export const useRemoveAdminTelegramGroup = () => {const queryClient=useQueryClient();return useMutation({mutationFn:async(chatId:number)=>(await api.delete(`/admin/groups/${chatId}`)).data,onSuccess:()=>queryClient.invalidateQueries({queryKey:['adminTelegramGroups']})})};
-export const useAccountPreferences = () => useQuery({ queryKey: ['accountPreferences'], queryFn: async () => (await api.get<AccountPreferences>('/accounts/preferences')).data });
-export const useVaultStatus = () => useQuery({ queryKey: ['vaultStatus'], queryFn: async () => (await api.get<VaultStatus>('/accounts/vault')).data });
+export const useAccountPreferences = (enabled = true) => useQuery({ queryKey: ['accountPreferences'], queryFn: async () => (await api.get<AccountPreferences>('/accounts/preferences')).data, enabled, staleTime: 60_000 });
+export const useVaultStatus = (enabled = true) => useQuery({ queryKey: ['vaultStatus'], queryFn: async () => (await api.get<VaultStatus>('/accounts/vault')).data, enabled, staleTime: 30_000 });
 export const useSetVaultPassword = () => {
     const queryClient = useQueryClient();
     return useMutation({
@@ -1547,7 +1553,7 @@ export const useUpdateAccountPreferences = () => {
         onSuccess: data => queryClient.setQueryData(['accountPreferences'], data),
     });
 };
-export const useStorageChannel = () => useQuery({ queryKey: ['storageChannel'], queryFn: async () => (await api.get<StorageChannel>('/accounts/storage-channel')).data });
+export const useStorageChannel = (enabled = true) => useQuery({ queryKey: ['storageChannel'], queryFn: async () => (await api.get<StorageChannel>('/accounts/storage-channel')).data, enabled, staleTime: 60_000 });
 export const useSetStorageChannel = () => { const queryClient=useQueryClient(); return useMutation({ mutationFn: async (channel_id:number)=>(await api.put<StorageChannel>('/accounts/storage-channel',{channel_id})).data, onSuccess:()=>queryClient.invalidateQueries({queryKey:['storageChannel']}) }); };
 export const useResetStorageChannel = () => { const queryClient=useQueryClient(); return useMutation({ mutationFn: async()=>api.delete('/accounts/storage-channel'), onSuccess:()=>queryClient.invalidateQueries({queryKey:['storageChannel']}) }); };
 export const useRemoveStorageChannel = () => { const queryClient=useQueryClient(); return useMutation({ mutationFn: async(channel_id:number)=>api.delete(`/accounts/storage-channel/${channel_id}`), onSuccess:()=>queryClient.invalidateQueries({queryKey:['storageChannel']}) }); };

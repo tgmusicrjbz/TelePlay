@@ -480,7 +480,11 @@ async def get_thumbnail(
             if file.thumbnail_file_id:
                 try:
                     thumb_bytes = await telegram.tg_client.download_media(file.thumbnail_file_id, in_memory=True)
-                    return Response(content=thumb_bytes.getvalue(), media_type="image/jpeg")
+                    return Response(
+                        content=thumb_bytes.getvalue(),
+                        media_type="image/jpeg",
+                        headers={"Cache-Control": "private, max-age=604800, stale-while-revalidate=2592000"},
+                    )
                 except Exception:
                     pass
             raise HTTPException(status_code=404, detail="Thumbnail not found in message")

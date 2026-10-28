@@ -351,6 +351,8 @@ class Folder(Base):
     # Indexes
     __table_args__ = (
         Index("idx_folder_user_parent", user_id, parent_id),
+        Index("idx_folder_user_parent_hidden_name", user_id, parent_id, is_hidden, name),
+        Index("idx_folder_user_cover", user_id, cover_file_id),
     )
 
 
@@ -426,6 +428,10 @@ class File(Base):
     __table_args__ = (
         Index("idx_file_user_folder", user_id, folder_id),
         Index("idx_file_type", file_type),
+        Index("idx_file_user_hidden_created", user_id, is_hidden, created_at),
+        Index("idx_file_user_folder_hidden_created", user_id, folder_id, is_hidden, created_at),
+        Index("idx_file_user_favorite_created", user_id, is_favorite, created_at),
+        Index("idx_file_user_type_created", user_id, file_type, created_at),
     )
 
 
