@@ -1,8 +1,9 @@
 /**
  * DeleteConfirmModal - confirmation dialog for deleting files/folders
  */
-import { X, Trash2 } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
 import { useState } from 'react';
+import ModalShell from './ModalShell';
 
 interface DeleteConfirmModalProps {
     type: 'file' | 'folder' | 'multiple';
@@ -28,20 +29,7 @@ export default function DeleteConfirmModal({ type, name, count = 1, onConfirm, o
         : <>از حذف <span className="inline break-all text-white font-medium">«{name}»</span> مطمئنی؟</>;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-            <div dir="rtl" className="w-full max-w-md overflow-hidden rounded-3xl border border-white/10 bg-dark-900 shadow-2xl animate-slide-up">
-                <div className="h-1 bg-gradient-to-l from-red-400 via-red-500 to-orange-400"/>
-                <div className="p-5 sm:p-6">
-                <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-lg font-semibold flex items-center gap-2 text-red-400">
-                        <Trash2 className="w-5 h-5" />
-                        {title}
-                    </h2>
-                    <button onClick={onClose} className="p-1 hover:bg-dark-700 rounded" aria-label="بستن پنجره حذف">
-                        <X className="w-5 h-5" />
-                    </button>
-                </div>
-
+        <ModalShell title={title} icon={<Trash2/>} onClose={onClose} danger zIndex={180}>
                 <div className="text-dark-300 mb-6">
                     <p className="max-w-full overflow-hidden break-words leading-7">{message}</p>
                     {includesFolder && <p className="mt-2 text-sm text-dark-400">می‌تونی فقط خود کشو را حذف کنی و محتویاتش را یک سطح بالاتر ببری، یا همه محتویات را هم پاک کنی.</p>}
@@ -54,8 +42,6 @@ export default function DeleteConfirmModal({ type, name, count = 1, onConfirm, o
                     {includesFolder && <button onClick={() => confirm(false)} disabled={isDeleting} className="min-h-11 rounded-xl border border-white/10 bg-dark-800 px-4 py-2 font-medium hover:bg-dark-700 disabled:opacity-50">فقط حذف کشو</button>}
                     <button onClick={onClose} className="min-h-11 rounded-xl px-4 py-2 text-dark-400 transition-colors hover:bg-white/[.04] hover:text-white sm:col-span-2">{isDeleting?'بستن و ادامه در پس‌زمینه':'بی‌خیال'}</button>
                 </div>
-                </div>
-            </div>
-        </div>
+        </ModalShell>
     );
 }

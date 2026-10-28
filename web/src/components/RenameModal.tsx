@@ -2,7 +2,8 @@
  * RenameModal - Modal for renaming files and folders
  */
 import { useState, useEffect, useRef } from 'react';
-import { X } from 'lucide-react';
+import { Pencil } from 'lucide-react';
+import ModalShell from './ModalShell';
 
 interface RenameModalProps {
     isOpen: boolean;
@@ -59,17 +60,7 @@ export default function RenameModal({ isOpen, onClose, onRename, currentName, it
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fadeIn">
-            <div className="bg-dark-800 rounded-xl border border-dark-600 p-6 w-full max-w-md shadow-2xl">
-                <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-lg font-semibold text-white">
-                        تغییر نام {itemType === 'file' ? 'فایل' : 'کشو'}
-                    </h2>
-                    <button onClick={onClose} className="text-dark-400 hover:text-white transition-colors">
-                        <X className="w-5 h-5" />
-                    </button>
-                </div>
-
+        <ModalShell title={`تغییر نام ${itemType === 'file' ? 'فایل' : 'کشو'}`} icon={<Pencil/>} onClose={onClose} zIndex={180}>
                 <form onSubmit={handleSubmit}>
                     <input
                         ref={inputRef}
@@ -77,29 +68,28 @@ export default function RenameModal({ isOpen, onClose, onRename, currentName, it
                         value={name}
                         onChange={(e) => setName(e.target.value)}
                         maxLength={255}
-                        className="w-full px-4 py-3 bg-dark-700 border border-dark-600 rounded-lg text-white placeholder-dark-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        className="input w-full"
                         placeholder={`نام ${itemType === 'file' ? 'فایل' : 'کشو'} را بنویس`}
                     />
-                    {error && <p className="mt-2 text-sm text-red-400" role="alert">{error}</p>}
+                    {error && <p className="mt-3 rounded-xl bg-red-500/10 px-3 py-2 text-sm text-red-300" role="alert">{error}</p>}
 
-                    <div className="flex gap-3 mt-6">
+                    <div className="mt-5 grid grid-cols-2 gap-2">
                         <button
                             type="button"
                             onClick={onClose}
-                            className="flex-1 px-4 py-2 bg-dark-700 hover:bg-dark-600 text-white rounded-lg transition-colors"
+                            className="btn-secondary"
                         >
                             لغو
                         </button>
                         <button
                             type="submit"
                             disabled={isSaving || !name.trim() || name.trim() === currentName}
-                            className="flex-1 px-4 py-2 bg-primary-600 hover:bg-primary-500 disabled:bg-dark-600 disabled:text-dark-400 text-white rounded-lg transition-colors"
+                            className="btn-primary disabled:opacity-50"
                         >
                             {isSaving ? 'در حال ذخیره…' : 'تغییر نام'}
                         </button>
                     </div>
                 </form>
-            </div>
-        </div>
+        </ModalShell>
     );
 }

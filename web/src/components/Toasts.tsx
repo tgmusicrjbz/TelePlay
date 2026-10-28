@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { X, CheckCircle, AlertCircle, Info } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 
@@ -17,15 +17,20 @@ export default function Toasts() {
 
 function ToastItem({ toast, onDismiss }: { toast: { id: string; message: string; type: 'success' | 'error' | 'info' }; onDismiss: () => void }) {
     const [leaving, setLeaving] = useState(false);
+    const dismissRef = useRef(onDismiss);
+    const dismissedRef = useRef(false);
+    useEffect(() => { dismissRef.current = onDismiss; }, [onDismiss]);
     const dismiss = useCallback(() => {
+        if (dismissedRef.current) return;
+        dismissedRef.current = true;
         setLeaving(true);
-        setTimeout(onDismiss, 180);
-    }, [onDismiss]);
+        setTimeout(() => dismissRef.current(), 180);
+    }, []);
     useEffect(() => {
         const timer = setTimeout(dismiss, toast.type === 'error' ? 4800 : toast.type === 'info' ? 2800 : 2300);
 
         return () => clearTimeout(timer);
-    }, [dismiss]);
+    }, [dismiss, toast.id, toast.type]);
 
     const getIcon = () => {
         switch (toast.type) {
@@ -35,16 +40,12 @@ function ToastItem({ toast, onDismiss }: { toast: { id: string; message: string;
         }
     };
 
-    const getBgColor = () => {
-         switch (toast.type) {
-            case 'success': return 'border-emerald-400/20 bg-dark-900/95';
-            case 'error': return 'border-red-400/25 bg-dark-900/95';
-            default: return 'border-sky-400/20 bg-dark-900/95';
-        }
-    };
+    const tone = toast.type === 'success' ? 'border-emerald-400/25' : toast.type === 'error' ? 'border-red-400/30' : 'border-sky-400/25';
+    const bar = toast.type === 'success' ? 'bg-emerald-400' : toast.type === 'error' ? 'bg-red-400' : 'bg-sky-400';
 
     return (
-        <div dir="rtl" className={`pointer-events-auto flex min-h-12 items-center gap-2.5 rounded-2xl border px-3 py-2.5 shadow-2xl shadow-black/25 backdrop-blur-xl transition-all duration-200 ease-out ${leaving ? '-translate-y-2 opacity-0 scale-[.98] md:translate-y-2' : 'animate-slide-up opacity-100'} ${getBgColor()}`}>
+        <div dir="rtl" role={toast.type === 'error' ? 'alert' : 'status'} className={`app-toast pointer-events-auto relative flex min-h-14 items-center gap-2.5 overflow-hidden rounded-2xl border px-3 py-2.5 ${tone} ${leaving ? '-translate-y-2 opacity-0 md:translate-y-2' : 'animate-slide-up opacity-100'}`}>
+            <span className={`absolute inset-y-2 right-0 w-0.5 rounded-full ${bar}`} />
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white/[.05]">{getIcon()}</span>
             <p className="min-w-0 flex-1 text-right text-xs font-medium leading-6 text-dark-100">{toast.message}</p>
             <button 

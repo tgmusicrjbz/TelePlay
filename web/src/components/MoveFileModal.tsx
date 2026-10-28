@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { X, Folder as FolderIcon, ChevronRight, Home, Plus } from 'lucide-react';
 import { useFolderTree, TelegramFile, Folder, useMoveFiles, useMoveFolders, useCreateFolder } from '../lib/api';
 import { useAppStore } from '../lib/store';
+import ModalShell from './ModalShell';
 
 interface MoveFileModalProps {
     items: { files: TelegramFile[]; folders: Folder[] };
@@ -69,20 +70,8 @@ export default function MoveFileModal({ items, onClose }: MoveFileModalProps) {
     };
 
     return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
-            <div className="glass-card w-full max-w-md p-6 animate-scale-in">
-                <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-lg font-semibold">جابه‌جایی {totalItems.toLocaleString('fa-IR')} مورد</h2>
-                    <button onClick={onClose} className="p-1 hover:bg-dark-700 rounded">
-                        <X className="w-5 h-5" />
-                    </button>
-                </div>
-
-                <p className="text-sm text-dark-400 mb-4 truncate">
-                    کشوی مقصد را انتخاب کن
-                </p>
-
-                <div className="bg-dark-800 rounded-lg max-h-64 overflow-y-auto mb-4 custom-scrollbar">
+        <ModalShell title={`جابه‌جایی ${totalItems.toLocaleString('fa-IR')} مورد`} subtitle="کشوی مقصد را انتخاب کن" icon={<FolderIcon/>} onClose={onClose} zIndex={180}>
+                <div className="mb-4 max-h-64 overflow-y-auto rounded-2xl border border-white/[.07] bg-dark-950/35 custom-scrollbar">
                     {/* Root option */}
                     <button
                         onClick={() => setSelectedId(null)}
@@ -111,17 +100,17 @@ export default function MoveFileModal({ items, onClose }: MoveFileModalProps) {
 
                 {creatingFolder?<div className="mb-4 flex gap-2 rounded-xl border border-primary-400/15 bg-primary-500/[.05] p-2"><input autoFocus dir="auto" className="input min-w-0 flex-1 text-right" value={folderName} onChange={event=>setFolderName(event.target.value)} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();void handleCreateFolder()}}} placeholder="نام کشوی تازه"/><button disabled={!folderName.trim()||createFolder.isPending} className="btn-primary shrink-0 px-3 text-xs" onClick={()=>void handleCreateFolder()}>{createFolder.isPending?'…':'ساخت'}</button><button className="btn-icon shrink-0" onClick={()=>setCreatingFolder(false)}><X className="h-4 w-4"/></button></div>:<button type="button" onClick={()=>setCreatingFolder(true)} className="mb-4 flex min-h-10 w-full items-center justify-center gap-2 rounded-xl border border-primary-400/15 bg-primary-500/[.06] text-sm text-primary-200"><Plus className="h-4 w-4"/>ساخت کشوی تازه در مقصد فعلی</button>}
 
-                <div className="flex justify-end gap-3">
+                <div className="grid grid-cols-2 gap-2">
                     <button
                         onClick={onClose}
-                        className="px-4 py-2 text-dark-400 hover:text-white transition-colors"
+                        className="btn-secondary"
                     >
                         لغو
                     </button>
                     <button
                         onClick={handleMove}
                         disabled={isPending}
-                        className="px-4 py-2 bg-primary-600 hover:bg-primary-700 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                        className="btn-primary flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                         {isPending ? (
                             <>
@@ -133,8 +122,7 @@ export default function MoveFileModal({ items, onClose }: MoveFileModalProps) {
                         )}
                     </button>
                 </div>
-            </div>
-        </div>
+        </ModalShell>
     );
 }
 

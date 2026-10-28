@@ -26,7 +26,6 @@ export function LoadingState({ label = 'در حال بارگذاری…', classN
     return (
         <div className={`flex min-h-52 w-full flex-col items-center justify-center rounded-3xl border border-white/[.07] bg-dark-900/45 px-6 text-center ${className}`} role="status" aria-live="polite">
             <span className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-primary-500/10 text-primary-300">
-                <span className="absolute inset-0 animate-ping rounded-2xl bg-primary-500/10 motion-reduce:hidden" />
                 <Loader2 className="relative h-6 w-6 animate-spin motion-reduce:animate-none" />
             </span>
             <span className="mt-4 text-sm font-medium text-dark-300">{label}</span>

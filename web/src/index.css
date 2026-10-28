@@ -129,7 +129,7 @@ body {
     radial-gradient(circle at 85% -10%, rgb(var(--primary-700) / .13), transparent 34rem),
     radial-gradient(circle at -10% 90%, rgb(14 165 233 / .07), transparent 30rem),
     linear-gradient(145deg, rgb(var(--dark-900)) 0%, rgb(var(--dark-950)) 72%);
-  background-attachment: fixed;
+  background-attachment: scroll;
   color: #f8fafc;
 }
 
@@ -163,20 +163,20 @@ body {
    ============================================ */
 
 .glass {
-  @apply backdrop-blur-xl border;
+  @apply border;
   background: var(--surface-soft);
   border-color: var(--surface-border);
 }
 
 .glass-card {
-  @apply rounded-2xl border backdrop-blur-xl;
+  @apply rounded-2xl border;
   background: linear-gradient(145deg, rgb(var(--dark-800) / .58), rgb(var(--dark-900) / .72));
   border-color: var(--surface-border);
   box-shadow: inset 0 1px 0 rgb(var(--app-white) / .025);
 }
 
 .glass-panel {
-  @apply rounded-2xl border backdrop-blur-2xl;
+  @apply rounded-2xl border;
   background: var(--surface-strong);
   border-color: var(--surface-border);
   box-shadow: var(--surface-shadow);
@@ -340,24 +340,62 @@ input[dir="ltr"], textarea[dir="ltr"], select[dir="ltr"] {
 .library-card {
   position: relative;
   isolation: isolate;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 116px;
   border: 1px solid var(--surface-border);
   background:
     linear-gradient(145deg, rgb(var(--dark-800) / .48), rgb(var(--dark-900) / .76));
-  box-shadow: 0 10px 28px rgb(0 0 0 / .1), inset 0 1px 0 rgb(var(--app-white) / .025);
-  transition: transform .22s ease, border-color .22s ease, background-color .22s ease, box-shadow .22s ease;
+  box-shadow: inset 0 1px 0 rgb(var(--app-white) / .025);
+  transition: border-color .18s ease, background-color .18s ease, box-shadow .18s ease;
 }
 
-.library-card:hover {
-  border-color: var(--surface-border-hover);
-  box-shadow: 0 16px 36px rgb(0 0 0 / .17), inset 0 1px 0 rgb(var(--app-white) / .035);
-  transform: translateY(-2px);
+@media (hover: hover) and (pointer: fine) {
+  .library-card:hover {
+    border-color: var(--surface-border-hover);
+    box-shadow: 0 8px 22px rgb(0 0 0 / .14), inset 0 1px 0 rgb(var(--app-white) / .035);
+    transform: translateY(-1px);
+  }
 }
 
 .library-card[data-selected="true"] {
   border-color: rgb(var(--primary-400) / .48);
   background: linear-gradient(145deg, rgb(var(--primary-500) / .14), rgb(var(--dark-900) / .82));
-  box-shadow: 0 0 0 2px rgb(var(--primary-500) / .12), 0 16px 34px rgb(var(--primary-950) / .14);
+  box-shadow: 0 0 0 2px rgb(var(--primary-500) / .12);
 }
+
+.modal-backdrop {
+  background: rgb(0 0 0 / .64);
+  animation: modal-fade-in .16s ease-out both;
+}
+
+.modal-surface {
+  border: 1px solid var(--surface-border);
+  background: var(--surface-strong);
+  box-shadow: 0 24px 64px rgb(0 0 0 / .34), inset 0 1px 0 rgb(var(--app-white) / .045);
+  animation: modal-rise-in .2s cubic-bezier(.2,.8,.2,1) both;
+}
+
+.select-trigger {
+  border: 1px solid var(--surface-border);
+  background: var(--surface-raised);
+  box-shadow: inset 0 1px 0 rgb(var(--app-white) / .025);
+}
+
+.select-popover {
+  border: 1px solid var(--surface-border);
+  background: rgb(var(--dark-900) / .985);
+  box-shadow: 0 18px 48px rgb(0 0 0 / .32), inset 0 1px 0 rgb(var(--app-white) / .045);
+  animation: modal-rise-in .14s ease-out both;
+}
+
+.app-toast {
+  background: rgb(var(--dark-900) / .985);
+  box-shadow: 0 14px 40px rgb(0 0 0 / .28), inset 0 1px 0 rgb(var(--app-white) / .045);
+  transition: opacity .18s ease, transform .18s ease;
+}
+
+@keyframes modal-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes modal-rise-in { from { opacity: 0; transform: translateY(8px) scale(.985); } to { opacity: 1; transform: none; } }
 
 .context-menu-item:first-child {
   @apply rounded-t-lg;

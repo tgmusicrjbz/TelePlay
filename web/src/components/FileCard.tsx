@@ -99,7 +99,7 @@ export default function FileCard({
     if (viewMode === 'list') {
         return (
             <div
-                className={`library-card relative flex items-center gap-4 rounded-2xl p-3 cursor-pointer animate-slide-up active:scale-[0.99]
+                className={`library-card relative flex items-center gap-4 rounded-2xl p-3 cursor-pointer active:scale-[0.99]
                     ${selected
                         ? 'text-primary-100'
                         : ''
@@ -179,7 +179,7 @@ export default function FileCard({
     const dense = viewMode === 'dense';
     return (
         <div
-            className={`library-card ${dense ? 'p-2' : 'p-3'} rounded-2xl cursor-pointer group relative animate-scale-in select-none
+            className={`library-card ${dense ? 'p-2' : 'p-3'} rounded-2xl cursor-pointer group relative select-none
                 ${selected
                     ? 'text-primary-100'
                     : ''

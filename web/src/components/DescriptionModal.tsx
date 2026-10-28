@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlignLeft, AtSign, Eye, Hash, ImagePlus, Link, Link2, Pencil, Sparkles, X } from 'lucide-react';
+import { AlignLeft, AtSign, Eye, Hash, ImagePlus, Link, Link2, Pencil, Sparkles } from 'lucide-react';
 import InternalFileLinkPicker from './InternalFileLinkPicker';
 import MarkdownContent from './MarkdownContent';
 import { getMarkdownSettings } from '../lib/markdownSettings';
 import { api, TelegramFile } from '../lib/api';
+import ModalShell from './ModalShell';
 
 interface DescriptionModalProps {
     isOpen: boolean;
@@ -57,16 +58,9 @@ export default function DescriptionModal({ isOpen, itemType, currentDescription,
         await persist(description);
     };
 
-    return (
-        <div className="fixed inset-0 z-[100000] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-            <form onSubmit={submit} className="glass-card w-full max-w-lg p-6 animate-slide-up">
-                <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-lg font-semibold flex items-center gap-2">
-                        <AlignLeft className="w-5 h-5 text-primary-400" />
-                        {preview ? 'پیش‌نمایش' : currentDescription ? 'ویرایش' : 'افزودن'} توضیحات {itemType === 'file' ? 'فایل' : 'کشو'}
-                    </h2>
-                    <button type="button" onClick={onClose} className="p-1 hover:bg-dark-700 rounded"><X className="w-5 h-5" /></button>
-                </div>
+    return (<>
+        <ModalShell title={`${preview ? 'پیش‌نمایش' : currentDescription ? 'ویرایش' : 'افزودن'} توضیحات ${itemType === 'file' ? 'فایل' : 'کشو'}`} icon={<AlignLeft/>} onClose={onClose} width="lg" zIndex={100000}>
+            <form onSubmit={submit}>
                 <div className="mb-2 flex items-center gap-1 rounded-xl border border-white/[.06] bg-white/[.025] p-1">{!preview&&<><button type="button" className="btn-icon h-9 w-9" title="پیوند وب" onClick={()=>insertLink('عنوان لینک','https://')}><Link className="h-4 w-4"/></button><button type="button" className="btn-icon h-9 w-9" title="تصویر از نشانی وب" onClick={()=>{const input=textareaRef.current;if(!input)return;const start=input.selectionStart,end=input.selectionEnd,alt=description.slice(start,end)||'تصویر',value=`![${alt}](https://)`;setDescription(`${description.slice(0,start)}${value}${description.slice(end)}`)}}><ImagePlus className="h-4 w-4"/></button><button type="button" className="btn-icon h-9 w-9" title="پیوند به فایل کمد" onClick={()=>setShowFilePicker(true)}><Link2 className="h-4 w-4"/></button></>}<span className="mr-1 min-w-0 flex-1 text-xs text-dark-500">{preview?'نمایش نهایی متن، پیوندها و رسانه‌ها':'پیوند یا تصویر را در محل نشانگر بگذار'}</span><button type="button" onClick={()=>setPreview(value=>!value)} className={`flex h-9 items-center gap-1 rounded-lg px-2 text-xs ${preview?'bg-primary-500/15 text-primary-100':'text-dark-300'}`}>{preview?<Pencil className="h-3.5 w-3.5"/>:<Eye className="h-3.5 w-3.5"/>}{preview?'ویرایش':'پیش‌نمایش'}</button></div>{preview?<DescriptionPreview content={description}/>:<textarea
                     ref={textareaRef}
                     value={description}
@@ -101,9 +95,9 @@ export default function DescriptionModal({ isOpen, itemType, currentDescription,
                     </button>}
                 </div>
             </form>
-            {showFilePicker&&<InternalFileLinkPicker onClose={()=>setShowFilePicker(false)} onSelect={file=>{const input=textareaRef.current;if(file.file_type==='image'&&input){const start=input.selectionStart,end=input.selectionEnd,alt=description.slice(start,end)||file.file_name,value=`![${alt}](/api/stream/${file.id})`;setDescription(`${description.slice(0,start)}${value}${description.slice(end)}`)}else insertLink(file.file_name,`komod://file/${file.id}`);setShowFilePicker(false)}}/>}
-        </div>
-    );
+        </ModalShell>
+        {showFilePicker&&<InternalFileLinkPicker onClose={()=>setShowFilePicker(false)} onSelect={file=>{const input=textareaRef.current;if(file.file_type==='image'&&input){const start=input.selectionStart,end=input.selectionEnd,alt=description.slice(start,end)||file.file_name,value=`![${alt}](/api/stream/${file.id})`;setDescription(`${description.slice(0,start)}${value}${description.slice(end)}`)}else insertLink(file.file_name,`komod://file/${file.id}`);setShowFilePicker(false)}}/>}
+    </>);
 }
 
 function DescriptionPreview({content}:{content:string}){
