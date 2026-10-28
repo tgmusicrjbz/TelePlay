@@ -109,6 +109,15 @@ class LinkImportDurabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(_pinterest_video_url(pin), "https://v1.pinimg.com/video.mp4")
         self.assertEqual(_pinterest_image_url(pin), "https://i.pinimg.com/originals/cover.jpg")
 
+    def test_pinterest_video_search_supports_nested_idea_pin_blocks(self):
+        pin = {"story_pin_data": {"pages": [{"layout": {"blocks": [{"media": {
+            "video_list": {
+                "small": {"url": "https://v1.pinimg.com/small.mp4", "width": 360, "height": 640},
+                "large": {"url": "https://v1.pinimg.com/large.mp4", "width": 1080, "height": 1920},
+            }
+        }}]}}]}}
+        self.assertEqual(_pinterest_video_url(pin), "https://v1.pinimg.com/large.mp4")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -135,6 +135,24 @@ def _pinterest_video_url(data: dict) -> str | None:
             video_list = (((block.get("video") or {}).get("video_list")) if isinstance(block, dict) else None) or {}
             if isinstance(video_list, dict):
                 video_lists.append(video_list)
+    # Pinterest has changed the nesting of Idea Pin blocks several times.
+    # Walk the public resource as well so a valid MP4 is not missed merely
+    # because it moved below a newer block/container key.
+    pending: list[object] = [data]
+    visited: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if isinstance(current, dict):
+            identity = id(current)
+            if identity in visited:
+                continue
+            visited.add(identity)
+            nested_list = current.get("video_list")
+            if isinstance(nested_list, dict):
+                video_lists.append(nested_list)
+            pending.extend(current.values())
+        elif isinstance(current, list):
+            pending.extend(current)
     candidates: list[tuple[int, str]] = []
     for video_list in video_lists:
         for format_data in video_list.values():
@@ -205,40 +223,56 @@ def _download_pinterest(url: str) -> list[dict]:
     temp_dir = Path(tempfile.mkdtemp(prefix="komod-pinterest-"))
     try:
         source_host = (urlparse(url).hostname or "").lower().rstrip(".")
-        metadata: dict[str, str] = {}
         if source_host == "pin.it":
-            canonical_url, metadata = _read_pinterest_page(url)
+            canonical_url, _ = _read_pinterest_page(url)
         else:
             canonical_url = _validate_pinterest_pin_url(url)
         title = "پین پینترست"
         author: str | None = None
         local_path: Path | None = None
         media_type = "video"
+        pin_data: dict | None = None
         try:
-            from yt_dlp import YoutubeDL
-            options = {
-                "quiet": True, "no_warnings": True, "noplaylist": True,
-                "noprogress": True, "logger": _QuietYTDLPLogger(),
-                "format": "best[filesize<200M]/best",
-                "outtmpl": str(temp_dir / "%(id)s.%(ext)s"),
-                "max_filesize": PINTEREST_MAX_BYTES,
-                "socket_timeout": 30, "retries": 2,
-            }
-            with YoutubeDL(options) as downloader:
-                info = downloader.extract_info(canonical_url, download=True) or {}
-                candidate = Path(downloader.prepare_filename(info))
-                local_path = candidate if candidate.exists() else next((path for path in temp_dir.iterdir() if path.is_file()), None)
-                title = sanitize_filename(str(info.get("title") or info.get("description") or title).splitlines()[0])[:220]
-                author = _clean_source_author(info.get("uploader") or info.get("creator") or info.get("uploader_id"))
+            pin_data = _pinterest_pin_data(canonical_url)
+            title, author = _pinterest_title_and_author(pin_data, title)
+            video_url = _pinterest_video_url(pin_data)
+            if video_url:
+                local_path = _download_public_media(video_url, temp_dir, "pinterest")
+                media_type = "video"
+            elif not pin_data.get("is_video"):
+                image_url = _pinterest_image_url(pin_data)
+                if image_url:
+                    local_path = _download_public_media(image_url, temp_dir, "pinterest")
+                    media_type = "image"
         except Exception:
-            logger.debug("Pinterest video extraction was unavailable; trying public page media", exc_info=True)
+            logger.debug("Pinterest public resource was unavailable; trying yt-dlp", exc_info=True)
+
+        if local_path is None:
+            try:
+                from yt_dlp import YoutubeDL
+                options = {
+                    "quiet": True, "no_warnings": True, "noplaylist": True,
+                    "noprogress": True, "logger": _QuietYTDLPLogger(),
+                    "format": "best[filesize<200M]/best",
+                    "outtmpl": str(temp_dir / "%(id)s.%(ext)s"),
+                    "max_filesize": PINTEREST_MAX_BYTES,
+                    "socket_timeout": 30, "retries": 2,
+                }
+                with YoutubeDL(options) as downloader:
+                    info = downloader.extract_info(canonical_url, download=True) or {}
+                    candidate = Path(downloader.prepare_filename(info))
+                    local_path = candidate if candidate.exists() else next((path for path in temp_dir.iterdir() if path.is_file()), None)
+                    title = sanitize_filename(str(info.get("title") or info.get("description") or title).splitlines()[0])[:220]
+                    author = _clean_source_author(info.get("uploader") or info.get("creator") or info.get("uploader_id"))
+            except Exception:
+                logger.debug("Pinterest yt-dlp extraction was unavailable", exc_info=True)
 
         if local_path is None:
             # A Pinterest page's OpenGraph media is usually a cover image even
             # for a video Pin. Ask the Pin resource itself before choosing a
             # fallback, otherwise a temporary yt-dlp error silently saves the
             # wrong media type.
-            pin_data = _pinterest_pin_data(canonical_url)
+            pin_data = pin_data or _pinterest_pin_data(canonical_url)
             title, api_author = _pinterest_title_and_author(pin_data, title)
             author = author or api_author
             video_url = _pinterest_video_url(pin_data)
@@ -254,6 +288,12 @@ def _download_pinterest(url: str) -> list[dict]:
                 media_type = "image"
                 local_path = _download_public_media(image_url, temp_dir, "pinterest")
         elif local_path.suffix.casefold() in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
+            # A video Pin must never degrade to its OpenGraph cover. If the
+            # public resource identified it as video, surface a retryable error
+            # instead of silently saving the wrong file.
+            if pin_data and pin_data.get("is_video"):
+                local_path.unlink(missing_ok=True)
+                raise RuntimeError("فایل ویدیویی این پین آماده نشد؛ کاور عکس ذخیره نشد. کمی بعد دوباره امتحان کن.")
             media_type = "image"
 
         return [{
@@ -845,35 +885,50 @@ class LinkImportService:
         """
         if message is not None:
             try:
-                return await message.copy(channel_id)
+                copied = await message.copy(channel_id)
+                telegram.mark_managed_storage_message(channel_id, copied.id)
+                return copied
             except Exception:
                 logger.warning("Worker could not copy media to storage; using bot upload fallback", exc_info=True)
         if telegram.tg_client is None:
             raise RuntimeError("ربات ذخیره‌سازی در دسترس نیست")
         if local_path:
             if item_type == "video":
-                return await telegram.tg_client.send_video(channel_id, local_path, supports_streaming=True)
+                copied = await telegram.tg_client.send_video(channel_id, local_path, supports_streaming=True)
+                telegram.mark_managed_storage_message(channel_id, copied.id)
+                return copied
             if item_type == "audio":
-                return await telegram.tg_client.send_audio(channel_id, local_path)
+                copied = await telegram.tg_client.send_audio(channel_id, local_path)
+                telegram.mark_managed_storage_message(channel_id, copied.id)
+                return copied
             if item_type == "image":
                 try:
-                    return await telegram.tg_client.send_photo(channel_id, local_path)
+                    copied = await telegram.tg_client.send_photo(channel_id, local_path)
+                    telegram.mark_managed_storage_message(channel_id, copied.id)
+                    return copied
                 except Exception:
                     logger.info("Pinterest image could not be sent as a photo; preserving it as a document", exc_info=True)
-                    return await telegram.tg_client.send_document(channel_id, local_path)
-            return await telegram.tg_client.send_document(channel_id, local_path)
+                    copied = await telegram.tg_client.send_document(channel_id, local_path)
+                    telegram.mark_managed_storage_message(channel_id, copied.id)
+                    return copied
+            copied = await telegram.tg_client.send_document(channel_id, local_path)
+            telegram.mark_managed_storage_message(channel_id, copied.id)
+            return copied
         with tempfile.TemporaryDirectory(prefix="komod-link-") as temp_dir:
             target = str(Path(temp_dir) / filename)
             downloaded = await client.download_media(message, file_name=target)
             if not downloaded:
                 raise RuntimeError("دریافت فایل اصلی کامل نشد")
             if item_type == "video":
-                return await telegram.tg_client.send_video(channel_id, downloaded, supports_streaming=True)
-            if item_type == "audio":
-                return await telegram.tg_client.send_audio(channel_id, downloaded)
-            if item_type == "image":
-                return await telegram.tg_client.send_photo(channel_id, downloaded)
-            return await telegram.tg_client.send_document(channel_id, downloaded)
+                copied = await telegram.tg_client.send_video(channel_id, downloaded, supports_streaming=True)
+            elif item_type == "audio":
+                copied = await telegram.tg_client.send_audio(channel_id, downloaded)
+            elif item_type == "image":
+                copied = await telegram.tg_client.send_photo(channel_id, downloaded)
+            else:
+                copied = await telegram.tg_client.send_document(channel_id, downloaded)
+            telegram.mark_managed_storage_message(channel_id, copied.id)
+            return copied
 
     async def _store(self, client: Client, job: ImportJob, items: list[dict]) -> list[File]:
         saved: list[File] = []

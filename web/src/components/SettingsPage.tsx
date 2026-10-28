@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { Activity, AlertTriangle, ArrowRight, AtSign, BookOpen, BrainCircuit, ChevronDown, ChevronLeft, AudioLines, Check, CheckCircle2, Copy, Database, Download, ExternalLink, FileStack, FileText, FoldVertical, FolderPlus, Gauge, Globe2, Grid2X2, HardDrive, Instagram, KeyRound, LayoutGrid, List, ListRestart, LockKeyhole, LogOut, MessageSquareText, MonitorSmartphone, Moon, MoreVertical, Palette, Pencil, Plus, RefreshCw, Search, Shield, Smartphone, Sun, Tags, Trash2, UnfoldVertical, UserRoundCog, Users, Warehouse, Wifi, WifiOff, XCircle } from 'lucide-react';
-import { AdminUser, Folder, PublicShareItem, TelegramFile, TwoFactorSetup, api, formatFileSize, formatIranTime, formatPersianDate, getServerOrigin, useAccountPreferences, useAddAdminUser, useAdminErrors, useAdminHealth, useAdminStats, useAdminUsers, useClearAdminErrors, useClearSecurityEvents, useCredentials, useCurrentUser, useDisableTwoFactor, useEnableTwoFactor, useFiles, useFolderTree, useGrantWorkspace, useLogoutAll, useLogoutOthers, usePublicShares, useRemoveAdminUser, useRemoveStorageChannel, useResetStorageChannel, useResolveAdminError, useRevokePublicShares, useRevokeSession, useRevokeWorkspace, useSecurityEvents, useSessions, useSetStorageChannel, useSetVaultPassword, useSetupTwoFactor, useStorageChannel, useStorageStats, useUnlockVault, useUpdateAccountPreferences, useUpdateAdminUser, useUpdateCredentials, useVaultStatus, useWorkspaceGrants, useWorkspaces } from '../lib/api';
+import { AdminUser, Folder, PublicShareItem, TelegramFile, TwoFactorSetup, api, formatFileSize, formatIranTime, formatPersianDate, useAccountPreferences, useAddAdminUser, useAdminErrors, useAdminHealth, useAdminStats, useAdminUsers, useClearAdminErrors, useClearSecurityEvents, useCredentials, useCurrentUser, useDisableTwoFactor, useEnableTwoFactor, useFiles, useFolderTree, useGrantWorkspace, useLogoutAll, useLogoutOthers, usePublicShares, useRemoveAdminUser, useRemoveStorageChannel, useResetStorageChannel, useResolveAdminError, useRevokePublicShares, useRevokeSession, useRevokeWorkspace, useSecurityEvents, useSessions, useSetStorageChannel, useSetVaultPassword, useSetupTwoFactor, useStorageChannel, useStorageStats, useUnlockVault, useUpdateAccountPreferences, useUpdateAdminUser, useUpdateCredentials, useVaultStatus, useWorkspaceGrants, useWorkspaces } from '../lib/api';
 import { activateAccount, forgetAccount, savedAccounts, saveAuthenticatedAccount, syncCurrentAccount } from '../lib/accounts';
 import { applyAppearanceMode, applyCustomTheme, applyTheme, colorThemes, ActiveTheme, AppearanceMode, ColorTheme, getStoredAppearanceMode, getStoredTheme } from '../lib/theme';
 import CustomSelect from './CustomSelect';
@@ -19,11 +19,10 @@ import HelpCenter from './HelpCenter';
 import { useAppStore } from '../lib/store';
 import { folderTreeLabel } from '../lib/folderTreeLabel';
 
-type SettingsView = 'home' | 'accounts' | 'security' | 'sessions' | 'access' | 'storage' | 'files' | 'links' | 'appearance' | 'markdown' | 'connection' | 'admin' | 'admin-users' | 'admin-groups' | 'admin-messages' | 'admin-captions' | 'admin-ai-models' | 'admin-instagram' | 'tags' | 'transfers' | 'tts' | 'help';
+type SettingsView = 'home' | 'accounts' | 'security' | 'sessions' | 'access' | 'storage' | 'files' | 'links' | 'appearance' | 'markdown' | 'admin' | 'admin-users' | 'admin-groups' | 'admin-messages' | 'admin-captions' | 'admin-ai-models' | 'admin-instagram' | 'tags' | 'transfers' | 'tts' | 'help';
 type SettingsHomeLayout = 'cards' | 'list' | 'compact';
 type Permission = 'read' | 'write';
 type SavedColor = { color: string; name: string };
-type ServerAddress = { url: string; name: string };
 const SettingsSectionContext = createContext<string | null>(null);
 
 export default function SettingsPage() {
@@ -72,10 +71,6 @@ export default function SettingsPage() {
     const [youtubeFolder, setYoutubeFolder] = useState(() => localStorage.getItem('komod-youtube-folder') || 'none');
     const [instagramFolder, setInstagramFolder] = useState(() => localStorage.getItem('komod-instagram-folder') || 'none');
     const [pinterestFolder, setPinterestFolder] = useState(() => localStorage.getItem('komod-pinterest-folder') || 'none');
-    const [serverUrl, setServerUrl] = useState('');
-    const [serverName, setServerName] = useState('مسیر جایگزین');
-    const [serverAddresses, setServerAddresses] = useState<ServerAddress[]>(() => { try { return JSON.parse(localStorage.getItem('komod-server-addresses') || '[]'); } catch { return []; } });
-    const [pingResult, setPingResult] = useState<{ url:string; ms?:number; ok:boolean } | null>(null);
     const [confirmation, setConfirmation] = useState<'device' | 'others' | 'all' | null>(null);
     const [importingBackup, setImportingBackup] = useState(false);
     const [shareTelegramId, setShareTelegramId] = useState('');
@@ -168,16 +163,6 @@ export default function SettingsPage() {
     const beginTwoFactor=async()=>{setTwoFactorMessage(null);try{setTwoFactorSetup(await setupTwoFactor.mutateAsync());setTwoFactorCode('')}catch(error:any){setTwoFactorMessage({kind:'error',text:error?.response?.data?.detail||'راه‌اندازی تأیید دومرحله‌ای انجام نشد.'})}};
     const confirmTwoFactor=async()=>{if(!twoFactorSetup)return;setTwoFactorMessage(null);try{await enableTwoFactor.mutateAsync({setup_token:twoFactorSetup.setup_token,code:twoFactorCode,current_password:currentPassword||undefined});setTwoFactorSetup(null);setTwoFactorCode('');setTwoFactorMessage({kind:'ok',text:'تأیید دومرحله‌ای فعال شد.'})}catch(error:any){setTwoFactorMessage({kind:'error',text:error?.response?.data?.detail||'کد تأیید نشد.'})}};
     const turnOffTwoFactor=async()=>{setTwoFactorMessage(null);try{await disableTwoFactor.mutateAsync({code:twoFactorCode||undefined,current_password:currentPassword||undefined});setTwoFactorCode('');setTwoFactorMessage({kind:'ok',text:'تأیید دومرحله‌ای غیرفعال شد.'})}catch(error:any){setTwoFactorMessage({kind:'error',text:error?.response?.data?.detail||'غیرفعال‌سازی انجام نشد.'})}};
-    const saveServerAddress = () => {
-        const raw = serverUrl.trim().replace(/\/+$/, '');
-        try { const parsed = new URL(raw); if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && ['localhost','127.0.0.1'].includes(parsed.hostname))) throw new Error(); }
-        catch { setPingResult({url:raw,ok:false}); return; }
-        const next = [{url:raw,name:serverName.trim()||'مسیر جایگزین'}, ...serverAddresses.filter(item=>item.url!==raw)].slice(0,8);
-        setServerAddresses(next); localStorage.setItem('komod-server-addresses',JSON.stringify(next)); setServerUrl('');
-    };
-    const selectServerAddress = (url:string) => { localStorage.setItem('komod-server-origin',url); window.location.reload(); };
-    const useDefaultServer = () => { localStorage.removeItem('komod-server-origin'); window.location.reload(); };
-    const pingServer = async (url:string) => { const started=performance.now(); try { const controller=new AbortController(); const timer=window.setTimeout(()=>controller.abort(),7000); const response=await fetch(`${url.replace(/\/+$/,'')}/health`,{signal:controller.signal,cache:'no-store'}); window.clearTimeout(timer); setPingResult({url,ok:response.ok,ms:Math.round(performance.now()-started)}); } catch { setPingResult({url,ok:false}); } };
     const logoutThisDevice = async (revoke = true) => {
         const currentSession = sessions.find(item => item.current);
         if (revoke && currentSession) {
@@ -332,9 +317,12 @@ export default function SettingsPage() {
             <SettingsGroup title="فایل‌ها و فضا" text="محل نگهداری، نمایش و انتقال فایل‌ها" icon={<FolderPlus/>} layout={homeLayout}>
                 <SettingsButton layout={homeLayout} icon={<Database/>} title="فضای ذخیره‌سازی" text="فضای شخصی، آمار مصرف و حذف فایل" onClick={() => setView('storage')} />
                 <SettingsButton layout={homeLayout} icon={<FolderPlus/>} title="فایل‌ها و مقصدها" text="نمایش کارت‌ها، مقصد فایل‌های تازه و لینک‌ها" onClick={() => setView('files')} />
-                <SettingsButton layout={homeLayout} icon={<Globe2/>} title="لینک‌ها و پایش" text="توضیحات لینک و بررسی خودکار منابع" onClick={() => setView('links')} />
                 <SettingsButton layout={homeLayout} icon={<Tags/>} title="مدیریت تگ‌ها" text="ساخت، دسته‌بندی، رنگ و شیوه نمایش" onClick={() => setView('tags')} />
                 <SettingsButton layout={homeLayout} icon={<ListRestart/>} title="مرکز انتقال‌ها" text="دانلود، آپلود، لینک‌ها و ذخیره آفلاین" onClick={() => setView('transfers')} />
+            </SettingsGroup>
+
+            <SettingsGroup title="دریافت و خودکارسازی" text="ورودی لینک‌ها و کارهای زمان‌بندی‌شده" icon={<Globe2/>} layout={homeLayout}>
+                <SettingsButton layout={homeLayout} icon={<Globe2/>} title="لینک‌ها و پایش" text="توضیحات لینک و بررسی خودکار منابع" onClick={() => setView('links')} />
             </SettingsGroup>
 
             <SettingsGroup title="ظاهر و مطالعه" text="شخصی‌سازی شکل برنامه و متن‌ها" icon={<Palette/>} layout={homeLayout}>
@@ -349,7 +337,6 @@ export default function SettingsPage() {
             </SettingsGroup>
 
             {user?.is_admin && <SettingsGroup title="مدیریت" text="تنظیمات فنی، کاربران، گروه‌ها و ربات" icon={<UserRoundCog/>} layout={homeLayout}>
-                <SettingsButton layout={homeLayout} icon={<Globe2/>} title="اتصال برنامه" text="آدرس اصلی یا مسیر HTTPS جایگزین" onClick={() => setView('connection')} />
                 <SettingsButton layout={homeLayout} icon={<UserRoundCog/>} title="کاربران" text="درخواست‌ها، کاربران فعال، غیرفعال و افزودن کاربر" onClick={() => setView('admin-users')} />
                 <SettingsButton layout={homeLayout} icon={<Users/>} title="گروه‌ها" text="تأیید گروه‌ها، محدودیت‌ها و میزان مصرف" onClick={() => setView('admin-groups')} />
                 <SettingsButton layout={homeLayout} icon={<MessageSquareText/>} title="پیام‌های ربات" text="ویرایش پاسخ دستورها، لینک‌ها و پردازش‌ها" onClick={() => setView('admin-messages')} />
@@ -422,17 +409,6 @@ export default function SettingsPage() {
         {view === 'links' && selectedSubsection === 'links-caption' && <LinkCaptionSettings/>}
         {view === 'links' && selectedSubsection === 'links-monitors' && <DeliverySettingsPanel section="monitors"/>}
 
-        {view === 'connection' && user?.is_admin && <div className="space-y-4">
-            <Card icon={<MonitorSmartphone/>} title="حالت اتصال" subtitle="در حالت آفلاین فقط محتوای ذخیره‌شده روی همین دستگاه نمایش داده می‌شود."><div className="mt-4 grid grid-cols-2 overflow-hidden rounded-xl border border-white/[.08] bg-dark-950/50 p-1"><button onClick={()=>changeConnectionMode(false)} className={`min-h-10 rounded-lg text-sm transition ${!forceOffline?'bg-primary-500 text-white':'text-dark-400'}`}>آنلاین</button><button onClick={()=>changeConnectionMode(true)} className={`min-h-10 rounded-lg text-sm transition ${forceOffline?'bg-primary-500 text-white':'text-dark-400'}`}>آفلاین</button></div></Card>
-            <Card icon={<Globe2/>} title="مسیر اتصال" subtitle="اگر آدرس اصلی در شبکه‌ات باز نمی‌شود، آدرس HTTPS یک دامنه جایگزین یا reverse proxy را اینجا ذخیره کن.">
-                <div className="mt-4 grid gap-2 sm:grid-cols-[10rem_1fr_auto]"><input value={serverName} onChange={event=>setServerName(event.target.value)} className="input" placeholder="نام مسیر"/><input dir="ltr" value={serverUrl} onChange={event=>setServerUrl(event.target.value)} className="input text-left" placeholder="https://komod.example.com"/><button onClick={saveServerAddress} className="btn-primary min-h-11 px-4">ذخیره</button></div>
-                {pingResult&&!pingResult.ok&&<p className="mt-2 text-xs text-red-300">آدرس معتبر یا قابل دسترس نیست. آدرس کامل HTTPS را وارد کن.</p>}
-                <p className="mt-3 rounded-xl bg-amber-500/[.08] px-3 py-2 text-xs leading-6 text-amber-100">پروکسی SOCKS یا MTProto داخل مرورگر قابل استفاده نیست. این بخش برای یک آدرس HTTPS جایگزین است که به همین سرور کمد وصل می‌شود.</p>
-            </Card>
-            <Card icon={<Gauge/>} title="آدرس‌های ذخیره‌شده" subtitle={`اتصال فعلی: ${getServerOrigin()}`}>
-                <div className="mt-4 space-y-2"><div className="flex items-center gap-2 rounded-xl border border-white/[.07] bg-dark-800/50 p-3"><div className="min-w-0 flex-1"><strong className="block text-sm">آدرس همین برنامه</strong><small dir="ltr" className="block truncate text-dark-500">{window.location.origin}</small></div><button className="btn-secondary px-3 py-2 text-xs" onClick={useDefaultServer}>انتخاب</button></div>{serverAddresses.map(item=><div key={item.url} className="flex items-center gap-2 rounded-xl border border-white/[.07] bg-dark-800/50 p-3"><span className={`h-2.5 w-2.5 shrink-0 rounded-full ${getServerOrigin()===item.url?'bg-emerald-400':'bg-dark-600'}`}/><div className="min-w-0 flex-1"><strong className="block truncate text-sm">{item.name}</strong><small dir="ltr" className="block truncate text-dark-500">{item.url}</small></div>{pingResult?.url===item.url&&<span className={`text-[10px] ${pingResult.ok?'text-emerald-300':'text-red-300'}`}>{pingResult.ok?`${pingResult.ms} ms`:'قطع'}</span>}<button className="btn-icon" title="سنجش اتصال" onClick={()=>void pingServer(item.url)}><Gauge className="h-4 w-4"/></button><button className="btn-secondary px-3 py-2 text-xs" onClick={()=>selectServerAddress(item.url)}>انتخاب</button><button className="btn-icon text-red-300" title="حذف" onClick={()=>{const next=serverAddresses.filter(address=>address.url!==item.url);setServerAddresses(next);localStorage.setItem('komod-server-addresses',JSON.stringify(next));}}><Trash2 className="h-4 w-4"/></button></div>)}</div>
-            </Card>
-        </div>}
 
         {view === 'admin-users' && user?.is_admin && <div className="space-y-4">
             {selectedSubsection==='admin-add'&&<Card id="admin-add" icon={<Plus/>} title="افزودن کاربر مجاز" subtitle="حذف دسترسی، فایل‌ها و اطلاعات قبلی کاربر را پاک نمی‌کند."><div className="mt-4 grid gap-2 sm:grid-cols-[1fr_1fr_auto]"><input dir="rtl" inputMode="numeric" value={newAdminTelegramId} onChange={event=>setNewAdminTelegramId(event.target.value.replace(/\D/g,''))} className="input text-right" placeholder="آیدی عددی تلگرام"/><input value={newAdminName} onChange={event=>setNewAdminName(event.target.value)} className="input" placeholder="نام دلخواه (اختیاری)"/><button disabled={addAdminUser.isPending||!newAdminTelegramId} onClick={()=>void addAuthorizedUser()} className="btn-primary min-h-11 px-5 disabled:opacity-40">افزودن</button></div></Card>}
@@ -468,8 +444,8 @@ export default function SettingsPage() {
     </div></SettingsSectionContext.Provider>;
 }
 
-function viewTitle(view: SettingsView) { return ({ home:'تنظیمات', accounts:'حساب‌ها', security:'ورود و امنیت', sessions:'مدیریت نشست‌ها', access:'دسترسی و اشتراک‌گذاری', storage:'فضای ذخیره‌سازی', files:'فایل‌ها و مقصدها', links:'لینک‌ها و پایش', appearance:'ظاهر برنامه', markdown:'مطالعه و Markdown', connection:'اتصال برنامه', admin:'گزارش و سلامت', 'admin-users':'مدیریت کاربران', 'admin-groups':'مدیریت گروه‌ها', 'admin-messages':'پیام‌های ربات', 'admin-captions':'متن خروجی فایل‌ها', 'admin-ai-models':'مدل‌های هوش مصنوعی', 'admin-instagram':'دریافت از اینستاگرام', tags:'مدیریت تگ‌ها', transfers:'مرکز انتقال‌ها', tts:'متن و صدا', help:'راهنمای کمد' })[view]; }
-function viewSubtitle(view: SettingsView) { return ({ home:'', accounts:'', security:'', sessions:'', access:'مشخص کن چه کسی کمدت را ببیند یا داخلش فایل ذخیره کند.', storage:'', files:'مقصد فایل‌های تازه و لینک‌ها را انتخاب کن.', links:'', appearance:'', markdown:'', connection:'آدرس اصلی و مسیرهای جایگزین HTTPS را مدیریت کن.', admin:'', 'admin-users':'', 'admin-groups':'', 'admin-messages':'', 'admin-captions':'متن زیر فایل‌های خروجی را برای همه کاربران تنظیم کن.', 'admin-ai-models':'', 'admin-instagram':'', tags:'', transfers:'همه انتقال‌های فعال و اخیر را یکجا مدیریت کن.', tts:'', help:'' })[view]; }
+function viewTitle(view: SettingsView) { return ({ home:'تنظیمات', accounts:'حساب‌ها', security:'ورود و امنیت', sessions:'مدیریت نشست‌ها', access:'دسترسی و اشتراک‌گذاری', storage:'فضای ذخیره‌سازی', files:'فایل‌ها و مقصدها', links:'لینک‌ها و پایش', appearance:'ظاهر برنامه', markdown:'مطالعه و Markdown', admin:'گزارش و سلامت', 'admin-users':'مدیریت کاربران', 'admin-groups':'مدیریت گروه‌ها', 'admin-messages':'پیام‌های ربات', 'admin-captions':'متن خروجی فایل‌ها', 'admin-ai-models':'مدل‌های هوش مصنوعی', 'admin-instagram':'دریافت از اینستاگرام', tags:'مدیریت تگ‌ها', transfers:'مرکز انتقال‌ها', tts:'متن و صدا', help:'راهنمای کمد' })[view]; }
+function viewSubtitle(view: SettingsView) { return ({ home:'', accounts:'', security:'', sessions:'', access:'مشخص کن چه کسی کمدت را ببیند یا داخلش فایل ذخیره کند.', storage:'', files:'مقصد فایل‌های تازه و لینک‌ها را انتخاب کن.', links:'', appearance:'', markdown:'', admin:'', 'admin-users':'', 'admin-groups':'', 'admin-messages':'', 'admin-captions':'متن زیر فایل‌های خروجی را برای همه کاربران تنظیم کن.', 'admin-ai-models':'', 'admin-instagram':'', tags:'', transfers:'همه انتقال‌های فعال و اخیر را یکجا مدیریت کن.', tts:'', help:'' })[view]; }
 function securityEventLabel(type: string) { return ({ login_success:'ورود موفق به حساب', login_failed:'تلاش ناموفق برای ورود', credentials_updated:'تغییر اطلاعات ورود', two_factor_enabled:'فعال‌سازی تأیید دومرحله‌ای', two_factor_disabled:'غیرفعال‌سازی تأیید دومرحله‌ای', sessions_revoked_all:'خروج از همه نشست‌ها', sessions_revoked_others:'خروج از نشست‌های دیگر', session_revoked:'لغو یک نشست', public_link_created:'ساخت پیوند عمومی', public_link_revoked:'لغو پیوند عمومی', public_links_revoked:'لغو گروهی پیوندهای عمومی', public_link_unlocked:'باز شدن پیوند رمزدار', public_link_password_failed:'رمز اشتباه برای پیوند عمومی', public_view:'مشاهده پیوند عمومی', account_backup_restored:'بازیابی نسخه پشتیبان حساب', workspace_grant_updated:'تغییر دسترسی اشتراک‌گذاری', workspace_grant_revoked:'لغو دسترسی اشتراک‌گذاری', vault_password_updated:'تغییر رمز گاوصندوق', vault_unlocked:'باز شدن گاوصندوق', vault_unlock_failed:'رمز اشتباه گاوصندوق' } as Record<string,string>)[type] || 'رویداد امنیتی'; }
 function permissionLabel(permission: 'owner' | Permission) { return permission === 'owner' ? 'کمد خودم' : permission === 'write' ? 'مشاهده و ذخیره' : 'فقط مشاهده'; }
 function PermissionSelect({ value, onChange }:{ value:Permission; onChange:(value:Permission)=>void }) { return <CustomSelect value={value} onChange={onChange} options={[{value:'read',label:'👁️ فقط مشاهده'},{value:'write',label:'📥 مشاهده و ذخیره'}]}/>; }

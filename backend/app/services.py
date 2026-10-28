@@ -90,6 +90,7 @@ def add_urls_to_file(file: File) -> dict:
         "is_favorite": bool(file.is_favorite),
         "is_pinned": bool(file.is_pinned),
         "is_hidden": bool(file.is_hidden),
+        "is_blurred": bool(file.is_blurred),
         "is_shortcut": bool(file.is_shortcut),
         "audio_stream_url": f"/api/stream/{file.id}/audio?workspace={file.user_id}" if file.audio_variant_message_id else None,
         "audio_variant_size": file.audio_variant_size,

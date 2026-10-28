@@ -27,6 +27,22 @@ clients: list[Client] = []
 tg_client: Client | None = None
 _background_tasks: set[asyncio.Task] = set()
 _send_index = 0
+_managed_storage_messages: set[tuple[int, int]] = set()
+
+
+def mark_managed_storage_message(chat_id: int, message_id: int) -> None:
+    """Prevent the storage-channel monitor from re-indexing app uploads."""
+    if len(_managed_storage_messages) >= 5000:
+        _managed_storage_messages.pop()
+    _managed_storage_messages.add((int(chat_id), int(message_id)))
+
+
+def consume_managed_storage_message(chat_id: int, message_id: int) -> bool:
+    key = (int(chat_id), int(message_id))
+    if key not in _managed_storage_messages:
+        return False
+    _managed_storage_messages.discard(key)
+    return True
 
 
 def build_clients() -> None:

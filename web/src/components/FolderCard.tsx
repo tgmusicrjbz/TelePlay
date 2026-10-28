@@ -119,7 +119,7 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
                 {selectionMode && <button onClick={handleSelectClick} className="absolute left-0 top-0 z-10 flex h-11 w-11 items-center justify-center" aria-label={selected ? 'لغو انتخاب کشو' : 'انتخاب کشو'}><span className={`flex h-6 w-6 items-center justify-center rounded-md border ${selected ? 'border-primary-400 bg-primary-500 text-white' : 'border-white/30 bg-dark-900/90'}`}>{selected && <Check className="h-4 w-4"/>}</span></button>}
                 <div
                     style={folderColor && !coverUrl ? { backgroundColor: `${folderColor}22`, borderColor: `${folderColor}66` } : undefined}
-                    className={`relative w-12 h-12 rounded-lg flex items-center justify-center shrink-0 border transition-colors
+                    className={`relative w-12 h-12 rounded-lg flex items-center justify-center shrink-0 border transition-all ${folder.is_blurred?'blur-md scale-105':''}
                         ${selected 
                             ? 'bg-primary-500/20 border-primary-500/40' 
                             : 'bg-primary-500/10 border-primary-500/20 group-hover:bg-primary-500/20'}`}
@@ -128,7 +128,7 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
                     {cardDisplay.statusBadges&&(folder.is_pinned || folder.is_favorite) && <span className="absolute -right-1 -top-1 flex items-center gap-0.5 rounded-full border border-white/10 bg-dark-900/95 p-1 shadow-lg">{folder.is_pinned && <Pin className="h-3 w-3 fill-current text-primary-300"/>}{folder.is_favorite && <Star className="h-3 w-3 fill-current text-amber-300"/>}</span>}
                 </div>
 
-                <div className="flex-1 min-w-0">
+                <div className={`flex-1 min-w-0 transition ${folder.is_blurred?'blur-[5px] select-none':''}`}>
                     <p className={`flex items-center gap-1.5 font-medium truncate text-sm transition-colors ${selected ? 'text-primary-300' : 'text-white group-hover:text-primary-300'}`}><span className="truncate">{folder.name}</span></p>
                     {cardDisplay.folderCount&&<p className="text-xs text-dark-400 mt-0.5">
                         {folder.file_count.toLocaleString('fa-IR')} فایل
@@ -179,7 +179,7 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
             <div className={`flex items-start justify-between ${dense ? 'mb-2' : 'mb-3'}`}>
                 <div
                     style={folderColor && !coverUrl ? { backgroundColor: `${folderColor}22`, borderColor: `${folderColor}66` } : undefined}
-                    className={`relative w-10 h-10 rounded-lg flex items-center justify-center border group-hover:scale-110 transition-all duration-300
+                    className={`relative w-10 h-10 rounded-lg flex items-center justify-center border group-hover:scale-110 transition-all duration-300 ${folder.is_blurred?'blur-md':''}
                         ${selected 
                             ? 'bg-gradient-to-br from-primary-500/20 to-primary-500/10 border-primary-500/40' 
                             : 'bg-gradient-to-br from-primary-500/10 to-primary-500/5 border-primary-500/20 group-hover:border-primary-500/30'}`}
@@ -206,7 +206,7 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
                 </div>
             </div>
 
-            <p className={`flex items-center gap-1.5 font-medium text-sm truncate transition-colors ${selected ? 'text-primary-300' : 'text-white group-hover:text-primary-300'}`} title={folder.name}>
+            <p className={`flex items-center gap-1.5 font-medium text-sm truncate transition-all ${folder.is_blurred?'blur-[5px] select-none':''} ${selected ? 'text-primary-300' : 'text-white group-hover:text-primary-300'}`} title={folder.name}>
                 <span className="truncate">{folder.name}</span>
             </p>
             {cardDisplay.folderCount&&<p className="text-xs text-dark-500 mt-1">

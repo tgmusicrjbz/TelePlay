@@ -98,6 +98,7 @@ release/
 *.db
 *.db-journal
 *.sqlite
+*.sqlite-journal
 *.sqlite3
 
 # ============== Telegram ==============

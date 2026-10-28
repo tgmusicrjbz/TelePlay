@@ -43,7 +43,7 @@ def _pack_summary(pack: Pack) -> PackSummary:
         id=pack.id, name=pack.name, description=pack.description,
         parent_folder_id=pack.parent_folder_id, item_count=len(ordered),
         cover_file_id=custom_cover_id, cover_position_x=pack.cover_position_x, cover_position_y=pack.cover_position_y,
-        hide_member_files=pack.hide_member_files, cover_url=cover_url,
+        cover_zoom=pack.cover_zoom, hide_member_files=pack.hide_member_files, is_blurred=pack.is_blurred, cover_url=cover_url,
         cover_urls=([cover_url] + previews)[:4] if cover_url else previews,
         preview_names=[item.file.file_name for item in ordered[:2]],
         type_counts=counts, position=pack.position,
@@ -146,6 +146,7 @@ async def update_pack(pack_id: int, payload: PackUpdate, db: AsyncSession = Depe
         pack.name = name
     if "description" in changes: pack.description = (changes["description"] or "").strip() or None
     if "hide_member_files" in changes: pack.hide_member_files = bool(changes["hide_member_files"])
+    if "is_blurred" in changes: pack.is_blurred = bool(changes["is_blurred"])
     if "parent_folder_id" in changes:
         await _validate_folder(db, current_user.id, changes["parent_folder_id"])
         pack.parent_folder_id = changes["parent_folder_id"]
@@ -159,6 +160,8 @@ async def update_pack(pack_id: int, payload: PackUpdate, db: AsyncSession = Depe
         pack.cover_position_x = changes["cover_position_x"]
     if "cover_position_y" in changes and changes["cover_position_y"] is not None:
         pack.cover_position_y = changes["cover_position_y"]
+    if "cover_zoom" in changes and changes["cover_zoom"] is not None:
+        pack.cover_zoom = changes["cover_zoom"]
     await db.commit()
     return _pack_response(await _owned_pack(db, pack_id, current_user.id))
 

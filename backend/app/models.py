@@ -338,6 +338,7 @@ class Folder(Base):
     is_pinned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_hidden: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_blurred: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
@@ -382,6 +383,7 @@ class File(Base):
     is_favorite: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_pinned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_hidden: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_blurred: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     file_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
     mime_type: Mapped[Optional[str]] = mapped_column(String(100))
     file_type: Mapped[str] = mapped_column(String(50), nullable=False)  # video, audio, document, image, text
@@ -501,7 +503,9 @@ class Pack(Base):
     cover_file_id: Mapped[Optional[int]] = mapped_column(ForeignKey("files.id", ondelete="SET NULL"))
     cover_position_x: Mapped[int] = mapped_column(Integer, nullable=False, default=50)
     cover_position_y: Mapped[int] = mapped_column(Integer, nullable=False, default=50)
+    cover_zoom: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
     hide_member_files: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_blurred: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

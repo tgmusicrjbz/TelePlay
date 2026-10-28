@@ -98,6 +98,7 @@ export interface Folder {
     is_pinned?: boolean;
     is_default?: boolean;
     is_hidden?: boolean;
+    is_blurred?: boolean;
     color?: string | null;
     icon?: string | null;
     cover_file_id?: number | null;
@@ -136,6 +137,7 @@ export interface TelegramFile {
     is_favorite?: boolean;
     is_pinned?: boolean;
     is_hidden?: boolean;
+    is_blurred?: boolean;
     is_shortcut?: boolean;
     audio_stream_url?: string | null;
     audio_variant_size?: number | null;
@@ -205,7 +207,9 @@ export interface PackSummary {
     cover_file_id: number | null;
     cover_position_x: number;
     cover_position_y: number;
+    cover_zoom: number;
     hide_member_files: boolean;
+    is_blurred: boolean;
     cover_url: string | null;
     cover_urls: string[];
     preview_names: string[];
@@ -348,6 +352,11 @@ api.interceptors.response.use(
         markServerReachable();
         window.dispatchEvent(new Event('komod-server-reachable'));
         resolveResponseMediaUrls(response.data);
+        const method=String(response.config.method||'get').toLowerCase();
+        const requestPath=String(response.config.url||'');
+        if(['post','put','patch','delete'].includes(method)&&/^\/(?:files|folders|packs)(?:\/|$)/.test(requestPath)&&!requestPath.includes('/status')){
+            queueMicrotask(()=>window.dispatchEvent(new CustomEvent('komod-library-changed',{detail:{method,url:requestPath}})));
+        }
         return response;
     },
     async (error) => {
@@ -578,7 +587,7 @@ export const useFile = (fileId: number) => {
 export const useUpdateFile = () => {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async ({ id, ...data }: { id: number; file_name?: string; description?: string | null; folder_id?: number | null; is_favorite?: boolean; is_pinned?: boolean; is_hidden?: boolean; tags?: string[] }) => {
+        mutationFn: async ({ id, ...data }: { id: number; file_name?: string; description?: string | null; folder_id?: number | null; is_favorite?: boolean; is_pinned?: boolean; is_hidden?: boolean; is_blurred?: boolean; tags?: string[] }) => {
             const cached=queryClient.getQueryData<TelegramFile>(['file',id]);
             // A description editor must only report success after the server
             // has persisted the text. Quietly queueing this change made the UI
@@ -836,7 +845,7 @@ export const useCreateFolder = () => {
 export const useUpdateFolder = () => {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async ({ id, ...data }: { id: number; name?: string; description?: string; parent_id?: number | null; is_favorite?: boolean; is_pinned?: boolean; is_hidden?: boolean; color?: string | null; icon?: string | null; cover_file_id?: number | null }) => {
+        mutationFn: async ({ id, ...data }: { id: number; name?: string; description?: string; parent_id?: number | null; is_favorite?: boolean; is_pinned?: boolean; is_hidden?: boolean; is_blurred?: boolean; color?: string | null; icon?: string | null; cover_file_id?: number | null }) => {
             const cached=queryClient.getQueriesData<Folder[]>({queryKey:['folders']}).flatMap(([,items])=>items||[]).find(item=>item.id===id);
             return runOrQueueMetadataMutation(async()=>(await api.patch<Folder>(`/folders/${id}`,data)).data,{entity:'folder',method:'patch',url:`/folders/${id}`,payload:data,baseUpdatedAt:cached?.updated_at},()=>({...cached,id,...data,updated_at:new Date().toISOString()} as Folder));
         },
@@ -984,7 +993,7 @@ const usePackMutation = <TVariables>(request: (variables: TVariables) => Promise
 
 export const useCreatePack = () => usePackMutation(async (payload: { name: string; description?: string; parent_folder_id: number | null; hide_member_files?: boolean; file_ids: number[] }) =>
     (await api.post<Pack>('/packs', payload, { timeout: 60_000 })).data);
-export const useUpdatePack = () => usePackMutation(async ({ id, ...payload }: { id: number; name?: string; description?: string; parent_folder_id?: number | null; cover_file_id?: number | null; cover_position_x?:number; cover_position_y?:number; hide_member_files?: boolean }) =>
+export const useUpdatePack = () => usePackMutation(async ({ id, ...payload }: { id: number; name?: string; description?: string; parent_folder_id?: number | null; cover_file_id?: number | null; cover_position_x?:number; cover_position_y?:number; cover_zoom?:number; hide_member_files?: boolean; is_blurred?:boolean }) =>
     (await api.patch<Pack>(`/packs/${id}`, payload)).data);
 export const useAddPackItems = () => usePackMutation(async ({ id, fileIds }: { id: number; fileIds: number[] }) =>
     (await api.post<Pack>(`/packs/${id}/items`, { file_ids: fileIds }, { timeout: 60_000 })).data);
@@ -998,7 +1007,9 @@ export const useDeletePack = () => {
         mutationFn: async (id: number) => { await api.delete(`/packs/${id}`); return id; },
         onSuccess: id => {
             queryClient.removeQueries({ queryKey: ['packs', 'detail', id] });
+            queryClient.setQueriesData<PackSummary[]>({predicate:query=>query.queryKey[0]==='packs'&&query.queryKey[1]!=='detail'},current=>current?.filter(item=>item.id!==id));
             queryClient.invalidateQueries({ queryKey: ['packs'] });
+            queryClient.invalidateQueries({ queryKey: ['files'] });
         },
     });
 };

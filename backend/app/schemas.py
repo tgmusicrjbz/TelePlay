@@ -53,6 +53,7 @@ class FolderUpdate(BaseModel):
     is_favorite: Optional[bool] = None
     is_pinned: Optional[bool] = None
     is_hidden: Optional[bool] = None
+    is_blurred: Optional[bool] = None
     color: Optional[str] = None
     icon: Optional[str] = None
     cover_file_id: Optional[int] = None
@@ -68,6 +69,7 @@ class FolderResponse(FolderBase):
     is_pinned: bool = False
     is_default: bool = False
     is_hidden: bool = False
+    is_blurred: bool = False
     color: Optional[str] = None
     icon: Optional[str] = None
     cover_file_id: Optional[int] = None
@@ -111,6 +113,7 @@ class FileUpdate(BaseModel):
     is_pinned: Optional[bool] = None
     tags: Optional[List[str]] = None
     is_hidden: Optional[bool] = None
+    is_blurred: Optional[bool] = None
 
 
 class FileDescriptionUpdate(BaseModel):
@@ -196,6 +199,7 @@ class FileResponse(FileBase):
     is_favorite: bool = False
     is_pinned: bool = False
     is_hidden: bool = False
+    is_blurred: bool = False
     is_shortcut: bool = False
     audio_stream_url: Optional[str] = None
     audio_variant_size: Optional[int] = None
@@ -307,7 +311,9 @@ class PackUpdate(BaseModel):
     cover_file_id: Optional[int] = None
     cover_position_x: Optional[int] = Field(default=None, ge=0, le=100)
     cover_position_y: Optional[int] = Field(default=None, ge=0, le=100)
+    cover_zoom: Optional[int] = Field(default=None, ge=100, le=300)
     hide_member_files: Optional[bool] = None
+    is_blurred: Optional[bool] = None
 
 
 class PackAddItems(BaseModel):
@@ -335,7 +341,9 @@ class PackSummary(BaseModel):
     cover_file_id: Optional[int] = None
     cover_position_x: int = 50
     cover_position_y: int = 50
+    cover_zoom: int = 100
     hide_member_files: bool = False
+    is_blurred: bool = False
     cover_url: Optional[str] = None
     cover_urls: List[str] = Field(default_factory=list)
     preview_names: List[str] = Field(default_factory=list)

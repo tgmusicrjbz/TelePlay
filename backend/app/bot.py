@@ -21,6 +21,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from .telegram import tg_client, forward_to_storage_channel, delete_from_storage_channel
+from . import telegram
 from .routers.folders import ensure_default_folder
 from .database import async_session
 from .models import User, File, Folder, LoginCode, Playlist, PlaylistItem, BotUserState, TelegramDestination, TelegramGroupSettings, AppSetting
@@ -2159,6 +2160,8 @@ async def import_personal_channel_post(message: Message) -> None:
     """Index a manual post from a user's configured personal storage channel."""
     await asyncio.sleep(5)  # Let normal app/bot uploads write their database row first.
     channel_id = message.chat.id
+    if telegram.consume_managed_storage_message(channel_id, message.id):
+        return
     async with async_session() as db:
         duplicate = (await db.execute(select(File.id).where(
             File.storage_channel_id == channel_id, File.channel_message_id == message.id,

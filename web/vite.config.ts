@@ -22,7 +22,9 @@ function injectOfflineBuildAssets() {
             const assetsDirectory = path.join(outputDirectory, 'assets')
             const assets = (await filesUnder(assetsDirectory))
                 .map(file => `/${path.relative(outputDirectory, file).replace(/\\/g, '/')}`)
-                .filter(file => /\.(?:js|css|woff2?|png|jpe?g|webp|svg)$/i.test(file))
+                // Modern browsers supported by the PWA use WOFF2. Do not
+                // precache duplicate WOFF fallbacks for every KaTeX font.
+                .filter(file => /\.(?:js|css|woff2|png|jpe?g|webp|svg)$/i.test(file))
                 .sort()
             const worker = await readFile(workerPath, 'utf8')
             await writeFile(
