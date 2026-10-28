@@ -6,6 +6,7 @@ import { Check, Folder as FolderIcon, MoreVertical, ChevronRight, Pin, Star } fr
 import { Folder } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { useCardDisplayPreferences } from '../lib/cardDisplay';
+import BlurredPreview, { blurredPreviewStyle } from './BlurredPreview';
 
 interface FolderCardProps {
     folder: Folder;
@@ -119,16 +120,17 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
                 {selectionMode && <button onClick={handleSelectClick} className="absolute left-0 top-0 z-10 flex h-11 w-11 items-center justify-center" aria-label={selected ? 'لغو انتخاب کشو' : 'انتخاب کشو'}><span className={`flex h-6 w-6 items-center justify-center rounded-md border ${selected ? 'border-primary-400 bg-primary-500 text-white' : 'border-white/30 bg-dark-900/90'}`}>{selected && <Check className="h-4 w-4"/>}</span></button>}
                 <div
                     style={folderColor && !coverUrl ? { backgroundColor: `${folderColor}22`, borderColor: `${folderColor}66` } : undefined}
-                    className={`relative w-12 h-12 rounded-lg flex items-center justify-center shrink-0 border transition-all ${folder.is_blurred?'blur-md scale-105':''}
+                    className={`relative w-12 h-12 rounded-lg flex items-center justify-center shrink-0 overflow-hidden border transition-all
                         ${selected 
                             ? 'bg-primary-500/20 border-primary-500/40' 
                             : 'bg-primary-500/10 border-primary-500/20 group-hover:bg-primary-500/20'}`}
                 >
-                    {coverUrl ? <img src={coverUrl} alt="" className="h-full w-full rounded-lg object-cover"/> : folder.icon ? <span className="text-2xl leading-none">{folder.icon}</span> : <FolderIcon style={folderColor ? {color:folderColor}:undefined} className={`w-6 h-6 transition-colors ${selected ? 'text-primary-300' : 'text-primary-400 group-hover:text-primary-300'}`} />}
-                    {cardDisplay.statusBadges&&(folder.is_pinned || folder.is_favorite) && <span className="absolute -right-1 -top-1 flex items-center gap-0.5 rounded-full border border-white/10 bg-dark-900/95 p-1 shadow-lg">{folder.is_pinned && <Pin className="h-3 w-3 fill-current text-primary-300"/>}{folder.is_favorite && <Star className="h-3 w-3 fill-current text-amber-300"/>}</span>}
+                    <span className="absolute inset-0 flex items-center justify-center transition duration-300" style={blurredPreviewStyle(Boolean(folder.is_blurred))}>{coverUrl ? <img src={coverUrl} alt="" className="h-full w-full object-cover"/> : folder.icon ? <span className="text-2xl leading-none">{folder.icon}</span> : <FolderIcon style={folderColor ? {color:folderColor}:undefined} className={`w-6 h-6 transition-colors ${selected ? 'text-primary-300' : 'text-primary-400 group-hover:text-primary-300'}`} />}</span>
+                    <BlurredPreview active={Boolean(folder.is_blurred)} compact />
+                    {cardDisplay.statusBadges&&(folder.is_pinned || folder.is_favorite) && <span className="absolute -right-1 -top-1 z-20 flex items-center gap-0.5 rounded-full border border-white/10 bg-dark-900/95 p-1 shadow-lg">{folder.is_pinned && <Pin className="h-3 w-3 fill-current text-primary-300"/>}{folder.is_favorite && <Star className="h-3 w-3 fill-current text-amber-300"/>}</span>}
                 </div>
 
-                <div className={`flex-1 min-w-0 transition ${folder.is_blurred?'blur-[5px] select-none':''}`}>
+                <div className="min-w-0 flex-1">
                     <p className={`flex items-center gap-1.5 font-medium truncate text-sm transition-colors ${selected ? 'text-primary-300' : 'text-white group-hover:text-primary-300'}`}><span className="truncate">{folder.name}</span></p>
                     {cardDisplay.folderCount&&<p className="text-xs text-dark-400 mt-0.5">
                         {folder.file_count.toLocaleString('fa-IR')} فایل
@@ -179,13 +181,14 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
             <div className={`flex items-start justify-between ${dense ? 'mb-2' : 'mb-3'}`}>
                 <div
                     style={folderColor && !coverUrl ? { backgroundColor: `${folderColor}22`, borderColor: `${folderColor}66` } : undefined}
-                    className={`relative w-10 h-10 rounded-lg flex items-center justify-center border group-hover:scale-110 transition-all duration-300 ${folder.is_blurred?'blur-md':''}
+                    className={`relative w-10 h-10 rounded-lg flex items-center justify-center overflow-hidden border group-hover:scale-110 transition-all duration-300
                         ${selected 
                             ? 'bg-gradient-to-br from-primary-500/20 to-primary-500/10 border-primary-500/40' 
                             : 'bg-gradient-to-br from-primary-500/10 to-primary-500/5 border-primary-500/20 group-hover:border-primary-500/30'}`}
                 >
-                    {coverUrl ? <img src={coverUrl} alt="" className="h-full w-full rounded-lg object-cover"/> : folder.icon ? <span className="text-xl leading-none">{folder.icon}</span> : <FolderIcon style={folderColor ? {color:folderColor}:undefined} className={`w-5 h-5 transition-colors ${selected ? 'text-primary-300' : 'text-primary-400'}`} />}
-                    {cardDisplay.statusBadges&&(folder.is_pinned || folder.is_favorite) && <span className="absolute -right-1 -top-1 flex items-center gap-0.5 rounded-full border border-white/10 bg-dark-900/95 p-0.5 shadow-lg">{folder.is_pinned && <Pin className="h-2.5 w-2.5 fill-current text-primary-300"/>}{folder.is_favorite && <Star className="h-2.5 w-2.5 fill-current text-amber-300"/>}</span>}
+                    <span className="absolute inset-0 flex items-center justify-center transition duration-300" style={blurredPreviewStyle(Boolean(folder.is_blurred))}>{coverUrl ? <img src={coverUrl} alt="" className="h-full w-full object-cover"/> : folder.icon ? <span className="text-xl leading-none">{folder.icon}</span> : <FolderIcon style={folderColor ? {color:folderColor}:undefined} className={`w-5 h-5 transition-colors ${selected ? 'text-primary-300' : 'text-primary-400'}`} />}</span>
+                    <BlurredPreview active={Boolean(folder.is_blurred)} compact />
+                    {cardDisplay.statusBadges&&(folder.is_pinned || folder.is_favorite) && <span className="absolute -right-1 -top-1 z-20 flex items-center gap-0.5 rounded-full border border-white/10 bg-dark-900/95 p-0.5 shadow-lg">{folder.is_pinned && <Pin className="h-2.5 w-2.5 fill-current text-primary-300"/>}{folder.is_favorite && <Star className="h-2.5 w-2.5 fill-current text-amber-300"/>}</span>}
                 </div>
                 <div className="flex items-center gap-1">
                 {selectionMode && <button onClick={handleSelectClick} className="absolute left-0 top-0 z-20 flex h-11 w-11 items-center justify-center" aria-label={selected ? 'لغو انتخاب کشو' : 'انتخاب کشو'}><span className={`flex h-6 w-6 items-center justify-center rounded-md border ${selected ? 'border-primary-400 bg-primary-500 text-white' : 'border-white/30 bg-dark-900/90'}`}>{selected && <Check className="h-4 w-4"/>}</span></button>}
@@ -206,7 +209,7 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
                 </div>
             </div>
 
-            <p className={`flex items-center gap-1.5 font-medium text-sm truncate transition-all ${folder.is_blurred?'blur-[5px] select-none':''} ${selected ? 'text-primary-300' : 'text-white group-hover:text-primary-300'}`} title={folder.name}>
+            <p className={`flex items-center gap-1.5 font-medium text-sm truncate transition-all ${selected ? 'text-primary-300' : 'text-white group-hover:text-primary-300'}`} title={folder.name}>
                 <span className="truncate">{folder.name}</span>
             </p>
             {cardDisplay.folderCount&&<p className="text-xs text-dark-500 mt-1">
