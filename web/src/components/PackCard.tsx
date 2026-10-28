@@ -49,7 +49,7 @@ export default function PackCard({ pack, viewMode, onOpen, selected=false, selec
     </div>;
     const menu=menuOpen&&createPortal(<>
         <button type="button" aria-label="بستن منوی جعبه" className="fixed inset-0 z-[279] bg-black/65 backdrop-blur-sm sm:bg-black/25" onClick={()=>setMenuOpen(false)}/>
-        <section dir="rtl" className={`fixed z-[280] border border-white/10 bg-dark-900/98 text-right shadow-2xl backdrop-blur-xl ${isMobile?'inset-x-0 bottom-0 rounded-t-[2rem] p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] animate-slide-up':'w-[248px] rounded-2xl p-2 animate-scale-in'}`} style={desktopMenuStyle} onClick={event=>event.stopPropagation()}>
+        <section dir="rtl" className={`black-glass-menu fixed z-[280] text-right ${isMobile?'inset-x-0 bottom-0 rounded-t-[2rem] p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] animate-slide-up':'w-[248px] rounded-2xl p-2 animate-scale-in'}`} style={desktopMenuStyle} onClick={event=>event.stopPropagation()}>
             {isMobile&&<span className="mx-auto mb-3 block h-1 w-11 rounded-full bg-white/20"/>}
             <header className={`flex items-center gap-3 ${isMobile?'mb-4 px-1':'border-b border-white/[.07] px-2 pb-2 pt-1'}`}>
                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-500/12 text-primary-200"><Boxes className="h-5 w-5"/></span>

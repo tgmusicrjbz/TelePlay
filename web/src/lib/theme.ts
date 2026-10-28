@@ -8,13 +8,23 @@ export const colorThemes = {
 
 export type ColorTheme = keyof typeof colorThemes;
 export type ActiveTheme = ColorTheme | 'custom';
-export type AppearanceMode = 'dark' | 'light';
+export const appearanceThemes = {
+    dark: { label: 'نیمه‌شب', description: 'پوسته فعلی با زمینه سرمه‌ای', colors: ['#0f172a', '#020617', '#a855f7'] },
+    black: { label: 'مشکی AMOLED', description: 'مشکی عمیق و کم‌نور', colors: ['#111113', '#000000', '#a855f7'] },
+    graphite: { label: 'ذغالی', description: 'خنثی و نرم با خاکستری تیره', colors: ['#27272a', '#09090b', '#a855f7'] },
+    light: { label: 'روشن', description: 'سفید و خوانا برای محیط پرنور', colors: ['#ffffff', '#eef2ff', '#7c3aed'] },
+} as const;
+export type AppearanceMode = keyof typeof appearanceThemes;
 
-export const getStoredAppearanceMode = (): AppearanceMode => localStorage.getItem('komod-appearance-mode') === 'light' ? 'light' : 'dark';
+export const getStoredAppearanceMode = (): AppearanceMode => {
+    const stored = localStorage.getItem('komod-appearance-mode');
+    return stored && stored in appearanceThemes ? stored as AppearanceMode : 'dark';
+};
 export const applyAppearanceMode = (mode: AppearanceMode) => {
     document.documentElement.classList.toggle('light', mode === 'light');
-    document.documentElement.classList.toggle('dark', mode === 'dark');
-    document.documentElement.style.colorScheme = mode;
+    document.documentElement.classList.toggle('dark', mode !== 'light');
+    document.documentElement.dataset.appearance = mode;
+    document.documentElement.style.colorScheme = mode === 'light' ? 'light' : 'dark';
 };
 
 export const getStoredTheme = (): ActiveTheme => {
