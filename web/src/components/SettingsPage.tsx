@@ -24,6 +24,29 @@ type SettingsHomeLayout = 'cards' | 'list' | 'compact';
 type Permission = 'read' | 'write';
 type SavedColor = { color: string; name: string };
 const SettingsSectionContext = createContext<string | null>(null);
+const settingsViews: SettingsView[] = ['home','accounts','security','sessions','access','storage','files','links','appearance','markdown','admin','admin-users','admin-groups','admin-messages','admin-captions','admin-ai-models','admin-instagram','tags','transfers','tts','help'];
+const settingsSearchIndex: Array<{view:SettingsView;title:string;text:string;admin?:boolean}> = [
+    {view:'accounts',title:'حساب‌ها',text:'افزودن حساب، جابه‌جایی و پشتیبان'},
+    {view:'security',title:'ورود و امنیت',text:'رمز عبور، بازیابی، گاوصندوق و تأیید دومرحله‌ای'},
+    {view:'sessions',title:'مدیریت نشست‌ها',text:'دستگاه‌های واردشده و رویدادهای امنیتی'},
+    {view:'access',title:'دسترسی و اشتراک‌گذاری',text:'کمدهای مشترک و سطح دسترسی افراد'},
+    {view:'storage',title:'فضای ذخیره‌سازی',text:'فضای شخصی، کانال ذخیره و حذف فایل'},
+    {view:'files',title:'فایل‌ها و مقصدها',text:'نمایش کارت‌ها و مقصد فایل‌های تازه'},
+    {view:'tags',title:'مدیریت تگ‌ها',text:'ساخت، دسته‌بندی، رنگ و تشخیص خودکار'},
+    {view:'transfers',title:'مرکز انتقال‌ها',text:'دانلود، آپلود، لینک‌ها و ذخیره آفلاین'},
+    {view:'links',title:'لینک‌ها و پایش',text:'توضیحات لینک و بررسی خودکار منابع'},
+    {view:'appearance',title:'ظاهر برنامه',text:'تم، رنگ، حالت روشن و موارد قابل نمایش'},
+    {view:'markdown',title:'مطالعه و Markdown',text:'فونت، اندازه، تم متن و ابزار مطالعه'},
+    {view:'tts',title:'متن و صدا',text:'تبدیل متن به صدا و استخراج متن از صوت'},
+    {view:'help',title:'راهنمای کمد',text:'توضیح امکانات و روش استفاده'},
+    {view:'admin-users',title:'کاربران',text:'درخواست‌ها، کاربران فعال و غیرفعال',admin:true},
+    {view:'admin-groups',title:'گروه‌ها',text:'تأیید، محدودیت و میزان مصرف گروه‌ها',admin:true},
+    {view:'admin-messages',title:'پیام‌های ربات',text:'ویرایش پاسخ دستورها و پردازش‌ها',admin:true},
+    {view:'admin-captions',title:'متن خروجی فایل‌ها',text:'متن زیر خروجی سرویس‌ها',admin:true},
+    {view:'admin-ai-models',title:'مدل‌های هوش مصنوعی',text:'مدل‌های مجاز و ضریب مصرف سهمیه',admin:true},
+    {view:'admin-instagram',title:'دریافت از اینستاگرام',text:'فرستنده‌ها، مقصدها و سهمیه دایرکت',admin:true},
+    {view:'admin',title:'گزارش و سلامت',text:'آمار، وضعیت سرویس‌ها و خطاها',admin:true},
+];
 
 export default function SettingsPage() {
     const setActiveSection = useAppStore(state => state.setActiveSection);
@@ -63,7 +86,9 @@ export default function SettingsPage() {
     const [view, setView] = useState<SettingsView>(() => {
         const target = localStorage.getItem('komod-settings-target') as SettingsView | null;
         localStorage.removeItem('komod-settings-target');
-        return target === 'tts' ? 'tts' : 'home';
+        if (target === 'tts') return 'tts';
+        const requested = new URLSearchParams(window.location.search).get('settings') as SettingsView | null;
+        return requested && settingsViews.includes(requested) ? requested : 'home';
     });
     const [theme, setTheme] = useState<ActiveTheme>(getStoredTheme);
     const [appearanceMode, setAppearanceMode] = useState<AppearanceMode>(getStoredAppearanceMode);
@@ -100,7 +125,8 @@ export default function SettingsPage() {
     const [twoFactorMessage,setTwoFactorMessage]=useState<{kind:'ok'|'error';text:string}|null>(null);
     const [vaultPassword,setVaultPasswordValue]=useState('');
     const [vaultMessage,setVaultMessage]=useState<{kind:'ok'|'error';text:string}|null>(null);
-    const [activeSubsection,setActiveSubsection]=useState<string|null>(null);
+    const [activeSubsection,setActiveSubsection]=useState<string|null>(()=>new URLSearchParams(window.location.search).get('section'));
+    const [settingsQuery,setSettingsQuery]=useState('');
     const [homeLayout,setHomeLayout]=useState<SettingsHomeLayout>(()=>{
         const stored=localStorage.getItem('komod-settings-home-layout');
         return stored==='list'||stored==='compact'?'list'===stored?'list':'compact':'cards';
@@ -135,6 +161,22 @@ export default function SettingsPage() {
         return () => { window.removeEventListener('komod-open-tts', openTTS); window.removeEventListener('komod-open-settings-home', openHome); };
     }, []);
     useEffect(()=>{window.dispatchEvent(new CustomEvent('komod-settings-view',{detail:{view}}))},[view]);
+    useEffect(()=>{
+        const url=new URL(window.location.href);
+        if(view==='home')url.searchParams.delete('settings');else url.searchParams.set('settings',view);
+        if(activeSubsection&&view!=='home')url.searchParams.set('section',activeSubsection);else url.searchParams.delete('section');
+        window.history.replaceState(window.history.state,'',`${url.pathname}${url.search}${url.hash}`);
+    },[activeSubsection,view]);
+    useEffect(()=>{
+        const syncFromHistory=()=>{
+            const params=new URLSearchParams(window.location.search);
+            const requested=params.get('settings') as SettingsView|null;
+            setView(requested&&settingsViews.includes(requested)?requested:'home');
+            setActiveSubsection(params.get('section'));
+        };
+        window.addEventListener('popstate',syncFromHistory);
+        return()=>window.removeEventListener('popstate',syncFromHistory);
+    },[]);
     useEffect(() => {
         const frame = window.requestAnimationFrame(() => {
             document.querySelector<HTMLElement>('[data-main-scroll="true"]')?.scrollTo({ top: 0, behavior: 'auto' });
@@ -258,6 +300,11 @@ export default function SettingsPage() {
     };
     const sectionLinks = settingsSectionLinks(view,Boolean(user?.is_admin||user?.can_use_monitors));
     const selectedSubsection = sectionLinks.some(item=>item.id===activeSubsection) ? activeSubsection : sectionLinks[0]?.id || null;
+    const settingsSearchResults=useMemo(()=>{
+        const query=settingsQuery.trim().toLocaleLowerCase('fa');
+        if(!query)return [];
+        return settingsSearchIndex.filter(item=>(!item.admin||user?.is_admin)&&`${item.title} ${item.text}`.toLocaleLowerCase('fa').includes(query));
+    },[settingsQuery,user?.is_admin]);
     const visibleAdminUsers = useMemo(() => filteredAdminUsers.filter(item => {
         if (selectedSubsection === 'admin-users-pending') return item.telegram_id < 0 && !item.is_active;
         if (selectedSubsection === 'admin-users-disabled') return !item.is_active && item.telegram_id >= 0;
@@ -305,6 +352,10 @@ export default function SettingsPage() {
         {sectionLinks.length>1&&<SectionJumpNav items={sectionLinks} active={selectedSubsection} onChange={setActiveSubsection} mobileGrid={view.startsWith('admin')}/>}
 
         {view === 'home' && <div className="space-y-5">
+            <section className="rounded-2xl border border-white/[.07] bg-dark-900/65 p-2">
+                <label className="relative block"><Search className="pointer-events-none absolute right-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-dark-400"/><input value={settingsQuery} onChange={event=>setSettingsQuery(event.target.value)} className="input w-full !pr-10 !pl-10 text-right" placeholder="جست‌وجو در تنظیمات" aria-label="جست‌وجو در تنظیمات"/>{settingsQuery&&<button type="button" onClick={()=>setSettingsQuery('')} className="btn-icon absolute left-1.5 top-1/2 h-8 w-8 -translate-y-1/2" aria-label="پاک‌کردن جست‌وجو"><XCircle className="h-4 w-4"/></button>}</label>
+                {settingsQuery.trim()&&<div className="mt-2 grid gap-1 sm:grid-cols-2">{settingsSearchResults.length?settingsSearchResults.map(item=><button type="button" key={item.view} onClick={()=>{setSettingsQuery('');setActiveSubsection(null);setView(item.view)}} className="flex min-h-14 items-center gap-3 rounded-xl px-3 text-right transition hover:bg-white/[.055] focus-visible:bg-white/[.055]"><Search className="h-4 w-4 shrink-0 text-primary-300"/><span className="min-w-0 flex-1"><strong className="block truncate text-sm">{item.title}</strong><small className="block truncate text-dark-400">{item.text}</small></span><ChevronLeft className="h-4 w-4 shrink-0 text-dark-500"/></button>):<p className="col-span-full py-5 text-center text-sm text-dark-400">بخشی با این عبارت پیدا نشد.</p>}</div>}
+            </section>
             <section className="overflow-hidden rounded-3xl border border-white/[.07] bg-gradient-to-bl from-primary-500/[.12] via-dark-900/80 to-dark-950/85 p-4 sm:p-5">
                 <div className="grid min-w-0 gap-2 sm:grid-cols-2">
                     <SummaryCard icon={<Smartphone/>} title={displayName} text="حساب فعال" />

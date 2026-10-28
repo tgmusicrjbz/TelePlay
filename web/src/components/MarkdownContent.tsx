@@ -2,6 +2,11 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Copy } from 'lucide-react';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import remarkBreaks from 'remark-breaks';
+import rehypeKatex from 'rehype-katex';
 import { api, TelegramFile } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { getMarkdownPalette, MarkdownPalette } from '../lib/markdownSettings';
@@ -9,7 +14,7 @@ import { getMarkdownPalette, MarkdownPalette } from '../lib/markdownSettings';
 type ReaderTone = string;
 function inlineMarkdown(text: string) {
     return text.split(/(!\[[^\]]*\]\([^)]+\)|\[[^\]]+\]\([^)]+\)|<a\s+href=["'][^"']+["'][^>]*>.*?<\/a>|<(?:strong|b)>.*?<\/(?:strong|b)>|<(?:em|i)>.*?<\/(?:em|i)>|https?:\/\/[^\s<]+|\{\{[^{}]+\}\}|\$[^$\n]+\$|\*\*[^*]+\*\*|__[^_]+__|<u>.*?<\/u>|~~[^~]+~~|`[^`]+`|\*[^*]+\*)/gi).map((part, index) => {
-        const image = part.match(/^!\[([^\]]*)\]\(([^)]+)\)$/); if (image) { const token=localStorage.getItem('access_token')||''; const source=image[2].startsWith('/api/')?`${image[2]}${image[2].includes('?')?'&':'?'}token=${encodeURIComponent(token)}`:image[2]; return <img key={index} src={source} alt={image[1]} loading="lazy" className="my-4 max-h-[70vh] max-w-full rounded-2xl border border-white/[.07] object-contain shadow-xl"/>; }
+        const image = part.match(/^!\[([^\]]*)\]\(([^)]+)\)$/); if (image) { const token=localStorage.getItem('access_token')||''; const source=image[2].startsWith('/api/')?`${image[2]}${image[2].includes('?')?'&':'?'}token=${encodeURIComponent(token)}`:image[2]; return <img key={index} src={source} alt={image[1]} loading="lazy" decoding="async" className="my-4 max-h-[70vh] max-w-full rounded-2xl border border-white/[.07] object-contain shadow-xl"/>; }
         const link = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/); if (link) {
             const internal=link[2].match(/^komod:\/\/file\/(\d+)$/i);
             if(internal)return <button type="button" key={index} onClick={()=>void openInternalFile(Number(internal[1]))} className="inline-flex max-w-full items-center gap-1 break-words font-medium text-primary-200 underline decoration-primary-400/40 underline-offset-4 transition hover:text-primary-100">{link[1]}</button>;
@@ -128,55 +133,12 @@ export default function MarkdownContent({ content, fontSize = 15, lineHeight = 2
         window.addEventListener('komod-markdown-themes-changed',refresh);
         return()=>window.removeEventListener('komod-markdown-themes-changed',refresh);
     },[]);
-    const blocks = useMemo(() => {
-        const result: JSX.Element[] = []; let code = false; let codeLines: string[] = []; let language = '';
-        const lines = content.split(/\r?\n/);
-        for (let index = 0; index < lines.length; index += 1) {
-            const line = lines[index];
-            if (line.trim().startsWith('```')) { if (code) { result.push(<MarkdownCodeBlock key={`code-${index}`} code={codeLines.join('\n')} language={language}/>); codeLines = []; language = ''; } else language = line.trim().slice(3).trim(); code = !code; continue; }
-            if (code) { codeLines.push(line); continue; }
-            if (line.trim().startsWith('$$')) {
-                const formula: string[] = [];
-                const first = line.trim().slice(2);
-                if (first.endsWith('$$')) formula.push(first.slice(0, -2));
-                else {
-                    if (first) formula.push(first);
-                    while (index + 1 < lines.length) {
-                        index += 1;
-                        const formulaLine = lines[index];
-                        if (formulaLine.trim().endsWith('$$')) { formula.push(formulaLine.trim().slice(0, -2)); break; }
-                        formula.push(formulaLine);
-                    }
-                }
-                result.push(<MathFormula key={`math-${index}`} source={formula.join('\n')} displayMode/>);
-                continue;
-            }
-            if (!line.trim()) { result.push(<div key={`space-${index}`} className="h-3"/>); continue; }
-            if (/^\s*(---+|___+|\*\*\*+)\s*$/.test(line)) { result.push(<div key={index} className="my-7 h-px bg-gradient-to-r from-transparent via-primary-400/45 to-transparent"/>); continue; }
-            const nextIsSeparator = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(lines[index + 1] || '');
-            if (line.includes('|') && nextIsSeparator) {
-                const rows: string[][] = [line.trim().replace(/^\||\|$/g, '').split('|').map(cell => cell.trim())];
-                index += 2;
-                while (index < lines.length && lines[index].includes('|') && lines[index].trim()) {
-                    rows.push(lines[index].trim().replace(/^\||\|$/g, '').split('|').map(cell => cell.trim()));
-                    index += 1;
-                }
-                index -= 1;
-                result.push(<div key={`table-${index}`} className="my-5 max-w-full overflow-x-auto rounded-2xl border border-white/[.08] shadow-lg"><table className="w-full min-w-max border-collapse text-sm"><thead className="bg-primary-500/12 text-primary-100"><tr>{rows[0].map((cell, cellIndex) => <th key={cellIndex} className="min-w-32 border-l border-white/[.07] px-4 py-3 text-right font-bold last:border-l-0">{inlineMarkdown(cell)}</th>)}</tr></thead><tbody>{rows.slice(1).map((cells, rowIndex) => <tr key={rowIndex} className="border-t border-white/[.06] odd:bg-white/[.018]"><>{rows[0].map((_, cellIndex) => <td key={cellIndex} className="max-w-sm break-words border-l border-white/[.05] px-4 py-3 align-top last:border-l-0">{inlineMarkdown(cells[cellIndex] || '')}</td>)}</></tr>)}</tbody></table></div>);
-                continue;
-            }
-            const htmlHeading=line.match(/^<h([1-6])>(.*?)<\/h\1>$/i);
-            const heading = line.match(/^(#{1,6})\s*(.+)$/);
-            if (heading||htmlHeading) { const level = heading?heading[1].length:Number(htmlHeading?.[1]||1); const headingText=heading?.[2]||htmlHeading?.[2]||''; const Tag = `h${level}` as keyof JSX.IntrinsicElements; const tone = level === 1 ? 'text-primary-200' : level === 2 ? 'text-sky-200' : level === 3 ? 'text-violet-200' : 'text-emerald-200'; result.push(<Tag key={index} className={`${level === 1 ? 'text-3xl' : level === 2 ? 'text-2xl' : level === 3 ? 'text-xl' : 'text-lg'} ${tone} mb-2 mt-7 break-words border-b border-white/[.05] pb-2 font-black leading-tight`}>{inlineMarkdown(headingText)}</Tag>); continue; }
-            const quote = line.match(/^>\s?(.+)$/); if (quote) { result.push(<blockquote key={index} className="my-3 rounded-l-xl border-r-4 border-violet-400/60 bg-violet-400/[.07] px-4 py-2 italic text-violet-100/90">{inlineMarkdown(quote[1])}</blockquote>); continue; }
-            const task = line.match(/^(\s*)[-*]\s+\[([ xX])\]\s+(.+)$/); if (task) { const checked = task[2].toLowerCase() === 'x'; result.push(<div key={index} className="my-1 flex items-start gap-2" style={{paddingInlineStart:Math.min(48,Math.floor(task[1].length/2)*16)}}><span className="flex h-[1lh] shrink-0 items-center"><span className={`flex h-5 w-5 items-center justify-center rounded-md border text-xs ${checked ? 'border-emerald-400/40 bg-emerald-400/15 text-emerald-300' : 'border-white/15 text-transparent'}`}>✓</span></span><span className={`min-w-0 flex-1 break-words ${checked ? 'text-dark-400 line-through' : ''}`}>{inlineMarkdown(task[3])}</span></div>); continue; }
-            const bullet = line.match(/^(\s*)[-*]\s+(.+)$/); if (bullet) { result.push(<div key={index} className="my-1 flex items-start gap-2" style={{paddingInlineStart:Math.min(48,Math.floor(bullet[1].length/2)*16)}}><span className="flex h-[1lh] w-2 shrink-0 items-center justify-center"><span className="h-1.5 w-1.5 rounded-full bg-primary-300 shadow-[0_0_0_3px_rgba(168,85,247,.12)]"/></span><span className="min-w-0 flex-1 break-words">{inlineMarkdown(bullet[2])}</span></div>); continue; }
-            const ordered = line.match(/^(\s*)(\d+)\.\s+(.+)$/); if (ordered) { result.push(<div key={index} className="my-1 flex items-start gap-2" style={{paddingInlineStart:Math.min(48,Math.floor(ordered[1].length/2)*16)}}><span className="flex h-[1lh] min-w-6 shrink-0 items-center"><span className="flex min-w-6 items-center justify-center rounded-md bg-primary-400/10 px-1 text-xs font-bold text-primary-200">{Number(ordered[2]).toLocaleString('fa-IR')}</span></span><span className="min-w-0 flex-1 break-words">{inlineMarkdown(ordered[3])}</span></div>); continue; }
-            result.push(<p key={index} className="whitespace-pre-wrap break-words">{inlineMarkdown(line)}</p>);
-        }
-        if (codeLines.length) result.push(<MarkdownCodeBlock key="code-final" code={codeLines.join('\n')} language={language}/>);
-        return result;
-    }, [content]);
+    const normalizedContent=useMemo(()=>content
+        .replace(/<h([1-6])>(.*?)<\/h\1>/gi,(_,level,text)=>`${'#'.repeat(Number(level))} ${text}`)
+        .replace(/<(?:strong|b)>(.*?)<\/(?:strong|b)>/gi,'**$1**')
+        .replace(/<(?:em|i)>(.*?)<\/(?:em|i)>/gi,'*$1*')
+        .replace(/<u>(.*?)<\/u>/gi,'[$1](komod-style://underline)')
+        .replace(/<a\s+href=["']([^"']+)["'][^>]*>(.*?)<\/a>/gi,'[$2]($1)'),[content]);
     const palette=customPalette||getMarkdownPalette(theme);
     const paletteStyle=palette?({
         '--md-background':palette.background,'--md-surface':palette.surface,'--md-text':palette.text,'--md-border':palette.border,
@@ -185,6 +147,33 @@ export default function MarkdownContent({ content, fontSize = 15, lineHeight = 2
         '--md-inline-code-bg':palette.inlineCodeBackground,'--md-code':palette.codeText,'--md-code-bg':palette.codeBackground,
     } as React.CSSProperties):undefined;
     return <div className={`markdown-reader-canvas ${palette?'markdown-reader-canvas--custom p-2 sm:p-3':''} mx-auto w-full ${wide?'max-w-none':'max-w-3xl'} overflow-hidden rounded-2xl transition-colors`} style={paletteStyle}>
-        <article dir={direction} className={`markdown-article ${palette?'markdown-article--custom':`markdown-article--${theme}`} markdown-font--${fontFamily} w-full max-w-none overflow-hidden rounded-2xl border p-4 shadow-inner transition-colors sm:p-6 ${wrap ? 'break-words' : 'overflow-x-auto whitespace-pre'}`} style={{fontSize, lineHeight, textAlign: align}}>{blocks}</article>
+        <article dir={direction} className={`markdown-article ${palette?'markdown-article--custom':`markdown-article--${theme}`} markdown-font--${fontFamily} w-full max-w-none overflow-hidden rounded-2xl border p-4 shadow-inner transition-colors sm:p-6 ${wrap ? 'break-words' : 'overflow-x-auto whitespace-pre'}`} style={{fontSize, lineHeight, textAlign: align}}>
+            <ReactMarkdown
+                remarkPlugins={[remarkGfm,remarkMath,remarkBreaks]}
+                rehypePlugins={[rehypeKatex]}
+                urlTransform={(url)=>/^(?:komod:\/\/file\/\d+|komod-style:\/\/underline)$/i.test(url)?url:defaultUrlTransform(url)}
+                components={{
+                    h1:({children})=><h1 className="mb-2 mt-7 break-words border-b border-white/[.05] pb-2 text-3xl font-black leading-tight text-primary-200">{children}</h1>,
+                    h2:({children})=><h2 className="mb-2 mt-7 break-words border-b border-white/[.05] pb-2 text-2xl font-black leading-tight text-sky-200">{children}</h2>,
+                    h3:({children})=><h3 className="mb-2 mt-7 break-words border-b border-white/[.05] pb-2 text-xl font-black leading-tight text-violet-200">{children}</h3>,
+                    h4:({children})=><h4 className="mb-2 mt-7 break-words border-b border-white/[.05] pb-2 text-lg font-black leading-tight text-emerald-200">{children}</h4>,
+                    p:({children})=><p className="my-2 whitespace-pre-wrap break-words">{children}</p>,
+                    a:({href='',children})=>{if(href==='komod-style://underline')return <u className="decoration-primary-400/70 decoration-2 underline-offset-4">{children}</u>;const internal=href.match(/^komod:\/\/file\/(\d+)$/i);return internal?<button type="button" onClick={()=>void openInternalFile(Number(internal[1]))} className="inline-flex max-w-full items-center gap-1 break-words font-medium text-primary-200 underline decoration-primary-400/40 underline-offset-4">{children}</button>:<a href={href} target="_blank" rel="noreferrer" className="break-all font-medium text-sky-300 underline decoration-sky-500/40 underline-offset-4">{children}</a>},
+                    img:({src='',alt=''})=>{const token=localStorage.getItem('access_token')||'';const source=src.startsWith('/api/')?`${src}${src.includes('?')?'&':'?'}token=${encodeURIComponent(token)}`:src;return <img src={source} alt={alt} loading="lazy" decoding="async" className="my-4 max-h-[70vh] max-w-full rounded-2xl border border-white/[.07] object-contain shadow-xl"/>},
+                    pre:({children})=><>{children}</>,
+                    code:({className,children})=>{const raw=String(children);const language=className?.replace(/^language-/,'');if(className||raw.includes('\n'))return <MarkdownCodeBlock code={raw.replace(/\n$/,'')} language={language}/>;return <code dir="ltr" className="mx-0.5 break-all rounded-md border border-cyan-400/15 bg-cyan-400/10 px-1.5 py-0.5 font-mono text-[.9em] text-cyan-200">{children}</code>},
+                    blockquote:({children})=><blockquote className="my-3 rounded-l-xl border-r-4 border-violet-400/60 bg-violet-400/[.07] px-4 py-2 italic text-violet-100/90">{children}</blockquote>,
+                    ul:({children,className})=><ul className={`my-3 list-disc space-y-1 pr-6 marker:text-primary-300 ${className||''}`}>{children}</ul>,
+                    ol:({children})=><ol className="my-3 list-decimal space-y-1 pr-7 marker:font-bold marker:text-primary-200">{children}</ol>,
+                    li:({children,className})=><li className={`break-words pr-1 ${className||''}`}>{children}</li>,
+                    table:({children})=><div className="my-5 max-w-full overflow-x-auto rounded-2xl border border-white/[.08] shadow-lg"><table className="w-full min-w-max border-collapse text-sm">{children}</table></div>,
+                    thead:({children})=><thead className="bg-primary-500/12 text-primary-100">{children}</thead>,
+                    tr:({children})=><tr className="border-t border-white/[.06] odd:bg-white/[.018]">{children}</tr>,
+                    th:({children})=><th className="min-w-32 border-l border-white/[.07] px-4 py-3 text-right font-bold last:border-l-0">{children}</th>,
+                    td:({children})=><td className="max-w-sm break-words border-l border-white/[.05] px-4 py-3 align-top last:border-l-0">{children}</td>,
+                    hr:()=> <div className="my-7 h-px bg-gradient-to-r from-transparent via-primary-400/45 to-transparent"/>,
+                }}
+            >{normalizedContent}</ReactMarkdown>
+        </article>
     </div>;
 }

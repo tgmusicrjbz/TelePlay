@@ -126,7 +126,7 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
                             ? 'bg-primary-500/20 border-primary-500/40' 
                             : 'bg-primary-500/10 border-primary-500/20 group-hover:bg-primary-500/20'}`}
                 >
-                    <span className="absolute inset-0 flex items-center justify-center transition duration-300">{coverUrl ? <img src={coverUrl} alt="" className="h-full w-full object-cover"/> : folder.icon ? <span className="text-2xl leading-none">{folder.icon}</span> : <FolderIcon style={folderColor ? {color:folderColor}:undefined} className={`w-6 h-6 transition-colors ${selected ? 'text-primary-300' : 'text-primary-400 group-hover:text-primary-300'}`} />}</span>
+                    <span className="absolute inset-0 flex items-center justify-center transition duration-300">{coverUrl ? <img src={coverUrl} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover"/> : folder.icon ? <span className="text-2xl leading-none">{folder.icon}</span> : <FolderIcon style={folderColor ? {color:folderColor}:undefined} className={`w-6 h-6 transition-colors ${selected ? 'text-primary-300' : 'text-primary-400 group-hover:text-primary-300'}`} />}</span>
                     {cardDisplay.statusBadges&&(folder.is_pinned || folder.is_favorite) && <span className="absolute -right-1 -top-1 z-20 flex items-center gap-0.5 rounded-full border border-white/10 bg-dark-900/95 p-1 shadow-lg">{folder.is_pinned && <Pin className="h-3 w-3 fill-current text-primary-300"/>}{folder.is_favorite && <Star className="h-3 w-3 fill-current text-amber-300"/>}</span>}
                 </div>
 
@@ -187,7 +187,7 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
                             ? 'bg-gradient-to-br from-primary-500/20 to-primary-500/10 border-primary-500/40' 
                             : 'bg-gradient-to-br from-primary-500/10 to-primary-500/5 border-primary-500/20 group-hover:border-primary-500/30'}`}
                 >
-                    <span className="absolute inset-0 flex items-center justify-center transition duration-300">{coverUrl ? <img src={coverUrl} alt="" className="h-full w-full object-cover"/> : folder.icon ? <span className="text-xl leading-none">{folder.icon}</span> : <FolderIcon style={folderColor ? {color:folderColor}:undefined} className={`w-5 h-5 transition-colors ${selected ? 'text-primary-300' : 'text-primary-400'}`} />}</span>
+                    <span className="absolute inset-0 flex items-center justify-center transition duration-300">{coverUrl ? <img src={coverUrl} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover"/> : folder.icon ? <span className="text-xl leading-none">{folder.icon}</span> : <FolderIcon style={folderColor ? {color:folderColor}:undefined} className={`w-5 h-5 transition-colors ${selected ? 'text-primary-300' : 'text-primary-400'}`} />}</span>
                     {cardDisplay.statusBadges&&(folder.is_pinned || folder.is_favorite) && <span className="absolute -right-1 -top-1 z-20 flex items-center gap-0.5 rounded-full border border-white/10 bg-dark-900/95 p-0.5 shadow-lg">{folder.is_pinned && <Pin className="h-2.5 w-2.5 fill-current text-primary-300"/>}{folder.is_favorite && <Star className="h-2.5 w-2.5 fill-current text-amber-300"/>}</span>}
                 </div>
                 <div className="relative z-30 flex items-center gap-1">

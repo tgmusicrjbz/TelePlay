@@ -26,9 +26,9 @@ if(oversized.length){
     throw new Error(`Oversized lazy/vendor assets:\n${oversized.map(item=>`${item.name}: ${(item.size/1024).toFixed(1)} KiB`).join('\n')}`);
 }
 const totalBytes=measured.reduce((sum,item)=>sum+item.size,0);
-// KaTeX is kept local so Markdown formulas also render offline. The shell is
-// still bounded below 1.6 MiB uncompressed and is checked separately after
-// service-worker asset selection.
-const totalLimit=1.6*1024*1024;
+// KaTeX and the standards-based Markdown pipeline are kept local so reading,
+// GFM tables and formulas work offline. Per-file limits above still prevent a
+// single blocking chunk; this total cap guards accidental aggregate growth.
+const totalLimit=2.1*1024*1024;
 if(totalBytes>totalLimit)throw new Error(`Total JS/CSS bundle is ${(totalBytes/1024).toFixed(1)} KiB; limit is ${(totalLimit/1024).toFixed(0)} KiB.`);
 console.log(`All ${measured.length} JS/CSS assets are within per-file limits; total ${(totalBytes/1024).toFixed(1)} KiB.`);

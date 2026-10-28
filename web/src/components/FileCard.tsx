@@ -120,7 +120,7 @@ export default function FileCard({
                 <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-white/[0.05] bg-dark-800/80">
                     <div className="absolute inset-0 flex items-center justify-center transition duration-300">
                         {authorizedThumbnailUrl && !thumbnailFailed ? (
-                            <img src={authorizedThumbnailUrl} alt={file.file_name} className="h-full w-full object-cover" onError={() => setThumbnailFailed(true)} />
+                            <img src={authorizedThumbnailUrl} alt={file.file_name} loading="lazy" decoding="async" className="h-full w-full object-cover" onError={() => setThumbnailFailed(true)} />
                         ) : (
                             fallbackThumbnail()
                         )}
@@ -202,7 +202,7 @@ export default function FileCard({
                 <div className="absolute inset-0 transition duration-300">
                     {authorizedThumbnailUrl && !thumbnailFailed ? (
                         <>
-                            <img src={authorizedThumbnailUrl} alt={file.file_name} className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" onError={() => setThumbnailFailed(true)} />
+                            <img src={authorizedThumbnailUrl} alt={file.file_name} loading="lazy" decoding="async" className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" onError={() => setThumbnailFailed(true)} />
                             <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100"></div>
                         </>
                     ) : (

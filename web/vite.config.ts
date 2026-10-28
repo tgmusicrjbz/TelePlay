@@ -46,6 +46,8 @@ export default defineConfig({
                     'data-vendor': ['axios', '@tanstack/react-query', 'zustand'],
                     'interaction-vendor': ['@dnd-kit/core', '@dnd-kit/sortable', '@dnd-kit/utilities'],
                     'markdown-vendor': ['katex'],
+                    'markdown-parser': ['react-markdown', 'remark-gfm', 'remark-breaks'],
+                    'markdown-math': ['remark-math', 'rehype-katex'],
                     'icons-vendor': ['lucide-react'],
                 },
             },

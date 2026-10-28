@@ -50,6 +50,7 @@ function ToastItem({ toast, onDismiss }: { toast: { id: string; message: string;
             <p className="min-w-0 flex-1 text-right text-xs font-medium leading-6 text-dark-100">{toast.message}</p>
             <button 
                 onClick={dismiss}
+                aria-label="بستن اعلان"
                 className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-dark-500 transition-colors hover:bg-white/[.06] hover:text-white"
             >
                 <X className="h-3.5 w-3.5" />

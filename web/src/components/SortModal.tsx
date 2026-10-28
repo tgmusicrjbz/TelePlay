@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { ArrowDown, ArrowUp, ChevronDown, ChevronUp, Plus, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, ChevronDown, ChevronUp, ListFilter, Plus, X } from 'lucide-react';
 import { SortCriterion, SortField } from '../lib/api';
+import ModalShell from './ModalShell';
 
 const labels: Record<SortField, string> = {
     name: 'نام', type: 'نوع', size: 'حجم', duration: 'مدت',
@@ -27,12 +28,7 @@ export default function SortModal({ open, criteria, onApply, onClose }: Props) {
         [next[index], next[target]] = [next[target], next[index]];
         setDraft(next);
     };
-    return <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onMouseDown={onClose}>
-        <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-dark-900 p-5 shadow-2xl" onMouseDown={event => event.stopPropagation()} dir="rtl">
-            <div className="mb-5 flex items-center justify-between">
-                <div><h2 className="text-lg font-bold">مرتب‌سازی چندمرحله‌ای</h2><p className="mt-1 text-xs text-dark-400">اولویت از بالا به پایین اعمال می‌شود.</p></div>
-                <button className="btn-icon" onClick={onClose}><X className="h-5 w-5" /></button>
-            </div>
+    return <ModalShell title="مرتب‌سازی چندمرحله‌ای" subtitle="اولویت از بالا به پایین اعمال می‌شود." icon={<ListFilter/>} width="lg" zIndex={110} onClose={onClose} footer={<><button className="btn-primary flex-1 sm:flex-none" onClick={() => { onApply(draft.length ? draft : [{ field: 'created', direction: 'desc' }]); onClose(); }}>اعمال</button><button className="btn-secondary flex-1 sm:flex-none" onClick={() => setDraft([{ field: 'created', direction: 'desc' }])}>حالت پیش‌فرض</button></>}>
             <div className="space-y-2">
                 {draft.map((item, index) => <div key={item.field} className="flex items-center gap-2 rounded-xl border border-white/10 bg-dark-800/60 p-2">
                     <span className="w-6 text-center text-xs text-primary-300">{index + 1}</span>
@@ -47,10 +43,5 @@ export default function SortModal({ open, criteria, onApply, onClose }: Props) {
             {available.length > 0 && <div className="mt-4 grid grid-cols-2 gap-2">
                 {available.map(field => <button key={field} className="btn-secondary flex items-center justify-center gap-2 text-xs" onClick={() => setDraft([...draft, { field, direction: 'asc' }])}><Plus className="h-4 w-4" />{labels[field]}</button>)}
             </div>}
-            <div className="mt-5 flex gap-2">
-                <button className="btn-primary flex-1" onClick={() => { onApply(draft.length ? draft : [{ field: 'created', direction: 'desc' }]); onClose(); }}>اعمال</button>
-                <button className="btn-secondary" onClick={() => setDraft([{ field: 'created', direction: 'desc' }])}>حالت پیش‌فرض</button>
-            </div>
-        </div>
-    </div>;
+    </ModalShell>;
 }
