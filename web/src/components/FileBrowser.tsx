@@ -1421,14 +1421,14 @@ export default function FileBrowser() {
                         )}
                         {/* Search */}
                         {(activeSection === 'files' || activeSection === 'activity') && <div className="relative min-w-0 flex-1 max-w-[24rem]">
-                            <span className="pointer-events-none absolute inset-y-0 right-3 z-10 flex items-center text-dark-500" aria-hidden="true"><Search className="h-4 w-4" /></span>
+                            <span className="pointer-events-none absolute inset-y-0 right-0 z-20 flex w-10 items-center justify-center text-dark-500" aria-hidden="true"><Search className="h-4 w-4 shrink-0" /></span>
                             <input
                                 type="text"
                                 placeholder="جست‌وجو در کمد…"
                                 value={searchQuery}
                                 onChange={(e) => {setActiveSavedFilterId(null);setSearchQuery(e.target.value)}}
                                 onKeyDown={event=>{if(event.key==='Enter'&&event.shiftKey&&activeSection==='files'){event.preventDefault();void runSmartSearch()}}}
-                                className="input-search h-10 w-full pr-9 text-sm"
+                                className="input-search h-10 w-full !pl-10 !pr-10 text-sm"
                             />
                             {activeSection==='files'&&<button type="button" onClick={()=>void runSmartSearch()} disabled={expandSmartSearch.isPending||searchQuery.trim().length<2} className={`absolute left-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md transition disabled:opacity-35 ${smartSearchQuery?'bg-primary-500/20 text-primary-200':'text-dark-400 hover:bg-white/[.06] hover:text-white'}`} title="جست‌وجوی هوشمند (Shift + Enter)" aria-label="جست‌وجوی هوشمند">{expandSmartSearch.isPending?<RefreshCw className="h-3.5 w-3.5 animate-spin"/>:<Sparkles className="h-3.5 w-3.5"/>}</button>}
                             {activeSection==='files'&&smartSearchQuery&&<div className="absolute inset-x-0 top-[calc(100%+.45rem)] z-50 flex items-center gap-2 rounded-xl border border-primary-400/15 bg-dark-900/95 px-2.5 py-2 text-[11px] text-primary-100 shadow-xl backdrop-blur-xl"><Sparkles className="h-3.5 w-3.5 shrink-0"/><span className="min-w-0 flex-1 truncate">هوشمند: {smartSearchTerms.length?smartSearchTerms.join('، '):'عبارت اصلی'}</span><button type="button" onClick={()=>{setSmartSearchQuery(null);setSmartSearchTerms([]);setPage(1);setAllFiles([])}} className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md hover:bg-white/10" aria-label="بازگشت به جست‌وجوی عادی"><X className="h-3.5 w-3.5"/></button></div>}
