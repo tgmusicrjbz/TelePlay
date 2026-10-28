@@ -8,7 +8,7 @@ import json
 import logging
 import re
 import secrets
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import urlparse, urlunparse
 from urllib.request import Request, urlopen
 
@@ -18,7 +18,7 @@ from . import telegram
 from .config import get_settings
 from .database import async_session
 from .downloader import ImportJob, link_importer
-from .models import InstagramInboxEvent, InstagramInboxSender, TelegramDestination, User
+from .models import InstagramInboxEvent, InstagramInboxSender, ProcessingJob, TelegramDestination, User
 
 
 logger = logging.getLogger(__name__)
@@ -41,6 +41,18 @@ def normalize_instagram_post_url(value: object) -> str | None:
     return urlunparse(("https", "www.instagram.com", path, "", "", ""))
 
 
+def _message_candidates(value: object):
+    """Yield scalar values from Meta's occasionally nested attachment payloads."""
+    if isinstance(value, dict):
+        for child in value.values():
+            yield from _message_candidates(child)
+    elif isinstance(value, (list, tuple)):
+        for child in value:
+            yield from _message_candidates(child)
+    elif isinstance(value, (str, int)):
+        yield value
+
+
 def extract_shared_posts(payload: dict) -> list[dict[str, str]]:
     """Extract sender, message id and post URL from Meta messaging webhooks."""
     found: list[dict[str, str]] = []
@@ -50,17 +62,22 @@ def extract_shared_posts(payload: dict) -> list[dict[str, str]]:
             message = item.get("message") or {}
             if not sender_id or message.get("is_echo"):
                 continue
-            candidates: list[object] = [message.get("text")]
-            for attachment in message.get("attachments") or []:
-                attachment_payload = attachment.get("payload") or {}
-                candidates.extend((attachment_payload.get("url"), attachment_payload.get("link")))
+            # Meta has used both flat payload.url and nested share/reel payloads.
+            # Walking the message keeps the receiver compatible with both while
+            # normalize_instagram_post_url still limits accepted values to posts.
+            candidates = list(_message_candidates(message))
             urls = list(dict.fromkeys(filter(None, (normalize_instagram_post_url(value) for value in candidates))))
             for index, url in enumerate(urls):
                 message_id = str(message.get("mid") or "").strip()
                 if not message_id:
                     fingerprint = json.dumps(item, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
                     message_id = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()
-                found.append({"sender_id": sender_id, "event_id": f"{message_id}:{index}", "url": url})
+                found.append({
+                    "sender_id": sender_id,
+                    "event_id": f"{message_id}:{index}",
+                    "message_id": message_id,
+                    "url": url,
+                })
     return found
 
 
@@ -205,6 +222,49 @@ async def dispatch_pending_events(sender_id: int) -> int:
     return queued
 
 
+async def recover_stale_instagram_events() -> int:
+    """Requeue Instagram events whose in-memory worker disappeared on a deploy."""
+    now = datetime.utcnow()
+    cutoff = now - timedelta(minutes=5)
+    recovery_window = now - timedelta(hours=12)
+    async with async_session() as db:
+        stale = (await db.execute(
+            select(InstagramInboxEvent).where(
+                InstagramInboxEvent.status == "queued",
+                InstagramInboxEvent.queued_at.is_not(None),
+                InstagramInboxEvent.queued_at < cutoff,
+            )
+        )).scalars().all()
+        active_job_ids = set()
+        job_ids = [event.import_job_id for event in stale if event.import_job_id]
+        if job_ids:
+            active_job_ids = set((await db.execute(
+                select(ProcessingJob.id).where(
+                    ProcessingJob.id.in_(job_ids),
+                    ProcessingJob.state.not_in(("done", "error", "cancelled")),
+                )
+            )).scalars())
+        orphaned = [event for event in stale if event.import_job_id not in active_job_ids]
+        recoverable = [event for event in orphaned if event.received_at >= recovery_window]
+        expired = [event for event in orphaned if event.received_at < recovery_window]
+        sender_ids = {event.sender_id for event in recoverable}
+        for event in recoverable:
+            event.status = "pending"
+            event.import_job_id = None
+            event.error = None
+        for event in expired:
+            event.status = "failed"
+            event.error = "پردازش این درخواست با راه‌اندازی دوباره سرویس ناتمام ماند؛ از بخش مدیریت دوباره تلاش کن."
+        if orphaned:
+            await db.commit()
+    recovered = 0
+    for sender_id in sender_ids:
+        recovered += await dispatch_pending_events(sender_id)
+    if recovered:
+        logger.info("Recovered %s stale Instagram inbox event(s)", recovered)
+    return recovered
+
+
 async def record_instagram_delivery(event_id: int, files: list) -> None:
     """Keep Telegram storage references so repeated shares need no download."""
     async with async_session() as db:
@@ -278,6 +338,27 @@ def _send_instagram_text_sync(instagram_user_id: str, text: str) -> bool:
     return True
 
 
+def _send_instagram_reaction_sync(instagram_user_id: str, message_id: str) -> bool:
+    if not settings.instagram_access_token or not settings.instagram_account_id or not message_id:
+        return False
+    endpoint = (
+        f"https://graph.instagram.com/{settings.instagram_graph_version.strip('/')}/"
+        f"{settings.instagram_account_id}/messages"
+    )
+    body = json.dumps({
+        "recipient": {"id": instagram_user_id},
+        "sender_action": "react",
+        "payload": {"message_id": message_id, "reaction": "love"},
+    }).encode("utf-8")
+    request = Request(endpoint, data=body, method="POST", headers={
+        "Authorization": f"Bearer {settings.instagram_access_token}",
+        "Content-Type": "application/json",
+    })
+    with urlopen(request, timeout=15) as response:
+        response.read()
+    return True
+
+
 def _send_pairing_message_sync(instagram_user_id: str, pairing_code: str) -> bool:
     return _send_instagram_text_sync(instagram_user_id, (
         "سلام 👋 پستت رسید!\n\n"
@@ -293,6 +374,15 @@ async def send_instagram_notice(instagram_user_id: str, text: str) -> bool:
         return await asyncio.to_thread(_send_instagram_text_sync, instagram_user_id, text)
     except Exception:
         logger.warning("Could not send Instagram notice to %s", instagram_user_id, exc_info=True)
+        return False
+
+
+async def send_instagram_reaction(instagram_user_id: str, message_id: str) -> bool:
+    """Acknowledge a shared reel without adding another message to the chat."""
+    try:
+        return await asyncio.to_thread(_send_instagram_reaction_sync, instagram_user_id, message_id)
+    except Exception:
+        logger.warning("Could not react to Instagram message %s", message_id, exc_info=True)
         return False
 
 

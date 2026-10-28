@@ -120,6 +120,8 @@ async def lifespan(app: FastAPI):
         if link_importer.available:
             try:
                 await link_importer.start()
+                from .instagram_inbox import recover_stale_instagram_events
+                await recover_stale_instagram_events()
             except Exception:
                 logger.exception("Background link importer could not start; the rest of the app remains available")
         await drive_importer.start()

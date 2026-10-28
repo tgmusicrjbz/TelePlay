@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import get_current_user
 from ..config import get_settings
 from ..database import get_db
-from ..instagram_inbox import dispatch_pending_events, extract_shared_posts, extract_text_messages, instagram_destination_reply, new_pairing_code, send_instagram_notice, send_pairing_message, verify_meta_signature
+from ..instagram_inbox import dispatch_pending_events, extract_shared_posts, extract_text_messages, instagram_destination_reply, new_pairing_code, send_instagram_notice, send_instagram_reaction, send_pairing_message, verify_meta_signature
 from ..models import AppSetting, InstagramInboxEvent, InstagramInboxSender, TelegramDestination, User
 
 
@@ -161,6 +161,11 @@ async def instagram_webhook(request: Request, background_tasks: BackgroundTasks,
         ))).scalar_one_or_none()
         if existing is not None:
             continue
+        # React immediately so the sender knows the reel reached Komod even if
+        # downloading and Telegram delivery take a while.
+        background_tasks.add_task(
+            send_instagram_reaction, shared["sender_id"], shared.get("message_id", "")
+        )
         sender = (await db.execute(select(InstagramInboxSender).where(
             InstagramInboxSender.instagram_user_id == shared["sender_id"]
         ))).scalar_one_or_none()

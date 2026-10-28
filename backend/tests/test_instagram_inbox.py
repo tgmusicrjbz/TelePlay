@@ -34,7 +34,30 @@ def test_extract_shared_posts_handles_meta_share_attachment_and_deduplicates_url
     assert extract_shared_posts(payload) == [{
         "sender_id": "ig-scoped-user",
         "event_id": "message-1:0",
+        "message_id": "message-1",
         "url": "https://www.instagram.com/p/ABC/",
+    }]
+
+
+def test_extract_shared_posts_handles_nested_reel_payloads():
+    payload = {
+        "object": "instagram",
+        "entry": [{"messaging": [{
+            "sender": {"id": "sender"},
+            "message": {
+                "mid": "nested-1",
+                "attachments": [{
+                    "type": "share",
+                    "payload": {"reel": {"permalink": "https://instagram.com/reel/NESTED42/?igsh=x"}},
+                }],
+            },
+        }]}],
+    }
+    assert extract_shared_posts(payload) == [{
+        "sender_id": "sender",
+        "event_id": "nested-1:0",
+        "message_id": "nested-1",
+        "url": "https://www.instagram.com/reel/NESTED42/",
     }]
 
 

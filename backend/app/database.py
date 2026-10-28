@@ -28,18 +28,30 @@ elif url.drivername == "sqlite":
     url = url.set(drivername="sqlite+aiosqlite")
 
 engine_options: dict[str, object] = {"echo": False, "pool_pre_ping": True}
-is_supabase_pooler = url.drivername == "postgresql+asyncpg" and (
-    url.port == 6543 or (url.host or "").endswith(".pooler.supabase.com")
+is_supabase_transaction_pooler = url.drivername == "postgresql+asyncpg" and url.port == 6543
+is_supabase_session_pooler = url.drivername == "postgresql+asyncpg" and (
+    (url.host or "").endswith(".pooler.supabase.com") and url.port != 6543
 )
 if url.drivername == "sqlite+aiosqlite":
     # Tests and local reloads create separate event loops. A connection reused
     # by another loop can leave SQLite in a stale state.
     engine_options.update(poolclass=NullPool)
-elif is_supabase_pooler:
+elif is_supabase_transaction_pooler:
     query = dict(url.query)
     query["prepared_statement_cache_size"] = "0"
     url = url.set(query=query)
     engine_options.update(poolclass=NullPool, connect_args={"statement_cache_size": 0})
+elif is_supabase_session_pooler:
+    # Supabase's session pooler has a small, hard connection limit. NullPool
+    # opened one connection per simultaneous asset/API request, so a page load
+    # could exhaust the whole project and make webhooks fail before reaching
+    # their handler. A bounded local pool queues bursts instead.
+    engine_options.update(
+        pool_size=max(1, min(settings.db_pool_size, 3)),
+        max_overflow=0,
+        pool_timeout=30,
+        pool_recycle=900,
+    )
 else:
     engine_options.update(
         pool_recycle=1800,
