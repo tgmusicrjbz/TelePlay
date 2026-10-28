@@ -84,6 +84,12 @@ async def lifespan(app: FastAPI):
             )
             await asyncio.sleep(delay)
     logger.info("Database migration revision verified")
+    if not settings.local_dev_mode:
+        try:
+            from .instagram_inbox import refresh_instagram_connection_health
+            await refresh_instagram_connection_health()
+        except Exception:
+            logger.warning("Instagram connection health check failed", exc_info=True)
     try:
         from .caption_metadata import extract_tags_from_caption
         from .models import File, User

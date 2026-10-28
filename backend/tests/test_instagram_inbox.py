@@ -1,8 +1,10 @@
 import hashlib
 import hmac
+import json
 from datetime import datetime, timedelta
+from unittest.mock import patch
 
-from app.instagram_inbox import extract_shared_posts, extract_text_messages, normalize_instagram_post_url, verify_meta_signature
+from app.instagram_inbox import _instagram_graph_health_sync, extract_shared_posts, extract_text_messages, normalize_instagram_post_url, settings, verify_meta_signature
 from app.models import InstagramInboxSender
 from app.routers.instagram import daily_usage_start, quota_limit_reason
 
@@ -82,6 +84,33 @@ def test_webhook_signature_formula_matches_meta_sha256_header():
     assert hmac.compare_digest(expected, signature)
     assert verify_meta_signature(raw, signature, secret)
     assert not verify_meta_signature(raw + b" ", signature, secret)
+
+
+def test_instagram_health_checks_token_account_and_message_subscription():
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+        def __enter__(self):
+            return self
+        def __exit__(self, *_):
+            return False
+        def read(self):
+            return json.dumps(self.payload).encode()
+
+    responses = [
+        Response({"id": "123", "username": "komod"}),
+        Response({"data": [{"subscribed_fields": ["messages", "messaging_postbacks"]}]}),
+    ]
+    with (
+        patch.object(settings, "instagram_access_token", "token"),
+        patch.object(settings, "instagram_account_id", "123"),
+        patch("app.instagram_inbox.urlopen", side_effect=responses),
+    ):
+        health = _instagram_graph_health_sync()
+    assert health["token_ok"] is True
+    assert health["account_matches"] is True
+    assert health["messages_subscribed"] is True
+    assert health["error"] is None
 
 
 def test_daily_usage_reset_only_moves_the_current_day_boundary_forward():

@@ -10,6 +10,7 @@ import re
 import secrets
 from datetime import datetime, timedelta
 from urllib.parse import urlparse, urlunparse
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from sqlalchemy import select
@@ -18,13 +19,14 @@ from . import telegram
 from .config import get_settings
 from .database import async_session
 from .downloader import ImportJob, link_importer
-from .models import InstagramInboxEvent, InstagramInboxSender, ProcessingJob, TelegramDestination, User
+from .models import AppSetting, InstagramInboxEvent, InstagramInboxSender, ProcessingJob, TelegramDestination, User
 
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 PAIRING_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 INSTAGRAM_URL_RE = re.compile(r"https?://(?:www\.)?instagram\.com/(?:p|reel|tv)/[^\s?#/]+", re.IGNORECASE)
+INSTAGRAM_HEALTH_KEY = "instagram_connection_health"
 
 
 def normalize_instagram_post_url(value: object) -> str | None:
@@ -146,6 +148,74 @@ def verify_meta_signature(raw_body: bytes, supplied_signature: str, app_secret: 
         return False
     expected = "sha256=" + hmac.new(app_secret.encode(), raw_body, hashlib.sha256).hexdigest()
     return hmac.compare_digest(supplied_signature, expected)
+
+
+def _instagram_graph_health_sync() -> dict:
+    checked_at = datetime.utcnow().isoformat()
+    result = {
+        "checked_at": checked_at,
+        "token_ok": False,
+        "account_matches": False,
+        "messages_subscribed": False,
+        "username": None,
+        "error": None,
+    }
+    if not settings.instagram_access_token or not settings.instagram_account_id:
+        result["error"] = "توکن یا شناسه حساب اینستاگرام تنظیم نشده است."
+        return result
+    base = f"https://graph.instagram.com/{settings.instagram_graph_version.strip('/')}"
+
+    def graph_get(path: str) -> dict:
+        request = Request(f"{base}/{path}", headers={
+            "Authorization": f"Bearer {settings.instagram_access_token}",
+            "Accept": "application/json",
+        })
+        try:
+            with urlopen(request, timeout=20) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except HTTPError as error:
+            try:
+                payload = json.loads(error.read().decode("utf-8"))
+                detail = payload.get("error") or {}
+                code = detail.get("code")
+                message = detail.get("message") or f"HTTP {error.code}"
+                raise RuntimeError(f"Meta {code}: {message}") from error
+            except (ValueError, UnicodeDecodeError):
+                raise RuntimeError(f"Meta HTTP {error.code}") from error
+
+    try:
+        profile = graph_get("me?fields=id,username")
+        result["token_ok"] = bool(profile.get("id"))
+        result["account_matches"] = str(profile.get("id")) == str(settings.instagram_account_id)
+        result["username"] = profile.get("username")
+        subscriptions = graph_get(f"{settings.instagram_account_id}/subscribed_apps")
+        fields = {
+            str(field)
+            for item in subscriptions.get("data") or []
+            for field in item.get("subscribed_fields") or []
+        }
+        result["messages_subscribed"] = "messages" in fields
+        if not result["account_matches"]:
+            result["error"] = "شناسه حساب با حساب متعلق به توکن یکسان نیست."
+        elif not result["messages_subscribed"]:
+            result["error"] = "فیلد messages برای این حساب Subscribe نشده است."
+    except Exception as error:
+        result["error"] = str(error)[:500]
+    return result
+
+
+async def refresh_instagram_connection_health() -> dict:
+    """Check Meta from the deployed host and persist only sanitized diagnostics."""
+    health = await asyncio.to_thread(_instagram_graph_health_sync)
+    async with async_session() as db:
+        row = await db.get(AppSetting, INSTAGRAM_HEALTH_KEY)
+        value = json.dumps(health, ensure_ascii=False)
+        if row is None:
+            db.add(AppSetting(key=INSTAGRAM_HEALTH_KEY, value=value))
+        else:
+            row.value = value
+        await db.commit()
+    return health
 
 
 async def dispatch_pending_events(sender_id: int) -> int:

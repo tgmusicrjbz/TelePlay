@@ -25,7 +25,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from urllib.parse import urlparse
 
-from ..database import get_db
+from ..database import async_session, get_db
 from ..models import File, User, WatchProgress, Folder, Playlist, Pack, PackItem, TelegramDestination
 from ..schemas import ActivityResponse, BatchFileUpdate, FileDescriptionUpdate, FileResponse, FileListResponse, FileUpdate, PlayerStateResponse, PlayerStateUpdate, PublicShareCreate, WatchProgressUpdate
 from ..auth import get_current_user, has_vault_access, require_scoped_folder, require_vault_access, workspace_scope
@@ -1226,14 +1226,23 @@ async def get_text_preview(
         raise HTTPException(status_code=413, detail="Text preview is limited to 1 MB")
     if (file.file_id or "").startswith("text-post:"):
         return {"content": file.search_text or file.description or ""}
-    message = await get_message_from_channel(file.channel_message_id, file.storage_channel_id)
+    channel_message_id = file.channel_message_id
+    storage_channel_id = file.storage_channel_id
+    file_type = file.file_type
+    previous_search_text = file.search_text
+    # Telegram downloads may take many seconds. End the read transaction first
+    # so opening several previews cannot occupy every database connection and
+    # starve time-sensitive requests such as the Instagram webhook.
+    await db.rollback()
+    message = await get_message_from_channel(channel_message_id, storage_channel_id)
     if message is None:
         raise HTTPException(status_code=404, detail="Message not found in storage")
-    if file.file_type == "text" and getattr(message, "document", None) is None:
+    if file_type == "text" and getattr(message, "document", None) is None:
         content = telegram_text_with_links(message.text)
-        if file.search_text != content:
-            file.search_text = content
-            await db.commit()
+        if previous_search_text != content:
+            async with async_session() as write_db:
+                await write_db.execute(update(File).where(File.id == file_id).values(search_text=content))
+                await write_db.commit()
         return {"content": content}
     contents = await telegram.tg_client.download_media(message, in_memory=True)
     if contents is None:
@@ -1242,9 +1251,10 @@ async def get_text_preview(
         raw = contents.getvalue()
         encoding = "utf-16" if raw.startswith((b"\xff\xfe", b"\xfe\xff")) else "utf-8-sig"
         content = raw.decode(encoding)
-        if file.search_text != content:
-            file.search_text = content
-            await db.commit()
+        if previous_search_text != content:
+            async with async_session() as write_db:
+                await write_db.execute(update(File).where(File.id == file_id).values(search_text=content))
+                await write_db.commit()
         return {"content": content}
     except UnicodeDecodeError:
         raise HTTPException(status_code=415, detail="Only UTF-8 and UTF-16 text preview is supported")

@@ -47,7 +47,7 @@ elif is_supabase_session_pooler:
     # could exhaust the whole project and make webhooks fail before reaching
     # their handler. A bounded local pool queues bursts instead.
     engine_options.update(
-        pool_size=max(1, min(settings.db_pool_size, 3)),
+        pool_size=max(1, min(settings.db_pool_size, 8)),
         max_overflow=0,
         pool_timeout=30,
         pool_recycle=900,

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hmac
+import json
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
@@ -260,6 +261,11 @@ async def instagram_status(_: User = Depends(require_admin), db: AsyncSession = 
     if base and not base.startswith(("http://", "https://")):
         base = "https://" + base
     default_hourly_limit, default_daily_limit, default_monthly_limit = await instagram_default_limits(db)
+    health_row = await db.get(AppSetting, "instagram_connection_health")
+    try:
+        connection_health = json.loads(health_row.value) if health_row else None
+    except (TypeError, ValueError):
+        connection_health = None
     return {
         "configured": bool(settings.instagram_app_secret and settings.instagram_webhook_verify_token),
         "reply_configured": bool(settings.instagram_access_token and settings.instagram_account_id),
@@ -269,6 +275,7 @@ async def instagram_status(_: User = Depends(require_admin), db: AsyncSession = 
         "default_hourly_limit": default_hourly_limit,
         "default_daily_limit": default_daily_limit,
         "default_monthly_limit": default_monthly_limit,
+        "connection_health": connection_health,
     }
 
 
