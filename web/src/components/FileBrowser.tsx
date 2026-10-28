@@ -22,6 +22,7 @@ import { applyTheme, getStoredTheme } from '../lib/theme';
 import { publishLocalTransfer } from '../lib/transfers';
 import { folderTreeLabel } from '../lib/folderTreeLabel';
 import PackCard from './PackCard';
+import { EmptyState, LoadingState } from './StatePanel';
 
 // Heavy sections are downloaded only when the user opens them. Vite still
 // precaches the resulting chunks in the service worker, so they remain
@@ -33,7 +34,7 @@ const CreatePackModal = lazy(() => import('./PackModal').then(module => ({ defau
 const PackViewer = lazy(() => import('./PackModal').then(module => ({ default: module.PackViewer })));
 
 function SectionFallback() {
-    return <div className="mx-auto mt-6 h-52 w-full max-w-5xl animate-pulse rounded-3xl bg-dark-800/70" aria-label="در حال باز کردن بخش"/>;
+    return <LoadingState className="mx-auto mt-6 max-w-5xl" label="در حال باز کردن بخش…" />;
 }
 
 const sortLabels: Record<SortField, string> = {
@@ -1743,18 +1744,13 @@ export default function FileBrowser() {
                                     ))}
                                 </div>
                             ) : (
-                                <div className="h-full flex flex-col items-center justify-center text-center pb-20 animate-fade-in">
-                                    <div className="w-24 h-24 rounded-3xl bg-dark-800/50 flex items-center justify-center border border-white/[0.04] mb-6 shadow-2xl">
-                                        <ArrowUp className="w-10 h-10 text-dark-600 animate-bounce" />
-                                    </div>
-                                    <h3 className="text-xl font-bold text-white mb-2">
-                                        {hiddenOnly ? 'گاوصندوق خالی است' : contentScope === 'folders' ? 'کشویی پیدا نشد' : 'چیزی پیدا نشد'}
-                                    </h3>
-                                    <p className="text-dark-400 max-w-xs">
-                                        {hiddenOnly ? 'در حال حاضر فایل یا کشوی مخفی‌ای نداری.' : searchQuery ? 'عبارت جست‌وجو یا فیلترها را تغییر بده.' : 'فایل‌ها را برای ربات تلگرام بفرست تا به کمدت اضافه شوند.'}
-                                    </p>
-                                    {hiddenOnly&&<button onClick={closeVaultItems} className="btn-primary mt-5 flex items-center gap-2"><ChevronRight className="h-4 w-4"/>بازگشت به کمد</button>}
-                                </div>
+                                <EmptyState
+                                    className="animate-fade-in"
+                                    icon={hiddenOnly ? <EyeOff /> : contentScope === 'folders' ? <FolderIcon /> : <Search />}
+                                    title={hiddenOnly ? 'گاوصندوق خالی است' : contentScope === 'folders' ? 'کشویی پیدا نشد' : 'چیزی پیدا نشد'}
+                                    description={hiddenOnly ? 'در حال حاضر فایل یا کشوی مخفی‌ای نداری.' : searchQuery ? 'عبارت جست‌وجو یا فیلترها را تغییر بده.' : 'فایل‌ها را برای ربات تلگرام بفرست تا به کمدت اضافه شوند.'}
+                                    action={hiddenOnly ? <button onClick={closeVaultItems} className="btn-primary flex items-center gap-2"><ChevronRight className="h-4 w-4"/>بازگشت به کمد</button> : undefined}
+                                />
                             )}
 
                             {/* Selection Rectangle Overlay */}

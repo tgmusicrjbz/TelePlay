@@ -177,7 +177,8 @@
 - [ ] Focus Trap و حرکت کامل با صفحه‌کلید
 - [x] پشتیبانی سراسری `prefers-reduced-motion` و نمایش واضح `focus-visible`
 - [ ] بررسی کامل Screen Reader و کنتراست همه صفحات
-- [ ] یکپارچه‌سازی Modal، Select، Toast، Empty State و Loading
+- [x] یکپارچه‌سازی Empty State و Loading در مسیرهای اصلی کمد، دانلودها و پلی‌لیست‌ها
+- [ ] یکپارچه‌سازی Modal، Select و Toast
 - [ ] جست‌وجو و Deep Link در تنظیمات
 - [ ] تست ظاهری موبایل، تبلت و دسکتاپ
 
