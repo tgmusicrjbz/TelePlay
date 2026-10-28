@@ -727,6 +727,22 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertIsNone(cleared.description)
 
+    async def test_file_and_folder_blur_state_is_persisted_and_returned(self):
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            blurred_file = await update_file(
+                self.direct_file_id, FileUpdate(is_blurred=True), db, user, None
+            )
+            blurred_folder = await update_folder(
+                self.folder_id, FolderUpdate(is_blurred=True), db, user, None
+            )
+            self.assertTrue(blurred_file.is_blurred)
+            self.assertTrue(blurred_folder.is_blurred)
+
+        async with async_session() as verification_db:
+            self.assertTrue((await verification_db.get(File, self.direct_file_id)).is_blurred)
+            self.assertTrue((await verification_db.get(Folder, self.folder_id)).is_blurred)
+
     async def test_dedicated_description_update_is_committed_and_can_be_cleared(self):
         async with async_session() as db:
             user = await db.get(User, self.user_id)

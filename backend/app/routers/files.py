@@ -1792,6 +1792,8 @@ async def update_file(
         file.is_favorite = update_data.is_favorite
     if update_data.is_pinned is not None:
         file.is_pinned = update_data.is_pinned
+    if update_data.is_blurred is not None:
+        file.is_blurred = update_data.is_blurred
     if update_data.is_hidden is not None:
         if update_data.is_hidden and not current_user.vault_password_hash:
             raise HTTPException(status_code=409, detail="ابتدا برای گاوصندوق رمز تعیین کن")

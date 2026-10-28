@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
-HEAD_REVISION = "20261028_0009"
+HEAD_REVISION = "20261028_0010"
 
 
 def migration_env(database_path: Path) -> dict[str, str]:
@@ -47,12 +47,18 @@ class MigrationTests(unittest.TestCase):
                 tables = {row[0] for row in connection.execute(
                     "SELECT name FROM sqlite_master WHERE type='table'"
                 )}
+                blurred_columns = {
+                    table: {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
+                    for table in ("files", "folders", "packs")
+                }
             finally:
                 connection.close()
             self.assertEqual(revision, HEAD_REVISION)
             self.assertIn("users", tables)
             self.assertIn("files", tables)
             self.assertIn("processing_jobs", tables)
+            for columns in blurred_columns.values():
+                self.assertIn("is_blurred", columns)
 
     def test_existing_current_schema_is_adopted_without_data_loss(self):
         with tempfile.TemporaryDirectory() as directory:

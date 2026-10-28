@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 def folder_appearance(folder: Folder) -> dict:
     return {
+        "is_blurred": bool(folder.is_blurred),
         "color": folder.color,
         "icon": folder.icon,
         "cover_file_id": folder.cover_file_id,
@@ -356,6 +357,8 @@ async def update_folder(
         folder.is_favorite = update_data.is_favorite
     if update_data.is_pinned is not None:
         folder.is_pinned = update_data.is_pinned
+    if update_data.is_blurred is not None:
+        folder.is_blurred = update_data.is_blurred
     if "color" in update_data.model_fields_set:
         folder.color = normalize_folder_color(update_data.color)
     if "icon" in update_data.model_fields_set:
