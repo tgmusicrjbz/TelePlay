@@ -170,12 +170,14 @@
 
 ## اولویت ۱۲ — یکپارچگی بصری و دسترسی‌پذیری
 
-وضعیت: `[ ] شروع نشده`
+وضعیت: `[-] در حال اجرا`
 
-- [ ] تعریف Design System برای Button، Modal، Select، Toast و Empty State
-- [ ] یکپارچه‌سازی فاصله‌ها، رنگ‌ها، اندازه لمس و حالت Loading
+- [x] تعریف پایه Design System برای سطح‌ها، Button، Input و Navigation
+- [x] یکپارچه‌سازی اولیه فاصله‌ها، رنگ‌ها، اندازه لمس و Focus سراسری
 - [ ] Focus Trap و حرکت کامل با صفحه‌کلید
-- [ ] بررسی Screen Reader، کنتراست و `prefers-reduced-motion`
+- [x] پشتیبانی سراسری `prefers-reduced-motion` و نمایش واضح `focus-visible`
+- [ ] بررسی کامل Screen Reader و کنتراست همه صفحات
+- [ ] یکپارچه‌سازی Modal، Select، Toast، Empty State و Loading
 - [ ] جست‌وجو و Deep Link در تنظیمات
 - [ ] تست ظاهری موبایل، تبلت و دسکتاپ
 

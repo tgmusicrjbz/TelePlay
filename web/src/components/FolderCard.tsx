@@ -103,9 +103,9 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
         return (
             <div
                 style={folderCardStyle}
-                className={`relative flex items-center gap-4 p-3 rounded-xl cursor-pointer transition-all duration-200 animate-slide-up active:scale-[0.99]
-                    glass-card hover:bg-white/[0.03] border-white/[0.05] group
+                className={`library-card relative flex items-center gap-4 rounded-2xl p-3 cursor-pointer animate-slide-up active:scale-[0.99] group
                     ${dropStyles} ${selectedStyles}`}
+                data-selected={Boolean(selected)}
                 onClick={handleClick}
                 onContextMenu={handleContextMenu}
                 onPointerDown={beginLongPress}
@@ -164,9 +164,9 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
     return (
         <div
             style={folderCardStyle}
-            className={`${dense ? 'p-2.5' : 'p-4'} rounded-xl cursor-pointer transition-all duration-300 group relative animate-scale-in select-none
-                glass-card hover:bg-dark-800/60 hover:shadow-xl hover:shadow-black/20 hover:-translate-y-1
+            className={`library-card ${dense ? 'p-2.5' : 'p-4'} rounded-2xl cursor-pointer group relative animate-scale-in select-none
                 ${dropStyles} ${selectedStyles}`}
+            data-selected={Boolean(selected)}
             onClick={handleClick}
             onContextMenu={handleContextMenu}
             onPointerDown={beginLongPress}

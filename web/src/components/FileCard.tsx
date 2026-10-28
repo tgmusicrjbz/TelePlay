@@ -99,11 +99,12 @@ export default function FileCard({
     if (viewMode === 'list') {
         return (
             <div
-                className={`relative flex items-center gap-4 p-3 rounded-xl cursor-pointer transition-all duration-200 animate-slide-up active:scale-[0.99]
+                className={`library-card relative flex items-center gap-4 rounded-2xl p-3 cursor-pointer animate-slide-up active:scale-[0.99]
                     ${selected
-                        ? 'bg-primary-500/10 border border-primary-500/30'
-                        : 'glass-card hover:bg-white/[0.03] border-white/[0.05]'
+                        ? 'text-primary-100'
+                        : ''
                     }`}
+                data-selected={selected}
                 onClick={handleClick}
                 onContextMenu={handleContextMenu}
                 onPointerDown={beginLongPress}
@@ -178,11 +179,12 @@ export default function FileCard({
     const dense = viewMode === 'dense';
     return (
         <div
-            className={`${dense ? 'p-2' : 'p-3'} rounded-xl cursor-pointer transition-all duration-300 group relative animate-scale-in select-none
+            className={`library-card ${dense ? 'p-2' : 'p-3'} rounded-2xl cursor-pointer group relative animate-scale-in select-none
                 ${selected
-                    ? 'bg-primary-500/10 border border-primary-500/30 shadow-lg shadow-primary-500/5'
-                    : 'glass-card hover:bg-dark-800/60 hover:shadow-xl hover:shadow-black/20 hover:-translate-y-1'
+                    ? 'text-primary-100'
+                    : ''
                 }`}
+            data-selected={selected}
             onClick={handleClick}
             onContextMenu={handleContextMenu}
             onPointerDown={beginLongPress}

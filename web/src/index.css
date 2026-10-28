@@ -105,6 +105,12 @@
   --primary-800: 107 33 168;
   --primary-900: 88 28 135;
   --primary-950: 59 7 100;
+  --surface-soft: rgb(var(--dark-800) / .46);
+  --surface-raised: rgb(var(--dark-850) / .86);
+  --surface-strong: rgb(var(--dark-900) / .94);
+  --surface-border: rgb(var(--app-white) / .075);
+  --surface-border-hover: rgb(var(--primary-400) / .23);
+  --surface-shadow: 0 18px 50px rgb(0 0 0 / .18), inset 0 1px 0 rgb(var(--app-white) / .035);
   font-family:
     "Vazirmatn",
     system-ui,
@@ -119,7 +125,11 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background: linear-gradient(135deg, #0f172a 0%, #020617 100%);
+  background:
+    radial-gradient(circle at 85% -10%, rgb(var(--primary-700) / .13), transparent 34rem),
+    radial-gradient(circle at -10% 90%, rgb(14 165 233 / .07), transparent 30rem),
+    linear-gradient(145deg, rgb(var(--dark-900)) 0%, rgb(var(--dark-950)) 72%);
+  background-attachment: fixed;
   color: #f8fafc;
 }
 
@@ -153,15 +163,23 @@ body {
    ============================================ */
 
 .glass {
-  @apply bg-dark-800/40 backdrop-blur-xl border border-white/[0.08];
+  @apply backdrop-blur-xl border;
+  background: var(--surface-soft);
+  border-color: var(--surface-border);
 }
 
 .glass-card {
-  @apply bg-dark-800/50 backdrop-blur-xl border border-white/[0.08] rounded-xl;
+  @apply rounded-2xl border backdrop-blur-xl;
+  background: linear-gradient(145deg, rgb(var(--dark-800) / .58), rgb(var(--dark-900) / .72));
+  border-color: var(--surface-border);
+  box-shadow: inset 0 1px 0 rgb(var(--app-white) / .025);
 }
 
 .glass-panel {
-  @apply bg-dark-900/80 backdrop-blur-2xl border border-white/[0.05] rounded-2xl shadow-2xl;
+  @apply rounded-2xl border backdrop-blur-2xl;
+  background: var(--surface-strong);
+  border-color: var(--surface-border);
+  box-shadow: var(--surface-shadow);
 }
 
 /* ============================================
@@ -171,17 +189,25 @@ body {
 .btn-primary {
   @apply bg-gradient-to-r from-primary-600 to-primary-500 
          hover:from-primary-500 hover:to-primary-400
-         text-white font-medium px-4 py-2 rounded-lg
+         text-white font-semibold px-4 py-2 rounded-xl
          transition-all duration-200 
          hover:shadow-lg hover:shadow-primary-500/25
          active:scale-[0.98];
+  min-height: 2.5rem;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .16), 0 8px 22px rgb(var(--primary-700) / .16);
 }
 
 .btn-secondary {
-  @apply bg-dark-700/80 hover:bg-dark-600/80 
-         text-white font-medium px-4 py-2 rounded-lg
-         border border-white/[0.08] hover:border-white/[0.15]
-         transition-all duration-200;
+  @apply text-white font-medium px-4 py-2 rounded-xl border transition-all duration-200 active:scale-[0.985];
+  min-height: 2.5rem;
+  background: rgb(var(--dark-800) / .72);
+  border-color: var(--surface-border);
+  box-shadow: inset 0 1px 0 rgb(var(--app-white) / .025);
+}
+
+.btn-secondary:hover {
+  background: rgb(var(--dark-700) / .78);
+  border-color: var(--surface-border-hover);
 }
 
 .btn-ghost {
@@ -192,9 +218,11 @@ body {
 }
 
 .btn-icon {
-  @apply inline-flex items-center justify-center p-2 leading-none rounded-lg bg-transparent hover:bg-white/[0.08]
+  @apply inline-flex items-center justify-center p-2 leading-none rounded-xl bg-transparent hover:bg-white/[0.08]
          text-dark-400 hover:text-white
-         transition-all duration-200;
+         transition-all duration-200 active:scale-95;
+  min-width: 2.5rem;
+  min-height: 2.5rem;
 }
 
 /* ============================================
@@ -202,11 +230,13 @@ body {
    ============================================ */
 
 .input {
-  @apply bg-dark-800/60 border border-white/[0.08] rounded-lg
+  @apply bg-dark-800/60 border border-white/[0.08] rounded-xl
          px-4 py-2.5 text-white placeholder-dark-500
          focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500/50
          transition-all duration-200;
   font-family: inherit;
+  min-height: 2.75rem;
+  box-shadow: inset 0 1px 0 rgb(var(--app-white) / .025);
 }
 
 input, textarea, select, button {
@@ -257,10 +287,32 @@ input[dir="ltr"], textarea[dir="ltr"], select[dir="ltr"] {
 }
 
 .context-menu-item {
-  @apply flex items-center gap-3 px-3 py-2 text-sm 
+  @apply flex items-center gap-3 rounded-xl px-3 py-2 text-sm
          text-dark-200 hover:text-white
          hover:bg-white/[0.06] cursor-pointer 
          transition-all duration-150;
+}
+
+.library-card {
+  position: relative;
+  isolation: isolate;
+  border: 1px solid var(--surface-border);
+  background:
+    linear-gradient(145deg, rgb(var(--dark-800) / .48), rgb(var(--dark-900) / .76));
+  box-shadow: 0 10px 28px rgb(0 0 0 / .1), inset 0 1px 0 rgb(var(--app-white) / .025);
+  transition: transform .22s ease, border-color .22s ease, background-color .22s ease, box-shadow .22s ease;
+}
+
+.library-card:hover {
+  border-color: var(--surface-border-hover);
+  box-shadow: 0 16px 36px rgb(0 0 0 / .17), inset 0 1px 0 rgb(var(--app-white) / .035);
+  transform: translateY(-2px);
+}
+
+.library-card[data-selected="true"] {
+  border-color: rgb(var(--primary-400) / .48);
+  background: linear-gradient(145deg, rgb(var(--primary-500) / .14), rgb(var(--dark-900) / .82));
+  box-shadow: 0 0 0 2px rgb(var(--primary-500) / .12), 0 16px 34px rgb(var(--primary-950) / .14);
 }
 
 .context-menu-item:first-child {
@@ -269,6 +321,42 @@ input[dir="ltr"], textarea[dir="ltr"], select[dir="ltr"] {
 
 .context-menu-item:last-child {
   @apply rounded-b-lg;
+}
+
+button:focus-visible,
+a:focus-visible,
+[role="button"]:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid rgb(var(--primary-400) / .85);
+  outline-offset: 2px;
+}
+
+button:disabled,
+[role="button"][aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
+@media (hover: none) {
+  .card-hover:hover {
+    transform: none;
+  }
+  .library-card:hover {
+    transform: none;
+  }
+  .library-card:active {
+    transform: scale(.985);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
 }
 
 .context-menu-divider {

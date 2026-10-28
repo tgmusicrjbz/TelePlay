@@ -1405,7 +1405,7 @@ export default function FileBrowser() {
 
             <main className="relative flex min-w-0 flex-1 flex-col bg-gradient-to-br from-dark-950 to-dark-900 md:mr-24">
                 {/* Header */}
-                <header className="h-16 border-b border-white/[0.06] flex items-center justify-between px-4 sm:px-6 bg-dark-900/50 backdrop-blur-sm z-30 sticky top-0">
+                <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-white/[0.07] bg-dark-900/75 px-4 shadow-lg shadow-black/[.06] backdrop-blur-2xl sm:px-6">
                     <div className="flex items-center gap-3 md:gap-6 flex-1 min-w-0">
                         {activeSection === 'files' && breadcrumbs.length > 1 && (
                             <button
@@ -1427,7 +1427,7 @@ export default function FileBrowser() {
                                 value={searchQuery}
                                 onChange={(e) => {setActiveSavedFilterId(null);setSearchQuery(e.target.value)}}
                                 onKeyDown={event=>{if(event.key==='Enter'&&event.shiftKey&&activeSection==='files'){event.preventDefault();void runSmartSearch()}}}
-                                className="w-full bg-dark-800/50 border border-white/[0.06] rounded-lg pr-9 pl-10 py-1.5 text-sm text-white focus:outline-none focus:border-primary-500/50 focus:bg-dark-800 transition-all"
+                                className="input-search h-10 w-full pr-9 text-sm"
                             />
                             {activeSection==='files'&&<button type="button" onClick={()=>void runSmartSearch()} disabled={expandSmartSearch.isPending||searchQuery.trim().length<2} className={`absolute left-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md transition disabled:opacity-35 ${smartSearchQuery?'bg-primary-500/20 text-primary-200':'text-dark-400 hover:bg-white/[.06] hover:text-white'}`} title="جست‌وجوی هوشمند (Shift + Enter)" aria-label="جست‌وجوی هوشمند">{expandSmartSearch.isPending?<RefreshCw className="h-3.5 w-3.5 animate-spin"/>:<Sparkles className="h-3.5 w-3.5"/>}</button>}
                             {activeSection==='files'&&smartSearchQuery&&<div className="absolute inset-x-0 top-[calc(100%+.45rem)] z-50 flex items-center gap-2 rounded-xl border border-primary-400/15 bg-dark-900/95 px-2.5 py-2 text-[11px] text-primary-100 shadow-xl backdrop-blur-xl"><Sparkles className="h-3.5 w-3.5 shrink-0"/><span className="min-w-0 flex-1 truncate">هوشمند: {smartSearchTerms.length?smartSearchTerms.join('، '):'عبارت اصلی'}</span><button type="button" onClick={()=>{setSmartSearchQuery(null);setSmartSearchTerms([]);setPage(1);setAllFiles([])}} className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md hover:bg-white/10" aria-label="بازگشت به جست‌وجوی عادی"><X className="h-3.5 w-3.5"/></button></div>}
