@@ -155,6 +155,17 @@ export interface FileListResponse {
     search_mode?: 'exact' | 'fuzzy';
     suggestions?: string[];
 }
+
+export interface LibraryChangeDetail {
+    updatedFiles?: TelegramFile[];
+    deletedFileIds?: number[];
+    movedFileIds?: number[];
+    targetFolderId?: number | null;
+}
+
+const publishLibraryChange = (detail: LibraryChangeDetail) => {
+    window.dispatchEvent(new CustomEvent<LibraryChangeDetail>('komod-library-changed', { detail }));
+};
 export interface PlayerState { files: TelegramFile[]; current_index: number; repeat_mode: 'off'|'all'|'one'; position: number; updated_at?: string|null; }
 
 export interface ActivityFeed {
@@ -616,6 +627,7 @@ export const useUpdateFile = () => {
             queryClient.invalidateQueries({ queryKey: ['folderTree'] });
             queryClient.invalidateQueries({ queryKey: ['activity'] });
             queryClient.invalidateQueries({ queryKey: ['tag-settings'] });
+            publishLibraryChange({ updatedFiles: [updated] });
         },
     });
 };
@@ -672,6 +684,7 @@ export const useDeleteFile = () => {
             queryClient.setQueriesData<Pack>({ queryKey: ['packs', 'detail'] }, pack => removeFilesFromCachedPack(pack, new Set([id])));
             queryClient.invalidateQueries({ queryKey: ['files'] });
             queryClient.invalidateQueries({ queryKey: ['packs'] });
+            publishLibraryChange({ deletedFileIds: [id] });
         },
     });
 };
@@ -695,6 +708,7 @@ export const useDeleteFiles = () => {
             queryClient.invalidateQueries({ queryKey: ['folders'] });
             queryClient.invalidateQueries({ queryKey: ['storage'] });
             queryClient.invalidateQueries({ queryKey: ['packs'] });
+            publishLibraryChange({ deletedFileIds: ids });
         },
     });
 };
@@ -705,10 +719,11 @@ export const useMoveFiles = () => {
         mutationFn: async ({ ids, folderId }: { ids: number[]; folderId: number | null }) => {
             await runOrQueueMetadataMutation(async()=>{await api.post('/files/batch-move',{ids,folder_id:folderId})},{entity:'folder',method:'post',url:'/files/batch-move',payload:{ids,folder_id:folderId}},()=>undefined);
         },
-        onSuccess: () => {
+        onSuccess: (_result, variables) => {
             queryClient.invalidateQueries({ queryKey: ['files'] });
             queryClient.invalidateQueries({ queryKey: ['folders'] });
             queryClient.invalidateQueries({ queryKey: ['folderTree'] });
+            publishLibraryChange({ movedFileIds: variables.ids, targetFolderId: variables.folderId });
         },
     });
 };
@@ -967,6 +982,7 @@ export const useTextFirstMode = () => {
                 ...current,files:current.files.map(file=>file.id===variables.id?result.media_file:file),
             }:current);
             queryClient.invalidateQueries({queryKey:['files']});
+            publishLibraryChange({updatedFiles:[result.media_file]});
         },
     });
 };
@@ -1292,19 +1308,21 @@ export const useBatchUpdateFiles = () => {
     return useMutation({
         mutationFn: async (payload: BatchFileEdit) => {
             return runOrQueueMetadataMutation(
-                async()=>(await api.post<{message:string;updated:number}>('/files/batch-update',payload)).data,
+                async()=>(await api.post<{message:string;updated:number;files:TelegramFile[]}>('/files/batch-update',payload)).data,
                 {entity:'tag',method:'post',url:'/files/batch-update',payload},
-                ()=>({message:'تغییرات برای همگام‌سازی ذخیره شد.',updated:payload.ids.length}),
+                ()=>({message:'تغییرات برای همگام‌سازی ذخیره شد.',updated:payload.ids.length,files:[]}),
             );
         },
-        onSuccess: (updated) => {
-            queryClient.setQueryData(['file',updated.id],updated);
-            queryClient.setQueriesData<any>({ queryKey: ['files'] }, current => current?.files
-                ? {...current,files:current.files.map((item:TelegramFile)=>item.id===updated.id?updated:item)}
+        onSuccess: (result) => {
+            const byId=new Map(result.files.map(file=>[file.id,file]));
+            result.files.forEach(file=>queryClient.setQueryData(['file',file.id],file));
+            queryClient.setQueriesData<FileListResponse>({ queryKey: ['files'] }, current => current
+                ? {...current,files:current.files.map(item=>byId.get(item.id)||item)}
                 : current);
             queryClient.invalidateQueries({ queryKey: ['files'] });
             queryClient.invalidateQueries({ queryKey: ['folders'] });
             queryClient.invalidateQueries({ queryKey: ['tag-settings'] });
+            if(result.files.length)publishLibraryChange({updatedFiles:result.files});
         },
     });
 };

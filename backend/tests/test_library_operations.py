@@ -1049,10 +1049,13 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             db.add_all([first, second])
             await db.commit()
             user = await db.get(User, self.user_id)
-            await batch_update_files(BatchFileUpdate(
+            result = await batch_update_files(BatchFileUpdate(
                 ids=[first.id, second.id], description_mode="append", description="new",
                 rename_mode="prefix", rename_value="fav-",
             ), db, user)
+            self.assertEqual(result["updated"], 2)
+            self.assertEqual({item.id for item in result["files"]}, {first.id, second.id})
+            self.assertEqual({item.file_name for item in result["files"]}, {"fav-one.mp4", "fav-two.mp3"})
             refreshed = (await db.execute(select(File).where(File.id.in_([first.id, second.id])).order_by(File.id))).scalars().all()
             self.assertEqual([item.file_name for item in refreshed], ["fav-one.mp4", "fav-two.mp3"])
             self.assertEqual([item.description for item in refreshed], ["old\nnew", "new"])

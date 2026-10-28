@@ -2098,7 +2098,14 @@ async def batch_update_files(
         file.tags_json = json.dumps(tags, ensure_ascii=False)
 
     await db.commit()
-    return {"message": f"Updated {len(files)} files", "updated": len(files)}
+    updated_files = (await db.execute(select(File).where(
+        File.id.in_([file.id for file in files]), File.user_id == current_user.id
+    ).options(selectinload(File.watch_progress)))).scalars().all()
+    return {
+        "message": f"Updated {len(updated_files)} files",
+        "updated": len(updated_files),
+        "files": [FileResponse(**add_urls_to_file(file)) for file in updated_files],
+    }
 
 
 @router.post("/{file_id}/progress")

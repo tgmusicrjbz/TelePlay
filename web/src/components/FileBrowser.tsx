@@ -4,7 +4,7 @@
 import { lazy, Suspense, useEffect, useCallback, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { FolderPlus, Folder as FolderIcon, Grid, LayoutGrid, List, Search, ChevronRight, ChevronDown, Home, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, StickyNote, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ArrowDownUp, ChevronUp, Plus, CheckSquare, Square, ListChecks, ListPlus, Upload, Star, RefreshCw, Link2, DownloadCloud, Download, Send, Eye, EyeOff, Minus, Play, Tags, Cloud, CloudOff, AudioLines, FileAudio, Sparkles, BookmarkPlus, Combine } from 'lucide-react';
-import { api, useFiles, useFolders, useFolderTree, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, Pack, useActivityFeed, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile, useImportLink, useTagSettings, useUnlockVault, useWorkspaces, sendFilesToTelegram, useTTSJobs, useSTTJobs, SavedFilter, useSavedFilters, useUpdateSavedFilters, usePacks, useExpandSmartSearch, formatFileSize } from '../lib/api';
+import { api, useFiles, useFolders, useFolderTree, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, Pack, useActivityFeed, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile, useImportLink, useTagSettings, useUnlockVault, useWorkspaces, sendFilesToTelegram, useTTSJobs, useSTTJobs, SavedFilter, useSavedFilters, useUpdateSavedFilters, usePacks, useExpandSmartSearch, formatFileSize, LibraryChangeDetail } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { cacheAllTextNotes, queueOfflineText, saveFileOffline } from '../lib/offline';
 import FileCard from './FileCard';
@@ -607,13 +607,39 @@ export default function FileBrowser() {
     }, [activeSection, refetchFiles, refetchFolders, refetchPacks, refetchActivity]);
 
     useEffect(()=>{
-        const refreshLibrary=()=>{
+        const refreshLibrary=(event:Event)=>{
             if(activeSection!=='files')return;
+            const detail=(event as CustomEvent<LibraryChangeDetail>).detail;
+            if(detail?.updatedFiles?.length){
+                const updatedById=new Map(detail.updatedFiles.map(file=>[file.id,file]));
+                setAllFiles(current=>current.flatMap(file=>{
+                    const updated=updatedById.get(file.id);
+                    if(!updated)return [file];
+                    const merged={...file,...updated};
+                    if(!showHidden&&merged.is_hidden)return [];
+                    if(hiddenOnly&&!merged.is_hidden)return [];
+                    if(favoriteOnly&&!merged.is_favorite)return [];
+                    return [merged];
+                }));
+            }
+            if(detail?.deletedFileIds?.length){
+                const deleted=new Set(detail.deletedFileIds);
+                setAllFiles(current=>current.filter(file=>!deleted.has(file.id)));
+            }
+            if(detail?.movedFileIds?.length){
+                const moved=new Set(detail.movedFileIds);
+                setAllFiles(current=>current.flatMap(file=>{
+                    if(!moved.has(file.id))return [file];
+                    const updated={...file,folder_id:detail.targetFolderId??null};
+                    const scoped=!hiddenOnly&&!effectiveSearchQuery&&!activeSavedFilterId&&!browseAllFiles;
+                    return scoped&&updated.folder_id!==effectiveFolderId?[]:[updated];
+                }));
+            }
             void Promise.all([refetchFiles(),refetchFolders(),refetchPacks()]);
         };
         window.addEventListener('komod-library-changed',refreshLibrary);
         return()=>window.removeEventListener('komod-library-changed',refreshLibrary);
-    },[activeSection,refetchFiles,refetchFolders,refetchPacks]);
+    },[activeSection,activeSavedFilterId,browseAllFiles,effectiveFolderId,effectiveSearchQuery,favoriteOnly,hiddenOnly,refetchFiles,refetchFolders,refetchPacks,showHidden]);
 
     const pullEnabled = !(window as Window & { Telegram?: { WebApp?: { initData?: string } } }).Telegram?.WebApp?.initData;
     const handlePullStart = (event: React.TouchEvent<HTMLDivElement>) => {
