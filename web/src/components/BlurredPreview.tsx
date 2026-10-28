@@ -6,13 +6,7 @@ export default function BlurredPreview({ active, compact = false, card = false }
         return (
             <span
                 aria-label="کارت محو شده"
-                className="pointer-events-none absolute inset-0 z-[25] rounded-[inherit]"
-                style={{
-                    background: 'linear-gradient(135deg, rgba(24, 33, 57, 0.97), rgba(7, 12, 29, 0.985))',
-                    backdropFilter: 'blur(32px) brightness(0.08) saturate(0)',
-                    WebkitBackdropFilter: 'blur(32px) brightness(0.08) saturate(0)',
-                    boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.045), inset 0 0 44px rgba(3,7,18,0.82)',
-                }}
+                className={`blurred-card-glass pointer-events-none absolute inset-0 z-[25] rounded-[inherit] ${compact ? 'blurred-card-glass--compact' : ''}`}
             />
         );
     }
