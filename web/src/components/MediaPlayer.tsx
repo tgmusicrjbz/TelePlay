@@ -10,6 +10,9 @@ import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalList
 import { CSS } from '@dnd-kit/utilities';
 import { getOfflineMedia } from '../lib/offline';
 
+const PLAYBACK_SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4] as const;
+const playbackSpeedLabel = (speed: number) => `${speed === 1 ? '1.0' : speed}x`;
+
 export default function MediaPlayer() {
     const { previewFile: file, setPreviewFile, isPlayerMinimized, setPlayerMinimized, clearQueue } = useAppStore();
 
@@ -46,7 +49,10 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
     const [showControls, setShowControls] = useState(true);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const compactInline = inline && !inlineExpanded && !isFullscreen;
-    const [playbackSpeed, setPlaybackSpeed] = useState(1);
+    const [playbackSpeed, setPlaybackSpeed] = useState(() => {
+        const saved = Number(localStorage.getItem('komod-playback-speed') || 1);
+        return PLAYBACK_SPEEDS.includes(saved as typeof PLAYBACK_SPEEDS[number]) ? saved : 1;
+    });
     const [isPiP, setIsPiP] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -76,6 +82,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
     const [preparingAudio, setPreparingAudio] = useState(false);
     const [compatibleVideoUrl, setCompatibleVideoUrl] = useState<string|null>(file.compatible_video_stream_url || null);
     const [compatibilityMessage, setCompatibilityMessage] = useState<string|null>(null);
+    const [compatibilityProgress, setCompatibilityProgress] = useState(0);
     const compatibilityAttempted = useRef(false);
     const audioSwitchPosition = useRef<number|null>(null);
     const [videoOrientation, setVideoOrientation] = useState<'auto' | 'portrait' | 'landscape'>('auto');
@@ -118,7 +125,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
         document.addEventListener('fullscreenchange', syncFullscreen);
         return () => document.removeEventListener('fullscreenchange', syncFullscreen);
     }, []);
-    useEffect(()=>{setAudioOnly(false);setVideoHidden(false);setAudioVariantUrl(file.audio_stream_url||null);setCompatibleVideoUrl(file.compatible_video_stream_url||null);setCompatibilityMessage(null);compatibilityAttempted.current=false;},[file.id,file.audio_stream_url,file.compatible_video_stream_url]);
+    useEffect(()=>{setAudioOnly(false);setVideoHidden(false);setAudioVariantUrl(file.audio_stream_url||null);setCompatibleVideoUrl(file.compatible_video_stream_url||null);setCompatibilityMessage(null);setCompatibilityProgress(0);compatibilityAttempted.current=false;},[file.id,file.audio_stream_url,file.compatible_video_stream_url]);
     useEffect(()=>{
         let disposed=false; let objectUrl:string|null=null;
         setOfflineStreamUrl(null);
@@ -153,20 +160,21 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
         if (!isVideo || compatibilityAttempted.current || offlineStreamUrl) return;
         compatibilityAttempted.current = true;
         const resumeAt = videoRef.current?.currentTime || currentTime || 0;
-        setError(null); setIsLoading(true); setCompatibilityMessage('در حال آماده‌سازی نسخه سازگار…');
+        setError(null); setIsLoading(true); setCompatibilityMessage('در حال آماده‌سازی نسخه سازگار…'); setCompatibilityProgress(3);
         try {
             let {data} = await api.post<{state:string;progress:number;message:string;stream_url?:string}>(`/stream/${file.id}/compatible-video`);
             for (let attempt=0; attempt<400 && data.state!=='done' && data.state!=='error'; attempt+=1) {
-                setCompatibilityMessage(`${data.message}${data.progress ? ` · ${data.progress.toLocaleString('fa-IR')}٪` : ''}`);
+                setCompatibilityMessage(data.message || 'در حال آماده‌سازی نسخه سازگار…');
+                setCompatibilityProgress(Math.max(3, Math.min(96, Number(data.progress) || 0)));
                 await new Promise(resolve=>window.setTimeout(resolve,3000));
                 data=(await api.get<typeof data>(`/stream/${file.id}/compatible-video/status`)).data;
             }
             if (data.state!=='done'||!data.stream_url) throw new Error(data.message||'آماده‌سازی نسخه سازگار انجام نشد.');
-            setCompatibleVideoUrl(data.stream_url); setCompatibilityMessage(null); setError(null);
+            setCompatibleVideoUrl(data.stream_url); setCompatibilityMessage(null); setCompatibilityProgress(100); setError(null);
             window.setTimeout(()=>{if(videoRef.current){videoRef.current.currentTime=resumeAt;void videoRef.current.play().catch(()=>undefined)}},180);
         } catch(error:any) {
             compatibilityAttempted.current=false;
-            setCompatibilityMessage(null); setIsLoading(false);
+            setCompatibilityMessage(null); setCompatibilityProgress(0); setIsLoading(false);
             setError(error?.response?.data?.detail||error?.message||'آماده‌سازی نسخه سازگار انجام نشد.');
         }
     },[currentTime,file.id,isVideo,offlineStreamUrl]);
@@ -290,6 +298,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
 
     const setSpeed = (nextSpeed: number) => {
         setPlaybackSpeed(nextSpeed);
+        localStorage.setItem('komod-playback-speed', String(nextSpeed));
         if (videoRef.current) {
             videoRef.current.playbackRate = nextSpeed;
         }
@@ -874,7 +883,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
                         {isLoading && !error && !isMinimized && (
                             <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 pointer-events-none z-20 bg-black/20">
                                 <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-primary-500"></div>
-                                {compatibilityMessage&&<p className="rounded-full bg-dark-950/80 px-4 py-2 text-xs text-dark-200 backdrop-blur-md">{compatibilityMessage}</p>}
+                                {compatibilityMessage&&<div dir="rtl" className="w-[min(17rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-white/10 bg-dark-950/85 px-4 py-3 text-center shadow-2xl backdrop-blur-xl"><p className="truncate text-xs font-medium text-dark-100">{compatibilityMessage}</p><div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-gradient-to-l from-primary-300 via-primary-500 to-fuchsia-500 transition-[width] duration-500 ease-out" style={{width:`${compatibilityProgress}%`}}/></div></div>}
                             </div>
                         )}
                         {skipFeedback && !isMinimized && (
@@ -999,8 +1008,8 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
                         {hasQueue && <button onClick={() => setShowQueue(true)} className="rounded-lg p-2 text-white/80 hover:bg-white/10" title="صف پخش"><ListMusic className="h-5 w-5" /></button>}
                         {!isVideo && <button onClick={() => handleSkip(-10)} className="rounded-lg p-2 text-white/80 hover:bg-white/10" title="۱۰ ثانیه عقب"><RotateCcw className="h-5 w-5" /></button>}
                         <div className="relative">
-                            <button onClick={() => { setShowSpeedMenu(open => !open); setShowVideoMoreMenu(false); setShowSleepMenu(false); }} className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-sm font-medium transition-all ${playbackSpeed !== 1 ? 'border-primary-500/40 bg-primary-500/30 text-primary-300' : 'border-white/10 bg-white/10 text-white/80 hover:bg-white/20'}`} title="انتخاب سرعت پخش" aria-expanded={showSpeedMenu}><Gauge className="w-4 h-4" /><span>{playbackSpeed === 1 ? '1.0' : playbackSpeed}x</span></button>
-                            {showSpeedMenu && <div role="menu" aria-label="سرعت پخش" className="absolute left-1/2 top-full mt-2 w-32 -translate-x-1/2 overflow-hidden rounded-2xl border border-primary-400/25 bg-black/90 p-1.5 shadow-2xl shadow-black/60 backdrop-blur-2xl">{[0.75, 1, 1.25, 1.5, 2].map(speed => <button key={speed} role="menuitem" onClick={() => setSpeed(speed)} className={`block w-full rounded-lg px-3 py-2 text-center text-sm transition-colors ${playbackSpeed === speed ? 'bg-primary-500/25 text-primary-200' : 'text-white/80 hover:bg-white/10'}`}>{speed === 1 ? '1.0' : speed}x</button>)}</div>}
+                            <button onClick={() => { setShowSpeedMenu(open => !open); setShowVideoMoreMenu(false); setShowSleepMenu(false); }} className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-sm font-medium transition-all ${playbackSpeed !== 1 ? 'border-primary-500/40 bg-primary-500/30 text-primary-300' : 'border-white/10 bg-white/10 text-white/80 hover:bg-white/20'}`} title="انتخاب سرعت پخش" aria-expanded={showSpeedMenu}><Gauge className="w-4 h-4" /><span>{playbackSpeedLabel(playbackSpeed)}</span></button>
+                            {showSpeedMenu && <div role="menu" aria-label="سرعت پخش" className="absolute left-1/2 top-full mt-2 grid w-52 -translate-x-1/2 grid-cols-3 gap-1 overflow-hidden rounded-2xl border border-primary-400/25 bg-black/90 p-1.5 shadow-2xl shadow-black/60 backdrop-blur-2xl">{PLAYBACK_SPEEDS.map(speed => <button key={speed} role="menuitem" onClick={() => setSpeed(speed)} className={`rounded-lg px-2 py-2 text-center text-xs transition-colors ${playbackSpeed === speed ? 'bg-primary-500/25 font-bold text-primary-200' : 'text-white/80 hover:bg-white/10'}`}>{playbackSpeedLabel(speed)}</button>)}</div>}
                         </div>
                         {!isVideo && <button onClick={() => handleSkip(10)} className="rounded-lg p-2 text-white/80 hover:bg-white/10" title="۱۰ ثانیه جلو"><RotateCw className="h-5 w-5" /></button>}
                         {!isVideo && <div className="relative">
@@ -1090,15 +1099,15 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
                                 {/* Speed */}
                                 <div className="relative">
                                     {showSpeedMenu && (
-                                        <div role="menu" aria-label="سرعت پخش" className="absolute bottom-full right-0 mb-2 w-32 overflow-hidden rounded-2xl border border-primary-400/25 bg-black/90 p-1.5 shadow-2xl shadow-black/60 backdrop-blur-2xl">
-                                            {[0.75, 1, 1.25, 1.5, 2].map(speed => (
+                                        <div role="menu" aria-label="سرعت پخش" className="absolute bottom-full right-0 mb-2 grid w-52 grid-cols-3 gap-1 overflow-hidden rounded-2xl border border-primary-400/25 bg-black/90 p-1.5 shadow-2xl shadow-black/60 backdrop-blur-2xl">
+                                            {PLAYBACK_SPEEDS.map(speed => (
                                                 <button
                                                     key={speed}
                                                     role="menuitem"
                                                     onClick={() => setSpeed(speed)}
-                                                    className={`block w-full rounded-lg px-3 py-2 text-center text-sm transition-colors ${playbackSpeed === speed ? 'bg-primary-500/25 text-primary-200' : 'text-white/80 hover:bg-white/10 hover:text-white'}`}
+                                                    className={`rounded-lg px-2 py-2 text-center text-xs transition-colors ${playbackSpeed === speed ? 'bg-primary-500/25 font-bold text-primary-200' : 'text-white/80 hover:bg-white/10 hover:text-white'}`}
                                                 >
-                                                    {speed === 1 ? '1.0' : speed}x
+                                                    {playbackSpeedLabel(speed)}
                                                 </button>
                                             ))}
                                         </div>
@@ -1113,7 +1122,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
                                         aria-expanded={showSpeedMenu}
                                     >
                                         <Gauge className="w-4 h-4" />
-                                        <span>{playbackSpeed === 1 ? '1.0' : playbackSpeed}x</span>
+                                        <span>{playbackSpeedLabel(playbackSpeed)}</span>
                                     </button>
                                 </div>
 
