@@ -307,3 +307,41 @@ async def list_monitor_accounts(current_user: User = Depends(get_current_user)):
         except Exception as error:
             raise HTTPException(status_code=503, detail=str(error)) from error
     return telegram_monitor_pool.accounts
+
+
+@router.get("/monitor-status")
+async def monitor_runtime_status(current_user: User = Depends(get_current_user)):
+    """Explain whether monitor sessions are missing, invalid, or connected."""
+    _require_admin(current_user)
+    from ..monitoring import telegram_monitor_pool
+    configured_count = len(settings.telegram_monitor_sessions)
+    shared_count = len(set(settings.telegram_monitor_sessions) & set(settings.telegram_worker_sessions))
+    if configured_count and not telegram_monitor_pool.clients and not settings.local_dev_mode:
+        try:
+            await telegram_monitor_pool.start()
+        except Exception:
+            # The structured response below is more useful than a generic 503.
+            pass
+    connected_count = len(telegram_monitor_pool.clients)
+    if settings.local_dev_mode:
+        state, message = "disabled", "حالت توسعه محلی فعال است و پردازشگر پایش اجرا نمی‌شود."
+    elif not configured_count:
+        state, message = "not_configured", "هیچ سشن اختصاصی پایش در محیط اجرای همین سرویس تنظیم نشده است."
+    elif not connected_count:
+        state = "connection_failed"
+        detail = next(iter(telegram_monitor_pool.last_errors.values()), "گزارش خطایی ثبت نشد")
+        message = f"متغیر محیطی خوانده شد، اما اتصال سشن ناموفق بود: {detail}"
+    elif shared_count:
+        state, message = "shared_session", "یک سشن هم‌زمان برای پایش و دانلود لینک تنظیم شده است. برای پایش یک سشن جدا بساز."
+    elif connected_count == configured_count:
+        state, message = "connected", f"{connected_count} حساب پایش تلگرام متصل است."
+    elif connected_count:
+        state, message = "partial", f"{connected_count} حساب از {configured_count} حساب پایش متصل شد."
+    return {
+        "state": state,
+        "message": message,
+        "configured_count": configured_count,
+        "connected_count": connected_count,
+        "shared_with_import_count": shared_count,
+        "accounts": telegram_monitor_pool.accounts,
+    }

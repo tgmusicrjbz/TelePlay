@@ -9,7 +9,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, PropertyMock, patch
 
 _temp = tempfile.TemporaryDirectory()
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{(Path(_temp.name) / 'library.sqlite').as_posix()}"
@@ -27,7 +27,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.database import Base, async_session, engine
-from app.models import AuthSession, BotUserState, ErrorLog, File, Folder, Pack, PackItem, Playlist, PlaylistItem, ProcessingJob, SecurityEvent, TTSUsage, User, WatchProgress
+from app.models import AuthSession, BotUserState, ErrorLog, File, Folder, Pack, PackItem, Playlist, PlaylistItem, ProcessingJob, SecurityEvent, SourceMonitor, TTSUsage, User, WatchProgress
+from app.config import _session_values
+from app.monitoring import TelegramMonitorClientPool, settings as monitor_settings, source_monitor_service, telegram_monitor_pool
 from app.routers.auth import _require_telegram_two_factor, _session_for_device, password_login, password_register, update_credentials
 from app.account_security import encrypt_secret, new_totp_secret, totp_code
 from app.routers.accounts import admin_error_logs, admin_health, delete_tag_definition, delete_tag_definitions_batch, export_account_data, get_saved_filters, get_tag_settings, import_account_data, report_client_error, resolve_admin_error, update_saved_filters, update_tag_settings
@@ -70,6 +72,18 @@ from app import telegram
 
 
 class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
+    def test_monitor_session_env_values_accept_railway_copy_formats(self):
+        self.assertEqual(_session_values('"session-one"', "TELEGRAM_MONITOR_SESSION=session-two"), ["session-one", "session-two"])
+
+    async def test_configured_but_invalid_monitor_session_reports_connection_failure(self):
+        pool = TelegramMonitorClientPool()
+        with patch.object(monitor_settings, "telegram_monitor_session", "invalid-session"), patch(
+            "app.monitoring.Client", side_effect=ValueError("bad session format")
+        ):
+            with self.assertRaisesRegex(RuntimeError, "سشن پایش تنظیم شده، اما اتصال"):
+                await pool.start()
+        self.assertEqual(pool.last_errors, {0: "bad session format"})
+
     async def test_monitoring_requires_explicit_access_and_keeps_saved_messages_admin_only(self):
         denied = SimpleNamespace(telegram_id=7654321, can_use_monitors=False)
         with self.assertRaises(HTTPException) as access_error:
@@ -98,6 +112,58 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
                 source_url="http://127.0.0.1/private", interval_minutes=60,
             ), delegated)
         self.assertEqual(foreign_url_error.exception.status_code, 422)
+
+    async def test_youtube_and_instagram_monitor_entries_reach_import_queue(self):
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            user.can_use_monitors = True
+            monitors = []
+            for source_type, source_url in (
+                ("youtube", "https://www.youtube.com/@example/videos"),
+                ("instagram", "https://www.instagram.com/example/"),
+            ):
+                monitor = SourceMonitor(
+                    user_id=user.id, name=f"test-{source_type}", source_type=source_type,
+                    source_url=source_url, enabled=True, interval_minutes=60,
+                    filters_json="{}", actions_json='{"include_existing": true, "initial_count": 1}',
+                )
+                db.add(monitor)
+                monitors.append(monitor)
+            await db.commit()
+            monitor_ids = [item.id for item in monitors]
+
+        entries = [{"id": "post-1", "url": "https://example.test/post-1", "title": "نمونه", "description": "", "type": "video"}]
+        for monitor_id in monitor_ids:
+            enqueue = AsyncMock(return_value=1)
+            with patch("app.monitoring._extract_entries", return_value=entries), patch("app.monitoring.link_importer.enqueue", enqueue):
+                result = await source_monitor_service.run_one(monitor_id)
+            self.assertEqual(result["queued"], 1)
+            enqueue.assert_awaited_once()
+            self.assertEqual(enqueue.await_args.args[0].url, entries[0]["url"])
+
+    async def test_telegram_monitor_copies_new_channel_message(self):
+        copied = AsyncMock()
+        message = SimpleNamespace(
+            id=42, text="پیام تازه کانال", caption=None, video=None, audio=None,
+            voice=None, photo=None, copy=copied,
+        )
+
+        class FakeTelegramClient:
+            async def get_chat_history(self, source, limit=50):
+                self.source, self.limit = source, limit
+                yield message
+
+        client = FakeTelegramClient()
+        monitor = SimpleNamespace(id=7, source_type="telegram", source_url="@example", last_cursor=None)
+        user = SimpleNamespace(id=self.user_id, telegram_id=111)
+        selected = AsyncMock(return_value=(client, asyncio.Lock()))
+        with patch.object(TelegramMonitorClientPool, "available", new_callable=PropertyMock, return_value=True), patch.object(
+            telegram_monitor_pool, "selected", selected
+        ):
+            sent = await source_monitor_service._run_telegram(monitor, user, {}, {"include_existing": True})
+        self.assertEqual(sent, 1)
+        self.assertEqual(monitor.last_cursor, "42")
+        copied.assert_awaited_once_with(111)
 
     async def test_telegram_login_requires_totp_when_enabled(self):
         secret = new_totp_secret()

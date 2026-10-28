@@ -28,39 +28,49 @@ class TelegramMonitorClientPool:
         self.clients: list[Client] = []
         self.accounts: list[dict[str, object]] = []
         self.locks: list[asyncio.Lock] = []
+        self.last_errors: dict[int, str] = {}
+        self.start_attempted = False
+        self._start_lock = asyncio.Lock()
 
     @property
     def available(self) -> bool:
         return bool(settings.telegram_monitor_sessions)
 
     async def start(self) -> None:
-        if self.clients or not self.available:
-            return
-        for index, session in enumerate(settings.telegram_monitor_sessions):
-            client = Client(
-                f"komod-monitor-{index + 1}", api_id=settings.telegram_api_id,
-                api_hash=settings.telegram_api_hash, session_string=session,
-                in_memory=True, no_updates=True,
-            )
-            try:
-                await client.start()
-                me = await client.get_me()
-                self.clients.append(client)
-                self.locks.append(asyncio.Lock())
-                self.accounts.append({
-                    "index": index,
-                    "telegram_id": int(me.id),
-                    "name": " ".join(value for value in (me.first_name, me.last_name) if value).strip() or str(me.id),
-                    "username": me.username,
-                })
-            except Exception:
-                logger.exception("Telegram monitor account %s could not start", index + 1)
+        async with self._start_lock:
+            if self.clients or not self.available:
+                return
+            self.start_attempted = True
+            self.last_errors.clear()
+            for index, session in enumerate(settings.telegram_monitor_sessions):
+                client: Client | None = None
                 try:
-                    await client.stop()
-                except Exception:
-                    pass
-        if not self.clients:
-            raise RuntimeError("هیچ حساب پایش تلگرام متصل نشد.")
+                    client = Client(
+                        f"komod-monitor-{index + 1}", api_id=settings.telegram_api_id,
+                        api_hash=settings.telegram_api_hash, session_string=session,
+                        in_memory=True, no_updates=True,
+                    )
+                    await client.start()
+                    me = await client.get_me()
+                    self.clients.append(client)
+                    self.locks.append(asyncio.Lock())
+                    self.accounts.append({
+                        "index": index,
+                        "telegram_id": int(me.id),
+                        "name": " ".join(value for value in (me.first_name, me.last_name) if value).strip() or str(me.id),
+                        "username": me.username,
+                    })
+                except Exception as error:
+                    self.last_errors[index] = str(error).strip()[:400] or type(error).__name__
+                    logger.exception("Telegram monitor account %s could not start", index + 1)
+                    if client is not None:
+                        try:
+                            await client.stop()
+                        except Exception:
+                            pass
+            if not self.clients:
+                detail = next(iter(self.last_errors.values()), "خطای نامشخص")
+                raise RuntimeError(f"سشن پایش تنظیم شده، اما اتصال حساب تلگرام شکست خورد: {detail}")
 
     async def stop(self) -> None:
         await asyncio.gather(*(client.stop() for client in self.clients), return_exceptions=True)

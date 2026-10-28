@@ -6,6 +6,23 @@ from pydantic import Field
 from functools import lru_cache
 
 
+def _session_values(*raw_values: str) -> list[str]:
+    """Normalize Railway/env session values without ever logging their contents."""
+    sessions: list[str] = []
+    variable_names = {"TELEGRAM_MONITOR_SESSION", "TELEGRAM_MONITOR_SESSIONS", "TELEGRAM_WORKER_SESSION", "TELEGRAM_WORKER_SESSIONS"}
+    for raw in raw_values:
+        for candidate in str(raw or "").replace("\r", "\n").replace("\n", ",").split(","):
+            value = candidate.strip()
+            if value[:1] in {'"', "'"} and value[-1:] == value[:1]:
+                value = value[1:-1].strip()
+            prefix, separator, remainder = value.partition("=")
+            if separator and prefix.strip() in variable_names:
+                value = remainder.strip()
+            if value and value not in sessions:
+                sessions.append(value)
+    return sessions
+
+
 class Settings(BaseSettings):
     # Telegram
     telegram_api_id: int
@@ -70,24 +87,12 @@ class Settings(BaseSettings):
     @property
     def telegram_worker_sessions(self) -> list[str]:
         """Configured import accounts, de-duplicated in a stable order."""
-        values = [*self.telegram_worker_session.split(","), *self.telegram_worker_sessions_str.split(",")]
-        sessions: list[str] = []
-        for value in values:
-            value = value.strip()
-            if value and value not in sessions:
-                sessions.append(value)
-        return sessions
+        return _session_values(self.telegram_worker_session, self.telegram_worker_sessions_str)
 
     @property
     def telegram_monitor_sessions(self) -> list[str]:
         """Monitoring-only Telegram accounts, de-duplicated in stable order."""
-        values = [*self.telegram_monitor_session.split(","), *self.telegram_monitor_sessions_str.split(",")]
-        sessions: list[str] = []
-        for value in values:
-            value = value.strip()
-            if value and value not in sessions:
-                sessions.append(value)
-        return sessions
+        return _session_values(self.telegram_monitor_session, self.telegram_monitor_sessions_str)
 
     monitor_user_max_sources: int = Field(5, alias="MONITOR_USER_MAX_SOURCES")
     monitor_user_min_interval_minutes: int = Field(30, alias="MONITOR_USER_MIN_INTERVAL_MINUTES")
