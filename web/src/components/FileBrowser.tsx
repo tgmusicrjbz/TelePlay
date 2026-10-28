@@ -1421,7 +1421,7 @@ export default function FileBrowser() {
                         )}
                         {/* Search */}
                         {(activeSection === 'files' || activeSection === 'activity') && <div className="relative min-w-0 flex-1 max-w-[24rem]">
-                            <Search className="pointer-events-none absolute right-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-dark-500" />
+                            <span className="pointer-events-none absolute inset-y-0 right-3 z-10 flex items-center text-dark-500" aria-hidden="true"><Search className="h-4 w-4" /></span>
                             <input
                                 type="text"
                                 placeholder="جست‌وجو در کمد…"
