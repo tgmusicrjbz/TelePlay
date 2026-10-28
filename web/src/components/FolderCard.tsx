@@ -118,7 +118,7 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
                 data-folder-id={folder.id}
             >
                 <BlurredPreview active={Boolean(folder.is_blurred)} card compact />
-                {selectionMode && <button onClick={handleSelectClick} className="absolute left-0 top-0 z-10 flex h-11 w-11 items-center justify-center" aria-label={selected ? 'لغو انتخاب کشو' : 'انتخاب کشو'}><span className={`flex h-6 w-6 items-center justify-center rounded-md border ${selected ? 'border-primary-400 bg-primary-500 text-white' : 'border-white/30 bg-dark-900/90'}`}>{selected && <Check className="h-4 w-4"/>}</span></button>}
+                {selectionMode && <button onClick={handleSelectClick} className="absolute left-0 top-0 z-30 flex h-11 w-11 items-center justify-center" aria-label={selected ? 'لغو انتخاب کشو' : 'انتخاب کشو'}><span className={`flex h-6 w-6 items-center justify-center rounded-md border ${selected ? 'border-primary-400 bg-primary-500 text-white' : 'border-white/30 bg-dark-900/90'}`}>{selected && <Check className="h-4 w-4"/>}</span></button>}
                 <div
                     style={folderColor && !coverUrl ? { backgroundColor: `${folderColor}22`, borderColor: `${folderColor}66` } : undefined}
                     className={`relative w-12 h-12 rounded-lg flex items-center justify-center shrink-0 overflow-hidden border transition-all
@@ -138,7 +138,7 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
                     {cardDisplay.folderDescription&&folder.description && <p dir="auto" className="text-xs text-dark-400 truncate mt-1" title={folder.description}>{folder.description}</p>}
                 </div>
 
-                <div className="relative z-10 flex items-center gap-2">
+                <div className="relative z-30 flex items-center gap-2">
                     <button
                         onClick={(e) => {
                             e.stopPropagation();
@@ -190,8 +190,8 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
                     <span className="absolute inset-0 flex items-center justify-center transition duration-300">{coverUrl ? <img src={coverUrl} alt="" className="h-full w-full object-cover"/> : folder.icon ? <span className="text-xl leading-none">{folder.icon}</span> : <FolderIcon style={folderColor ? {color:folderColor}:undefined} className={`w-5 h-5 transition-colors ${selected ? 'text-primary-300' : 'text-primary-400'}`} />}</span>
                     {cardDisplay.statusBadges&&(folder.is_pinned || folder.is_favorite) && <span className="absolute -right-1 -top-1 z-20 flex items-center gap-0.5 rounded-full border border-white/10 bg-dark-900/95 p-0.5 shadow-lg">{folder.is_pinned && <Pin className="h-2.5 w-2.5 fill-current text-primary-300"/>}{folder.is_favorite && <Star className="h-2.5 w-2.5 fill-current text-amber-300"/>}</span>}
                 </div>
-                <div className="relative z-10 flex items-center gap-1">
-                {selectionMode && <button onClick={handleSelectClick} className="absolute left-0 top-0 z-20 flex h-11 w-11 items-center justify-center" aria-label={selected ? 'لغو انتخاب کشو' : 'انتخاب کشو'}><span className={`flex h-6 w-6 items-center justify-center rounded-md border ${selected ? 'border-primary-400 bg-primary-500 text-white' : 'border-white/30 bg-dark-900/90'}`}>{selected && <Check className="h-4 w-4"/>}</span></button>}
+                <div className="relative z-30 flex items-center gap-1">
+                {selectionMode && <button onClick={handleSelectClick} className="absolute left-0 top-0 z-30 flex h-11 w-11 items-center justify-center" aria-label={selected ? 'لغو انتخاب کشو' : 'انتخاب کشو'}><span className={`flex h-6 w-6 items-center justify-center rounded-md border ${selected ? 'border-primary-400 bg-primary-500 text-white' : 'border-white/30 bg-dark-900/90'}`}>{selected && <Check className="h-4 w-4"/>}</span></button>}
                 {!selectionMode && <button
                     onClick={(e) => {
                         e.stopPropagation();

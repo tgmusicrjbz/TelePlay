@@ -6,12 +6,12 @@ export default function BlurredPreview({ active, compact = false, card = false }
         return (
             <span
                 aria-label="کارت محو شده"
-                className="pointer-events-none absolute inset-0 z-[5] rounded-[inherit]"
+                className="pointer-events-none absolute inset-0 z-[25] rounded-[inherit]"
                 style={{
-                    background: 'rgba(5, 9, 24, 0.38)',
-                    backdropFilter: 'blur(18px) brightness(0.42) saturate(0.55)',
-                    WebkitBackdropFilter: 'blur(18px) brightness(0.42) saturate(0.55)',
-                    boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.035)',
+                    background: 'linear-gradient(135deg, rgba(24, 33, 57, 0.97), rgba(7, 12, 29, 0.985))',
+                    backdropFilter: 'blur(32px) brightness(0.08) saturate(0)',
+                    WebkitBackdropFilter: 'blur(32px) brightness(0.08) saturate(0)',
+                    boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.045), inset 0 0 44px rgba(3,7,18,0.82)',
                 }}
             />
         );
