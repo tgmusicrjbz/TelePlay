@@ -1117,9 +1117,11 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             third.file_name, third.file_type = "A", "video"
             db.add_all([first, second, third])
             await db.commit()
+            created_ids = {first.id, second.id, third.id}
             user = await db.get(User, self.user_id)
             result = await list_files(None, None, None, 1, 20, db, user, "name:asc,type:desc")
-            self.assertEqual([item.file_type for item in result.files], ["video", "audio", "video"])
+            created = [item.file_type for item in result.files if item.id in created_ids]
+            self.assertEqual(created, ["video", "audio", "video"])
 
     async def test_batch_edit_preserves_extensions_and_updates_descriptions(self):
         async with async_session() as db:
@@ -1395,6 +1397,38 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
 
 
 class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
+    async def test_group_deep_link_opens_settings_without_a_manual_start_command(self):
+        from app.telegram import build_clients
+        build_clients()
+        from app.bot import start_command
+
+        message = SimpleNamespace(
+            command=["start", "group_n10055"],
+            from_user=SimpleNamespace(id=111, username="admin", first_name="مدیر", last_name=None),
+            reply=AsyncMock(),
+        )
+        with patch("app.bot.get_or_create_user", new_callable=AsyncMock), patch(
+            "app.bot.load_user_ui_state", new_callable=AsyncMock
+        ), patch("app.bot.set_current_drawer", new_callable=AsyncMock), patch(
+            "app.bot.is_connected_group", new_callable=AsyncMock, return_value=True
+        ), patch("app.bot.is_group_manager", new_callable=AsyncMock, return_value=True), patch(
+            "app.bot.group_settings_view", new_callable=AsyncMock, return_value={"text": "پنل گروه"}
+        ):
+            await start_command(SimpleNamespace(), message)
+        message.reply.assert_awaited_once_with(text="پنل گروه")
+
+    async def test_group_manager_check_is_cached_for_fast_settings_buttons(self):
+        from app.telegram import build_clients
+        build_clients()
+        from app.bot import group_manager_cache, is_group_manager
+
+        group_manager_cache.clear()
+        client = SimpleNamespace(get_chat_member=AsyncMock(return_value=SimpleNamespace(status="administrator")))
+        with patch("app.bot.is_global_admin", return_value=False):
+            self.assertTrue(await is_group_manager(client, -10055, 111))
+            self.assertTrue(await is_group_manager(client, -10055, 111))
+        client.get_chat_member.assert_awaited_once_with(-10055, 111)
+
     async def test_group_button_accepts_the_members_next_text(self):
         from app.telegram import build_clients
         build_clients()
@@ -1483,7 +1517,7 @@ class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
         private_commands, group_commands = command_sets[-2:]
         self.assertIn("search", [command.command for command in private_commands])
         self.assertNotIn("search", [command.command for command in group_commands])
-        self.assertEqual({command.command for command in group_commands}, {"komod", "tts", "stt", "group_usage", "connect_here"})
+        self.assertEqual({command.command for command in group_commands}, {"komod", "tts", "stt", "group_usage", "group_settings", "connect_here"})
         self.assertTrue(all(command.description for commands in command_sets for command in commands))
         client.set_bot_name.assert_awaited_once_with("🗂 کمد | درایو ابری تلگرام")
         client.set_bot_info_short_description.assert_awaited_once_with(
@@ -1495,7 +1529,7 @@ class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
 
         from app.telegram import build_clients
         build_clients()
-        from app.bot import file_detail_keyboard, file_detail_text, file_more_keyboard, format_duration, format_jalali, format_size, help_keyboard, main_menu_keyboard, pagination_row, search_type_keyboard, sort_keyboard, sort_drafts, truncate_description, type_filter_keyboard
+        from app.bot import decode_group_start_payload, encode_group_start_payload, file_detail_keyboard, file_detail_text, file_more_keyboard, format_duration, format_jalali, format_size, group_menu_keyboard, group_tool_help, help_keyboard, main_menu_keyboard, pagination_row, search_type_keyboard, sort_keyboard, sort_drafts, truncate_description, type_filter_keyboard
         file = SimpleNamespace(
             file_type="video", file_name="clip.mp4", file_size=10,
             duration=5, description="توضیح همراه رسانه",
@@ -1533,9 +1567,17 @@ class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
         menu_labels = [button.text for row in main_menu_keyboard(111).inline_keyboard for button in row]
         self.assertIn("📦 همه‌ی فایل‌ها", menu_labels)
         self.assertIn("🗄️ کشوهای من", menu_labels)
-        self.assertNotIn("🔍 بگرد تو کمد", menu_labels)
-        self.assertNotIn("🌐 باز کردن کمد", menu_labels)
-        self.assertIn("⚙️ تنظیم فایل و لینک", menu_labels)
+        self.assertIn("🔎 جست‌وجو", menu_labels)
+        self.assertIn("✨ باز کردن کمد", menu_labels)
+        self.assertIn("⚙️ تنظیمات", menu_labels)
+        self.assertIn("show_help", [button.callback_data for row in main_menu_keyboard(111).inline_keyboard for button in row])
+        payload = encode_group_start_payload(-10055)
+        self.assertEqual(payload, "group_n10055")
+        self.assertEqual(decode_group_start_payload(payload), -10055)
+        group_labels = [button.text for row in group_menu_keyboard().inline_keyboard for button in row]
+        self.assertEqual(group_labels, ["📊 مصرف امروز", "⚙️ مدیریت گروه", "💡 راهنمای سریع ابزارها"])
+        self.assertIn("/tts", group_tool_help("guide"))
+        self.assertIn("/stt", group_tool_help("guide"))
         self.assertEqual(
             [button.text for row in help_keyboard(111).inline_keyboard for button in row],
             ["✨ ورود به نسخهٔ وب", "🚪 بازگشت به منوی اصلی"],

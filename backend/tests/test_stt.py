@@ -99,7 +99,8 @@ class STTQueueTests(unittest.IsolatedAsyncioTestCase):
         await create_job(
             job_id="recover-stt", user_id=user_id, kind="stt", title="نمونه",
             payload={"id": "recover-stt", "user_id": user_id, "source_file_id": 42,
-                     "title": "نمونه", "folder_id": None, "prompt": "", "output_mode": "temporary"},
+                     "title": "نمونه", "folder_id": None, "prompt": "", "output_mode": "temporary",
+                     "cleanup_source": True, "delete_telegram_source": False},
             status=status,
         )
         queue = STTQueue(GeminiSTTProvider([]))
@@ -111,6 +112,8 @@ class STTQueueTests(unittest.IsolatedAsyncioTestCase):
         queued_job = await queue.queue.get()
         self.assertEqual((queued_job.id, queued_job.source_file_id), ("recover-stt", 42))
         self.assertEqual(queued_job.output_mode, "temporary")
+        self.assertTrue(queued_job.cleanup_source)
+        self.assertFalse(queued_job.delete_telegram_source)
         queue.queue.task_done()
         async with async_session() as db:
             persisted = await db.get(ProcessingJob, "recover-stt")

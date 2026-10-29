@@ -94,22 +94,18 @@ async def configure_main_client(c) -> None:
             BotCommand("start", "باز کردن منوی اصلی"),
             BotCommand("myfiles", "دیدن فایل‌های ذخیره‌شده"),
             BotCommand("folders", "مرور کشوهای کمد"),
-            BotCommand("playlists", "ساخت و پخش پلی‌لیست‌ها"),
             BotCommand("tts", "ساخت صدا از متن"),
             BotCommand("stt", "استخراج متن از صدا"),
             BotCommand("search", "جست‌وجو در فایل‌ها و کشوها"),
-            BotCommand("newfolder", "ساخت کشوی جدید"),
-            BotCommand("web", "راهنمای ورود به نسخهٔ وب"),
             BotCommand("login", "ورود به نسخهٔ وب یا دستگاه دیگر"),
-            BotCommand("instagram", "اتصال دریافت پست اینستاگرام"),
             BotCommand("help", "نمایش راهنمای استفاده"),
-            BotCommand("logout_all", "خروج از همهٔ دستگاه‌ها"),
         ]
         group_commands = [
             BotCommand("komod", "باز کردن منوی گروه"),
             BotCommand("tts", "تبدیل متن ریپلای‌شده به صدا"),
             BotCommand("stt", "تبدیل صوت یا ویدیوی ریپلای‌شده به متن"),
             BotCommand("group_usage", "نمایش مصرف امروز گروه"),
+            BotCommand("group_settings", "مدیریت ابزارها و سهمیه‌های گروه"),
             BotCommand("connect_here", "درخواست اتصال این گروه"),
         ]
         await asyncio.wait_for(c.set_bot_commands(private_commands, scope=BotCommandScopeAllPrivateChats()), timeout=20)

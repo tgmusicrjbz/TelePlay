@@ -22,10 +22,10 @@ class BotMessageDefinition:
 
 
 BOT_MESSAGE_DEFINITIONS = (
-    BotMessageDefinition("welcome", "پیام شروع", "عمومی", "🗄️ **سلام {first_name}!**\nفایل بفرست یا یکی از بخش‌ها را باز کن.", ("first_name",)),
+    BotMessageDefinition("welcome", "پیام شروع", "عمومی", "🗄️ **سلام {first_name}!**\n\nفایل، متن یا لینک بفرست؛ برای مدیریت کامل هم کمد را باز کن.", ("first_name",)),
     BotMessageDefinition("access_denied", "دسترسی محدود", "عمومی", "🚫 **دسترسی محدوده**\n\nاین ربات فقط برای کاربرهای مجاز فعاله.\nشناسهٔ تلگرام شما: `{telegram_id}`", ("telegram_id",)),
     BotMessageDefinition("file_access_denied", "عدم اجازه ذخیره فایل", "عمومی", "🚫 این حساب فعلاً اجازهٔ ذخیره فایل در کمد رو نداره.\nآیدی تلگرام: `{telegram_id}`", ("telegram_id",)),
-    BotMessageDefinition("help", "راهنمای ربات", "عمومی", "💡 **راهنمای کمد**\n\nفایل، متن یا لینک بفرست؛ بقیه‌اش با کمد."),
+    BotMessageDefinition("help", "راهنمای ربات", "عمومی", "💡 **راهنمای سریع کمد**\n\n📎 فایل، عکس، ویدیو یا متن را مستقیم بفرست تا ذخیره شود.\n🔗 لینک یوتیوب، اینستاگرام یا پینترست را بفرست تا دریافت شود.\n🎙 `/tts متن` برای ساخت صدا؛ یا روی یک متن ریپلای کن.\n📝 روی صدا یا ویدیو ریپلای کن و `/stt` را بفرست.\n🔎 با `/search عبارت` داخل کمد بگرد.\n\nمدیریت کامل فایل‌ها و تنظیمات از نسخهٔ وب در دسترس است."),
     BotMessageDefinition("login_confirmed", "تأیید ورود دستگاه", "ورود", "✅ **ورود تأیید شد**\n\nبه صفحهٔ ورود برگرد؛ کمد خودش باز می‌شه."),
     BotMessageDefinition("login_code_used", "کد ورود استفاده‌شده", "ورود", "⚠️ این کد قبلاً استفاده شده."),
     BotMessageDefinition("login_code_expired", "انقضای کد ورود", "ورود", "❌ اعتبار این کد تموم شده."),
@@ -36,14 +36,14 @@ BOT_MESSAGE_DEFINITIONS = (
     BotMessageDefinition("link_failed", "خطای دریافت لینک", "لینک‌ها", "❌ {error}", ("error",)),
     BotMessageDefinition("tts_unavailable", "غیرفعال بودن متن به صدا", "متن و صدا", "تبدیل متن به صدا هنوز روی سرور فعال نشده."),
     BotMessageDefinition("tts_text_required", "نبودن متن برای تبدیل", "متن و صدا", "متن را بعد از `/tts` بنویس یا این دستور را روی یک پیام متنی ریپلای کن."),
-    BotMessageDefinition("tts_queued", "ثبت درخواست متن به صدا", "متن و صدا", "🎙️ درخواست ساخت صدا ثبت شد.{queue_note}", ("queue_note",)),
+    BotMessageDefinition("tts_queued", "ثبت درخواست متن به صدا", "متن و صدا", "🎙️ متن در صف ساخت صداست.{queue_note}", ("queue_note",)),
     BotMessageDefinition("group_tts_output_caption", "متن زیر خروجی متن به صدا در گروه", "گروه‌ها", "{title}", ("title",)),
     BotMessageDefinition("stt_unavailable", "غیرفعال بودن صوت به متن", "متن و صدا", "استخراج متن هنوز روی سرور فعال نشده."),
     BotMessageDefinition("stt_waiting_upload", "انتظار برای صوت یا ویدیو", "متن و صدا", "🎙️ حالا صدا یا ویدیو را بفرست. خود فایل در کمد ذخیره نمی‌شود."),
     BotMessageDefinition("stt_reply_required", "راهنمای ریپلای صوت", "متن و صدا", "روی صدا یا ویدیو ریپلای کن و `/stt` را بفرست. برای خروجی موقت هم `/stt temp` بزن."),
     BotMessageDefinition("stt_invalid_media", "نوع فایل نامعتبر", "متن و صدا", "این فایل صوتی یا ویدیویی نیست."),
     BotMessageDefinition("stt_prepare_failed", "خطای آماده‌سازی صوت", "متن و صدا", "فایل برای استخراج متن آماده نشد؛ دوباره تلاش کن."),
-    BotMessageDefinition("stt_queued", "ثبت درخواست صوت به متن", "متن و صدا", "📝 درخواست استخراج متن ثبت شد.{queue_note}", ("queue_note",)),
+    BotMessageDefinition("stt_queued", "ثبت درخواست صوت به متن", "متن و صدا", "📝 فایل در صف استخراج متن است.{queue_note}", ("queue_note",)),
     BotMessageDefinition("group_stt_output_caption", "متن زیر خروجی صوت به متن در گروه", "گروه‌ها", "{title}", ("title",)),
     BotMessageDefinition("folder_name_required", "نبودن نام کشو", "کشوها", "اسم کشو رو بعد از دستور بنویس؛ نمونه: `/newfolder فیلم‌ها`."),
     BotMessageDefinition("folder_name_invalid", "نام نامعتبر کشو", "کشوها", "اسم کشو باید بین ۱ تا ۲۵۵ نویسه باشه."),
@@ -56,7 +56,7 @@ BOT_MESSAGE_DEFINITIONS = (
     BotMessageDefinition("group_access_check_failed", "خطای بررسی دسترسی گروه", "گروه‌ها", "بررسی دسترسی انجام نشد؛ ربات را مدیر این گفت‌وگو کن."),
     BotMessageDefinition("group_connect_private_first", "فعال نبودن کمد مدیر", "گروه‌ها", "اول در گفت‌وگوی خصوصی ربات، کمدت را فعال کن."),
     BotMessageDefinition("group_approval_pending", "درخواست تأیید گروه", "گروه‌ها", "🕓 درخواست اتصال این گروه برای مدیر کمد فرستاده شد. بعد از تأیید، ابزارها فعال می‌شوند."),
-    BotMessageDefinition("group_connected", "اتصال موفق گروه", "گروه‌ها", "✅ این گروه تأیید و به کمد متصل شد.\n\nاز منوی دکمه‌ای ربات برای متن به صدا، صوت به متن، لینک‌ها و نمایش مصرف استفاده کن."),
+    BotMessageDefinition("group_connected", "اتصال موفق گروه", "گروه‌ها", "✅ این گروه تأیید و به کمد متصل شد.\n\n`/tts` متن را به صدا تبدیل می‌کند، `/stt` از صدا متن می‌گیرد و منوی کمد مصرف و مدیریت گروه را نشان می‌دهد."),
 )
 
 BOT_MESSAGE_BY_KEY = {item.key: item for item in BOT_MESSAGE_DEFINITIONS}

@@ -362,6 +362,7 @@ class STTJob:
     telegram_id: int | None = None
     api_keys: list[str] | None = None
     cleanup_source: bool = False
+    delete_telegram_source: bool = True
     stt_model: str = ""
     text_model: str = ""
     stt_mode: str = "verbatim"
@@ -416,6 +417,7 @@ class STTQueue:
                 prompt=str(payload.get("prompt") or ""), post_prompts=list(payload.get("post_prompts") or []), output_mode=str(payload.get("output_mode") or "save"),
                 telegram_id=payload.get("telegram_id"), api_keys=decrypt_user_keys(user.gemini_api_keys_encrypted),
                 cleanup_source=bool(payload.get("cleanup_source", False)), id=job_id,
+                delete_telegram_source=bool(payload.get("delete_telegram_source", True)),
                 stt_model=str(payload.get("stt_model") or settings.gemini_stt_model),
                 text_model=str(payload.get("text_model") or "gemini-3.8-flash"),
                 stt_mode=str(payload.get("stt_mode") or "verbatim"),
@@ -472,6 +474,7 @@ class STTQueue:
                      "title": job.title, "folder_id": job.folder_id, "prompt": job.prompt, "post_prompts": job.post_prompts or [],
                      "output_mode": job.output_mode, "telegram_id": job.telegram_id,
                      "cleanup_source": job.cleanup_source, "stt_model": job.stt_model,
+                     "delete_telegram_source": job.delete_telegram_source,
                      "text_model": job.text_model, "stt_mode": job.stt_mode,
                      "output_caption": job.output_caption, "status_chat_id": job.status_chat_id,
                      "status_message_id": job.status_message_id, "fingerprint": fingerprint},
@@ -567,10 +570,11 @@ class STTQueue:
             channel_id, message_id = source.storage_channel_id, source.channel_message_id
             await db.delete(source)
             await db.commit()
-        try:
-            await telegram.tg_client.delete_messages(channel_id or settings.telegram_storage_channel_id, message_id)
-        except Exception:
-            logger.warning("Could not remove temporary STT source %s", message_id, exc_info=True)
+        if job.delete_telegram_source:
+            try:
+                await telegram.tg_client.delete_messages(channel_id or settings.telegram_storage_channel_id, message_id)
+            except Exception:
+                logger.warning("Could not remove temporary STT source %s", message_id, exc_info=True)
 
     async def _process(self, job: STTJob) -> None:
         provider = GeminiSTTProvider(

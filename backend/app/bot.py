@@ -11,6 +11,7 @@ import contextlib
 import logging
 import random
 import json
+import time
 from urllib.parse import quote
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
@@ -65,6 +66,7 @@ pending_stt_modes: dict[int, str] = {}
 pending_group_actions: dict[tuple[int, int], tuple[str, datetime] | tuple[str, datetime, int]] = {}
 claimed_stt_messages: set[tuple[int, int]] = set()
 loaded_ui_state_users: set[int] = set()
+group_manager_cache: dict[tuple[int, int], tuple[bool, float]] = {}
 PAGE_SIZE = 8
 PREVIEW_TTL_SECONDS = 300
 TEHRAN_TZ = timezone(timedelta(hours=3, minutes=30))
@@ -300,11 +302,18 @@ async def is_group_manager(client, chat_id: int, telegram_user_id: int) -> bool:
     """Global admins and Telegram group owners/admins may edit group settings."""
     if is_global_admin(telegram_user_id):
         return True
+    key = (chat_id, telegram_user_id)
+    cached = group_manager_cache.get(key)
+    if cached and cached[1] > time.monotonic():
+        return cached[0]
     try:
         member = await client.get_chat_member(chat_id, telegram_user_id)
         status = str(getattr(member, "status", "")).lower()
-        return any(value in status for value in ("owner", "administrator"))
+        allowed = any(value in status for value in ("owner", "administrator"))
+        group_manager_cache[key] = (allowed, time.monotonic() + 90)
+        return allowed
     except Exception:
+        group_manager_cache[key] = (False, time.monotonic() + 10)
         return False
 
 
@@ -333,22 +342,50 @@ def _quota_text(used: int, limit: int) -> str:
 
 def group_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📖 راهنمای متن به صدا", callback_data="grpmenu:tts"), InlineKeyboardButton("📖 راهنمای صوت به متن", callback_data="grpmenu:stt")],
-        [InlineKeyboardButton("📖 راهنمای لینک", callback_data="grpmenu:link"), InlineKeyboardButton("📊 گزارش مصرف", callback_data="grpmenu:usage")],
-        [InlineKeyboardButton("⚙️ تنظیمات مدیر", callback_data="grpmenu:settings")],
+        [InlineKeyboardButton("📊 مصرف امروز", callback_data="grpmenu:usage"),
+         InlineKeyboardButton("⚙️ مدیریت گروه", callback_data="grpmenu:settings")],
+        [InlineKeyboardButton("💡 راهنمای سریع ابزارها", callback_data="grpmenu:guide")],
     ])
 
 
 def group_menu_text() -> str:
-    return "🧰 راهنمای کمد در گروه\n\nبرای دیدن روش هر کار، راهنمای همان بخش را باز کن. تبدیل‌ها با دستور روی پیام ریپلای‌شده انجام می‌شوند."
+    return (
+        "🗄️ کمد در این گروه فعاله\n\n"
+        "🎙 متن به صدا: `/tts متن` یا ریپلای روی متن با `/tts`\n"
+        "📝 صوت به متن: ریپلای روی صدا یا ویدیو با `/stt`\n"
+        "🔗 لینک: لینک پشتیبانی‌شده را مستقیم بفرست\n\n"
+        "خروجی همین‌جا فرستاده می‌شود."
+    )
 
 
 def group_tool_help(action: str) -> str:
-    return {
-        "tts": "🎙 متن به صدا\n\n۱) روی پیام متنی ریپلای کن.\n۲) دستور /tts را بفرست.\n\nمی‌توانی متن را مستقیم هم بنویسی: /tts متن موردنظر",
-        "stt": "📝 صوت به متن\n\n۱) روی صدا، ویدیو یا فایل صوتی ریپلای کن.\n۲) دستور /stt را بفرست.",
-        "link": "🔗 دریافت لینک\n\nلینک یوتیوب، اینستاگرام یا یک پین عمومی پینترست را مستقیم در گروه بفرست؛ بعد از آماده‌شدن، خروجی در همین گروه ارسال می‌شود.",
-    }[action]
+    return (
+        "💡 راهنمای سریع کمد\n\n"
+        "🎙 **ساخت صدا از متن**\n"
+        "`/tts این متن خوانده شود`\n"
+        "یا روی یک پیام متنی ریپلای کن و `/tts` را بفرست.\n\n"
+        "📝 **استخراج متن از صدا**\n"
+        "روی صدا، ویدیو یا فایل صوتی ریپلای کن و `/stt` را بفرست.\n\n"
+        "🔗 **دریافت از لینک**\n"
+        "لینک یوتیوب، اینستاگرام یا پینترست را مستقیم در گروه بفرست."
+    )
+
+
+def encode_group_start_payload(chat_id: int) -> str:
+    return f"group_{'n' if chat_id < 0 else 'p'}{abs(chat_id)}"
+
+
+def decode_group_start_payload(payload: str) -> int | None:
+    match = re.fullmatch(r"group_([np])(\d+)", payload.lower())
+    if not match:
+        return None
+    value = int(match.group(2))
+    return -value if match.group(1) == "n" else value
+
+
+async def group_settings_start_url(client, chat_id: int) -> str:
+    me = await client.get_me()
+    return f"https://t.me/{me.username}?start={encode_group_start_payload(chat_id)}"
 
 
 async def group_settings_view(chat_id: int, telegram_user_id: int, title: str | None = None) -> dict:
@@ -357,34 +394,82 @@ async def group_settings_view(chat_id: int, telegram_user_id: int, title: str | 
         await db.commit()
         group_usage, member_usage = await get_group_usage(db, chat_id, telegram_user_id)
         voice = await get_group_voice(db, chat_id)
-    operations = (("tts", "🎙️ متن به صدا"), ("stt", "📝 صوت به متن"), ("link", "🔗 افزودن لینک"))
-    lines = [f"⚙️ تنظیمات گروه {group.title}", "", "مصرف امروز:"]
-    rows = []
+    operations = (("tts", "🎙 متن به صدا"), ("stt", "📝 صوت به متن"), ("link", "🔗 دریافت لینک"))
+    lines = [f"⚙️ مدیریت «{group.title}»", "", "ابزارها و مصرف امروز:"]
+    toggle_buttons = []
     for operation, label in operations:
         enabled = bool(getattr(group, f"{operation}_enabled"))
         group_limit = int(getattr(group, f"{operation}_daily_limit"))
         member_limit = int(getattr(group, f"member_{operation}_daily_limit"))
         group_used = int(getattr(group_usage, f"{operation}_count", 0))
         member_used = int(getattr(member_usage, f"{operation}_count", 0))
-        personal_usage = "آزاد" if is_global_admin(telegram_user_id) else _quota_text(member_used, member_limit)
-        lines.append(f"{label}: {'فعال' if enabled else 'غیرفعال'} · گروه {_quota_text(group_used, group_limit)} · شما {personal_usage}")
-        rows.append([InlineKeyboardButton(
-            f"{'🟢' if enabled else '⚪'} {label}", callback_data=f"grpq:{chat_id}:{operation}:toggle:0"
-        )])
-        rows.append([
-            InlineKeyboardButton("−۵ گروه", callback_data=f"grpq:{chat_id}:{operation}:group:-5"),
-            InlineKeyboardButton(f"سقف {to_persian_digits(group_limit) if group_limit else '∞'}", callback_data="noop"),
-            InlineKeyboardButton("+۵ گروه", callback_data=f"grpq:{chat_id}:{operation}:group:5"),
-        ])
-        rows.append([
-            InlineKeyboardButton("−۱ عضو", callback_data=f"grpq:{chat_id}:{operation}:member:-1"),
-            InlineKeyboardButton(f"سقف {to_persian_digits(member_limit) if member_limit else '∞'}", callback_data="noop"),
-            InlineKeyboardButton("+۱ عضو", callback_data=f"grpq:{chat_id}:{operation}:member:1"),
-        ])
+        personal_usage = "نامحدود" if is_global_admin(telegram_user_id) else _quota_text(member_used, member_limit)
+        lines.append(f"{'🟢' if enabled else '⚪'} {label} · گروه {_quota_text(group_used, group_limit)} · شما {personal_usage}")
+        toggle_buttons.append(InlineKeyboardButton(
+            f"{'🟢' if enabled else '⚪'} {label.split(' ', 1)[1]}", callback_data=f"grpq:{chat_id}:{operation}:toggle:0"
+        ))
     voice_label=next((item["label"] for item in VOICE_OPTIONS if item["value"]==voice),voice)
-    lines.extend(("", f"گوینده گروه: {voice_label}", "برای واردکردن مقدار دقیق یا تأیید و قطع گروه‌ها از پنل مدیریت وب استفاده کن."))
-    rows.append([InlineKeyboardButton(f"🎤 گوینده: {voice_label.split(' · ')[0]}",callback_data=f"grpvoice:{chat_id}:menu")])
+    lines.extend(("", f"🎤 گوینده پیش‌فرض: {voice_label}"))
+    rows = [toggle_buttons[:2], toggle_buttons[2:], [InlineKeyboardButton("🎚 تنظیم سهمیه‌ها", callback_data=f"grpquota:{chat_id}:menu")],
+            [InlineKeyboardButton(f"🎤 {voice_label.split(' · ')[0]}",callback_data=f"grpvoice:{chat_id}:menu")]]
     return {"text": "\n".join(lines), "reply_markup": InlineKeyboardMarkup(rows), "parse_mode": enums.ParseMode.DISABLED}
+
+
+def group_quota_menu_view(chat_id: int) -> dict:
+    rows = [
+        [InlineKeyboardButton("🎙 متن به صدا", callback_data=f"grpquota:{chat_id}:tts"),
+         InlineKeyboardButton("📝 صوت به متن", callback_data=f"grpquota:{chat_id}:stt")],
+        [InlineKeyboardButton("🔗 دریافت لینک", callback_data=f"grpquota:{chat_id}:link")],
+        [InlineKeyboardButton("↩️ مدیریت گروه", callback_data=f"grpquota:{chat_id}:back")],
+    ]
+    return {"text": "🎚 سهمیهٔ کدام ابزار را تنظیم می‌کنی؟", "reply_markup": InlineKeyboardMarkup(rows), "parse_mode": enums.ParseMode.DISABLED}
+
+
+async def group_quota_view(chat_id: int, operation: str) -> dict:
+    labels = {"tts": "🎙 متن به صدا", "stt": "📝 صوت به متن", "link": "🔗 دریافت لینک"}
+    if operation not in labels:
+        return await group_settings_view(chat_id, 0)
+    async with async_session() as db:
+        group = await get_or_create_group_settings(db, chat_id)
+        await db.commit()
+    group_limit = int(getattr(group, f"{operation}_daily_limit") or 0)
+    member_limit = int(getattr(group, f"member_{operation}_daily_limit") or 0)
+    text = (
+        f"🎚 سهمیه {labels[operation]}\n\n"
+        f"کل گروه در روز: {to_persian_digits(group_limit) if group_limit else 'نامحدود'}\n"
+        f"هر عضو در روز: {to_persian_digits(member_limit) if member_limit else 'نامحدود'}"
+    )
+    rows = [
+        [InlineKeyboardButton("−۵", callback_data=f"grpq:{chat_id}:{operation}:group:-5"),
+         InlineKeyboardButton("کل گروه", callback_data="noop"),
+         InlineKeyboardButton("+۵", callback_data=f"grpq:{chat_id}:{operation}:group:5")],
+        [InlineKeyboardButton("−۱", callback_data=f"grpq:{chat_id}:{operation}:member:-1"),
+         InlineKeyboardButton("هر عضو", callback_data="noop"),
+         InlineKeyboardButton("+۱", callback_data=f"grpq:{chat_id}:{operation}:member:1")],
+        [InlineKeyboardButton("↩️ فهرست سهمیه‌ها", callback_data=f"grpquota:{chat_id}:menu")],
+    ]
+    return {"text": text, "reply_markup": InlineKeyboardMarkup(rows), "parse_mode": enums.ParseMode.DISABLED}
+
+
+async def send_group_settings_private(client, chat_id: int, telegram_user_id: int, title: str | None = None) -> None:
+    """Send the group panel directly; unlike the old flow this has no peer-cache preflight."""
+    await get_or_create_user(telegram_user_id)
+    await client.send_message(
+        telegram_user_id,
+        **(await group_settings_view(chat_id, telegram_user_id, title)),
+    )
+
+
+async def send_group_settings_fallback(client, source_message: Message, chat_id: int) -> None:
+    """Offer a signed-by-Telegram start link when Telegram refuses a direct DM."""
+    url = await group_settings_start_url(client, chat_id)
+    notice = await source_message.reply(
+        "برای بازکردن پنل خصوصی همین گروه، دکمهٔ زیر را بزن.",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("⚙️ باز کردن مدیریت گروه", url=url),
+        ]]),
+    )
+    asyncio.create_task(delete_preview_later(client, notice.chat.id, notice.id, 45))
 
 
 def _remaining_text(used: int, limit: int) -> str:
@@ -953,12 +1038,15 @@ def post_upload_keyboard(file: File, telegram_id: int) -> InlineKeyboardMarkup |
 
 def main_menu_keyboard(telegram_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
+        [get_web_app_button(telegram_id, "✨ باز کردن کمد")],
         [InlineKeyboardButton("🗄️ کشوهای من", callback_data="folders:0:0"),
          InlineKeyboardButton("📦 همه‌ی فایل‌ها", callback_data="files:0")],
         [InlineKeyboardButton("🎙 ساخت صدا", callback_data="tts_menu:home"),
          InlineKeyboardButton("📝 استخراج متن", callback_data="stt_start")],
-        [InlineKeyboardButton("📥 مقصد فایل‌های بعدی", callback_data="storage_target:0")],
-        [InlineKeyboardButton("⚙️ تنظیم فایل و لینک", callback_data="bot_settings")],
+        [InlineKeyboardButton("🔎 جست‌وجو", callback_data="search_choose"),
+         InlineKeyboardButton("📥 مقصد ذخیره", callback_data="storage_target:0")],
+        [InlineKeyboardButton("💡 راهنما", callback_data="show_help"),
+         InlineKeyboardButton("⚙️ تنظیمات", callback_data="bot_settings")],
     ])
 
 
@@ -1188,6 +1276,16 @@ async def start_command(client, message: Message):
     # Accept the explicit login payload and old plain-code links.
     if len(message.command) > 1:
         payload = message.command[1].strip()
+        group_chat_id = decode_group_start_payload(payload)
+        if group_chat_id is not None:
+            if not await is_connected_group(group_chat_id):
+                await message.reply("این گروه به کمد متصل نیست یا تأییدش متوقف شده.")
+                return
+            if not await is_group_manager(client, group_chat_id, message.from_user.id):
+                await message.reply("مدیریت این بخش فقط در اختیار مدیرهای همان گروه است.")
+                return
+            await message.reply(**(await group_settings_view(group_chat_id, message.from_user.id)))
+            return
         code_input = (payload[6:] if payload.lower().startswith("login_") else payload).upper()
         async with async_session() as db:
             result = await db.execute(select(LoginCode).where(LoginCode.code == code_input))
@@ -1399,7 +1497,14 @@ async def group_tts_command(client, message: Message, source_message: Message | 
     job.output_caption = await bot_message("group_tts_output_caption", title=job.title)
     job.status_chat_id = message.chat.id
     job.status_message_id = status_message.id
-    position = await tts_queue.enqueue(job)
+    try:
+        position = await tts_queue.enqueue(job)
+    except Exception as error:
+        logger.exception("Could not queue group TTS: %s", error)
+        with contextlib.suppress(Exception):
+            await status_message.delete()
+        await message.reply("❌ ساخت صدا در صف قرار نگرفت؛ کمی بعد دوباره تلاش کن.")
+        return
     if position > 1:
         await status_message.edit(await bot_message("tts_queued", queue_note=f" نوبت {to_persian_digits(str(position))} در صف."))
 
@@ -1437,22 +1542,19 @@ async def group_stt_command(client, message: Message, source_message: Message | 
         except ValueError as error:
             await message.reply(f"⛔ {error}")
             return
-    target_channel = user.storage_channel_id or settings.telegram_storage_channel_id
+    source = None
+    status_message = None
     try:
-        temporary_message = await forward_to_storage_channel(replied, target_channel)
-        stored_media = next((getattr(temporary_message, field, None) for field in ("audio", "voice", "video", "video_note", "document") if getattr(temporary_message, field, None)), None)
-        if stored_media is None:
-            raise RuntimeError("فایل برای پردازش آماده نشد.")
         async with async_session() as db:
             default_folder = await ensure_default_folder(db, user.id)
             source = File(
-                user_id=user.id, folder_id=default_folder.id, channel_message_id=temporary_message.id,
-                storage_channel_id=target_channel, file_id=stored_media.file_id,
-                file_unique_id=stored_media.file_unique_id,
-                file_name=sanitize_filename(getattr(stored_media, "file_name", None) or f"group-stt-{replied.id}"),
-                file_size=getattr(stored_media, "file_size", 0) or 0, mime_type=mime,
+                user_id=user.id, folder_id=default_folder.id, channel_message_id=replied.id,
+                storage_channel_id=message.chat.id, file_id=media.file_id,
+                file_unique_id=media.file_unique_id,
+                file_name=sanitize_filename(getattr(media, "file_name", None) or f"group-stt-{replied.id}"),
+                file_size=getattr(media, "file_size", 0) or 0, mime_type=mime,
                 file_type="video" if mime.startswith("video/") or replied.video or replied.video_note else "audio",
-                duration=getattr(stored_media, "duration", None) or getattr(media, "duration", None),
+                duration=getattr(media, "duration", None),
                 is_hidden=True,
             )
             db.add(source)
@@ -1466,7 +1568,7 @@ async def group_stt_command(client, message: Message, source_message: Message | 
             user_id=user.id, source_file_id=source.id,
             title=f"📝 متن {Path(source.file_name).stem or 'صدا'}"[:180], folder_id=None,
             output_mode="temporary", telegram_id=message.chat.id, api_keys=personal_keys,
-            cleanup_source=True, stt_model=routed_stt_model,
+            cleanup_source=True, delete_telegram_source=False, stt_model=routed_stt_model,
             text_model=routed_text_model, stt_mode=preferences["stt_mode"],
         )
         job.output_caption = await bot_message("group_stt_output_caption", title=job.title)
@@ -1477,6 +1579,15 @@ async def group_stt_command(client, message: Message, source_message: Message | 
             await status_message.edit(await bot_message("stt_queued", queue_note=f" نوبت {to_persian_digits(str(position))} در صف."))
     except Exception as error:
         logger.exception("Could not queue group STT: %s", error)
+        if source is not None:
+            async with async_session() as db:
+                stale = await db.get(File, source.id)
+                if stale is not None and stale.is_hidden:
+                    await db.delete(stale)
+                    await db.commit()
+        if status_message is not None:
+            with contextlib.suppress(Exception):
+                await status_message.delete()
         await message.reply("❌ فایل برای استخراج متن آماده نشد؛ دوباره تلاش کن.")
 
 
@@ -1486,19 +1597,17 @@ async def group_settings_command(client, message: Message):
         return
     if not await require_connected_group(message):
         return
-    if not is_global_admin(message.from_user.id):
-        notice = await message.reply("تنظیم محدودیت‌های گروه فقط در اختیار مدیر اصلی کمد است.")
+    if not await is_group_manager(client, message.chat.id, message.from_user.id):
+        notice = await message.reply("مدیریت تنظیمات فقط در اختیار مدیرهای این گروه است.")
         asyncio.create_task(delete_preview_later(client, notice.chat.id, notice.id, 12))
         return
     try:
-        view = await group_settings_view(message.chat.id, message.from_user.id, message.chat.title)
-        await client.send_message(message.from_user.id, **view)
+        await send_group_settings_private(client, message.chat.id, message.from_user.id, message.chat.title)
         with contextlib.suppress(Exception):
             await message.delete()
     except Exception as error:
         logger.exception("Could not open private group settings chat=%s user=%s: %s", message.chat.id, message.from_user.id, error)
-        notice = await message.reply("پنل خصوصی باز نشد. یک پیام معمولی برای ربات بفرست و دوباره امتحان کن.")
-        asyncio.create_task(delete_preview_later(client, notice.chat.id, notice.id, 15))
+        await send_group_settings_fallback(client, message, message.chat.id)
 
 
 @tg_client.on_message(
@@ -1574,12 +1683,15 @@ async def group_usage_command(client, message: Message):
 async def group_limit_command(client, message: Message):
     if not await require_connected_group(message):
         return
-    if not message.from_user or not is_global_admin(message.from_user.id):
-        await message.reply("تغییر سهمیه‌ها فقط در اختیار مدیر اصلی کمد است.")
+    if not message.from_user or not await is_group_manager(client, message.chat.id, message.from_user.id):
+        await message.reply("تغییر سهمیه‌ها فقط در اختیار مدیرهای این گروه است.")
         return
-    await client.send_message(message.from_user.id, **(await group_settings_view(message.chat.id, message.from_user.id, message.chat.title)))
-    with contextlib.suppress(Exception):
-        await message.delete()
+    try:
+        await send_group_settings_private(client, message.chat.id, message.from_user.id, message.chat.title)
+        with contextlib.suppress(Exception):
+            await message.delete()
+    except Exception:
+        await send_group_settings_fallback(client, message, message.chat.id)
 
 
 @tg_client.on_message(filters.private & (filters.video | filters.audio | filters.voice | filters.document | filters.video_note), group=-1)
@@ -2413,7 +2525,7 @@ async def handle_callback(client, callback: CallbackQuery):
     data = callback.data
     async with async_session() as db:
         known_user = (await db.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one_or_none()
-    group_settings_callback = ((data.startswith("grpq:") or data.startswith("grpvoice:")) and is_global_admin(callback.from_user.id)) or data.startswith("grpmenu:")
+    group_settings_callback = data.startswith(("grpq:", "grpquota:", "grpvoice:", "grpmenu:"))
     if ((known_user is not None and not known_user.is_active) or
             (settings.restrict_users and callback.from_user.id not in settings.bootstrap_users and known_user is None and not group_settings_callback)):
         await callback.answer("اجازهٔ استفاده از این ربات رو نداری.", show_alert=True)
@@ -2430,8 +2542,8 @@ async def handle_callback(client, callback: CallbackQuery):
         if not await is_connected_group(group_chat_id):
             await callback.answer("این گروه دیگر به کمد متصل نیست.", show_alert=True)
             return
-        if not is_global_admin(callback.from_user.id):
-            await callback.answer("فقط مدیر اصلی کمد می‌تواند این تنظیمات را تغییر دهد.", show_alert=True)
+        if not await is_group_manager(client, group_chat_id, callback.from_user.id):
+            await callback.answer("فقط مدیرهای این گروه می‌توانند تنظیمات را تغییر دهند.", show_alert=True)
             return
         try:
             if operation not in {"tts", "stt", "link"} or scope not in {"toggle", "group", "member"}:
@@ -2445,20 +2557,40 @@ async def handle_callback(client, callback: CallbackQuery):
                     field = f"{operation}_daily_limit" if scope == "group" else f"member_{operation}_daily_limit"
                     setattr(group, field, max(0, min(100000, int(getattr(group, field)) + int(delta_raw))))
                 await db.commit()
-            await callback.message.edit_text(**(await group_settings_view(
-                group_chat_id, callback.from_user.id
-            )))
+            view = await group_settings_view(group_chat_id, callback.from_user.id) if scope == "toggle" else await group_quota_view(group_chat_id, operation)
+            await callback.message.edit_text(**view)
             await callback.answer("تنظیمات گروه ذخیره شد.")
         except (ValueError, TypeError):
             await callback.answer("این تنظیم معتبر نیست.", show_alert=True)
+
+    elif data.startswith("grpquota:"):
+        try:
+            _, chat_id_raw, operation = data.split(":", 2)
+            group_chat_id = int(chat_id_raw)
+        except (ValueError, TypeError):
+            await callback.answer("این تنظیم معتبر نیست.", show_alert=True)
+            return
+        if not await is_group_manager(client, group_chat_id, callback.from_user.id):
+            await callback.answer("فقط مدیرهای این گروه می‌توانند سهمیه‌ها را ببینند.", show_alert=True)
+            return
+        if operation == "menu":
+            await callback.message.edit_text(**group_quota_menu_view(group_chat_id))
+        elif operation == "back":
+            await callback.message.edit_text(**(await group_settings_view(group_chat_id, callback.from_user.id)))
+        elif operation in {"tts", "stt", "link"}:
+            await callback.message.edit_text(**(await group_quota_view(group_chat_id, operation)))
+        else:
+            await callback.answer("این سهمیه معتبر نیست.", show_alert=True)
+            return
+        await callback.answer()
 
     elif data.startswith("grpvoice:"):
         try:
             _,chat_id_raw,voice=data.split(":",2); group_chat_id=int(chat_id_raw)
         except (ValueError,TypeError):
             await callback.answer("این تنظیم معتبر نیست.",show_alert=True); return
-        if not is_global_admin(callback.from_user.id):
-            await callback.answer("فقط مدیر اصلی کمد می‌تواند گوینده گروه را تغییر دهد.",show_alert=True); return
+        if not await is_group_manager(client, group_chat_id, callback.from_user.id):
+            await callback.answer("فقط مدیرهای این گروه می‌توانند گوینده را تغییر دهند.",show_alert=True); return
         if voice=="menu":
             rows=[]
             for index in range(0,len(VOICE_OPTIONS),2):
@@ -2487,7 +2619,7 @@ async def handle_callback(client, callback: CallbackQuery):
             pending_group_actions.pop((group_chat_id, callback.from_user.id), None)
             await callback.message.edit_text(group_menu_text(), reply_markup=group_menu_keyboard())
             await callback.answer("عملیات لغو شد.")
-        elif action in {"tts", "stt", "link"}:
+        elif action == "guide":
             pending_group_actions.pop((group_chat_id, callback.from_user.id), None)
             await callback.message.edit_text(
                 group_tool_help(action),
@@ -2498,19 +2630,18 @@ async def handle_callback(client, callback: CallbackQuery):
             await callback.message.edit_text(**(await group_usage_view(group_chat_id)))
             await callback.answer()
         elif action == "settings":
-            if not is_global_admin(callback.from_user.id):
-                await callback.answer("این بخش فقط برای مدیر اصلی کمد است.", show_alert=True)
+            if not await is_group_manager(client, group_chat_id, callback.from_user.id):
+                await callback.answer("این بخش فقط برای مدیرهای گروه است.", show_alert=True)
                 return
             try:
-                view = await group_settings_view(group_chat_id, callback.from_user.id, callback.message.chat.title)
-                # Refresh the bot peer cache first. After a restart Pyrogram may know
-                # the admin only through the group and otherwise raises PEER_ID_INVALID.
-                await asyncio.wait_for(client.get_users(callback.from_user.id), timeout=5)
-                await asyncio.wait_for(client.send_message(callback.from_user.id, **view), timeout=10)
-                await callback.answer("پنل تنظیمات در گفت‌وگوی خصوصی برایت فرستاده شد.", show_alert=True)
+                await asyncio.wait_for(send_group_settings_private(
+                    client, group_chat_id, callback.from_user.id, callback.message.chat.title
+                ), timeout=10)
+                await callback.answer("پنل مدیریت در گفت‌وگوی خصوصی فرستاده شد.", show_alert=True)
             except Exception as error:
                 logger.exception("Could not send private group settings chat=%s user=%s: %s", group_chat_id, callback.from_user.id, error)
-                await callback.answer("ارسال پنل خصوصی انجام نشد. در گفت‌وگوی ربات روی «شروع» بزن یا یک پیام معمولی بفرست و دوباره امتحان کن.", show_alert=True)
+                await send_group_settings_fallback(client, callback.message, group_chat_id)
+                await callback.answer("تلگرام ارسال مستقیم را نپذیرفت؛ دکمهٔ امنِ بازکردن پنل پایین منو اضافه شد.", show_alert=True)
         else:
             await callback.answer()
 
