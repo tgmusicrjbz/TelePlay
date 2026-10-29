@@ -10,4 +10,3 @@ declare global {
 }
 
 export const isNativeApp = () => Boolean(window.Capacitor?.isNativePlatform?.());
-
