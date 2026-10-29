@@ -1,5 +1,5 @@
 import { createContext, lazy, Suspense, useContext, useEffect, useMemo, useState } from 'react';
-import { Activity, AlertTriangle, ArrowRight, AtSign, BookOpen, BrainCircuit, ChevronDown, ChevronLeft, AudioLines, Check, CheckCircle2, Copy, Database, Download, ExternalLink, FileStack, FileText, FoldVertical, FolderPlus, Gauge, Globe2, Grid2X2, HardDrive, Instagram, KeyRound, LayoutGrid, List, ListRestart, LockKeyhole, LogOut, MessageSquareText, MonitorSmartphone, Moon, MoreVertical, Palette, Pencil, Plus, RefreshCw, Search, Shield, Smartphone, Sun, Tags, Trash2, UnfoldVertical, UserRoundCog, Users, Warehouse, Wifi, WifiOff, XCircle } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowRight, AtSign, BookOpen, BrainCircuit, ChevronDown, ChevronLeft, AudioLines, Check, CheckCircle2, Copy, Database, Download, ExternalLink, FileStack, FileText, FoldVertical, FolderPlus, Gauge, Globe2, Grid2X2, HardDrive, Instagram, KeyRound, LayoutGrid, List, ListRestart, LockKeyhole, LogOut, MessageSquareText, MonitorSmartphone, Moon, MoreVertical, Palette, Pencil, Plus, RefreshCw, Search, Shield, Smartphone, Sparkles, Sun, Tags, Trash2, UnfoldVertical, UserRoundCog, Users, Warehouse, Wifi, WifiOff, XCircle } from 'lucide-react';
 import { AdminUser, Folder, PublicShareItem, TelegramFile, TwoFactorSetup, api, formatFileSize, formatIranTime, formatPersianDate, useAccountPreferences, useAddAdminUser, useAdminErrors, useAdminHealth, useAdminStats, useAdminUsers, useClearAdminErrors, useClearSecurityEvents, useCredentials, useCurrentUser, useDisableTwoFactor, useEnableTwoFactor, useFiles, useFolderTree, useGrantWorkspace, useLogoutAll, useLogoutOthers, usePublicShares, useRemoveAdminUser, useRemoveStorageChannel, useResetStorageChannel, useResolveAdminError, useRevokePublicShares, useRevokeSession, useRevokeWorkspace, useSecurityEvents, useSessions, useSetStorageChannel, useSetVaultPassword, useSetupTwoFactor, useStorageChannel, useStorageStats, useUnlockVault, useUpdateAccountPreferences, useUpdateAdminUser, useUpdateCredentials, useVaultStatus, useWorkspaceGrants, useWorkspaces } from '../lib/api';
 import { activateAccount, forgetAccount, savedAccounts, saveAuthenticatedAccount, syncCurrentAccount } from '../lib/accounts';
 import { applyAppearanceMode, applyCustomTheme, applyTheme, appearanceThemes, colorThemes, ActiveTheme, AppearanceMode, ColorTheme, getStoredAppearanceMode, getStoredTheme } from '../lib/theme';
@@ -188,6 +188,11 @@ export default function SettingsPage() {
     }, [view]);
 
     const chooseTheme = (next: ActiveTheme) => { setTheme(next); localStorage.setItem('komod-color-theme', next); applyTheme(next); };
+    const openMediaStudio = () => {
+        setActiveSection('studio');
+        if (window.location.pathname !== '/studio') window.history.pushState({},'', '/studio');
+        window.dispatchEvent(new PopStateEvent('popstate'));
+    };
     const chooseAppearanceMode = (next: AppearanceMode) => {
         setAppearanceMode(next);
         localStorage.setItem('komod-appearance-mode', next);
@@ -390,6 +395,7 @@ export default function SettingsPage() {
 
             <SettingsGroup title="ابزارها" text="کارهای هوشمند و قابلیت‌های دستگاه" icon={<AudioLines/>} layout={homeLayout}>
                 <SettingsButton layout={homeLayout} icon={<AudioLines/>} title="متن و صدا" text="ساخت صدا و استخراج متن از صوت یا ویدیو" onClick={() => setView('tts')} />
+                <SettingsButton layout={homeLayout} icon={<Sparkles/>} title="استودیوی رسانه" text="فشرده‌سازی، تبدیل، برش و ادغام فایل‌های رسانه‌ای" onClick={openMediaStudio} />
                 <SettingsButton layout={homeLayout} icon={<BookOpen/>} title="راهنمای کمد" text="توضیح ساده یا کامل همه بخش‌ها و امکانات" onClick={() => setView('help')} />
                 <SettingsButton layout={homeLayout} icon={<Download/>} title="نصب کمد" text="افزودن برنامه به صفحه اصلی این دستگاه" onClick={() => window.dispatchEvent(new Event('komod-install-request'))} />
             </SettingsGroup>
