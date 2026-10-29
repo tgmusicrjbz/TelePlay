@@ -954,6 +954,15 @@ export const useUploadFile = () => {
     });
 };
 
+export type MediaStudioOperation = 'compress'|'convert'|'extract_audio'|'trim'|'merge';
+export interface MediaStudioCapabilities { available:boolean; max_batch:number; max_concurrent:number; operations:MediaStudioOperation[]; formats:{video:string[];audio:string[];image:string[]}; codecs:string[]; presets:string[] }
+export interface MediaStudioJob { id:string; state:'queued'|'preparing'|'processing'|'saving'|'done'|'error'|'cancelled'; progress:number; message:string; title:string; operation:MediaStudioOperation; file_ids:number[]; result:{file_id?:number;file_name?:string;file_type?:string;size?:number;source_size?:number;stream_url?:string}; created_at:string; updated_at:string; finished_at?:string|null }
+export const useMediaStudioCapabilities=()=>useQuery<MediaStudioCapabilities>({queryKey:['mediaStudio','capabilities'],queryFn:async()=>(await api.get('/media-studio/capabilities')).data,staleTime:300_000});
+export const useMediaStudioJobs=()=>useQuery<MediaStudioJob[]>({queryKey:['mediaStudio','jobs'],queryFn:async()=>(await api.get('/media-studio/jobs')).data,refetchInterval:query=>query.state.data?.some(job=>['queued','preparing','processing','saving'].includes(job.state))?1800:false});
+export const useCreateMediaStudioJob=()=>{const client=useQueryClient();return useMutation({mutationFn:async(payload:{operation:MediaStudioOperation;file_ids:number[];title:string;folder_id?:number|null;options:Record<string,unknown>})=>(await api.post<MediaStudioJob>('/media-studio/jobs',payload)).data,onSuccess:()=>{client.invalidateQueries({queryKey:['mediaStudio','jobs']})}})};
+export const useCancelMediaStudioJob=()=>{const client=useQueryClient();return useMutation({mutationFn:async(id:string)=>(await api.delete(`/media-studio/jobs/${id}`)).data,onSuccess:()=>client.invalidateQueries({queryKey:['mediaStudio','jobs']})})};
+export const useRetryMediaStudioJob=()=>{const client=useQueryClient();return useMutation({mutationFn:async(id:string)=>(await api.post(`/media-studio/jobs/${id}/retry`)).data,onSuccess:()=>client.invalidateQueries({queryKey:['mediaStudio','jobs']})})};
+
 // ============== Mixed-media Pack Hooks ==============
 
 const packCacheScope = () => localStorage.getItem('komod-active-workspace') || cachedCurrentUser()?.id || 'guest';

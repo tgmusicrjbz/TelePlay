@@ -4,6 +4,7 @@ FastAPI main application with Telegram MTProto client lifecycle.
 import logging
 import asyncio
 import secrets
+import time
 import traceback
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Form
@@ -28,8 +29,10 @@ from .drive_importer import drive_importer
 from .tts import tts_queue
 from .stt import stt_queue
 from .monitoring import source_monitor_service, telegram_monitor_pool
+from .media_studio import media_studio
 from .routers import files_router, folders_router, streaming_router, auth_router, tv_router, playlists_router, accounts_router, tts_router, stt_router, packs_router, bot_messages_router, admin_groups_router, instagram_router
 from .routers.delivery import router as delivery_router
+from .routers.media_studio import router as media_studio_router
 
 settings = get_settings()
 
@@ -131,6 +134,7 @@ async def lifespan(app: FastAPI):
             except Exception:
                 logger.exception("Background link importer could not start; the rest of the app remains available")
         await drive_importer.start()
+        await media_studio.recover()
         # Recovery also supports users who configured only personal Gemini keys.
         await tts_queue.start()
         await stt_queue.start()
@@ -148,6 +152,7 @@ async def lifespan(app: FastAPI):
         await source_monitor_service.stop()
         await telegram_monitor_pool.stop()
         await drive_importer.stop()
+        await media_studio.stop()
         await link_importer.stop()
         await tts_queue.stop()
         await stt_queue.stop()
@@ -171,6 +176,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 async def track_unexpected_errors(request: Request, call_next):
     """Attach a trace ID to responses and persist unexpected failures for admins."""
     request_id = secrets.token_hex(6)
+    started_at = time.perf_counter()
     try:
         response = await call_next(request)
     except Exception as error:
@@ -185,6 +191,13 @@ async def track_unexpected_errors(request: Request, call_next):
         logger.error("Server error response [%s] %s %s -> %s", request_id, request.method, request.url.path, response.status_code)
         await persist_error_log(request_id, request.method, request.url.path, f"HTTP {response.status_code} response")
     response.headers["X-Request-ID"] = request_id
+    duration_ms = (time.perf_counter() - started_at) * 1000
+    response.headers["Server-Timing"] = f'app;dur={duration_ms:.1f}'
+    if duration_ms >= 1500 and not request.url.path.startswith("/api/stream/"):
+        logger.warning(
+            "Slow request [%s] %s %s -> %s in %.1fms",
+            request_id, request.method, request.url.path, response.status_code, duration_ms,
+        )
     return response
 
 # CORS middleware - Properly configured for production
@@ -203,7 +216,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept", "Range", "X-Workspace-User", "X-Komod-Device-ID"],
-    expose_headers=["Content-Range", "Accept-Ranges", "Content-Length", "X-Request-ID", "X-Komod-OTP-Required"],
+    expose_headers=["Content-Range", "Accept-Ranges", "Content-Length", "X-Request-ID", "X-Komod-OTP-Required", "Server-Timing"],
 )
 
 
@@ -246,6 +259,7 @@ app.include_router(bot_messages_router, prefix="/api")
 app.include_router(admin_groups_router, prefix="/api")
 app.include_router(delivery_router, prefix="/api")
 app.include_router(instagram_router, prefix="/api")
+app.include_router(media_studio_router, prefix="/api")
 
 
 

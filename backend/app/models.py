@@ -476,7 +476,10 @@ class Playlist(Base):
     )
     cover_file: Mapped[Optional["File"]] = relationship(foreign_keys="Playlist.cover_file_id")
 
-    __table_args__ = (UniqueConstraint("user_id", "name", name="uq_playlist_user_name"),)
+    __table_args__ = (
+        UniqueConstraint("user_id", "name", name="uq_playlist_user_name"),
+        Index("idx_playlist_user_cover", user_id, cover_file_id),
+    )
 
 
 class PlaylistItem(Base):
@@ -525,6 +528,7 @@ class Pack(Base):
 
     __table_args__ = (
         Index("idx_pack_user_parent_position", user_id, parent_folder_id, position),
+        Index("idx_pack_user_hidden", user_id, hide_member_files, id),
     )
 
 
@@ -545,6 +549,7 @@ class PackItem(Base):
     __table_args__ = (
         UniqueConstraint("pack_id", "file_id", name="uq_pack_file"),
         Index("idx_pack_item_position", pack_id, position),
+        Index("idx_pack_item_file_pack", file_id, pack_id),
     )
 
 
