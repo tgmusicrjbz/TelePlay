@@ -581,6 +581,106 @@ button:disabled,
     linear-gradient(145deg, #202023 0%, #09090b 76%);
 }
 
+:root[data-appearance="ocean"] {
+  --dark-50: 240 253 250;
+  --dark-100: 204 251 241;
+  --dark-200: 165 243 252;
+  --dark-300: 103 232 249;
+  --dark-400: 94 176 190;
+  --dark-500: 72 132 145;
+  --dark-600: 41 94 107;
+  --dark-700: 30 73 83;
+  --dark-800: 15 47 56;
+  --dark-850: 10 35 43;
+  --dark-900: 6 26 34;
+  --dark-950: 2 13 19;
+  --surface-soft: rgb(15 47 56 / .5);
+  --surface-raised: rgb(10 35 43 / .88);
+  --surface-strong: rgb(6 26 34 / .95);
+}
+
+:root[data-appearance="ocean"] body {
+  background:
+    radial-gradient(circle at 84% -10%, rgb(var(--primary-600) / .13), transparent 32rem),
+    radial-gradient(circle at -8% 88%, rgb(34 211 238 / .09), transparent 30rem),
+    linear-gradient(145deg, #0c303b 0%, #020d13 76%);
+}
+
+:root[data-appearance="forest"] {
+  --dark-50: 240 253 244;
+  --dark-100: 220 252 231;
+  --dark-200: 187 247 208;
+  --dark-300: 134 239 172;
+  --dark-400: 110 180 146;
+  --dark-500: 76 133 108;
+  --dark-600: 52 98 78;
+  --dark-700: 41 74 62;
+  --dark-800: 24 52 42;
+  --dark-850: 17 40 33;
+  --dark-900: 12 31 25;
+  --dark-950: 5 18 14;
+  --surface-soft: rgb(24 52 42 / .5);
+  --surface-raised: rgb(17 40 33 / .88);
+  --surface-strong: rgb(12 31 25 / .95);
+}
+
+:root[data-appearance="forest"] body {
+  background:
+    radial-gradient(circle at 86% -8%, rgb(var(--primary-600) / .12), transparent 31rem),
+    radial-gradient(circle at -12% 92%, rgb(52 211 153 / .08), transparent 28rem),
+    linear-gradient(145deg, #173d30 0%, #05120e 78%);
+}
+
+:root[data-appearance="plum"] {
+  --dark-50: 253 244 255;
+  --dark-100: 250 232 255;
+  --dark-200: 245 208 254;
+  --dark-300: 240 171 252;
+  --dark-400: 190 131 204;
+  --dark-500: 142 92 157;
+  --dark-600: 104 67 117;
+  --dark-700: 77 52 89;
+  --dark-800: 54 34 64;
+  --dark-850: 42 25 51;
+  --dark-900: 31 18 38;
+  --dark-950: 16 8 21;
+  --surface-soft: rgb(54 34 64 / .5);
+  --surface-raised: rgb(42 25 51 / .88);
+  --surface-strong: rgb(31 18 38 / .95);
+}
+
+:root[data-appearance="plum"] body {
+  background:
+    radial-gradient(circle at 86% -10%, rgb(var(--primary-500) / .14), transparent 32rem),
+    radial-gradient(circle at -10% 90%, rgb(232 121 249 / .07), transparent 28rem),
+    linear-gradient(145deg, #3c2348 0%, #100815 78%);
+}
+
+:root[data-appearance="sepia"] {
+  --dark-50: 255 251 235;
+  --dark-100: 254 243 199;
+  --dark-200: 253 230 138;
+  --dark-300: 245 205 128;
+  --dark-400: 190 151 110;
+  --dark-500: 143 106 75;
+  --dark-600: 108 78 56;
+  --dark-700: 91 66 47;
+  --dark-800: 62 43 30;
+  --dark-850: 48 33 24;
+  --dark-900: 37 25 18;
+  --dark-950: 20 13 9;
+  --surface-soft: rgb(62 43 30 / .5);
+  --surface-raised: rgb(48 33 24 / .88);
+  --surface-strong: rgb(37 25 18 / .95);
+}
+
+:root[data-appearance="sepia"] body {
+  background:
+    radial-gradient(circle at 86% -10%, rgb(var(--primary-600) / .12), transparent 31rem),
+    radial-gradient(circle at -10% 92%, rgb(245 158 11 / .07), transparent 28rem),
+    linear-gradient(145deg, #493220 0%, #140d09 78%);
+}
+
 /* File, folder and pack menus intentionally remain dark in every app theme. */
 .black-glass-menu {
   --app-white: 255 255 255;

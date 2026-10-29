@@ -12,6 +12,10 @@ export const appearanceThemes = {
     dark: { label: 'نیمه‌شب', description: 'پوسته فعلی با زمینه سرمه‌ای', colors: ['#0f172a', '#020617', '#a855f7'] },
     black: { label: 'مشکی AMOLED', description: 'مشکی عمیق و کم‌نور', colors: ['#111113', '#000000', '#a855f7'] },
     graphite: { label: 'ذغالی', description: 'خنثی و نرم با خاکستری تیره', colors: ['#27272a', '#09090b', '#a855f7'] },
+    ocean: { label: 'اقیانوسی', description: 'سرمه‌ای و فیروزه‌ای آرام', colors: ['#123b48', '#020d13', '#22d3ee'] },
+    forest: { label: 'جنگلی', description: 'سبز تیره و طبیعی', colors: ['#1f4939', '#05120e', '#34d399'] },
+    plum: { label: 'آلویی', description: 'بنفش گرم و عمیق', colors: ['#51365f', '#100815', '#e879f9'] },
+    sepia: { label: 'قهوه‌ای گرم', description: 'گرم و مناسب مطالعه طولانی', colors: ['#62452f', '#140d09', '#f59e0b'] },
     light: { label: 'روشن', description: 'سفید و خوانا برای محیط پرنور', colors: ['#ffffff', '#eef2ff', '#7c3aed'] },
 } as const;
 export type AppearanceMode = keyof typeof appearanceThemes;
