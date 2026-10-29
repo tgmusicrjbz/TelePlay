@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 
 export type ConnectivityState = 'online' | 'offline' | 'checking';
 
@@ -6,6 +6,8 @@ const EVENT_NAME = 'komod-connectivity-changed';
 let state: ConnectivityState = navigator.onLine ? 'checking' : 'offline';
 let lastCheckedAt = 0;
 let pendingProbe: Promise<boolean> | null = null;
+const subscribers = new Set<() => void>();
+let stopMonitoring: (() => void) | null = null;
 
 const forcedOffline = () => localStorage.getItem('komod-force-offline') === '1';
 
@@ -24,10 +26,13 @@ const publish = (next: ConnectivityState) => {
     if (state === next) return;
     state = next;
     window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: next }));
+    subscribers.forEach(callback => callback());
 };
 
 export const connectivityState = () => forcedOffline() || !navigator.onLine ? 'offline' : state;
-export const isEffectivelyOnline = () => connectivityState() !== 'offline';
+// Treat the short reachability probe as offline for cache-backed reads. This
+// keeps startup instant on captive portals and unstable mobile connections.
+export const isEffectivelyOnline = () => connectivityState() === 'online';
 
 export const markServerReachable = () => {
     lastCheckedAt = Date.now();
@@ -66,32 +71,45 @@ export async function checkServerReachability(options: { force?: boolean; timeou
     return pendingProbe;
 }
 
+function beginMonitoring() {
+    if (stopMonitoring) return;
+    const modeChanged = () => {
+        if (forcedOffline()) publish('offline');
+        else void checkServerReachability({ force: true });
+        subscribers.forEach(callback => callback());
+    };
+    const browserOnline = () => { publish('checking'); void checkServerReachability({ force: true }); };
+    const browserOffline = () => markServerUnreachable();
+    const onVisible = () => {
+        if (document.visibilityState === 'visible') void checkServerReachability({ force: state === 'offline' });
+    };
+    window.addEventListener('komod-connectivity-mode', modeChanged);
+    window.addEventListener('online', browserOnline);
+    window.addEventListener('offline', browserOffline);
+    document.addEventListener('visibilitychange', onVisible);
+    const timer = window.setInterval(() => {
+        if (state === 'offline' && navigator.onLine && !forcedOffline()) void checkServerReachability({ force: true });
+    }, 30_000);
+    void checkServerReachability();
+    stopMonitoring = () => {
+        window.removeEventListener('komod-connectivity-mode', modeChanged);
+        window.removeEventListener('online', browserOnline);
+        window.removeEventListener('offline', browserOffline);
+        document.removeEventListener('visibilitychange', onVisible);
+        window.clearInterval(timer);
+        stopMonitoring = null;
+    };
+}
+
+const subscribe = (callback: () => void) => {
+    subscribers.add(callback);
+    beginMonitoring();
+    return () => {
+        subscribers.delete(callback);
+        if (!subscribers.size) stopMonitoring?.();
+    };
+};
+
 export function useConnectivity() {
-    const [current, setCurrent] = useState<ConnectivityState>(() => connectivityState());
-    useEffect(() => {
-        const changed = (event: Event) => setCurrent((event as CustomEvent<ConnectivityState>).detail || connectivityState());
-        const modeChanged = () => {
-            if (forcedOffline()) { publish('offline'); setCurrent('offline'); }
-            else void checkServerReachability({ force: true });
-        };
-        const browserOnline = () => { setCurrent('checking'); void checkServerReachability({ force: true }); };
-        const browserOffline = () => { markServerUnreachable(); setCurrent('offline'); };
-        window.addEventListener(EVENT_NAME, changed);
-        window.addEventListener('komod-connectivity-mode', modeChanged);
-        window.addEventListener('online', browserOnline);
-        window.addEventListener('offline', browserOffline);
-        const onVisible = () => { if (document.visibilityState === 'visible') void checkServerReachability({ force: state === 'offline' }); };
-        document.addEventListener('visibilitychange', onVisible);
-        const timer = window.setInterval(() => { if (state === 'offline' && navigator.onLine && !forcedOffline()) void checkServerReachability({ force: true }); }, 20_000);
-        void checkServerReachability();
-        return () => {
-            window.removeEventListener(EVENT_NAME, changed);
-            window.removeEventListener('komod-connectivity-mode', modeChanged);
-            window.removeEventListener('online', browserOnline);
-            window.removeEventListener('offline', browserOffline);
-            document.removeEventListener('visibilitychange', onVisible);
-            window.clearInterval(timer);
-        };
-    }, []);
-    return current;
+    return useSyncExternalStore(subscribe, connectivityState, () => 'offline');
 }

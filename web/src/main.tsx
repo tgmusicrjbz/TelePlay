@@ -6,6 +6,7 @@ import App from './App'
 import './index.css'
 import { applyAppearanceMode, applyTheme, getStoredAppearanceMode, getStoredTheme } from './lib/theme'
 import AppErrorBoundary from './components/AppErrorBoundary'
+import { isEffectivelyOnline } from './lib/connectivity'
 
 applyAppearanceMode(getStoredAppearanceMode())
 applyTheme(getStoredTheme())
@@ -15,7 +16,10 @@ const queryClient = new QueryClient({
         queries: {
             staleTime: 1000 * 60 * 5, // 5 minutes
             gcTime: 1000 * 60 * 30,
-            retry: 1,
+            retry: (failureCount, error: any) => {
+                const status = Number(error?.response?.status || 0)
+                return isEffectivelyOnline() && failureCount < 1 && (!status || status === 429 || status >= 500)
+            },
             // Telegram WebView fires focus repeatedly while sheets and native
             // pickers open. Mutations already invalidate affected queries, so
             // refetching every visible query on each focus only creates bursts.

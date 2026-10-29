@@ -46,11 +46,14 @@ export default function PwaManager() {
                     scope: '/',
                     updateViaCache: 'none',
                 });
-                await registration.update().catch(() => undefined);
                 await navigator.serviceWorker.ready;
                 // Ask the browser to avoid evicting downloaded media and the
                 // complete application shell under storage pressure.
                 await navigator.storage?.persist?.().catch(() => false);
+                const warmOffline = () => {
+                    if (navigator.onLine) registration.active?.postMessage({ type: 'WARM_OFFLINE' });
+                };
+                warmOffline();
                 if (registration.waiting) setWaitingWorker(registration.waiting);
                 registration.addEventListener('updatefound', () => {
                     const worker = registration.installing;
@@ -60,14 +63,18 @@ export default function PwaManager() {
                 });
                 const timer = window.setInterval(() => registration.update(), 60 * 60 * 1000);
                 const checkForUpdate = () => {
-                    if (document.visibilityState === 'visible') void registration.update();
+                    if (document.visibilityState === 'visible' && navigator.onLine) {
+                        void registration.update();
+                    }
                 };
                 document.addEventListener('visibilitychange', checkForUpdate);
                 window.addEventListener('focus', checkForUpdate);
+                window.addEventListener('online', warmOffline);
                 return () => {
                     window.clearInterval(timer);
                     document.removeEventListener('visibilitychange', checkForUpdate);
                     window.removeEventListener('focus', checkForUpdate);
+                    window.removeEventListener('online', warmOffline);
                 };
             } catch (error) {
                 console.error('Service worker registration failed', error);

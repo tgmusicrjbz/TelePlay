@@ -11,7 +11,7 @@ if (appChunks.length !== 1) {
 
 const entryPath = path.join(assetsDirectory, appChunks[0]);
 const { size } = await stat(entryPath);
-const maximumBytes = 450 * 1024;
+const maximumBytes = 180 * 1024;
 
 if (size > maximumBytes) {
     throw new Error(`Application entry chunk is ${(size / 1024).toFixed(1)} KiB; limit is ${maximumBytes / 1024} KiB.`);

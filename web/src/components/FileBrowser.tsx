@@ -13,7 +13,6 @@ import NewFolderModal from './NewFolderModal';
 import MoveFileModal from './MoveFileModal';
 import DeleteConfirmModal from './DeleteConfirmModal';
 import RenameModal from './RenameModal';
-import DescriptionModal from './DescriptionModal';
 import BatchEditModal from './BatchEditModal';
 import Sidebar from './Sidebar';
 import Toasts from './Toasts';
@@ -23,6 +22,7 @@ import { publishLocalTransfer } from '../lib/transfers';
 import { folderTreeLabel } from '../lib/folderTreeLabel';
 import PackCard from './PackCard';
 import { EmptyState, LoadingState } from './StatePanel';
+import { useConnectivity } from '../lib/connectivity';
 
 // Heavy sections are downloaded only when the user opens them. Vite still
 // precaches the resulting chunks in the service worker, so they remain
@@ -32,6 +32,7 @@ const PlaylistBrowser = lazy(() => import('./PlaylistBrowser'));
 const DownloadsPage = lazy(() => import('./DownloadsPage'));
 const CreatePackModal = lazy(() => import('./PackModal').then(module => ({ default: module.CreatePackModal })));
 const PackViewer = lazy(() => import('./PackModal').then(module => ({ default: module.PackViewer })));
+const DescriptionModal = lazy(() => import('./DescriptionModal'));
 
 function SectionFallback() {
     return <LoadingState className="mx-auto mt-6 max-w-5xl" label="در حال باز کردن بخش…" />;
@@ -245,6 +246,7 @@ export default function FileBrowser() {
     const [uploadPanelMode, setUploadPanelMode] = useState<'open'|'collapsed'|'hidden'>('open');
     const [isFileDragOver, setIsFileDragOver] = useState(false);
     const [importJobs, setImportJobs] = useState<ImportStatus[]>([]);
+    const hasActiveImportJobs = useMemo(() => importJobs.some(job => ['queued','downloading','saving','paused'].includes(job.state)), [importJobs]);
     const [importPanelMode, setImportPanelMode] = useState<'open'|'collapsed'|'hidden'>('open');
     const [forceOffline, setForceOffline] = useState(() => localStorage.getItem('komod-force-offline') === '1');
     useEffect(()=>{const params=new URLSearchParams(window.location.search);const drive=params.get('drive');if(!drive)return;addToast(drive==='connected'?'حساب گوگل با موفقیت متصل شد.':'اتصال حساب گوگل کامل نشد؛ دوباره تلاش کن.',drive==='connected'?'success':'error');params.delete('drive');const query=params.toString();window.history.replaceState({},'',`${window.location.pathname}${query?`?${query}`:''}${window.location.hash}`)},[addToast]);
@@ -258,8 +260,10 @@ export default function FileBrowser() {
     const [vaultPassword, setVaultPassword] = useState('');
     const unlockVault = useUnlockVault();
     useTagSettings();
-    const {data:globalTTSJobs=[],isSuccess:ttsJobsReady}=useTTSJobs();
-    const {data:globalSTTJobs=[],isSuccess:sttJobsReady}=useSTTJobs();
+    const connectivity = useConnectivity();
+    const serverOnline = connectivity === 'online';
+    const {data:globalTTSJobs=[],isSuccess:ttsJobsReady}=useTTSJobs(serverOnline);
+    const {data:globalSTTJobs=[],isSuccess:sttJobsReady}=useSTTJobs(serverOnline);
     const knownSpeechJobs=useRef<Record<string,string>>({});
     const speechJobsInitialized=useRef(false);
     useEffect(()=>{
@@ -295,7 +299,7 @@ export default function FileBrowser() {
     }, []);
 
     useEffect(() => {
-        if (!navigator.onLine || forceOffline) return;
+        if (!serverOnline || forceOffline) return;
         let cancelled=false;
         const syncQueue=async()=>{try{
             const [links,drives]=await Promise.all([
@@ -308,9 +312,9 @@ export default function FileBrowser() {
             ]));
         }catch{/* وضعیت محلی حفظ می‌شود */}};
         void syncQueue();
-        const timer=window.setInterval(syncQueue,4000);
+        const timer=hasActiveImportJobs?window.setInterval(()=>{if(document.visibilityState==='visible')void syncQueue()},4000):0;
         return()=>{cancelled=true;window.clearInterval(timer)};
-    },[forceOffline]);
+    },[forceOffline,serverOnline,hasActiveImportJobs]);
 
     useEffect(() => {
         sessionStorage.removeItem('komod-show-hidden');
@@ -529,8 +533,20 @@ export default function FileBrowser() {
     useEffect(() => applyTheme(getStoredTheme()), []);
 
     useEffect(() => {
-        if (navigator.onLine && localStorage.getItem('komod-force-offline') !== '1') void cacheAllTextNotes();
-    }, []);
+        if (!serverOnline) return;
+        const connection = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
+        if (connection?.saveData || connection?.effectiveType === '2g' || connection?.effectiveType === 'slow-2g') return;
+        const owner = localStorage.getItem('komod-active-workspace') || localStorage.getItem('komod-telegram-user-id') || 'default';
+        const key = `komod-text-cache-sync:${owner}`;
+        if (Date.now() - Number(localStorage.getItem(key) || 0) < 12 * 60 * 60 * 1000) return;
+        let cancelled = false;
+        const run = () => {
+            if (cancelled || document.visibilityState !== 'visible') return;
+            void cacheAllTextNotes().then(() => localStorage.setItem(key, String(Date.now()))).catch(() => undefined);
+        };
+        const timer = window.setTimeout(run, 12_000);
+        return () => { cancelled = true; window.clearTimeout(timer); };
+    }, [serverOnline]);
 
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);
@@ -1822,14 +1838,14 @@ export default function FileBrowser() {
                 itemType="folder"
             />
 
-            <DescriptionModal
-                isOpen={!!descriptionItem}
-                itemType={descriptionItem?.type || 'file'}
-                currentDescription={descriptionItem?.item.description || ''}
-                initialPreview={descriptionItem?.mode === 'preview'}
+            {descriptionItem&&<Suspense fallback={null}><DescriptionModal
+                isOpen
+                itemType={descriptionItem.type}
+                currentDescription={descriptionItem.item.description || ''}
+                initialPreview={descriptionItem.mode === 'preview'}
                 onClose={() => setDescriptionItem(null)}
                 onSave={handleSaveDescription}
-            />
+            /></Suspense>}
             <BatchEditModal
                 open={showBatchEdit}
                 count={selectedFilesForActions.length}

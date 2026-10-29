@@ -1,11 +1,13 @@
-const CACHE_NAME = 'komod-shell-v20';
+const BUILD_ID = '__KOMOD_BUILD_ID__';
+const CACHE_NAME = `komod-shell-${BUILD_ID}`;
 const COVER_CACHE = 'komod-covers-v4';
 const MAX_COVER_ENTRIES = 250;
-const CORE_ASSETS = ['/', '/index.html', '/offline.html', '/manifest.webmanifest', '/komod.svg'];
-// Replaced with every emitted JS/CSS chunk by the Vite build plugin. Keeping
-// this list in the service worker makes installation atomic: a new worker is
-// activated only after the complete application shell is available offline.
-const BUILD_ASSETS = /*__KOMOD_BUILD_ASSETS__*/ [];
+const CORE_ASSETS = ['/', '/index.html', '/offline.html', '/manifest.webmanifest', '/komod.svg', '/komod-192.png', '/komod-512.png', '/komod-maskable-512.png', '/apple-touch-icon.png'];
+// Vite replaces these lists after the bundle graph is known. Only the entry
+// and its static imports gate installation; lazy screens are warmed separately
+// so one flaky optional request cannot invalidate an otherwise working update.
+const CORE_BUILD_ASSETS = /*__KOMOD_CORE_BUILD_ASSETS__*/ [];
+const OPTIONAL_BUILD_ASSETS = /*__KOMOD_OPTIONAL_BUILD_ASSETS__*/ [];
 
 async function trimCache(cacheName, maximumEntries) {
   const cache = await caches.open(cacheName);
@@ -21,10 +23,10 @@ self.addEventListener('install', event => {
       if (!response.ok) throw new Error('Unable to cache the application shell');
       const html = await response.clone().text();
       const assetPaths = [...html.matchAll(/(?:src|href)="(\/assets\/[^\"]+)"/g)].map(match => match[1]);
-      const requiredAssets = [...new Set([...BUILD_ASSETS, ...assetPaths])];
-      // addAll intentionally rejects the installation if even one required
-      // chunk is missing. The previous working worker/cache then stays active.
-      await cache.addAll(requiredAssets);
+      const requiredAssets = [...new Set([...CORE_BUILD_ASSETS, ...assetPaths])];
+      // Keep the boot graph atomic. The previous worker remains active if the
+      // HTML, entry script, CSS, or one of their static imports is unavailable.
+      await cache.addAll(requiredAssets.map(asset => new Request(asset, { cache: 'reload' })));
       await Promise.all([
         cache.put('/index.html', response.clone()),
         cache.put('/', response.clone()),
@@ -32,9 +34,33 @@ self.addEventListener('install', event => {
           fetch(asset, { cache: 'no-store' }).then(optional => optional.ok ? cache.put(asset, optional) : undefined).catch(() => undefined)
         ),
       ]);
-    }).then(() => self.skipWaiting())
+    })
   );
 });
+
+let optionalWarmPromise = null;
+function warmOptionalAssets() {
+  if (optionalWarmPromise) return optionalWarmPromise;
+  optionalWarmPromise = (async () => {
+    const cache = await caches.open(CACHE_NAME);
+    let cursor = 0;
+    const workers = Array.from({ length: Math.min(4, OPTIONAL_BUILD_ASSETS.length) }, async () => {
+      while (cursor < OPTIONAL_BUILD_ASSETS.length) {
+        const asset = OPTIONAL_BUILD_ASSETS[cursor++];
+        if (await cache.match(asset)) continue;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 8000);
+        try {
+          const response = await fetch(asset, { cache: 'reload', signal: controller.signal });
+          if (response.ok) await cache.put(asset, response);
+        } catch { /* Retried when the app next comes online. */ }
+        finally { clearTimeout(timeout); }
+      }
+    });
+    await Promise.all(workers);
+  })().finally(() => { optionalWarmPromise = null; });
+  return optionalWarmPromise;
+}
 
 self.addEventListener('activate', event => {
   event.waitUntil(
@@ -42,9 +68,8 @@ self.addEventListener('activate', event => {
       // Keep the immediately previous shell. An already-open client can still
       // request one of its lazy chunks after a deployment; deleting that cache
       // made Downloads/MediaPlayer crash whenever the network was unavailable.
-      const previousShell = keys
-        .filter(key => key.startsWith('komod-shell-') && key !== CACHE_NAME)
-        .sort((a, b) => Number((b.match(/v(\d+)$/) || [])[1] || 0) - Number((a.match(/v(\d+)$/) || [])[1] || 0))[0];
+      const oldShells = keys.filter(key => key.startsWith('komod-shell-') && key !== CACHE_NAME);
+      const previousShell = oldShells[oldShells.length - 1];
       const keep = new Set([CACHE_NAME, previousShell, COVER_CACHE].filter(Boolean));
       return Promise.all(keys.filter(key =>
         ((key.startsWith('komod-shell-') || key.startsWith('komod-covers-')) && !keep.has(key))
@@ -56,6 +81,7 @@ self.addEventListener('activate', event => {
 
 self.addEventListener('message', event => {
   if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
+  if (event.data?.type === 'WARM_OFFLINE') event.waitUntil(warmOptionalAssets());
 });
 
 self.addEventListener('fetch', event => {
@@ -110,15 +136,16 @@ self.addEventListener('fetch', event => {
     event.respondWith((async () => {
       const cache = await caches.open(CACHE_NAME);
       const cachedShell = (await cache.match('/index.html')) || (await cache.match('/'));
-      if (cachedShell) {
-        const refreshShell = fetch('/index.html', { cache: 'no-store' })
-          .then(response => {
-            if (!response.ok) return;
-            return Promise.all([cache.put('/index.html', response.clone()), cache.put('/', response.clone())]);
-          })
-          .catch(() => undefined);
-        event.waitUntil(refreshShell);
-        return cachedShell;
+      // A cached HTML shell must stay paired with the exact hashed assets that
+      // were installed with it. Updating HTML inside an old cache can produce a
+      // blank page if connectivity drops between deployment requests.
+      if (cachedShell) return cachedShell;
+      const oldShells = (await caches.keys()).filter(key => key.startsWith('komod-shell-') && key !== CACHE_NAME);
+      const previousShell = oldShells[oldShells.length - 1];
+      if (previousShell) {
+        const previousCache = await caches.open(previousShell);
+        const previous = (await previousCache.match('/index.html')) || (await previousCache.match('/'));
+        if (previous) return previous;
       }
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 3500);
@@ -139,6 +166,7 @@ self.addEventListener('fetch', event => {
 
   event.respondWith(
     caches.match(request).then(cached => {
+      if (cached && url.pathname.startsWith('/assets/')) return cached;
       const network = fetch(request).then(response => {
         if (response.ok) caches.open(CACHE_NAME).then(cache => cache.put(request, response.clone()));
         return response;

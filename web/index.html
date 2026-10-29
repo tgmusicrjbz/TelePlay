@@ -19,20 +19,33 @@
     <meta property="og:title" content="کمد؛ درایو ابری تلگرام" />
     <meta property="og:description" content="فایل‌های تلگرامت را یکجا ذخیره، مرتب و پخش کن." />
     <meta property="og:image" content="/komod-512.png" />
-    <!-- Persian UI font -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&family=Markazi+Text:wght@400;500;600;700&family=Merriweather:wght@400;700&family=Noto+Naskh+Arabic:wght@400;500;600;700&family=Noto+Sans+Arabic:wght@300;400;500;600;700&family=Vazirmatn:wght@300;400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
+    <!-- Reading fonts are attached after first paint; they never gate offline boot. -->
   </head>
   <body class="bg-dark-950 text-white">
-    <div id="root"></div>
+    <div id="root"><div data-komod-boot style="min-height:100vh;display:grid;place-items:center;padding:24px;box-sizing:border-box;background:#07090f;color:#f8fafc;font-family:system-ui,-apple-system,sans-serif"><div style="width:min(320px,100%);text-align:center"><img src="/komod-192.png" alt="" width="64" height="64" style="width:64px;height:64px;border-radius:20px;box-shadow:0 18px 50px #7c3aed55"/><strong style="display:block;margin-top:18px;font-size:18px">در حال باز کردن کمد…</strong><span style="display:block;margin:12px auto 0;width:42px;height:4px;overflow:hidden;border-radius:99px;background:#ffffff18"><i style="display:block;width:55%;height:100%;border-radius:inherit;background:#d946ef;animation:komod-boot 1s ease-in-out infinite alternate"></i></span></div></div></div>
+    <style>@keyframes komod-boot{from{transform:translateX(70%)}to{transform:translateX(-70%)}}@media(prefers-reduced-motion:reduce){[data-komod-boot] i{animation:none!important}}</style>
     <button id="komod-recovery" type="button" aria-label="بازیابی کمد" style="display:none;align-items:center;gap:8px;position:fixed;left:12px;bottom:max(12px,env(safe-area-inset-bottom));z-index:2147483647;border:1px solid rgb(168 85 247 / .28);border-radius:16px;padding:11px 14px;background:rgb(15 23 42 / .96);color:#f8fafc;font:600 13px Vazirmatn,system-ui;box-shadow:0 18px 45px #0009;backdrop-filter:blur(18px)"><span style="display:grid;width:28px;height:28px;place-items:center;border-radius:10px;background:rgb(168 85 247 / .16);color:rgb(216 180 254)">↻</span><span>بازیابی کمد</span></button>
     <script>
       // Loading Telegram synchronously can block the whole PWA while offline.
       // Load it independently and notify React if it becomes available later.
+      (() => {
+        let fontsRequested = false;
+        const loadFonts = () => {
+          if (fontsRequested || !navigator.onLine) return;
+          fontsRequested = true;
+          const link = document.createElement('link');
+          link.rel = 'stylesheet';
+          link.href = 'https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&family=Markazi+Text:wght@400;500;600;700&family=Merriweather:wght@400;700&family=Noto+Naskh+Arabic:wght@400;500;600;700&family=Noto+Sans+Arabic:wght@300;400;500;600;700&family=Vazirmatn:wght@300;400;500;600;700&display=swap';
+          link.onerror = () => { fontsRequested = false; };
+          document.head.appendChild(link);
+        };
+        const scheduleFonts = () => {
+          if ('requestIdleCallback' in window) window.requestIdleCallback(loadFonts, { timeout: 5000 });
+          else setTimeout(loadFonts, 1800);
+        };
+        window.addEventListener('komod-app-ready', scheduleFonts, { once: true });
+        window.addEventListener('online', scheduleFonts);
+      })();
       (() => {
         let requested = false;
         const loadTelegram = () => {
@@ -53,9 +66,9 @@
         let ready = false;
         const showIfBlank = () => {
           const root = document.getElementById('root');
-          if (!ready && !root?.childElementCount && recovery) recovery.style.display = 'flex';
+          if (!ready && (!root?.childElementCount || root.querySelector('[data-komod-boot]')) && recovery) recovery.style.display = 'flex';
         };
-        setTimeout(showIfBlank, 7000);
+        setTimeout(showIfBlank, 5000);
         recovery?.addEventListener('click', async () => {
           recovery.textContent = 'در حال بازیابی…';
           try {

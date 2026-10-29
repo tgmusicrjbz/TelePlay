@@ -9,7 +9,7 @@
         "preview": "vite preview",
         "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
         "verify:bundle": "node scripts/verify-bundle-size.mjs",
-        "verify:offline": "node scripts/verify-offline-build.mjs"
+        "verify:offline": "node scripts/verify-offline-build.mjs && node scripts/verify-offline-runtime.mjs"
     },
     "dependencies": {
         "@dnd-kit/core": "^6.1.0",

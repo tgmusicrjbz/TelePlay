@@ -497,7 +497,7 @@ const offlineTempId=(value:object)=>{let id=offlineTempIds.get(value);if(!id){id
 
 // ============== Auth Hooks ==============
 
-export const useCurrentUser = () => {
+export const useCurrentUser = (enabled = true) => {
     const cachedUser = cachedCurrentUser();
     return useQuery({
         queryKey: ['currentUser'],
@@ -505,12 +505,12 @@ export const useCurrentUser = () => {
             const { data } = await api.get<User>('/auth/me', { timeout: 5000 });
             return data;
         },
-        enabled: !!localStorage.getItem('access_token'),
+        enabled: enabled && !!localStorage.getItem('access_token'),
         initialData: cachedUser,
         initialDataUpdatedAt: cachedUser ? 0 : undefined,
         retry: (failureCount, error: any) => {
             const status = error?.response?.status;
-            return failureCount < 2 && (!status || status === 429 || status >= 500);
+            return isEffectivelyOnline() && failureCount < 2 && (!status || status === 429 || status >= 500);
         },
     });
 };
@@ -1657,7 +1657,7 @@ export const useTTSJobs = (enabled=true) => useQuery<TTSJobStatus[]>({
     enabled,
     refetchInterval: query => {
         const jobs = query.state.data || [];
-        return jobs.some(job => !['done','error','cancelled'].includes(job.state)) ? 1200 : (jobs.length ? 30_000 : false);
+        return jobs.some(job => !['done','error','cancelled'].includes(job.state)) ? 1500 : false;
     },
 });
 export const useCreateTTSJob = () => {

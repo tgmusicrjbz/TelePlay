@@ -478,10 +478,18 @@ export async function syncOfflineTextOutbox(): Promise<{ synced: number; failed:
 
 export async function cacheAllTextNotes(): Promise<void> {
     if (!isEffectivelyOnline()) return;
+    const cached = new Map((await listOfflineTexts()).map(item => [item.id, item.file.updated_at]));
     let page = 1;
     while (page <= 20) {
         const { data } = await api.get<{ files: TelegramFile[]; total: number; per_page: number }>('/files', { params: { file_type: 'text', page, per_page: 100 } });
-        await Promise.allSettled(data.files.map(file => cacheTextFile(file)));
+        const changed = data.files.filter(file => cached.get(file.id) !== file.updated_at);
+        let cursor = 0;
+        await Promise.all(Array.from({ length: Math.min(3, changed.length) }, async () => {
+            while (cursor < changed.length && isEffectivelyOnline()) {
+                const file = changed[cursor++];
+                await cacheTextFile(file).catch(() => undefined);
+            }
+        }));
         if (page * data.per_page >= data.total) break;
         page += 1;
     }

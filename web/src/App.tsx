@@ -2,7 +2,6 @@ import { Routes, Route, Navigate, useSearchParams, useNavigate } from 'react-rou
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api, AuthResponse, getKomodDeviceId, isTwoFactorChallenge, resolveServerUrl, useCurrentUser, useLoginWithCode, usePasswordLogin, useRegisterAccount, useBotInfo, useGenerateLoginCode } from './lib/api';
-import FileBrowser from './components/FileBrowser';
 import PwaManager from './components/PwaManager';
 import OfflineDownloadProgressPanel from './components/OfflineDownloadProgress';
 import { restoreSavedSession, saveAuthenticatedAccount } from './lib/accounts';
@@ -33,6 +32,7 @@ const AddToPlaylistDialog = lazyWithRecovery(() => import('./components/AddToPla
 const FileDetailsSheet = lazyWithRecovery(() => import('./components/FileDetailsSheet'),'details');
 const FileAIToolsModal = lazyWithRecovery(() => import('./components/FileAIToolsModal'),'file-ai-tools');
 const PublicSharePage = lazyWithRecovery(() => import('./components/PublicSharePage'),'public-share');
+const FileBrowser = lazyWithRecovery(() => import('./components/FileBrowser'),'file-browser');
 
 function LazyFallback(){return <div dir="rtl" className="fixed inset-x-0 bottom-5 z-[400] mx-auto flex w-fit items-center gap-2 rounded-2xl border border-white/10 bg-dark-900/95 px-4 py-3 text-xs text-dark-200 shadow-2xl"><span className="h-4 w-4 animate-spin rounded-full border-2 border-primary-300 border-t-transparent"/>در حال آماده‌سازی…</div>}
 
@@ -55,6 +55,7 @@ function DeferredOverlays() {
 }
 
 function PlayerCloudSync() {
+    const connectivity = useConnectivity();
     const playQueue = useAppStore(state => state.playQueue);
     const queueIndex = useAppStore(state => state.queueIndex);
     const repeatMode = useAppStore(state => state.repeatMode);
@@ -63,6 +64,7 @@ function PlayerCloudSync() {
     const setPlayerMinimized = useAppStore(state => state.setPlayerMinimized);
     const [hydrated, setHydrated] = useState(false);
     useEffect(() => {
+        if (connectivity !== 'online') return;
         let cancelled = false;
         void api.get('/files/player-state').then(({data}) => {
             if (cancelled) return;
@@ -73,15 +75,15 @@ function PlayerCloudSync() {
             }
         }).catch(() => undefined).finally(() => { if (!cancelled) setHydrated(true); });
         return () => { cancelled = true; };
-    }, [setPlayerMinimized, setRepeatMode, startQueue]);
+    }, [connectivity, setPlayerMinimized, setRepeatMode, startQueue]);
     useEffect(() => {
-        if (!hydrated) return;
+        if (!hydrated || connectivity !== 'online') return;
         const timer = window.setTimeout(() => void api.put('/files/player-state', {
             file_ids: playQueue.map(item => item.id), current_index: queueIndex,
             repeat_mode: repeatMode, position: 0,
         }).catch(() => undefined), 900);
         return () => window.clearTimeout(timer);
-    }, [hydrated, playQueue, queueIndex, repeatMode]);
+    }, [connectivity, hydrated, playQueue, queueIndex, repeatMode]);
     return null;
 }
 
@@ -262,14 +264,19 @@ function OfflineTextSync() {
     const queryClient=useQueryClient();
     useEffect(() => {
         const sync = () => { if (isEffectivelyOnline()) { void syncOfflineTextOutbox(); void syncOfflineMutations(config=>api.request(config)); } };
+        const reconnect = () => {
+            if (!isEffectivelyOnline()) return;
+            sync();
+            void queryClient.invalidateQueries({ refetchType: 'active' });
+        };
         const finished=(event:Event)=>{const result=(event as CustomEvent<{synced:number;conflicts:number}>).detail;if(result?.synced){addToast(`${result.synced.toLocaleString('fa-IR')} تغییر آفلاین همگام شد.`);void queryClient.invalidateQueries()}if(result?.conflicts)addToast(`${result.conflicts.toLocaleString('fa-IR')} تغییر به‌خاطر نسخه جدیدتر آنلاین اعمال نشد.`,'error')};
         sync();
         const timer = window.setInterval(sync, 30000);
-        window.addEventListener('online', sync);
-        window.addEventListener('komod-connectivity-changed', sync);
+        window.addEventListener('online', reconnect);
+        window.addEventListener('komod-connectivity-changed', reconnect);
         window.addEventListener('komod-offline-sync-finished',finished);
         document.addEventListener('visibilitychange', sync);
-        return () => { window.clearInterval(timer); window.removeEventListener('online', sync); window.removeEventListener('komod-connectivity-changed', sync); window.removeEventListener('komod-offline-sync-finished',finished); document.removeEventListener('visibilitychange', sync); };
+        return () => { window.clearInterval(timer); window.removeEventListener('online', reconnect); window.removeEventListener('komod-connectivity-changed', reconnect); window.removeEventListener('komod-offline-sync-finished',finished); document.removeEventListener('visibilitychange', sync); };
     }, [addToast,queryClient]);
     return null;
 }
@@ -549,10 +556,10 @@ function BotLink({ code }: { code?: string }) {
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
     restoreSavedSession();
-    const { isLoading, error } = useCurrentUser();
-    const token = localStorage.getItem('access_token');
     const connectivity = useConnectivity();
-    const online = connectivity !== 'offline';
+    const { isLoading, error } = useCurrentUser(connectivity === 'online');
+    const token = localStorage.getItem('access_token');
+    const online = connectivity === 'online';
     const [authWaitExpired, setAuthWaitExpired] = useState(false);
 
     useEffect(() => {
@@ -625,7 +632,7 @@ function App() {
                             <DeferredOverlays />
                             <PlayerCloudSync />
                             <OfflineDownloadProgressPanel />
-                            <FileBrowser />
+                            <Suspense fallback={<LazyFallback/>}><FileBrowser /></Suspense>
                         </ProtectedRoute>
                     }
                 />
