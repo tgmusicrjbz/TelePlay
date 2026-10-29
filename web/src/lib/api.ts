@@ -1617,6 +1617,9 @@ export const useResetInstagramDailyUsage = () => {
 export const useTTSSettings = () => useQuery<TTSSettings>({
     queryKey: ['tts-settings'],
     queryFn: async () => (await api.get<TTSSettings>('/tts/settings')).data,
+    staleTime: 10 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
+    refetchOnMount: false,
 });
 export const useUpdateTTSSettings = () => {
     const queryClient = useQueryClient();
@@ -1637,13 +1640,14 @@ export const useUpdateAIModelCatalog = () => {
         onSuccess:data=>{queryClient.setQueryData(['ai-model-catalog'],data);queryClient.invalidateQueries({queryKey:['tts-settings']});},
     });
 };
-export const useGeminiKeys = () => useQuery<GeminiKeySummary>({queryKey:['gemini-personal-keys'],queryFn:async()=>(await api.get('/tts/personal-keys')).data});
+export const useGeminiKeys = (enabled=true) => useQuery<GeminiKeySummary>({queryKey:['gemini-personal-keys'],queryFn:async()=>(await api.get('/tts/personal-keys')).data,enabled,staleTime:10*60*1000});
 export const useUpdateGeminiKeys = () => {const queryClient=useQueryClient();return useMutation({mutationFn:async(keys:string[])=>(await api.put<GeminiKeySummary>('/tts/personal-keys',{keys})).data,onSuccess:data=>{queryClient.setQueryData(['gemini-personal-keys'],data);queryClient.invalidateQueries({queryKey:['tts-settings']})}})};
 export const useDeleteGeminiKeys = () => {const queryClient=useQueryClient();return useMutation({mutationFn:async()=>(await api.delete<GeminiKeySummary>('/tts/personal-keys')).data,onSuccess:data=>{queryClient.setQueryData(['gemini-personal-keys'],data);queryClient.invalidateQueries({queryKey:['tts-settings']})}})};
 export const useTestGeminiKeys = () => useMutation({mutationFn:async()=>(await api.post<{results:GeminiKeyHealth[]}>('/tts/personal-keys/test')).data.results});
-export const useTTSJobs = () => useQuery<TTSJobStatus[]>({
+export const useTTSJobs = (enabled=true) => useQuery<TTSJobStatus[]>({
     queryKey: ['tts-jobs'],
     queryFn: async () => (await api.get<TTSJobStatus[]>('/tts/jobs')).data,
+    enabled,
     refetchInterval: query => {
         const jobs = query.state.data || [];
         return jobs.some(job => !['done','error','cancelled'].includes(job.state)) ? 1200 : (jobs.length ? 30_000 : false);
@@ -1678,8 +1682,9 @@ export const useClearFinishedTTSJobs = () => {
     });
 };
 
-export const useSTTJobs = () => useQuery<STTJobStatus[]>({
+export const useSTTJobs = (enabled=true) => useQuery<STTJobStatus[]>({
     queryKey:['stt-jobs'], queryFn:async()=>(await api.get<STTJobStatus[]>('/stt/jobs')).data,
+    enabled,
     refetchInterval:query=>(query.state.data||[]).some(job=>!['done','error','cancelled'].includes(job.state))?1500:false,
 });
 export const useCreateSTTJob = () => { const queryClient=useQueryClient(); return useMutation({

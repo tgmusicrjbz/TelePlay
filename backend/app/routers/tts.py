@@ -29,9 +29,8 @@ def _default_model_costs() -> dict[str, int]:
     return {item["value"]: int(item.get("cost", 1)) for item in [*TTS_MODEL_OPTIONS, *STT_MODEL_OPTIONS, *TEXT_MODEL_OPTIONS]}
 
 
-async def load_model_costs(db: AsyncSession) -> dict[str, int]:
+def _decode_model_costs(row: AppSetting | None) -> dict[str, int]:
     costs = _default_model_costs()
-    row = await db.get(AppSetting, AI_MODEL_COSTS_KEY)
     if row:
         try:
             saved = json.loads(row.value)
@@ -48,9 +47,8 @@ def _clean_model_ids(values: list[str] | object) -> list[str]:
     return list(dict.fromkeys(str(value).strip()[:120] for value in values if str(value).strip()))[:12]
 
 
-async def load_model_catalog(db: AsyncSession) -> dict[str, list[str]]:
+def _decode_model_catalog(row: AppSetting | None) -> dict[str, list[str]]:
     catalog = {"tts_models": [], "stt_models": [], "text_models": []}
-    row = await db.get(AppSetting, AI_MODEL_CATALOG_KEY)
     if row:
         try:
             saved = json.loads(row.value)
@@ -59,6 +57,20 @@ async def load_model_catalog(db: AsyncSession) -> dict[str, list[str]]:
         except (TypeError, ValueError, json.JSONDecodeError):
             pass
     return catalog
+
+
+async def load_model_configuration(db: AsyncSession) -> tuple[dict[str, list[str]], dict[str, int]]:
+    rows = list((await db.execute(select(AppSetting).where(AppSetting.key.in_((AI_MODEL_CATALOG_KEY, AI_MODEL_COSTS_KEY))))).scalars())
+    by_key = {row.key: row for row in rows}
+    return _decode_model_catalog(by_key.get(AI_MODEL_CATALOG_KEY)), _decode_model_costs(by_key.get(AI_MODEL_COSTS_KEY))
+
+
+async def load_model_costs(db: AsyncSession) -> dict[str, int]:
+    return _decode_model_costs(await db.get(AppSetting, AI_MODEL_COSTS_KEY))
+
+
+async def load_model_catalog(db: AsyncSession) -> dict[str, list[str]]:
+    return _decode_model_catalog(await db.get(AppSetting, AI_MODEL_CATALOG_KEY))
 
 
 def _with_catalog(preferences: dict, catalog: dict[str, list[str]]) -> dict:
@@ -165,9 +177,8 @@ async def test_personal_keys(current_user: User = Depends(get_current_user)):
 @router.get("/settings")
 async def get_tts_settings(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     personal_keys = decrypt_user_keys(current_user.gemini_api_keys_encrypted)
-    catalog = await load_model_catalog(db)
+    catalog, costs = await load_model_configuration(db)
     preferences = _with_catalog(load_tts_settings(current_user), catalog)
-    costs = await load_model_costs(db)
     usage = await db.get(TTSUsage, current_user.id)
     return {
         **preferences,
@@ -185,8 +196,7 @@ async def get_tts_settings(current_user: User = Depends(get_current_user), db: A
 
 @router.get("/model-catalog")
 async def get_model_catalog(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    catalog = await load_model_catalog(db)
-    costs = await load_model_costs(db)
+    catalog, costs = await load_model_configuration(db)
     return {
         **catalog,
         "models": model_options(TTS_MODEL_OPTIONS, catalog["tts_models"], costs),
@@ -251,12 +261,11 @@ async def update_tts_settings(
     payload_data.pop("custom_tts_models", None)
     payload_data.pop("custom_stt_models", None)
     payload_data.pop("custom_text_models", None)
-    catalog = await load_model_catalog(db)
+    catalog, costs = await load_model_configuration(db)
     preferences = _with_catalog({**load_tts_settings(current_user), **payload_data}, catalog)
     current_user.tts_settings_json = json.dumps(preferences, ensure_ascii=False)
     await db.commit()
     personal_keys = decrypt_user_keys(current_user.gemini_api_keys_encrypted)
-    costs = await load_model_costs(db)
     usage = await db.get(TTSUsage, current_user.id)
     return {**preferences, "available": tts_queue.available or bool(personal_keys), "personal_key_count": len(personal_keys), "voices": VOICE_OPTIONS, "models": model_options(TTS_MODEL_OPTIONS, preferences["custom_tts_models"], costs), "stt_models": model_options(STT_MODEL_OPTIONS, preferences["custom_stt_models"], costs), "text_models": model_options(TEXT_MODEL_OPTIONS, preferences["custom_text_models"], costs), "model_costs": costs, "can_edit_model_costs": current_user.telegram_id in settings.admin_users, "quota": quota_payload(usage)}
 

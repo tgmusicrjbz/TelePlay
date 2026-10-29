@@ -127,11 +127,16 @@ export default function TTSSettingsPanel(){
         localStorage.removeItem('komod-speech-mode');
         return requested==='stt'?'stt':'tts';
     });
+    const [ttsPanel,setTtsPanel]=useState<'input'|'settings'|'output'|'history'>('input');
+    const [ttsSettingsTab,setTtsSettingsTab]=useState<'voice'|'style'|'model'|'keys'>('voice');
+    const [sttSearch,setSttSearch]=useState('');
+    const [sttFileId,setSttFileId]=useState(()=>Number(localStorage.getItem('komod-stt-source-file')||0));
+    const [sttPanel,setSttPanel]=useState<'source'|'settings'|'output'|'history'>(()=>sttFileId?'output':'source');
     const {data:settings,isLoading}=useTTSSettings();
-    const {data:jobs=[]}=useTTSJobs();
-    const {data:folders=[]}=useFolderTree();
+    const {data:jobs=[]}=useTTSJobs(speechMode==='tts'&&ttsPanel==='history');
+    const {data:folders=[]}=useFolderTree(false,speechMode==='stt'||ttsPanel==='output'||ttsPanel==='settings');
     const update=useUpdateTTSSettings();
-    const {data:geminiKeys}=useGeminiKeys();
+    const {data:geminiKeys}=useGeminiKeys(speechMode==='tts'&&ttsPanel==='settings'&&ttsSettingsTab==='keys');
     const updateGeminiKeys=useUpdateGeminiKeys();
     const deleteGeminiKeys=useDeleteGeminiKeys();
     const testGeminiKeys=useTestGeminiKeys();
@@ -140,7 +145,7 @@ export default function TTSSettingsPanel(){
     const control=useControlTTSJob();
     const dismiss=useDismissTTSJob();
     const clearFinished=useClearFinishedTTSJobs();
-    const {data:sttJobs=[]}=useSTTJobs();
+    const {data:sttJobs=[]}=useSTTJobs(speechMode==='stt'&&sttPanel==='history');
     const createSTT=useCreateSTTJob();
     const cancelSTT=useCancelSTTJob();
     const dismissSTT=useDismissSTTJob();
@@ -160,22 +165,17 @@ export default function TTSSettingsPanel(){
     const [text,setText]=useState('');
     const [folder,setFolder]=useState('default');
     const [outputMode,setOutputMode]=useState<'save'|'preview'|'telegram'>('save');
-    const [ttsPanel,setTtsPanel]=useState<'input'|'settings'|'output'|'history'>('input');
-    const [ttsSettingsTab,setTtsSettingsTab]=useState<'voice'|'style'|'model'|'keys'>('voice');
     const [editorFullscreen,setEditorFullscreen]=useState(false);
     const [message,setMessage]=useState<{kind:'ok'|'error';text:string}|null>(null);
     const [previewing,setPreviewing]=useState(false);
     const [previewUrl,setPreviewUrl]=useState('');
     const textAreaRef=useRef<HTMLTextAreaElement|null>(null);
-    const [sttSearch,setSttSearch]=useState('');
-    const {data:sttFiles}=useFiles(undefined,'audio,video',sttSearch||undefined,1,'created:desc');
-    const [sttFileId,setSttFileId]=useState(()=>Number(localStorage.getItem('komod-stt-source-file')||0));
+    const {data:sttFiles}=useFiles(undefined,'audio,video',sttSearch||undefined,1,'created:desc',false,false,false,false,false,speechMode==='stt'&&sttPanel==='source');
     const [sttTitle,setSttTitle]=useState(()=>{const source=localStorage.getItem('komod-stt-source-title');return source?`📝 متن ${source.replace(/\.[^.]+$/,'')}`:'📝 متن صدا'});
     const [sttPrompt,setSttPrompt]=useState('');
     const [sttPostPrompts,setSttPostPrompts]=useState<string[]>([]);
     const [sttFolder,setSttFolder]=useState('default');
     const [sttOutput,setSttOutput]=useState<'temporary'|'save'>(()=>localStorage.getItem('komod-stt-output-mode')==='temporary'?'temporary':'save');
-    const [sttPanel,setSttPanel]=useState<'source'|'settings'|'output'|'history'>(()=>sttFileId?'output':'source');
     const [expandedSTTResults,setExpandedSTTResults]=useState<Set<string>>(()=>new Set());
     const [refineJob,setRefineJob]=useState<STTJobStatus|null>(null);
     const [fullscreenSTTJob,setFullscreenSTTJob]=useState<STTJobStatus|null>(null);
@@ -197,7 +197,7 @@ export default function TTSSettingsPanel(){
     useEffect(()=>{if(availableVoices.length&&!availableVoices.some(item=>item.value===voice))setVoice(availableVoices[0].value)},[availableVoices,voice]);
 
     const save=async(messageText='تنظیمات و کشوی پیش‌فرض صدا ذخیره شد.')=>{if(!settings)return;setMessage(null);try{await update.mutateAsync({voice,gender,pitch,use_case:useCase,style,speed,auto_expression:autoExpression,model,stt_model:sttModel,stt_mode:sttMode,text_model:textModel,ai_routing_mode:aiRoutingMode,folder_id:folder==='default'?null:Number(folder)});setMessage({kind:'ok',text:messageText})}catch(error:any){setMessage({kind:'error',text:error?.response?.data?.detail||'ذخیره تنظیمات انجام نشد.'})}};
-    const submit=async()=>{const normalized=normalizeDirectorNotes(text).trim();if(!normalized)return;setText(normalized);setMessage(null);try{await create.mutateAsync({text:normalized,title:title.trim()||'صدای ساخته‌شده',folder_id:outputMode==='save'?(folder==='default'?null:Number(folder)):null,voice,gender,pitch,use_case:useCase,style,speed,auto_expression:autoExpression,output_mode:outputMode});setMessage({kind:'ok',text:outputMode==='preview'?'صدا در حال آماده‌شدن برای پخش است.':outputMode==='telegram'?'صدا ساخته می‌شود و در تلگرام می‌آید.':'ساخت صدا شروع شد.'})}catch(error:any){setMessage({kind:'error',text:error?.response?.data?.detail||'ساخت صدا شروع نشد.'})}};
+    const submit=async(modeOverride?:'save'|'preview'|'telegram')=>{const normalized=normalizeDirectorNotes(text).trim();if(!normalized)return;const targetMode=modeOverride||outputMode;setText(normalized);setMessage(null);try{await create.mutateAsync({text:normalized,title:title.trim()||'صدای ساخته‌شده',folder_id:targetMode==='save'?(folder==='default'?null:Number(folder)):null,voice,gender,pitch,use_case:useCase,style,speed,auto_expression:autoExpression,output_mode:targetMode});setMessage({kind:'ok',text:targetMode==='preview'?'صدا در حال آماده‌شدن برای پخش است.':targetMode==='telegram'?'صدا ساخته می‌شود و در تلگرام می‌آید.':'ساخت صدا شروع شد.'})}catch(error:any){setMessage({kind:'error',text:error?.response?.data?.detail||'ساخت صدا شروع نشد.'})}};
     const insertText=(value:string,cursorOffset=value.length)=>{const target=textAreaRef.current;const start=target?.selectionStart??text.length;const end=target?.selectionEnd??start;setText(`${text.slice(0,start)}${value}${text.slice(end)}`);requestAnimationFrame(()=>{target?.focus();target?.setSelectionRange(start+cursorOffset,start+cursorOffset)})};
     const insertScopedCue=(tag:string)=>{const target=textAreaRef.current;const start=target?.selectionStart??text.length;const end=target?.selectionEnd??start;const selected=text.slice(start,end)||'متن این بخش';const value=`${tag}${selected}[resumes normal speech]`;insertText(value,tag.length+(end>start?selected.length:0))};
     const playVoicePreview=async(targetVoice=voice)=>{if(!settings)return;setPreviewing(true);setMessage(null);try{const key=new Request(`${window.location.origin}/__komod_tts_preview_v3__/${encodeURIComponent(settings.model)}/${encodeURIComponent(targetVoice)}`);let cached:Response|undefined;try{await Promise.all(['komod-tts-previews-v1','komod-tts-previews-v2'].map(name=>caches.delete(name)));cached=await (await caches.open('komod-tts-previews-v3')).match(key)}catch{/* Cache API may be unavailable */}let blob:Blob;if(cached)blob=await cached.blob();else{const response=await api.get<ArrayBuffer>(`/tts/preview/${encodeURIComponent(targetVoice)}`,{responseType:'arraybuffer'});blob=new Blob([response.data],{type:'audio/wav'});try{await (await caches.open('komod-tts-previews-v3')).put(key,new Response(blob,{headers:{'Content-Type':'audio/wav'}}))}catch{/* normal playback still works */}}if(previewUrl.startsWith('blob:'))URL.revokeObjectURL(previewUrl);setPreviewUrl(URL.createObjectURL(blob))}catch(error:any){setMessage({kind:'error',text:error?.response?.data?.detail||'پخش نمونه صدا انجام نشد.'})}finally{setPreviewing(false)}};
@@ -213,13 +213,13 @@ export default function TTSSettingsPanel(){
     const sttWorkload=Number(selectedSTTFile?.duration||0)||(selectedSTTFile?Math.ceil(selectedSTTFile.file_size/16000):0);
     const ttsOption=settings?routedOption(settings.models,model,text.length,'tts'):undefined;
     const sttOption=settings?routedOption(settings.stt_models,sttModel,sttWorkload,'stt',Boolean(sttPrompt.trim()||sttPostPrompts.some(item=>item.trim()))):undefined;
-    if(isLoading)return <div className="rounded-2xl bg-dark-900/70 p-5 text-sm text-dark-400">در حال دریافت تنظیمات صدا…</div>;
     return <div className="space-y-4">
+        {isLoading&&!settings&&<div className="flex min-h-10 items-center gap-2 rounded-xl border border-primary-400/10 bg-primary-500/[.05] px-3 text-xs text-dark-400"><span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary-300/25 border-t-primary-300"/>در حال همگام‌سازی تنظیمات…</div>}
         <div className="grid grid-cols-2 gap-1 rounded-2xl border border-white/[.08] bg-dark-900/80 p-1.5 shadow-lg shadow-black/10" role="tablist" aria-label="ابزارهای متن و صدا">
             <button type="button" role="tab" aria-selected={speechMode==='tts'} onClick={()=>{setSpeechMode('tts');setMessage(null)}} className={`flex min-h-12 items-center justify-center gap-2 rounded-xl px-3 text-sm font-semibold transition ${speechMode==='tts'?'bg-primary-500 text-white shadow-lg shadow-primary-950/25':'text-dark-400 hover:bg-white/[.05] hover:text-white'}`}><AudioLines className="h-5 w-5"/>متن به صدا</button>
             <button type="button" role="tab" aria-selected={speechMode==='stt'} onClick={()=>{setSpeechMode('stt');setMessage(null)}} className={`flex min-h-12 items-center justify-center gap-2 rounded-xl px-3 text-sm font-semibold transition ${speechMode==='stt'?'bg-primary-500 text-white shadow-lg shadow-primary-950/25':'text-dark-400 hover:bg-white/[.05] hover:text-white'}`}><FileAudio className="h-5 w-5"/>صدا به متن</button>
         </div>
-        {speechMode==='tts'&&<div className="grid grid-cols-4 gap-1 rounded-2xl border border-white/[.07] bg-dark-950/50 p-1">{([{value:'input',label:'متن'},{value:'settings',label:'تنظیمات'},{value:'output',label:'خروجی'},{value:'history',label:'تاریخچه'}] as const).map(item=><button type="button" key={item.value} onClick={()=>setTtsPanel(item.value)} className={`min-h-10 rounded-xl px-1 text-[11px] sm:text-xs ${ttsPanel===item.value?'bg-primary-500/15 text-primary-100':'text-dark-400'}`}>{item.label}</button>)}</div>}
+        {speechMode==='tts'&&<div className="grid grid-cols-4 gap-1 rounded-2xl border border-white/[.07] bg-dark-950/50 p-1">{([{value:'input',label:'متن'},{value:'output',label:'خروجی'},{value:'history',label:'تاریخچه'},{value:'settings',label:'تنظیمات'}] as const).map(item=><button type="button" key={item.value} onClick={()=>setTtsPanel(item.value)} className={`min-h-10 rounded-xl px-1 text-[11px] sm:text-xs ${ttsPanel===item.value?'bg-primary-500/15 text-primary-100':'text-dark-400'}`}>{item.label}</button>)}</div>}
         {speechMode==='tts'&&(ttsPanel==='input'||ttsPanel==='output')&&<section className="rounded-2xl border border-white/[.07] bg-dark-900/70 p-4 sm:p-5">
             <div className="flex items-center gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary-500/10 text-primary-300"><Wand2 className="h-5 w-5"/></span><h2 className="font-bold">{ttsPanel==='input'?'متن ورودی':'تنظیم خروجی'}</h2></div>
             {ttsPanel==='output'&&<><ModelUsageCard title={aiRoutingMode==='manual'?'مدل انتخابی ساخت صدا':'مدل پیشنهادی برای این متن'} modelLabel={ttsOption?.label||model} modelId={ttsOption?.value||model} cost={ttsOption?.cost} quota={settings?.quota.tts}/>
@@ -228,7 +228,7 @@ export default function TTSSettingsPanel(){
             <div className="mt-3 grid grid-cols-3 gap-1 rounded-2xl border border-white/[.07] bg-dark-950/40 p-1" role="radiogroup" aria-label="محل خروجی صدا">{([{value:'save',label:'ذخیره در کمد'},{value:'preview',label:'فقط پخش'},{value:'telegram',label:'فقط تلگرام'}] as const).map(item=><button type="button" key={item.value} role="radio" aria-checked={outputMode===item.value} onClick={()=>setOutputMode(item.value)} className={`min-h-10 rounded-xl px-2 text-xs transition ${outputMode===item.value?'bg-primary-500 text-white shadow-lg shadow-primary-950/20':'text-dark-400 hover:bg-white/[.05] hover:text-white'}`}>{item.label}</button>)}</div></>}
             {ttsPanel==='input'&&<><div className={editorFullscreen?'fixed inset-0 z-[280] flex min-h-0 flex-col overflow-hidden bg-dark-950 p-3 sm:p-8':'mt-3'}><div className="mb-2 flex shrink-0 items-center justify-between"><span className="text-xs text-dark-400">متن و پیش‌نمایش</span><button type="button" onClick={()=>setEditorFullscreen(value=>!value)} className="btn-icon" title={editorFullscreen?'خروج از تمام‌صفحه':'تمام‌صفحه'}>{editorFullscreen?<Minimize2 className="h-4 w-4"/>:<Maximize2 className="h-4 w-4"/>}</button></div><div className={editorFullscreen?'grid min-h-0 flex-1 grid-rows-2 gap-3 sm:grid-cols-2 sm:grid-rows-1 sm:gap-4':''}><label className={`text-xs text-dark-400 ${editorFullscreen?'flex min-h-0 flex-col':''}`}>متن<textarea ref={textAreaRef} value={text} onChange={event=>setText(normalizeDirectorNotes(event.target.value))} className={`input mt-1.5 w-full resize-none leading-8 ${editorFullscreen?'min-h-0 flex-1':'min-h-48'}`} placeholder="متنت را اینجا بنویس یا بچسبان…" maxLength={200000}/></label><div className={editorFullscreen?'flex min-h-0 flex-col':'contents'}>{editorFullscreen&&<span className="text-xs text-dark-400">پیش‌نمایش</span>}<TaggedTextPreview text={text} fullscreen={editorFullscreen}/></div></div>{editorFullscreen&&<div className="mt-3 max-h-[30dvh] shrink-0 overflow-y-auto rounded-2xl border border-white/[.07] bg-dark-900/70 p-3">{cueTools}</div>}</div>
             {!editorFullscreen&&cueTools}
-            <div className="mt-2 flex items-center justify-between gap-3 text-[11px] text-dark-500"><span>{text.length.toLocaleString('fa-IR')} نویسه</span><button type="button" disabled={!text} onClick={()=>setText('')} className="rounded-lg px-2 py-1 text-red-300 transition hover:bg-red-500/10 disabled:opacity-30">پاک‌کردن متن</button></div></>}
+            <div className="mt-2 flex items-center justify-between gap-3 text-[11px] text-dark-500"><span>{text.length.toLocaleString('fa-IR')} نویسه</span><button type="button" disabled={!text} onClick={()=>setText('')} className="rounded-lg px-2 py-1 text-red-300 transition hover:bg-red-500/10 disabled:opacity-30">پاک‌کردن متن</button></div><button disabled={!settings?.available||!text.trim()||create.isPending} onClick={()=>void submit('save')} className="btn-primary mt-4 flex min-h-12 w-full items-center justify-center gap-2 disabled:opacity-40"><AudioLines className="h-5 w-5"/>{create.isPending?'در حال افزودن…':'ساخت و ذخیره'}</button></>}
             {ttsPanel==='output'&&<button disabled={!settings?.available||!text.trim()||create.isPending} onClick={()=>void submit()} className="btn-primary mt-4 flex min-h-12 w-full items-center justify-center gap-2 disabled:opacity-40"><AudioLines className="h-5 w-5"/>{create.isPending?'در حال افزودن…':outputMode==='save'?'ساخت و ذخیره':outputMode==='telegram'?'ساخت و ارسال':'ساخت و پخش'}</button>}
         </section>}
         {speechMode==='stt'&&<section className="rounded-2xl border border-white/[.07] bg-dark-900/70 p-4 sm:p-5">
