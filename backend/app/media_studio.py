@@ -1,7 +1,7 @@
 """FFmpeg media processing service with durable job state."""
 from __future__ import annotations
 
-import asyncio, json, logging, shutil, tempfile, uuid
+import asyncio, json, logging, os, shutil, tempfile, uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -21,6 +21,12 @@ AUDIO_FORMATS = {"mp3", "m4a", "aac", "wav", "flac", "ogg"}
 IMAGE_FORMATS = {"jpg", "jpeg", "png", "webp", "avif"}
 ALL_FORMATS = VIDEO_FORMATS | AUDIO_FORMATS | IMAGE_FORMATS
 RUNNING_STATES = {"queued", "preparing", "processing", "saving"}
+
+
+def _executable(name: str) -> str | None:
+    configured=os.getenv(f"{name.upper()}_BINARY","").strip()
+    candidates=[configured,shutil.which(name),f"/usr/bin/{name}",f"/usr/local/bin/{name}"]
+    return next((candidate for candidate in candidates if candidate and Path(candidate).is_file()),None)
 
 
 def _int(value: Any, default: int, low: int, high: int) -> int:
@@ -81,13 +87,14 @@ class MediaStudioManager:
     def __init__(self):
         self.tasks: dict[str, asyncio.Task] = {}; self.processes: dict[str, asyncio.subprocess.Process] = {}
         self.semaphore = asyncio.Semaphore(2)
+        self.ffmpeg=_executable("ffmpeg"); self.ffprobe=_executable("ffprobe")
 
     @property
-    def available(self): return bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))
+    def available(self): return bool(self.ffmpeg and self.ffprobe)
 
     async def supported_codecs(self) -> list[str]:
         if not self.available: return []
-        process=await asyncio.create_subprocess_exec("ffmpeg","-hide_banner","-encoders",stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.STDOUT)
+        process=await asyncio.create_subprocess_exec(self.ffmpeg,"-hide_banner","-encoders",stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.STDOUT)
         output=(await process.communicate())[0].decode(errors="ignore")
         return [label for label,encoder in (("h264","libx264"),("h265","libx265"),("av1","libsvtav1")) if encoder in output]
 
@@ -127,12 +134,13 @@ class MediaStudioManager:
         await self.update(job_id,"cancelled",0,"پردازش لغو شد.")
 
     async def probe(self, path: Path):
-        process = await asyncio.create_subprocess_exec("ffprobe","-v","error","-show_entries","format=duration,size:stream=width,height,codec_type","-of","json",str(path),stdout=asyncio.subprocess.PIPE)
+        process = await asyncio.create_subprocess_exec(self.ffprobe,"-v","error","-show_entries","format=duration,size:stream=width,height,codec_type","-of","json",str(path),stdout=asyncio.subprocess.PIPE)
         stdout,_ = await process.communicate()
         try: return json.loads(stdout or b"{}")
         except json.JSONDecodeError: return {}
 
     async def run_ffmpeg(self, job_id: str, command: list[str], duration: float):
+        command[0]=self.ffmpeg or command[0]
         process = await asyncio.create_subprocess_exec(*command,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
         self.processes[job_id] = process; last = 20
         assert process.stdout is not None

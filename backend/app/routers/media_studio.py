@@ -41,6 +41,7 @@ def serialize(job: ProcessingJob):
 @router.get("/capabilities")
 async def capabilities(_: User = Depends(get_current_user)):
     return {"available":media_studio.available,"max_batch":12,"max_concurrent":2,
+            "engine":"ffmpeg" if media_studio.available else None,
             "operations":["compress","convert","extract_audio","trim","merge"],
             "formats":{"video":sorted(VIDEO_FORMATS),"audio":sorted(AUDIO_FORMATS),"image":sorted(IMAGE_FORMATS)},
             "codecs":await media_studio.supported_codecs(),"presets":["smallest","balanced","best","web","social","custom"]}
