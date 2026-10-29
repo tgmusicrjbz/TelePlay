@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from app.media_studio import build_ffmpeg_command, output_extension
+from app.media_studio import build_ffmpeg_command, can_stream_copy, output_extension
 
 
 class MediaStudioCommandTests(unittest.TestCase):
@@ -29,6 +29,26 @@ class MediaStudioCommandTests(unittest.TestCase):
         command=build_ffmpeg_command("trim",[Path("input.mp3")],Path("output.mp3"),"audio",{"start":12,"end":20})
         self.assertIn("12.000",command)
         self.assertIn("8.000",command)
+
+    def test_compatible_operations_use_stream_copy(self):
+        probe={"streams":[
+            {"codec_type":"video","codec_name":"h264","width":1280,"height":720,"pix_fmt":"yuv420p","avg_frame_rate":"30/1"},
+            {"codec_type":"audio","codec_name":"aac","sample_rate":"48000","channels":2},
+        ]}
+        self.assertTrue(can_stream_copy("convert",[Path("input.mov")],"video","mp4",{"codec":"h264"},[probe]))
+        self.assertFalse(can_stream_copy("convert",[Path("input.mov")],"video","webm",{"codec":"vp9"},[probe]))
+        self.assertFalse(can_stream_copy("convert",[Path("input.mov")],"video","mp4",{"codec":"h264","resolution":720},[probe]))
+        command=build_ffmpeg_command("trim",[Path("input.mp3")],Path("output.mp3"),"audio",{"start":1,"end":3,"_stream_copy":True})
+        self.assertIn("copy",command)
+        self.assertNotIn("libmp3lame",command)
+
+    def test_merge_stream_copy_uses_concat_demuxer(self):
+        command=build_ffmpeg_command("merge",[Path("a.mp4"),Path("b.mp4")],Path("out.mp4"),"video",{
+            "_stream_copy":True,"_concat_list":"concat.txt",
+        })
+        self.assertEqual(command[command.index("-f")+1],"concat")
+        self.assertIn("copy",command)
+        self.assertNotIn("filter_complex",command)
 
     def test_merge_does_not_accept_raw_arguments(self):
         command=build_ffmpeg_command("merge",[Path("a.mp3"),Path("b.mp3")],Path("out.mp3"),"audio",{"raw":"-dangerous"})
@@ -55,12 +75,14 @@ class MediaStudioCommandTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("ffmpeg"), "FFmpeg is not installed")
     def test_real_audio_extract_and_trim_commands_produce_outputs(self):
         with tempfile.TemporaryDirectory() as directory:
-            root=Path(directory); video=root/"source.mp4"; audio=root/"audio.mp3"; trimmed=root/"trimmed.mp3"
+            root=Path(directory); video=root/"source.mp4"; audio=root/"audio.mp3"; trimmed=root/"trimmed.mp3"; fast_trimmed=root/"fast-trimmed.mp3"
             subprocess.run(["ffmpeg","-hide_banner","-loglevel","error","-y","-f","lavfi","-i","color=c=blue:s=160x120:d=1","-f","lavfi","-i","sine=frequency=440:duration=1","-c:v","libx264","-c:a","aac","-shortest",str(video)],check=True)
             subprocess.run(build_ffmpeg_command("extract_audio",[video],audio,"video",{"format":"mp3","preset":"balanced"}),check=True,stdout=subprocess.DEVNULL)
             subprocess.run(build_ffmpeg_command("trim",[audio],trimmed,"audio",{"start":0.1,"end":0.7,"format":"mp3"}),check=True,stdout=subprocess.DEVNULL)
+            subprocess.run(build_ffmpeg_command("trim",[audio],fast_trimmed,"audio",{"start":0.1,"end":0.7,"format":"mp3","_stream_copy":True}),check=True,stdout=subprocess.DEVNULL)
             self.assertGreater(audio.stat().st_size,0)
             self.assertGreater(trimmed.stat().st_size,0)
+            self.assertGreater(fast_trimmed.stat().st_size,0)
 
     @unittest.skipUnless(shutil.which("ffmpeg"), "FFmpeg is not installed")
     def test_real_compress_convert_and_merge_commands_produce_outputs(self):

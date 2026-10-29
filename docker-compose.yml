@@ -59,6 +59,7 @@ services:
       # Security
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       JWT_EXPIRY_MINUTES: ${JWT_EXPIRY_MINUTES:-10080}
+      MEDIA_STUDIO_CONCURRENCY: ${MEDIA_STUDIO_CONCURRENCY:-1}
 
       # Web URL
       WEB_BASE_URL: ${WEB_BASE_URL:-http://localhost}

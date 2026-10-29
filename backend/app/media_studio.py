@@ -32,6 +32,19 @@ CODEC_COMPATIBILITY = {
     "mkv": ("h264", "h265", "vp9", "av1"),
     "webm": ("vp9", "av1"),
 }
+AUDIO_CODEC_COMPATIBILITY = {
+    "mp3": {"mp3"},
+    "m4a": {"aac", "alac"},
+    "aac": {"aac"},
+    "wav": {"pcm_s16le", "pcm_s24le", "pcm_s32le", "pcm_f32le", "pcm_f64le"},
+    "flac": {"flac"},
+    "ogg": {"vorbis", "opus"},
+}
+CONTAINER_AUDIO_COMPATIBILITY = {
+    "mp4": {"aac", "mp3", "alac"},
+    "mov": {"aac", "mp3", "alac"},
+    "webm": {"opus", "vorbis"},
+}
 
 
 def _executable(name: str) -> str | None:
@@ -72,10 +85,68 @@ def _video_codec(extension: str, options: dict[str, Any]) -> tuple[str, str]:
     return codec, encoder
 
 
+def _stream(probe: dict[str, Any], kind: str) -> dict[str, Any]:
+    return next((item for item in probe.get("streams", []) if item.get("codec_type") == kind), {})
+
+
+def _normal_video_codec(value: Any) -> str:
+    return {"hevc": "h265", "h265": "h265"}.get(str(value or "").lower(), str(value or "").lower())
+
+
+def _audio_matches(extension: str, codec: Any) -> bool:
+    return str(codec or "").lower() in AUDIO_CODEC_COMPATIBILITY.get(extension, set())
+
+
+def can_stream_copy(operation: str, inputs: list[Path], source_type: str, extension: str,
+                    options: dict[str, Any], probes: list[dict[str, Any]]) -> bool:
+    """Return true only when FFmpeg can safely avoid decoding and encoding."""
+    if not inputs or not probes or source_type == "image" or operation == "compress":
+        return False
+    if source_type == "video" and (_int(options.get("resolution"), 0, 0, 4320) or _int(options.get("fps"), 0, 0, 120)):
+        return False
+    if operation == "trim":
+        return inputs[0].suffix.lower().lstrip(".") == extension
+    if operation == "extract_audio":
+        return _audio_matches(extension, _stream(probes[0], "audio").get("codec_name"))
+    if operation == "convert":
+        if source_type == "audio":
+            return _audio_matches(extension, _stream(probes[0], "audio").get("codec_name"))
+        video_codec = _normal_video_codec(_stream(probes[0], "video").get("codec_name"))
+        requested = str(options.get("codec") or "h264").lower()
+        if video_codec != requested or requested not in CODEC_COMPATIBILITY.get(extension, ()):
+            return False
+        audio_codec = str(_stream(probes[0], "audio").get("codec_name") or "").lower()
+        return not audio_codec or extension == "mkv" or audio_codec in CONTAINER_AUDIO_COMPATIBILITY.get(extension, set())
+    if operation != "merge" or any(path.suffix.lower().lstrip(".") != extension for path in inputs):
+        return False
+    if source_type == "audio":
+        signatures = [(
+            _stream(probe, "audio").get("codec_name"),
+            _stream(probe, "audio").get("sample_rate"),
+            _stream(probe, "audio").get("channels"),
+        ) for probe in probes]
+    else:
+        signatures = [(
+            _stream(probe, "video").get("codec_name"),
+            _stream(probe, "video").get("width"),
+            _stream(probe, "video").get("height"),
+            _stream(probe, "video").get("pix_fmt"),
+            _stream(probe, "video").get("avg_frame_rate") or _stream(probe, "video").get("r_frame_rate"),
+            _stream(probe, "audio").get("codec_name"),
+            _stream(probe, "audio").get("sample_rate"),
+            _stream(probe, "audio").get("channels"),
+        ) for probe in probes]
+    return bool(signatures[0][0]) and all(signature == signatures[0] for signature in signatures[1:])
+
+
 def build_ffmpeg_command(operation: str, inputs: list[Path], output: Path, source_type: str, options: dict[str, Any]) -> list[str]:
     """Build a command only from allowlisted values; raw FFmpeg args are never accepted."""
     command = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-progress", "pipe:1", "-nostats"]
     start, end = _float(options.get("start"), 0, 0, 86_400), _float(options.get("end"), 0, 0, 86_400)
+    if operation == "merge" and options.get("_stream_copy") and options.get("_concat_list"):
+        command += ["-f", "concat", "-safe", "0", "-i", str(options["_concat_list"]), "-map", "0:v:0?", "-map", "0:a:0?", "-c", "copy"]
+        if output.suffix.lower() == ".mp4": command += ["-movflags", "+faststart"]
+        return command + [str(output)]
     if operation == "merge":
         for path in inputs: command += ["-i", str(path)]
         if source_type == "audio":
@@ -123,6 +194,14 @@ def build_ffmpeg_command(operation: str, inputs: list[Path], output: Path, sourc
         command += ["-i", str(inputs[0])]
         if end > start: command += ["-t", f"{end-start:.3f}"]
     extension = output.suffix.lower().lstrip(".")
+    if options.get("_stream_copy"):
+        if operation == "extract_audio" or source_type == "audio" or extension in AUDIO_FORMATS:
+            command += ["-map", "0:a:0", "-vn", "-c:a", "copy"]
+        else:
+            command += ["-map", "0:v:0?", "-map", "0:a:0?", "-c", "copy"]
+        if operation == "trim": command += ["-avoid_negative_ts", "make_zero"]
+        if extension == "mp4": command += ["-movflags", "+faststart"]
+        return command + [str(output)]
     preset = str(options.get("preset") or "balanced")
     if operation == "extract_audio" or source_type == "audio" or extension in AUDIO_FORMATS:
         bitrate = _int(options.get("audio_bitrate"), 160, 32, 512) if preset == "custom" else _preset_value(options, {"smallest":96,"balanced":160,"best":256,"web":128,"social":128}, 160)
@@ -144,10 +223,10 @@ def build_ffmpeg_command(operation: str, inputs: list[Path], output: Path, sourc
         crf = max(14, min(38, round(51-quality*.39))) if preset == "custom" else _preset_value(options, {"smallest":30,"balanced":24,"best":19,"web":25,"social":23}, 24)
         if codec in {"vp9", "av1"}: crf = min(45, crf + 7)
         command += ["-c:v", encoder, "-crf", str(crf)]
-        if encoder in {"libx264", "libx265"}: command += ["-preset", "fast" if preset == "smallest" else "slow" if preset == "best" else "medium"]
-        elif encoder == "libvpx-vp9": command += ["-b:v", "0", "-deadline", "good", "-cpu-used", "6" if preset == "smallest" else "3" if preset == "best" else "4"]
-        elif encoder == "libsvtav1": command += ["-preset", "10" if preset == "smallest" else "6" if preset == "best" else "8"]
-        elif encoder == "libaom-av1": command += ["-b:v", "0", "-cpu-used", "8" if preset == "smallest" else "4" if preset == "best" else "6"]
+        if encoder in {"libx264", "libx265"}: command += ["-preset", "veryfast" if preset == "smallest" else "medium" if preset == "best" else "fast"]
+        elif encoder == "libvpx-vp9": command += ["-b:v", "0", "-deadline", "good", "-cpu-used", "7" if preset == "smallest" else "4" if preset == "best" else "5"]
+        elif encoder == "libsvtav1": command += ["-preset", "11" if preset == "smallest" else "7" if preset == "best" else "9"]
+        elif encoder == "libaom-av1": command += ["-b:v", "0", "-cpu-used", "8" if preset == "smallest" else "5" if preset == "best" else "7"]
         height, fps = _int(options.get("resolution"),0,0,4320), _int(options.get("fps"),0,0,120)
         filters = ([f"scale=-2:min({height}\\,ih)"] if height else []) + ([f"fps={fps}"] if fps else [])
         if filters: command += ["-vf", ",".join(filters)]
@@ -162,7 +241,8 @@ class MediaStudioManager:
     def __init__(self):
         self.tasks: dict[str, asyncio.Task] = {}; self.processes: dict[str, asyncio.subprocess.Process] = {}
         self.user_cancellations: set[str] = set()
-        self.semaphore = asyncio.Semaphore(2)
+        self.max_concurrent = _int(os.getenv("MEDIA_STUDIO_CONCURRENCY"), 1, 1, 4)
+        self.semaphore = asyncio.Semaphore(self.max_concurrent)
         self.ffmpeg=_executable("ffmpeg"); self.ffprobe=_executable("ffprobe")
         self._codec_encoders: dict[str, str] | None = None
 
@@ -223,7 +303,7 @@ class MediaStudioManager:
         await self.update(job_id,"cancelled",0,"پردازش لغو شد.")
 
     async def probe(self, path: Path):
-        process = await asyncio.create_subprocess_exec(self.ffprobe,"-v","error","-show_entries","format=duration,size:stream=width,height,codec_type,avg_frame_rate","-of","json",str(path),stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
+        process = await asyncio.create_subprocess_exec(self.ffprobe,"-v","error","-show_entries","format=duration,size:stream=width,height,codec_type,codec_name,pix_fmt,avg_frame_rate,r_frame_rate,sample_rate,channels,channel_layout","-of","json",str(path),stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
         stdout,stderr = await process.communicate()
         if process.returncode:
             logger.warning("Media Studio probe failed for %s: %s", path.name, stderr.decode(errors="ignore")[-500:])
@@ -277,8 +357,22 @@ class MediaStudioManager:
                             "has_audio":any(stream.get("codec_type")=="audio" for stream in probe.get("streams",[])),
                             "duration":item_duration,
                         } for probe,item_duration in zip(input_probes,durations)]
-                    await self.update(job_id,"processing",20,"پردازش شروع شد…")
-                    await self.run_ffmpeg(job_id,build_ffmpeg_command(operation,inputs,output,source_type,options),duration)
+                    fast_copy=can_stream_copy(operation,inputs,source_type,extension,options,input_probes)
+                    if fast_copy:
+                        options["_stream_copy"]=True
+                        if operation=="merge":
+                            concat_list=root/"concat.txt"
+                            concat_list.write_text("".join(f"file '{path.as_posix()}'\n" for path in inputs),encoding="utf-8")
+                            options["_concat_list"]=str(concat_list)
+                    await self.update(job_id,"processing",20,"پردازش سریع بدون تبدیل دوباره…" if fast_copy else "پردازش شروع شد…")
+                    try:
+                        await self.run_ffmpeg(job_id,build_ffmpeg_command(operation,inputs,output,source_type,options),duration)
+                    except RuntimeError:
+                        if not fast_copy: raise
+                        logger.info("Media Studio stream-copy fallback for job %s", job_id)
+                        output.unlink(missing_ok=True); options.pop("_stream_copy",None); options.pop("_concat_list",None)
+                        await self.update(job_id,"processing",20,"مسیر سریع سازگار نبود؛ پردازش معمولی شروع شد…")
+                        await self.run_ffmpeg(job_id,build_ffmpeg_command(operation,inputs,output,source_type,options),duration)
                     if not output.exists() or not output.stat().st_size: raise RuntimeError("فایل خروجی ساخته نشد.")
                     await self.update(job_id,"saving",92,"در حال ذخیره خروجی در کمد…")
                     probe=await self.probe(output); target_channel=user.storage_channel_id or settings.telegram_storage_channel_id
