@@ -28,7 +28,7 @@ export default function SortModal({ open, criteria, onApply, onClose }: Props) {
         [next[index], next[target]] = [next[target], next[index]];
         setDraft(next);
     };
-    return <ModalShell title="مرتب‌سازی چندمرحله‌ای" subtitle="اولویت از بالا به پایین اعمال می‌شود." icon={<ListFilter/>} width="lg" zIndex={110} onClose={onClose} footer={<><button className="btn-primary flex-1 sm:flex-none" onClick={() => { onApply(draft.length ? draft : [{ field: 'created', direction: 'desc' }]); onClose(); }}>اعمال</button><button className="btn-secondary flex-1 sm:flex-none" onClick={() => setDraft([{ field: 'created', direction: 'desc' }])}>حالت پیش‌فرض</button></>}>
+    return <ModalShell title="مرتب‌سازی چندمرحله‌ای" subtitle="اولویت از بالا به پایین اعمال می‌شود." icon={<ListFilter/>} width="lg" onClose={onClose} footer={<><button className="btn-primary flex-1 sm:flex-none" onClick={() => { onApply(draft.length ? draft : [{ field: 'created', direction: 'desc' }]); onClose(); }}>اعمال</button><button className="btn-secondary flex-1 sm:flex-none" onClick={() => setDraft([{ field: 'created', direction: 'desc' }])}>حالت پیش‌فرض</button></>}>
             <div className="space-y-2">
                 {draft.map((item, index) => <div key={item.field} className="flex items-center gap-2 rounded-xl border border-white/10 bg-dark-800/60 p-2">
                     <span className="w-6 text-center text-xs text-primary-300">{index + 1}</span>

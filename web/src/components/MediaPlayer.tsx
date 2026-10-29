@@ -791,11 +791,15 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
         />
     );
 
+    // The compact player remains above the mobile navigation, but below menus and
+    // modal sheets.  This keeps destructive/confirming actions fully tappable.
+    const playerLayer = isMinimized ? 'z-[120]' : 'z-[240]';
+
     // Unified Render
     return (
         <div
             ref={containerRef}
-            className={`${isMinimized ? 'mini-player' : 'video-player'} ${inline ? 'relative h-full w-full overflow-hidden bg-black' : 'fixed z-[240]'} transition-all duration-300 ease-in-out ${
+            className={`${isMinimized ? 'mini-player' : 'video-player'} ${inline ? 'relative h-full w-full overflow-hidden bg-black' : `fixed ${playerLayer}`} transition-all duration-300 ease-in-out ${
                 inline ? '' :
                 isMinimized
                     ? 'bottom-[calc(5rem+env(safe-area-inset-bottom))] left-0 right-0 h-20 max-h-[25vh] border-t border-white/10 bg-dark-900 shadow-2xl md:bottom-0'
