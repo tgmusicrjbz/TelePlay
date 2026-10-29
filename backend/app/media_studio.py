@@ -245,6 +245,7 @@ class MediaStudioManager:
         self.semaphore = asyncio.Semaphore(self.max_concurrent)
         self.ffmpeg=_executable("ffmpeg"); self.ffprobe=_executable("ffprobe")
         self._codec_encoders: dict[str, str] | None = None
+        self._capability_task: asyncio.Task | None = None
 
     @property
     def available(self): return bool(self.ffmpeg and self.ffprobe)
@@ -252,14 +253,31 @@ class MediaStudioManager:
     async def supported_codec_encoders(self) -> dict[str, str]:
         if not self.available: return {}
         if self._codec_encoders is not None: return dict(self._codec_encoders)
-        process=await asyncio.create_subprocess_exec(self.ffmpeg,"-hide_banner","-encoders",stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.STDOUT)
-        output=(await process.communicate())[0].decode(errors="ignore")
+        process: asyncio.subprocess.Process | None = None
+        try:
+            process=await asyncio.create_subprocess_exec(self.ffmpeg,"-hide_banner","-encoders",stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.STDOUT)
+            output=(await asyncio.wait_for(process.communicate(),timeout=8))[0].decode(errors="ignore")
+        except Exception:
+            if process and process.returncode is None:
+                process.kill()
+                await process.wait()
+            logger.warning("FFmpeg codec detection failed",exc_info=True)
+            return {}
         self._codec_encoders = {
             label: next((encoder for encoder in encoders if encoder in output), "")
             for label, encoders in CODEC_ENCODERS.items()
         }
         self._codec_encoders = {label: encoder for label, encoder in self._codec_encoders.items() if encoder}
         return dict(self._codec_encoders)
+
+    def cached_supported_codecs(self) -> list[str]:
+        if not self.available: return []
+        return list(self._codec_encoders.keys()) if self._codec_encoders is not None else list(CODEC_ENCODERS.keys())
+
+    def warm_capabilities(self) -> None:
+        if not self.available or self._codec_encoders is not None: return
+        if not self._capability_task or self._capability_task.done():
+            self._capability_task=asyncio.create_task(self.supported_codec_encoders(),name="media-capabilities")
 
     async def supported_codecs(self) -> list[str]:
         return list((await self.supported_codec_encoders()).keys())
