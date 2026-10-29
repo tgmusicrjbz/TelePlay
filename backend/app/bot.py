@@ -11,6 +11,7 @@ import contextlib
 import logging
 import random
 import json
+from urllib.parse import quote
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from pyrogram import filters, enums
@@ -70,6 +71,14 @@ TEHRAN_TZ = timezone(timedelta(hours=3, minutes=30))
 FILE_ICONS = {"video": "🎬", "audio": "🎵", "document": "📄", "image": "🖼", "text": "📝"}
 TYPE_LABELS = {"all": "همه", "video": "فیلم", "audio": "آهنگ", "image": "عکس", "text": "متن", "document": "سند", "folder": "کشو"}
 SORT_LABELS = {"name": "نام", "type": "نوع", "size": "حجم", "duration": "مدت", "created": "تاریخ آپلود", "updated": "تاریخ ویرایش"}
+
+
+def web_login_url(code: str) -> str:
+    """Return the public login page for a one-time Telegram login code."""
+    base_url = settings.web_base_url.strip().rstrip("/")
+    if not base_url.startswith(("http://", "https://")):
+        base_url = f"https://{base_url}"
+    return f"{base_url}/login?code={quote(code)}"
 
 
 async def resolve_caption_folder(user_id: int, path: str | None) -> Folder | None:
@@ -1825,9 +1834,7 @@ async def login_command(client, message: Message):
             login_code.telegram_id = message.from_user.id
             await db.commit()
             
-            await message.reply(
-                "✅ ورود دستگاه شما تأیید شد."
-            )
+            await message.reply(await bot_message("login_confirmed"))
         return
 
     # Use secrets for cryptographically strong random number generation
@@ -1845,9 +1852,14 @@ async def login_command(client, message: Message):
         await db.commit()
     
     await message.reply(
-        "🔑 **کد ورود شما:**\n\n"
-        f"`{code}`\n\n"
-        "این کد رو توی صفحهٔ ورود وارد کن. اعتبارش ۵ دقیقه‌ست."
+        "🔐 **ورود به کمد**\n\n"
+        f"کد یک‌بارمصرفت: `{code}`\n\n"
+        "دکمهٔ زیر رو بزن تا صفحهٔ ورود باز بشه. اگر صفحه از قبل بازه، "
+        "همین کد رو در بخش «ورود با دستور یا کد» وارد کن.\n\n"
+        "⏳ این کد ۵ دقیقه اعتبار داره و فقط یک‌بار استفاده می‌شه.",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("🌐 ورود به کمد", url=web_login_url(code)),
+        ]]),
     )
 
     return

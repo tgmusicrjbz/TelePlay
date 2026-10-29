@@ -279,18 +279,25 @@ function LoginPage() {
     const { mutate: generateCode, isPending: isGenerating } = useGenerateLoginCode();
     const passwordLogin = usePasswordLogin();
     const registerAccount = useRegisterAccount();
-    
-    const [code, setCode] = useState('');
-    const [isPolling, setIsPolling] = useState(false);
+
+    const queryCode = new URLSearchParams(window.location.search).get('code')
+        ?.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6) || '';
+    const initialTelegramCode = queryCode.length === 6 ? queryCode : '';
+    const [code, setCode] = useState(initialTelegramCode);
+    const [codeSource, setCodeSource] = useState<'device'|'bot'>(initialTelegramCode ? 'bot' : 'device');
+    const [isPolling, setIsPolling] = useState(Boolean(initialTelegramCode));
     const [error, setError] = useState<string | null>(null);
     const [notice, setNotice] = useState<string | null>(null);
-    const [loginMode, setLoginMode] = useState<'password'|'telegram'>('password');
+    const [loginMode, setLoginMode] = useState<'password'|'telegram'>(initialTelegramCode ? 'telegram' : 'password');
     const [loginUsername, setLoginUsername] = useState('');
     const [loginPassword, setLoginPassword] = useState('');
     const [loginOtp, setLoginOtp] = useState('');
     const [needsOtp, setNeedsOtp] = useState(false);
     const [telegramOtp,setTelegramOtp]=useState('');
     const [telegramNeedsOtp,setTelegramNeedsOtp]=useState(false);
+    const [showTelegramCodeLogin,setShowTelegramCodeLogin]=useState(Boolean(initialTelegramCode));
+    const [telegramCodeInput,setTelegramCodeInput]=useState(initialTelegramCode);
+    const [commandCopied,setCommandCopied]=useState(false);
     const [accountMode,setAccountMode]=useState<'login'|'register'>('login');
     const [registerName,setRegisterName]=useState('');
     const [registerPasswordAgain,setRegisterPasswordAgain]=useState('');
@@ -303,6 +310,8 @@ function LoginPage() {
         generateCode(undefined, {
             onSuccess: (data) => {
                 setCode(data.code);
+                setCodeSource('device');
+                setTelegramCodeInput('');
                 setIsPolling(true);
             },
             onError: (err: any) => {
@@ -387,6 +396,33 @@ function LoginPage() {
         });
     };
 
+    const handleTelegramCodeLogin = (event: React.FormEvent) => {
+        event.preventDefault();
+        const normalized = telegramCodeInput.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+        if (normalized.length !== 6) {
+            setError('کد ۶ کاراکتری ربات را کامل وارد کن.');
+            return;
+        }
+        setCode(normalized);
+        setCodeSource('bot');
+        setTelegramCodeInput(normalized);
+        setTelegramNeedsOtp(false);
+        setTelegramOtp('');
+        setError(null);
+        setIsPolling(true);
+    };
+
+    const copyLoginCommand = async () => {
+        if (!code) return;
+        try {
+            await navigator.clipboard.writeText(`/login ${code}`);
+            setCommandCopied(true);
+            window.setTimeout(() => setCommandCopied(false), 1800);
+        } catch {
+            setError('کپی خودکار انجام نشد؛ دستور را با نگه‌داشتن روی آن کپی کن.');
+        }
+    };
+
     const handlePasswordLogin = (event: React.FormEvent) => {
         event.preventDefault();
         setError(null);
@@ -456,6 +492,26 @@ function LoginPage() {
                             <div className="flex items-center gap-2"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-primary-500/15 text-primary-200">۳</span><span>به این صفحه برگرد؛ ورود خودکار انجام می‌شود.</span></div>
                         </div>
                         <div className="mt-4"><BotLink code={code}/></div>
+                        <button type="button" onClick={()=>setShowTelegramCodeLogin(value=>!value)} className="mt-3 flex min-h-10 w-full items-center justify-between rounded-xl border border-white/[.07] bg-dark-950/35 px-3 text-xs text-dark-300 transition hover:border-primary-400/25 hover:text-primary-100">
+                            <span>ورود با دستور یا کد</span>
+                            <svg className={`h-4 w-4 transition ${showTelegramCodeLogin?'rotate-180':''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/></svg>
+                        </button>
+                        {showTelegramCodeLogin&&<div className="mt-2 space-y-3 rounded-2xl border border-white/[.07] bg-dark-950/45 p-3">
+                            {codeSource==='device'&&code&&<div>
+                                <p className="mb-2 text-xs leading-6 text-dark-400">اگر دکمه باز نشد، این دستور را در گفت‌وگوی خصوصی ربات بفرست:</p>
+                                <button type="button" onClick={copyLoginCommand} className="flex min-h-11 w-full items-center justify-between rounded-xl border border-primary-400/15 bg-primary-500/[.07] px-3 text-left font-mono text-sm tracking-wide text-primary-100" dir="ltr">
+                                    <span>/login {code}</span><span className="font-sans text-[11px] text-primary-300">{commandCopied?'کپی شد ✓':'کپی'}</span>
+                                </button>
+                            </div>}
+                            <form onSubmit={handleTelegramCodeLogin} className="space-y-2">
+                                <p className="text-xs leading-6 text-dark-400">یا در ربات فقط <span dir="ltr" className="font-mono text-dark-200">/login</span> را بزن و کدی که می‌دهد اینجا وارد کن:</p>
+                                <div className="flex gap-2">
+                                    <input dir="ltr" inputMode="text" autoComplete="one-time-code" maxLength={6} value={telegramCodeInput} onChange={event=>setTelegramCodeInput(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,6))} className="input min-w-0 flex-1 text-center font-mono tracking-[.28em]" placeholder="ABC123"/>
+                                    <button type="submit" disabled={telegramCodeInput.length!==6} className="btn-secondary shrink-0 px-4 disabled:opacity-40">ورود</button>
+                                </div>
+                            </form>
+                            <p className="text-[11px] leading-5 text-dark-500">کد را داخل گروه نفرست؛ فقط گفت‌وگوی خصوصی ربات امن است.</p>
+                        </div>}
                         {isGenerating&&<div className="mt-3 flex items-center justify-center gap-2 text-xs text-dark-400"><div className="h-4 w-4 animate-spin rounded-full border border-white/15 border-t-primary-400"/>در حال آماده‌سازی ورود امن…</div>}
                         {isPolling&&<div className="mt-3 flex items-center justify-center gap-2 text-xs text-dark-400"><div className="h-2 w-2 animate-pulse rounded-full bg-primary-500"/>منتظر تأیید در تلگرام…</div>}
                         {telegramNeedsOtp&&<div className="mt-4 rounded-2xl border border-primary-400/15 bg-primary-500/[.06] p-3"><p className="mb-3 text-center text-xs leading-6 text-primary-100">تلگرام تأیید شد. حالا کد برنامهٔ تأیید را وارد کن.</p><input dir="ltr" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={telegramOtp} onChange={event=>setTelegramOtp(event.target.value.replace(/\D/g,'').slice(0,6))} className="input w-full text-center font-mono tracking-[.35em]" placeholder="کد ۶ رقمی"/></div>}

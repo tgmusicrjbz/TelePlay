@@ -100,7 +100,7 @@ async def configure_main_client(c) -> None:
             BotCommand("search", "جست‌وجو در فایل‌ها و کشوها"),
             BotCommand("newfolder", "ساخت کشوی جدید"),
             BotCommand("web", "راهنمای ورود به نسخهٔ وب"),
-            BotCommand("login", "تأیید کد ورود دستگاه"),
+            BotCommand("login", "ورود به نسخهٔ وب یا دستگاه دیگر"),
             BotCommand("instagram", "اتصال دریافت پست اینستاگرام"),
             BotCommand("help", "نمایش راهنمای استفاده"),
             BotCommand("logout_all", "خروج از همهٔ دستگاه‌ها"),

@@ -26,7 +26,7 @@ BOT_MESSAGE_DEFINITIONS = (
     BotMessageDefinition("access_denied", "دسترسی محدود", "عمومی", "🚫 **دسترسی محدوده**\n\nاین ربات فقط برای کاربرهای مجاز فعاله.\nشناسهٔ تلگرام شما: `{telegram_id}`", ("telegram_id",)),
     BotMessageDefinition("file_access_denied", "عدم اجازه ذخیره فایل", "عمومی", "🚫 این حساب فعلاً اجازهٔ ذخیره فایل در کمد رو نداره.\nآیدی تلگرام: `{telegram_id}`", ("telegram_id",)),
     BotMessageDefinition("help", "راهنمای ربات", "عمومی", "💡 **راهنمای کمد**\n\nفایل، متن یا لینک بفرست؛ بقیه‌اش با کمد."),
-    BotMessageDefinition("login_confirmed", "تأیید ورود دستگاه", "ورود", "✅ ورود دستگاه شما تأیید شد."),
+    BotMessageDefinition("login_confirmed", "تأیید ورود دستگاه", "ورود", "✅ **ورود تأیید شد**\n\nبه صفحهٔ ورود برگرد؛ کمد خودش باز می‌شه."),
     BotMessageDefinition("login_code_used", "کد ورود استفاده‌شده", "ورود", "⚠️ این کد قبلاً استفاده شده."),
     BotMessageDefinition("login_code_expired", "انقضای کد ورود", "ورود", "❌ اعتبار این کد تموم شده."),
     BotMessageDefinition("link_service_unavailable", "غیرفعال بودن دریافت لینک", "لینک‌ها", "⚙️ دانلود از لینک هنوز روی سرور تنظیم نشده است."),
