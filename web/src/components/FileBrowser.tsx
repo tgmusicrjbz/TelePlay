@@ -30,7 +30,6 @@ import { EmptyState, LoadingState } from './StatePanel';
 const SettingsPage = lazy(() => import('./SettingsPage'));
 const PlaylistBrowser = lazy(() => import('./PlaylistBrowser'));
 const DownloadsPage = lazy(() => import('./DownloadsPage'));
-const MediaStudioPage = lazy(() => import('./MediaStudioPage'));
 const CreatePackModal = lazy(() => import('./PackModal').then(module => ({ default: module.CreatePackModal })));
 const PackViewer = lazy(() => import('./PackModal').then(module => ({ default: module.PackViewer })));
 
@@ -1431,7 +1430,6 @@ export default function FileBrowser() {
                         {activeSection === 'playlists' && <span className="truncate text-sm font-semibold text-white">🎧 پلی‌لیست‌ها</span>}
                         {activeSection === 'settings' && <span className="truncate text-sm font-semibold text-white">⚙️ تنظیمات</span>}
                         {activeSection === 'downloads' && <span className="truncate text-sm font-semibold text-white">📥 دانلودها</span>}
-                        {activeSection === 'studio' && <span className="truncate text-sm font-semibold text-white">🎬 استودیوی رسانه</span>}
 
                         {/* Vertical Div */}
                         <div className="hidden sm:block w-px h-6 bg-white/[0.1]"></div>
@@ -1520,7 +1518,7 @@ export default function FileBrowser() {
                             <button className="mr-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-dark-300 hover:bg-white/10" aria-label="پایان انتخاب گروهی" title="پایان انتخاب" onClick={cancelSelection}><X className="h-5 w-5" /></button>
                         </div>
                     )}
-                    {activeSection === 'playlists' ? <Suspense fallback={<SectionFallback/>}><PlaylistBrowser /></Suspense> : activeSection === 'settings' ? <Suspense fallback={<SectionFallback/>}><SettingsPage /></Suspense> : activeSection === 'studio' ? <Suspense fallback={<SectionFallback/>}><MediaStudioPage /></Suspense> : activeSection === 'downloads' ? <Suspense fallback={<SectionFallback/>}><DownloadsPage /></Suspense> : <>
+                    {activeSection === 'playlists' ? <Suspense fallback={<SectionFallback/>}><PlaylistBrowser /></Suspense> : activeSection === 'settings' ? <Suspense fallback={<SectionFallback/>}><SettingsPage /></Suspense> : activeSection === 'downloads' ? <Suspense fallback={<SectionFallback/>}><DownloadsPage /></Suspense> : <>
                     <div className="max-w-7xl mx-auto mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div className="flex min-w-0 items-center gap-3">
                             <h1 className="truncate text-2xl font-bold tracking-tight text-white sm:text-3xl">{sectionTitle}</h1>

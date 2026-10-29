@@ -159,8 +159,8 @@ interface AppState {
     setPlaylistFiles: (files: TelegramFile[]) => void;
 
     // Navigation Section
-    activeSection: 'files' | 'playlists' | 'activity' | 'studio' | 'downloads' | 'settings';
-    setActiveSection: (section: 'files' | 'playlists' | 'activity' | 'studio' | 'downloads' | 'settings') => void;
+    activeSection: 'files' | 'playlists' | 'activity' | 'downloads' | 'settings';
+    setActiveSection: (section: 'files' | 'playlists' | 'activity' | 'downloads' | 'settings') => void;
 
     // Toast Notifications
     toasts: Array<{ id: string; message: string; type: 'success' | 'error' | 'info' }>;
@@ -182,7 +182,7 @@ export const useAppStore = create<AppState>((set) => ({
     setBreadcrumbs: (breadcrumbs) => set({ breadcrumbs }),
 
     // Navigation Section
-    activeSection: window.location.pathname.startsWith('/playlist') ? 'playlists' : window.location.pathname.startsWith('/studio') ? 'studio' : window.location.pathname.startsWith('/downloads') ? 'downloads' : 'files',
+    activeSection: window.location.pathname.startsWith('/playlist') ? 'playlists' : window.location.pathname.startsWith('/studio') ? 'settings' : window.location.pathname.startsWith('/downloads') ? 'downloads' : 'files',
     setActiveSection: (section) => set({
         activeSection: section,
         currentFolderId: null,

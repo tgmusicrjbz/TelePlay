@@ -20,13 +20,14 @@ const AdminGroupsSettings=lazy(()=>import('./AdminGroupsSettings'));
 const AIModelsAdminPanel=lazy(()=>import('./AIModelsAdminPanel'));
 const InstagramInboxSettings=lazy(()=>import('./InstagramInboxSettings'));
 const HelpCenter=lazy(()=>import('./HelpCenter'));
+const MediaStudioPage=lazy(()=>import('./MediaStudioPage'));
 
-type SettingsView = 'home' | 'accounts' | 'security' | 'sessions' | 'access' | 'storage' | 'files' | 'links' | 'appearance' | 'markdown' | 'admin' | 'admin-users' | 'admin-groups' | 'admin-messages' | 'admin-captions' | 'admin-ai-models' | 'admin-instagram' | 'tags' | 'transfers' | 'tts' | 'help';
+type SettingsView = 'home' | 'accounts' | 'security' | 'sessions' | 'access' | 'storage' | 'files' | 'links' | 'appearance' | 'markdown' | 'admin' | 'admin-users' | 'admin-groups' | 'admin-messages' | 'admin-captions' | 'admin-ai-models' | 'admin-instagram' | 'tags' | 'transfers' | 'tts' | 'studio' | 'help';
 type SettingsHomeLayout = 'cards' | 'list' | 'compact';
 type Permission = 'read' | 'write';
 type SavedColor = { color: string; name: string };
 const SettingsSectionContext = createContext<string | null>(null);
-const settingsViews: SettingsView[] = ['home','accounts','security','sessions','access','storage','files','links','appearance','markdown','admin','admin-users','admin-groups','admin-messages','admin-captions','admin-ai-models','admin-instagram','tags','transfers','tts','help'];
+const settingsViews: SettingsView[] = ['home','accounts','security','sessions','access','storage','files','links','appearance','markdown','admin','admin-users','admin-groups','admin-messages','admin-captions','admin-ai-models','admin-instagram','tags','transfers','tts','studio','help'];
 const settingsSearchIndex: Array<{view:SettingsView;title:string;text:string;admin?:boolean}> = [
     {view:'accounts',title:'حساب‌ها',text:'افزودن حساب، جابه‌جایی و پشتیبان'},
     {view:'security',title:'ورود و امنیت',text:'رمز عبور، بازیابی، گاوصندوق و تأیید دومرحله‌ای'},
@@ -40,6 +41,7 @@ const settingsSearchIndex: Array<{view:SettingsView;title:string;text:string;adm
     {view:'appearance',title:'ظاهر برنامه',text:'تم، رنگ، حالت روشن و موارد قابل نمایش'},
     {view:'markdown',title:'مطالعه و Markdown',text:'فونت، اندازه، تم متن و ابزار مطالعه'},
     {view:'tts',title:'متن و صدا',text:'تبدیل متن به صدا و استخراج متن از صوت'},
+    {view:'studio',title:'استودیوی رسانه',text:'فشرده‌سازی، تبدیل، برش و ادغام فایل‌های رسانه‌ای'},
     {view:'help',title:'راهنمای کمد',text:'توضیح امکانات و روش استفاده'},
     {view:'admin-users',title:'کاربران',text:'درخواست‌ها، کاربران فعال و غیرفعال',admin:true},
     {view:'admin-groups',title:'گروه‌ها',text:'تأیید، محدودیت و میزان مصرف گروه‌ها',admin:true},
@@ -56,6 +58,7 @@ export default function SettingsPage() {
         const target = localStorage.getItem('komod-settings-target') as SettingsView | null;
         localStorage.removeItem('komod-settings-target');
         if (target === 'tts') return 'tts';
+        if (window.location.pathname.startsWith('/studio')) return 'studio';
         const requested = new URLSearchParams(window.location.search).get('settings') as SettingsView | null;
         return requested && settingsViews.includes(requested) ? requested : 'home';
     });
@@ -165,6 +168,7 @@ export default function SettingsPage() {
     useEffect(()=>{window.dispatchEvent(new CustomEvent('komod-settings-view',{detail:{view}}))},[view]);
     useEffect(()=>{
         const url=new URL(window.location.href);
+        if(window.location.pathname.startsWith('/studio'))url.pathname='/';
         if(view==='home')url.searchParams.delete('settings');else url.searchParams.set('settings',view);
         if(activeSubsection&&view!=='home')url.searchParams.set('section',activeSubsection);else url.searchParams.delete('section');
         window.history.replaceState(window.history.state,'',`${url.pathname}${url.search}${url.hash}`);
@@ -188,11 +192,7 @@ export default function SettingsPage() {
     }, [view]);
 
     const chooseTheme = (next: ActiveTheme) => { setTheme(next); localStorage.setItem('komod-color-theme', next); applyTheme(next); };
-    const openMediaStudio = () => {
-        setActiveSection('studio');
-        if (window.location.pathname !== '/studio') window.history.pushState({},'', '/studio');
-        window.dispatchEvent(new PopStateEvent('popstate'));
-    };
+    const openMediaStudio = () => { setActiveSubsection(null); setView('studio'); };
     const chooseAppearanceMode = (next: AppearanceMode) => {
         setAppearanceMode(next);
         localStorage.setItem('komod-appearance-mode', next);
@@ -419,6 +419,7 @@ export default function SettingsPage() {
 
         {view === 'tags' && <SettingsLazy><TagSettingsPanel activeSection={selectedSubsection}/></SettingsLazy>}
         {view === 'transfers' && <SettingsLazy><TransferCenter/></SettingsLazy>}
+        {view === 'studio' && <SettingsLazy><MediaStudioPage/></SettingsLazy>}
 
         {view === 'security' && <div className="space-y-4"><Card id="security-login" icon={<KeyRound/>} title={credentials?.enabled?'تغییر اطلاعات ورود':'فعال‌کردن ورود مستقل'}><div className="mt-4 space-y-3"><label className="block text-xs text-dark-400">نام کاربری<input dir="rtl" autoComplete="username" value={credentialUsername} onChange={event=>setCredentialUsername(event.target.value.toLowerCase())} className="input mt-1.5 w-full text-right" placeholder="komod_user"/></label>{credentials?.enabled&&<label className="block text-xs text-dark-400">رمز فعلی<input dir="rtl" type="password" autoComplete="current-password" value={currentPassword} onChange={event=>setCurrentPassword(event.target.value)} className="input mt-1.5 w-full text-right" placeholder="برای تأیید تغییرات"/></label>}<div className="grid gap-3 sm:grid-cols-2"><label className="block text-xs text-dark-400">رمز جدید<input dir="rtl" type="password" autoComplete="new-password" value={newPassword} onChange={event=>setNewPassword(event.target.value)} className="input mt-1.5 w-full text-right" placeholder="حداقل ۸ نویسه"/></label><label className="block text-xs text-dark-400">تکرار رمز جدید<input dir="rtl" type="password" autoComplete="new-password" value={repeatPassword} onChange={event=>setRepeatPassword(event.target.value)} className="input mt-1.5 w-full text-right" placeholder="تکرار رمز"/></label></div><button disabled={updateCredentials.isPending||credentialUsername.trim().length<4||(!credentials?.enabled&&newPassword.length<8)||(credentials?.enabled&&!currentPassword)} onClick={()=>void saveCredentials()} className="btn-primary min-h-11 w-full disabled:opacity-50">{updateCredentials.isPending?'در حال ذخیره…':'ذخیره اطلاعات ورود'}</button>{credentialMessage&&<p className={`rounded-xl px-3 py-2 text-sm ${credentialMessage.kind==='ok'?'bg-emerald-500/10 text-emerald-300':'bg-red-500/10 text-red-300'}`}>{credentialMessage.text}</p>}</div></Card><Card id="security-vault" icon={<LockKeyhole/>} title="گاوصندوق فایل‌ها" subtitle="فایل‌ها و کشوهای مخفی بدون رمز در فهرست و API نمایش داده نمی‌شوند."><div className="mt-4 space-y-3"><input dir="rtl" type="password" value={vaultPassword} onChange={event=>setVaultPasswordValue(event.target.value)} className="input w-full text-right" placeholder={vaultStatus?.configured?'رمز گاوصندوق':'یک رمز حداقل ۶ نویسه‌ای'}/><div className="grid grid-cols-2 gap-2"><button disabled={vaultPassword.length<6||unlockVault.isPending} className="btn-secondary min-h-11 disabled:opacity-40" onClick={async()=>{try{await unlockVault.mutateAsync(vaultPassword);setVaultMessage({kind:'ok',text:'گاوصندوق برای این نشست باز شد.'});setVaultPasswordValue('');window.dispatchEvent(new Event('komod-vault-changed'));}catch(error:any){setVaultMessage({kind:'error',text:error?.response?.data?.detail||'رمز درست نیست.'});}}}>باز کردن</button><button disabled={vaultPassword.length<6||setVaultPassword.isPending} className="btn-primary min-h-11 disabled:opacity-40" onClick={async()=>{try{await setVaultPassword.mutateAsync(vaultPassword);setVaultMessage({kind:'ok',text:vaultStatus?.configured?'رمز گاوصندوق عوض شد.':'گاوصندوق فعال شد.'});setVaultPasswordValue('');window.dispatchEvent(new Event('komod-vault-changed'));}catch(error:any){setVaultMessage({kind:'error',text:error?.response?.data?.detail||'ذخیره رمز انجام نشد.'});}}}>{vaultStatus?.configured?'تغییر رمز':'ساخت گاوصندوق'}</button></div>{vaultMessage&&<p className={`rounded-xl px-3 py-2 text-sm ${vaultMessage.kind==='ok'?'bg-emerald-500/10 text-emerald-300':'bg-red-500/10 text-red-300'}`}>{vaultMessage.text}</p>}</div></Card><Card id="security-vault" icon={<Shield/>} title="محافظت از حساب"><ul className="mt-3 list-disc space-y-2 pr-5 text-sm leading-7 text-dark-400"><li>پس از پنج تلاش ناموفق، ورود ۱۵ دقیقه قفل می‌شود.</li><li>ورودهای هر دستگاه در بخش نشست‌ها قابل مشاهده و لغو هستند.</li><li>اگر رمز را فراموش کردی، ورود با تلگرام همچنان مسیر بازیابی امن است.</li></ul></Card></div>}
 
@@ -512,8 +513,8 @@ function SettingsLazy({children}:{children:React.ReactNode}) {
     return <Suspense fallback={<div className="space-y-3" aria-label="در حال بارگذاری بخش تنظیمات"><div className="h-28 animate-pulse rounded-2xl border border-white/[.06] bg-dark-900/55"/><div className="h-20 animate-pulse rounded-2xl border border-white/[.06] bg-dark-900/40"/></div>}>{children}</Suspense>;
 }
 
-function viewTitle(view: SettingsView) { return ({ home:'تنظیمات', accounts:'حساب‌ها', security:'ورود و امنیت', sessions:'مدیریت نشست‌ها', access:'دسترسی و اشتراک‌گذاری', storage:'فضای ذخیره‌سازی', files:'فایل‌ها و مقصدها', links:'لینک‌ها و پایش', appearance:'ظاهر برنامه', markdown:'مطالعه و Markdown', admin:'گزارش و سلامت', 'admin-users':'مدیریت کاربران', 'admin-groups':'مدیریت گروه‌ها', 'admin-messages':'پیام‌های ربات', 'admin-captions':'متن خروجی فایل‌ها', 'admin-ai-models':'مدل‌های هوش مصنوعی', 'admin-instagram':'دریافت از اینستاگرام', tags:'مدیریت تگ‌ها', transfers:'مرکز انتقال‌ها', tts:'متن و صدا', help:'راهنمای کمد' })[view]; }
-function viewSubtitle(view: SettingsView) { return ({ home:'', accounts:'', security:'', sessions:'', access:'مشخص کن چه کسی کمدت را ببیند یا داخلش فایل ذخیره کند.', storage:'', files:'مقصد فایل‌های تازه و لینک‌ها را انتخاب کن.', links:'', appearance:'', markdown:'', admin:'', 'admin-users':'', 'admin-groups':'', 'admin-messages':'', 'admin-captions':'متن زیر فایل‌های خروجی را برای همه کاربران تنظیم کن.', 'admin-ai-models':'', 'admin-instagram':'', tags:'', transfers:'همه انتقال‌های فعال و اخیر را یکجا مدیریت کن.', tts:'', help:'' })[view]; }
+function viewTitle(view: SettingsView) { return ({ home:'تنظیمات', accounts:'حساب‌ها', security:'ورود و امنیت', sessions:'مدیریت نشست‌ها', access:'دسترسی و اشتراک‌گذاری', storage:'فضای ذخیره‌سازی', files:'فایل‌ها و مقصدها', links:'لینک‌ها و پایش', appearance:'ظاهر برنامه', markdown:'مطالعه و Markdown', admin:'گزارش و سلامت', 'admin-users':'مدیریت کاربران', 'admin-groups':'مدیریت گروه‌ها', 'admin-messages':'پیام‌های ربات', 'admin-captions':'متن خروجی فایل‌ها', 'admin-ai-models':'مدل‌های هوش مصنوعی', 'admin-instagram':'دریافت از اینستاگرام', tags:'مدیریت تگ‌ها', transfers:'مرکز انتقال‌ها', tts:'متن و صدا', studio:'استودیوی رسانه', help:'راهنمای کمد' })[view]; }
+function viewSubtitle(view: SettingsView) { return ({ home:'', accounts:'', security:'', sessions:'', access:'مشخص کن چه کسی کمدت را ببیند یا داخلش فایل ذخیره کند.', storage:'', files:'مقصد فایل‌های تازه و لینک‌ها را انتخاب کن.', links:'', appearance:'', markdown:'', admin:'', 'admin-users':'', 'admin-groups':'', 'admin-messages':'', 'admin-captions':'متن زیر فایل‌های خروجی را برای همه کاربران تنظیم کن.', 'admin-ai-models':'', 'admin-instagram':'', tags:'', transfers:'همه انتقال‌های فعال و اخیر را یکجا مدیریت کن.', tts:'', studio:'', help:'' })[view]; }
 function securityEventLabel(type: string) { return ({ login_success:'ورود موفق به حساب', login_failed:'تلاش ناموفق برای ورود', credentials_updated:'تغییر اطلاعات ورود', two_factor_enabled:'فعال‌سازی تأیید دومرحله‌ای', two_factor_disabled:'غیرفعال‌سازی تأیید دومرحله‌ای', sessions_revoked_all:'خروج از همه نشست‌ها', sessions_revoked_others:'خروج از نشست‌های دیگر', session_revoked:'لغو یک نشست', public_link_created:'ساخت پیوند عمومی', public_link_revoked:'لغو پیوند عمومی', public_links_revoked:'لغو گروهی پیوندهای عمومی', public_link_unlocked:'باز شدن پیوند رمزدار', public_link_password_failed:'رمز اشتباه برای پیوند عمومی', public_view:'مشاهده پیوند عمومی', account_backup_restored:'بازیابی نسخه پشتیبان حساب', workspace_grant_updated:'تغییر دسترسی اشتراک‌گذاری', workspace_grant_revoked:'لغو دسترسی اشتراک‌گذاری', vault_password_updated:'تغییر رمز گاوصندوق', vault_unlocked:'باز شدن گاوصندوق', vault_unlock_failed:'رمز اشتباه گاوصندوق' } as Record<string,string>)[type] || 'رویداد امنیتی'; }
 function permissionLabel(permission: 'owner' | Permission) { return permission === 'owner' ? 'کمد خودم' : permission === 'write' ? 'مشاهده و ذخیره' : 'فقط مشاهده'; }
 function PermissionSelect({ value, onChange }:{ value:Permission; onChange:(value:Permission)=>void }) { return <CustomSelect value={value} onChange={onChange} options={[{value:'read',label:'👁️ فقط مشاهده'},{value:'write',label:'📥 مشاهده و ذخیره'}]}/>; }
