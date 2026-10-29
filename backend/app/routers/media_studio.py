@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import get_current_user
 from ..database import get_db
-from ..media_studio import AUDIO_FORMATS, IMAGE_FORMATS, RUNNING_STATES, VIDEO_FORMATS, media_studio, new_job_id
+from ..media_studio import AUDIO_FORMATS, CODEC_COMPATIBILITY, IMAGE_FORMATS, RUNNING_STATES, VIDEO_FORMATS, media_studio, new_job_id, output_extension
 from ..models import File, Folder, ProcessingJob, User
 
 router = APIRouter(prefix="/media-studio", tags=["Media Studio"])
@@ -40,11 +40,14 @@ def serialize(job: ProcessingJob):
 
 @router.get("/capabilities")
 async def capabilities(_: User = Depends(get_current_user)):
+    codecs=await media_studio.supported_codecs()
     return {"available":media_studio.available,"max_batch":12,"max_concurrent":2,
             "engine":"ffmpeg" if media_studio.available else None,
             "operations":["compress","convert","extract_audio","trim","merge"],
             "formats":{"video":sorted(VIDEO_FORMATS),"audio":sorted(AUDIO_FORMATS),"image":sorted(IMAGE_FORMATS)},
-            "codecs":await media_studio.supported_codecs(),"presets":["smallest","balanced","best","web","social","custom"]}
+            "codecs":codecs,
+            "codec_compatibility":{container:[codec for codec in compatible if codec in codecs] for container,compatible in CODEC_COMPATIBILITY.items()},
+            "presets":["smallest","balanced","best","web","social","custom"]}
 
 
 @router.get("/jobs")
@@ -57,12 +60,26 @@ async def jobs(current_user: User = Depends(get_current_user), db: AsyncSession 
 async def create(payload: MediaJobCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     if not media_studio.available: raise HTTPException(503,"FFmpeg روی سرویس پردازش نصب نیست.")
     active=await db.scalar(select(func.count()).select_from(ProcessingJob).where(ProcessingJob.user_id==current_user.id,ProcessingJob.kind=="media_studio",ProcessingJob.state.in_(RUNNING_STATES)))
-    if (active or 0)>=8: raise HTTPException(429,"حداکثر ۸ پردازش هم‌زمان در صف مجاز است.")
+    if (active or 0)>=24: raise HTTPException(429,"صف پردازش پر است؛ چند دقیقه دیگر دوباره امتحان کن.")
     if payload.folder_id is not None and not await db.scalar(select(Folder.id).where(Folder.id==payload.folder_id,Folder.user_id==current_user.id)): raise HTTPException(404,"کشوی مقصد پیدا نشد.")
     files=list((await db.execute(select(File).where(File.id.in_(payload.file_ids),File.user_id==current_user.id))).scalars())
     if len(files)!=len(set(payload.file_ids)): raise HTTPException(404,"یکی از فایل‌های ورودی پیدا نشد.")
-    if payload.operation=="extract_audio" and files[0].file_type!="video": raise HTTPException(400,"استخراج صوت فقط برای ویدیو قابل انجام است.")
-    if payload.operation=="merge" and len({item.file_type for item in files})!=1: raise HTTPException(400,"برای ادغام، نوع همه فایل‌ها باید یکسان باشد.")
+    source_types={item.file_type for item in files}; source_type=files[0].file_type
+    allowed_types={"compress":{"video","audio","image"},"convert":{"video","audio","image"},"extract_audio":{"video"},"trim":{"video","audio"},"merge":{"video","audio"}}[payload.operation]
+    if source_type not in allowed_types or any(file_type not in allowed_types for file_type in source_types): raise HTTPException(400,"نوع فایل برای این ابزار مناسب نیست.")
+    if payload.operation=="merge" and len(source_types)!=1: raise HTTPException(400,"برای ادغام، نوع همه فایل‌ها باید یکسان باشد.")
+    options=dict(payload.options or {}); options["format"]=output_extension(payload.operation,source_type,options)
+    if payload.operation=="trim":
+        try: start,end=float(options.get("start") or 0),float(options.get("end") or 0)
+        except (TypeError,ValueError): raise HTTPException(400,"زمان شروع یا پایان معتبر نیست.")
+        if end and end<=start: raise HTTPException(400,"زمان پایان باید بعد از زمان شروع باشد.")
+    if source_type=="video" and payload.operation!="extract_audio":
+        codec_encoders=await media_studio.supported_codec_encoders(); compatible=CODEC_COMPATIBILITY.get(options["format"],())
+        available=[codec for codec in compatible if codec in codec_encoders]
+        if not available: raise HTTPException(503,"کدک سازگار برای فرمت خروجی روی سرویس نصب نیست.")
+        codec=str(options.get("codec") or available[0]).lower(); codec=codec if codec in available else available[0]
+        options["codec"],options["_codec_encoder"]=codec,codec_encoders[codec]
+    payload.options=options
     job=ProcessingJob(id=new_job_id(),user_id=current_user.id,kind="media_studio",state="queued",title=payload.title.strip(),progress=0,message="در صف پردازش",payload_json=json.dumps(payload.model_dump(),ensure_ascii=False),result_json="{}")
     db.add(job); await db.commit(); media_studio.start(job.id)
     return serialize(job)
