@@ -6,6 +6,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { cachedCurrentUser, clearCurrentAccountSession, updateCurrentAccountTokens } from './accounts';
 import { queueOfflineMutation, shouldQueueOffline } from './offlineMutations';
 import { isEffectivelyOnline, markServerReachable, markServerUnreachable } from './connectivity';
+import { isNativeApp } from './runtime';
 
 const normalizeServerOrigin = (value?: string | null) => {
     const trimmed = String(value || '').trim().replace(/\/+$/, '');
@@ -22,9 +23,15 @@ const normalizeServerOrigin = (value?: string | null) => {
 // hijack requests while developing on localhost: Vite must proxy those calls
 // to the local API instance.
 const runningLocally = () => ['localhost', '127.0.0.1'].includes(window.location.hostname);
-export const getServerOrigin = () => runningLocally()
-    ? window.location.origin
-    : normalizeServerOrigin(localStorage.getItem('komod-server-origin'));
+const bundledServerOrigin = normalizeServerOrigin(import.meta.env.VITE_API_ORIGIN);
+export const getServerOrigin = () => {
+    if (isNativeApp()) {
+        return normalizeServerOrigin(localStorage.getItem('komod-server-origin') || bundledServerOrigin);
+    }
+    return runningLocally()
+        ? window.location.origin
+        : normalizeServerOrigin(localStorage.getItem('komod-server-origin'));
+};
 export const resolveServerUrl = (value: string) => value.startsWith('/') ? `${getServerOrigin()}${value}` : value;
 
 // Types

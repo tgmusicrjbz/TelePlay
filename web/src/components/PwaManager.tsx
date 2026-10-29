@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Download, PlusSquare, RefreshCw, Share, WifiOff, X } from 'lucide-react';
 import { useConnectivity } from '../lib/connectivity';
+import { isNativeApp } from '../lib/runtime';
 
 interface InstallPromptEvent extends Event {
     prompt: () => Promise<void>;
@@ -11,6 +12,7 @@ const isStandalone = () => window.matchMedia('(display-mode: standalone)').match
     || (navigator as Navigator & { standalone?: boolean }).standalone === true;
 
 export default function PwaManager() {
+    const nativeApp = isNativeApp();
     const connectivity = useConnectivity();
     const online = connectivity !== 'offline';
     const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
@@ -36,7 +38,7 @@ export default function PwaManager() {
     }, []);
 
     useEffect(() => {
-        if (!('serviceWorker' in navigator) || !import.meta.env.PROD) return;
+        if (nativeApp || !('serviceWorker' in navigator) || !import.meta.env.PROD) return;
         let refreshing = false;
         const register = async () => {
             try {
@@ -83,7 +85,7 @@ export default function PwaManager() {
             cleanup?.();
             navigator.serviceWorker.removeEventListener('controllerchange', controllerChanged);
         };
-    }, []);
+    }, [nativeApp]);
 
     const install = async () => {
         if (installPrompt) {
@@ -110,7 +112,7 @@ export default function PwaManager() {
     };
 
     const applyUpdate = () => waitingWorker?.postMessage({ type: 'SKIP_WAITING' });
-    const showInstall = !installed && (Boolean(installPrompt) || isIos);
+    const showInstall = !nativeApp && !installed && (Boolean(installPrompt) || isIos);
 
     return <>
         {!online && <div className="fixed inset-x-0 top-0 z-[200] flex items-center justify-center gap-2 bg-amber-500 px-4 py-2 text-center text-xs font-semibold text-black shadow-lg" role="status">

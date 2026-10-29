@@ -1,0 +1,17 @@
+def androidMavenMirror = System.getenv('ANDROID_MAVEN_MIRROR')
+
+if (androidMavenMirror) {
+    settingsEvaluated { settings ->
+        settings.pluginManagement.repositories {
+            maven { url androidMavenMirror }
+        }
+    }
+    allprojects {
+        buildscript.repositories {
+            maven { url androidMavenMirror }
+        }
+        repositories {
+            maven { url androidMavenMirror }
+        }
+    }
+}

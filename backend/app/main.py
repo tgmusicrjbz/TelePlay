@@ -208,6 +208,8 @@ allowed_origins = [
     "http://localhost:5173",  # Vite dev server
     "http://127.0.0.1:3000",
     "http://127.0.0.1:5173",
+    "https://localhost",  # Bundled Capacitor Android app
+    "capacitor://localhost",  # Reserved for a future iOS build
 ]
 
 app.add_middleware(

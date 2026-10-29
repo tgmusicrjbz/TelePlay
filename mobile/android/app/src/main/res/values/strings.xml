@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">کمد</string>
+    <string name="title_activity_main">کمد</string>
+    <string name="package_name">ir.rjbzmhd.komod</string>
+    <string name="custom_url_scheme">ir.rjbzmhd.komod</string>
+</resources>
