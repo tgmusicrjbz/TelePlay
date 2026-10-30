@@ -9,6 +9,7 @@ import { syncOfflineTextOutbox } from './lib/offline';
 import { syncOfflineMutations } from './lib/offlineMutations';
 import { useAppStore } from './lib/store';
 import { checkServerReachability, isEffectivelyOnline, useConnectivity } from './lib/connectivity';
+import { clearBrokenAppShell } from './lib/appRecovery';
 
 function lazyWithRecovery(loader:()=>Promise<{default:()=>JSX.Element}>,key:string){
     return lazy(async()=>{
@@ -17,9 +18,10 @@ function lazyWithRecovery(loader:()=>Promise<{default:()=>JSX.Element}>,key:stri
         catch(error){
             if(navigator.onLine&&!sessionStorage.getItem(marker)){
                 sessionStorage.setItem(marker,'1');
-                const registrations=await navigator.serviceWorker?.getRegistrations().catch(()=>[])||[];
-                await Promise.all(registrations.map(registration=>registration.update().catch(()=>undefined)));
-                window.location.reload();
+                await clearBrokenAppShell();
+                const target=new URL(window.location.href);
+                target.searchParams.set('recover',String(Date.now()));
+                window.location.replace(target.toString());
             }
             throw error;
         }

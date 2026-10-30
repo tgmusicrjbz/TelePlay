@@ -1,4 +1,5 @@
 import React from 'react';
+import { recoverApplication } from '../lib/appRecovery';
 
 type State = { failed: boolean; errorId: string };
 
@@ -23,10 +24,7 @@ export default class AppErrorBoundary extends React.Component<React.PropsWithChi
     }
 
     private recover(path?: string) {
-        Object.keys(sessionStorage).filter(key => key.startsWith('komod-lazy-retry:')).forEach(key => sessionStorage.removeItem(key));
-        const target = path || `${window.location.pathname}${window.location.search}`;
-        const separator = target.includes('?') ? '&' : '?';
-        window.location.replace(`${target}${separator}recover=${Date.now()}`);
+        void recoverApplication(path);
     }
 
     render() {

@@ -70,13 +70,21 @@
         };
         setTimeout(showIfBlank, 5000);
         recovery?.addEventListener('click', async () => {
-          recovery.textContent = 'در حال بازیابی…';
+          recovery.disabled = true;
+          recovery.innerHTML = '<span style="display:grid;width:28px;height:28px;place-items:center;border-radius:10px;background:rgb(168 85 247 / .16);color:rgb(216 180 254)">↻</span><span>در حال بازیابی…</span>';
           try {
-            const registration = await navigator.serviceWorker?.getRegistration();
-            registration?.active?.postMessage({ type: 'SKIP_WAITING' });
+            const tasks = [];
+            if ('serviceWorker' in navigator) {
+              tasks.push(navigator.serviceWorker.getRegistrations().then(items => Promise.allSettled(items.map(item => item.unregister()))));
+            }
+            if ('caches' in window) {
+              tasks.push(caches.keys().then(keys => Promise.allSettled(keys.filter(key => key.startsWith('komod-shell-')).map(key => caches.delete(key)))));
+            }
+            await Promise.allSettled(tasks);
           } catch {}
-          location.replace('/');
-          setTimeout(() => location.reload(), 250);
+          const target = new URL('/', location.origin);
+          target.searchParams.set('recover', String(Date.now()));
+          location.replace(target.toString());
         });
         window.addEventListener('komod-app-ready', () => { ready = true; if (recovery) recovery.style.display = 'none'; });
       })();
