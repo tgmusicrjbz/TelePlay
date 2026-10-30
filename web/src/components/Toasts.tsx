@@ -17,6 +17,8 @@ export default function Toasts() {
 
 function ToastItem({ toast, onDismiss }: { toast: { id: string; message: string; type: 'success' | 'error' | 'info' }; onDismiss: () => void }) {
     const [leaving, setLeaving] = useState(false);
+    const [dragX, setDragX] = useState(0);
+    const dragRef = useRef<{ pointerId: number; startX: number; startedAt: number } | null>(null);
     const dismissRef = useRef(onDismiss);
     const dismissedRef = useRef(false);
     useEffect(() => { dismissRef.current = onDismiss; }, [onDismiss]);
@@ -42,9 +44,29 @@ function ToastItem({ toast, onDismiss }: { toast: { id: string; message: string;
 
     const tone = toast.type === 'success' ? 'border-emerald-400/25' : toast.type === 'error' ? 'border-red-400/30' : 'border-sky-400/25';
     const bar = toast.type === 'success' ? 'bg-emerald-400' : toast.type === 'error' ? 'bg-red-400' : 'bg-sky-400';
+    const startSwipe = (event: React.PointerEvent<HTMLDivElement>) => {
+        if ((event.target as HTMLElement).closest('button')) return;
+        dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startedAt: performance.now() };
+        event.currentTarget.setPointerCapture(event.pointerId);
+    };
+    const moveSwipe = (event: React.PointerEvent<HTMLDivElement>) => {
+        const drag = dragRef.current;
+        if (!drag || drag.pointerId !== event.pointerId) return;
+        setDragX(event.clientX - drag.startX);
+    };
+    const finishSwipe = (event: React.PointerEvent<HTMLDivElement>) => {
+        const drag = dragRef.current;
+        if (!drag || drag.pointerId !== event.pointerId) return;
+        dragRef.current = null;
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+        const elapsed = Math.max(1, performance.now() - drag.startedAt);
+        const velocity = Math.abs(dragX) / elapsed;
+        if (Math.abs(dragX) >= 72 || (Math.abs(dragX) >= 28 && velocity > .45)) dismiss();
+        else setDragX(0);
+    };
 
     return (
-        <div dir="rtl" role={toast.type === 'error' ? 'alert' : 'status'} className={`app-toast pointer-events-auto relative flex min-h-14 items-center gap-2.5 overflow-hidden rounded-2xl border px-3 py-2.5 ${tone} ${leaving ? '-translate-y-2 opacity-0 md:translate-y-2' : 'animate-slide-up opacity-100'}`}>
+        <div dir="rtl" role={toast.type === 'error' ? 'alert' : 'status'} onPointerDown={startSwipe} onPointerMove={moveSwipe} onPointerUp={finishSwipe} onPointerCancel={finishSwipe} style={{ touchAction: 'pan-y', transform: leaving ? undefined : `translateX(${dragX}px)`, opacity: leaving ? undefined : Math.max(.2, 1 - Math.abs(dragX) / 240), transition: dragRef.current ? 'none' : 'transform 180ms ease, opacity 180ms ease' }} className={`app-toast pointer-events-auto relative flex min-h-14 select-none items-center gap-2.5 overflow-hidden rounded-2xl border px-3 py-2.5 ${tone} ${leaving ? '-translate-y-2 opacity-0 md:translate-y-2' : dragX === 0 ? 'animate-slide-up opacity-100' : ''}`}>
             <span className={`absolute inset-y-2 right-0 w-0.5 rounded-full ${bar}`} />
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white/[.05]">{getIcon()}</span>
             <p className="min-w-0 flex-1 text-right text-xs font-medium leading-6 text-dark-100">{toast.message}</p>

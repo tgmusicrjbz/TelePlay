@@ -771,6 +771,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
             onPause={handlePause}
             onError={handleError}
             onEnded={handleEnded}
+            loop={repeatMode === 'one' && !stopAfterCurrent && sleepMode !== 'track'}
             controls={false}
             playsInline
             preload="auto"
@@ -787,6 +788,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
             onPause={handlePause}
             onError={handleError}
             onEnded={handleEnded}
+            loop={repeatMode === 'one' && !stopAfterCurrent && sleepMode !== 'track'}
             preload="auto"
         />
     );

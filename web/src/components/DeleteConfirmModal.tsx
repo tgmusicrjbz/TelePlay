@@ -2,24 +2,20 @@
  * DeleteConfirmModal - confirmation dialog for deleting files/folders
  */
 import { Trash2 } from 'lucide-react';
-import { useState } from 'react';
 import ModalShell from './ModalShell';
 
 interface DeleteConfirmModalProps {
     type: 'file' | 'folder' | 'multiple';
     name?: string;
     count?: number;
-    onConfirm: (deleteContents: boolean) => Promise<void>;
+    onConfirm: (deleteContents: boolean) => Promise<void> | void;
     onClose: () => void;
 }
 
 export default function DeleteConfirmModal({ type, name, count = 1, onConfirm, onClose }: DeleteConfirmModalProps) {
-    const [isDeleting, setIsDeleting] = useState(false);
-    const confirm = async (deleteContents: boolean) => {
-        if (isDeleting) return;
-        setIsDeleting(true);
-        try { await onConfirm(deleteContents); }
-        finally { setIsDeleting(false); }
+    const confirm = (deleteContents: boolean) => {
+        onClose();
+        void Promise.resolve(onConfirm(deleteContents));
     };
     const itemLabel = type === 'folder' ? 'کشو' : 'فایل';
     const title = count > 1 ? `حذف ${count.toLocaleString('fa-IR')} مورد` : `حذف ${itemLabel}`;
@@ -36,11 +32,11 @@ export default function DeleteConfirmModal({ type, name, count = 1, onConfirm, o
                 </div>
 
                 <div className="grid gap-2 sm:grid-cols-2">
-                    <button onClick={() => confirm(true)} disabled={isDeleting} className={`min-h-11 w-full rounded-xl bg-red-600 px-4 py-2 font-medium transition-colors hover:bg-red-500 disabled:opacity-50 ${includesFolder?'':'sm:col-span-2'}`}>
-                        {isDeleting ? 'در حال حذف…' : includesFolder ? 'حذف کشو و محتویات' : 'حذف فایل'}
+                    <button onClick={() => confirm(true)} className={`min-h-11 w-full rounded-xl bg-red-600 px-4 py-2 font-medium transition-colors hover:bg-red-500 ${includesFolder?'':'sm:col-span-2'}`}>
+                        {includesFolder ? 'حذف کشو و محتویات' : 'حذف فایل'}
                     </button>
-                    {includesFolder && <button onClick={() => confirm(false)} disabled={isDeleting} className="min-h-11 rounded-xl border border-white/10 bg-dark-800 px-4 py-2 font-medium hover:bg-dark-700 disabled:opacity-50">فقط حذف کشو</button>}
-                    <button onClick={onClose} className="min-h-11 rounded-xl px-4 py-2 text-dark-400 transition-colors hover:bg-white/[.04] hover:text-white sm:col-span-2">{isDeleting?'بستن و ادامه در پس‌زمینه':'بی‌خیال'}</button>
+                    {includesFolder && <button onClick={() => confirm(false)} className="min-h-11 rounded-xl border border-white/10 bg-dark-800 px-4 py-2 font-medium hover:bg-dark-700">فقط حذف کشو</button>}
+                    <button onClick={onClose} className="min-h-11 rounded-xl px-4 py-2 text-dark-400 transition-colors hover:bg-white/[.04] hover:text-white sm:col-span-2">بی‌خیال</button>
                 </div>
         </ModalShell>
     );

@@ -1034,12 +1034,23 @@ export const useAddPackItems = () => usePackMutation(async ({ id, fileIds }: { i
     (await api.post<Pack>(`/packs/${id}/items`, { file_ids: fileIds }, { timeout: 60_000 })).data);
 export const useRemovePackItem = () => usePackMutation(async ({ id, itemId }: { id: number; itemId: number }) =>
     (await api.delete<Pack>(`/packs/${id}/items/${itemId}`, { timeout: 30_000 })).data);
+export const useRemovePackItems = () => usePackMutation(async ({ id, itemIds }: { id: number; itemIds: number[] }) =>
+    (await api.post<Pack>(`/packs/${id}/items/batch-remove`, { item_ids: itemIds }, { timeout: 30_000 })).data);
 export const useReorderPack = () => usePackMutation(async ({ id, itemIds }: { id: number; itemIds: number[] }) =>
     (await api.put<Pack>(`/packs/${id}/reorder`, { item_ids: itemIds })).data);
 export const useDeletePack = () => {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (id: number) => { await api.delete(`/packs/${id}`); return id; },
+        mutationFn: async (value: number | { id:number; deleteFiles?:boolean }) => {
+            const id=typeof value==='number'?value:value.id;
+            if(typeof value!=='number'&&value.deleteFiles){
+                const pack=(await api.get<Pack>(`/packs/${id}`)).data;
+                const ids=[...new Set(pack.items.map(item=>item.file.id))];
+                for(let index=0;index<ids.length;index+=100) await api.post('/files/batch-delete',ids.slice(index,index+100));
+            }
+            await api.delete(`/packs/${id}`);
+            return id;
+        },
         onSuccess: id => {
             queryClient.removeQueries({ queryKey: ['packs', 'detail', id] });
             queryClient.setQueriesData<PackSummary[]>({predicate:query=>query.queryKey[0]==='packs'&&query.queryKey[1]!=='detail'},current=>current?.filter(item=>item.id!==id));

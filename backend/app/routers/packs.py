@@ -8,7 +8,7 @@ from ..auth import get_current_user
 from ..database import get_db
 from ..models import File, Folder, Pack, PackItem, User
 from ..schemas import (
-    FileResponse, PackAddItems, PackCreate, PackItemResponse, PackReorder,
+    FileResponse, PackAddItems, PackCreate, PackItemResponse, PackRemoveItems, PackReorder,
     PackResponse, PackSummary, PackUpdate,
 )
 from ..services import add_urls_to_file
@@ -182,6 +182,22 @@ async def add_pack_items(pack_id: int, payload: PackAddItems, db: AsyncSession =
     for file in files:
         if file.id not in existing:
             db.add(PackItem(pack_id=pack.id, file_id=file.id, position=position)); position += 1
+    await db.commit()
+    return _pack_response(await _owned_pack(db, pack_id, current_user.id))
+
+
+@router.post("/{pack_id}/items/batch-remove", response_model=PackResponse)
+async def remove_pack_items(pack_id: int, payload: PackRemoveItems, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    pack = await _owned_pack(db, pack_id, current_user.id)
+    selected = set(payload.item_ids)
+    owned = {item.id for item in pack.items}
+    if not selected.issubset(owned):
+        raise HTTPException(status_code=404, detail="بعضی از آیتم‌های جعبه پیدا نشدند")
+    await db.execute(delete(PackItem).where(PackItem.pack_id == pack.id, PackItem.id.in_(selected)))
+    await db.flush()
+    remaining = (await db.execute(select(PackItem).where(PackItem.pack_id == pack.id).order_by(PackItem.position, PackItem.id))).scalars().all()
+    for position, candidate in enumerate(remaining):
+        candidate.position = position
     await db.commit()
     return _pack_response(await _owned_pack(db, pack_id, current_user.id))
 

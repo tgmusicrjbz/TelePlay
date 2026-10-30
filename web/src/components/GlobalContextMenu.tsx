@@ -217,6 +217,7 @@ export default function GlobalContextMenu() {
                         {!readOnlyWorkspace&&<ActionTile icon={<Boxes/>} label={activeContextMenu.packId?'افزودن به جعبهٔ دیگر':'افزودن به جعبه'} onClick={()=>{window.dispatchEvent(new CustomEvent('komod-add-to-pack',{detail:{fileIds:[file.id]}}));setActiveContextMenu(null)}}/>}
                         {playable&&<ActionTile icon={<Play/>} label="پخش" onClick={()=>handleAction(()=>handlePlay(file))}/>}
                         {previewable&&<ActionTile icon={<Eye/>} label={previewLabel} onClick={()=>handleAction(()=>setContentPreviewFile(file))}/>}
+                        {!readOnlyWorkspace&&<ActionTile danger icon={<Trash2/>} label="حذف فایل" onClick={()=>handleAction(()=>setDeleteConfirm({type:'file',items:[file]}))}/>}
                         {file.description&&<ActionTile icon={<BookOpen/>} label="پیش‌نمایش توضیحات" onClick={()=>handleAction(()=>setDescriptionItem({type:'file',item:file,mode:'preview'}))}/>}
                         {!readOnlyWorkspace&&canPreviewText(file)&&<ActionTile icon={<AudioLines/>} label="تبدیل به صوت" onClick={()=>void handleTextToSpeech(file)}/>}
                         {!readOnlyWorkspace&&playable&&<ActionTile icon={<AudioLines/>} label="تبدیل صدا به متن" onClick={()=>handleSpeechToText(file)}/>}
@@ -260,7 +261,6 @@ export default function GlobalContextMenu() {
                                 <div className="mt-3 grid grid-cols-2 gap-2"><button onClick={()=>setShowShareSettings(false)} className="btn-secondary min-h-10 text-xs">انصراف</button><button disabled={sharing} onClick={()=>void handleShare(file)} className="btn-primary min-h-10 text-xs disabled:opacity-50">{sharing?'در حال ساخت…':'ساخت و کپی'}</button></div>
                             </div>}
                             </div>
-                            <button className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-red-500/10 text-sm text-red-300 hover:bg-red-500/15" onClick={()=>handleAction(()=>setDeleteConfirm({type:'file',items:[file]}))}><Trash2 className="h-4 w-4"/>حذف فایل</button>
                             </>}
                         </div>}
                     {readOnlyWorkspace&&<p className="mt-3 rounded-xl bg-amber-500/[.08] px-3 py-2 text-xs text-amber-200">این کمد با دسترسی فقط مشاهده باز شده است.</p>}

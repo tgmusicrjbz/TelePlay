@@ -320,6 +320,10 @@ class PackAddItems(BaseModel):
     file_ids: List[int] = Field(min_length=1, max_length=500)
 
 
+class PackRemoveItems(BaseModel):
+    item_ids: List[int] = Field(min_length=1, max_length=500)
+
+
 class PackReorder(BaseModel):
     item_ids: List[int] = Field(min_length=1, max_length=500)
 
