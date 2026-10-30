@@ -34,7 +34,7 @@ self.addEventListener('install', event => {
           fetch(asset, { cache: 'no-store' }).then(optional => optional.ok ? cache.put(asset, optional) : undefined).catch(() => undefined)
         ),
       ]);
-    })
+    }).then(() => self.skipWaiting())
   );
 });
 
