@@ -2,7 +2,7 @@ import { createContext, lazy, Suspense, useContext, useEffect, useMemo, useState
 import { Activity, AlertTriangle, ArrowRight, AtSign, BookOpen, BrainCircuit, ChevronDown, ChevronLeft, AudioLines, Check, CheckCircle2, Copy, Database, Download, ExternalLink, FileStack, FileText, FoldVertical, FolderPlus, Gauge, Globe2, Grid2X2, HardDrive, Instagram, KeyRound, LayoutGrid, List, ListRestart, LockKeyhole, LogOut, MessageSquareText, MonitorSmartphone, Moon, MoreVertical, Palette, Pencil, Plus, RefreshCw, Search, Shield, Smartphone, Sparkles, Sun, Tags, Trash2, UnfoldVertical, UserRoundCog, Users, Warehouse, Wifi, WifiOff, XCircle } from 'lucide-react';
 import { AdminUser, Folder, PublicShareItem, TelegramFile, TwoFactorSetup, api, formatFileSize, formatIranTime, formatPersianDate, useAccountPreferences, useAddAdminUser, useAdminErrors, useAdminHealth, useAdminStats, useAdminUsers, useClearAdminErrors, useClearSecurityEvents, useCredentials, useCurrentUser, useDisableTwoFactor, useEnableTwoFactor, useFiles, useFolderTree, useGrantWorkspace, useLogoutAll, useLogoutOthers, usePublicShares, useRemoveAdminUser, useRemoveStorageChannel, useResetStorageChannel, useResolveAdminError, useRevokePublicShares, useRevokeSession, useRevokeWorkspace, useSecurityEvents, useSessions, useSetStorageChannel, useSetVaultPassword, useSetupTwoFactor, useStorageChannel, useStorageStats, useUnlockVault, useUpdateAccountPreferences, useUpdateAdminUser, useUpdateCredentials, useVaultStatus, useWorkspaceGrants, useWorkspaces } from '../lib/api';
 import { activateAccount, forgetAccount, savedAccounts, saveAuthenticatedAccount, syncCurrentAccount } from '../lib/accounts';
-import { applyAppearanceMode, applyCustomTheme, applyTheme, appearanceThemes, colorThemes, ActiveTheme, AppearanceMode, ColorTheme, getStoredAppearanceMode, getStoredTheme } from '../lib/theme';
+import { applyAppearanceMode, applyCustomTheme, applyTheme, appearanceThemes, colorThemes, ActiveTheme, AppearanceMode, ColorTheme, getStoredAppearanceMode, getStoredTheme, isLightAppearance } from '../lib/theme';
 import CustomSelect from './CustomSelect';
 import { useAppStore } from '../lib/store';
 import { folderTreeLabel } from '../lib/folderTreeLabel';
@@ -197,7 +197,7 @@ export default function SettingsPage() {
     const chooseAppearanceMode = (next: AppearanceMode) => {
         setAppearanceMode(next);
         localStorage.setItem('komod-appearance-mode', next);
-        if (next !== 'light') localStorage.setItem('komod-last-dark-appearance', next);
+        if (!isLightAppearance(next)) localStorage.setItem('komod-last-dark-appearance', next);
         applyAppearanceMode(next);
     };
     const changeConnectionMode = (offline: boolean) => {
@@ -353,7 +353,7 @@ export default function SettingsPage() {
             {view!=='home'&&<div className="min-w-0 flex-1"><h1 className="text-2xl font-bold sm:text-3xl">{viewTitle(view)}</h1>{viewSubtitle(view)&&<p className="mt-2 text-sm text-dark-400">{viewSubtitle(view)}</p>}</div>}
             <div className={`flex shrink-0 items-center gap-2 ${view==='home'?'w-full rounded-2xl border border-white/[.07] bg-dark-900/65 p-1.5':''}`}>
                 {view==='home'&&<><button type="button" onClick={()=>setAllSettingsGroups(true)} className="btn-icon h-10 w-10 shrink-0" title="بازکردن همه منوها" aria-label="بازکردن همه منوها"><UnfoldVertical className="h-4.5 w-4.5"/></button><button type="button" onClick={()=>setAllSettingsGroups(false)} className="btn-icon h-10 w-10 shrink-0" title="بستن همه منوها" aria-label="بستن همه منوها"><FoldVertical className="h-4.5 w-4.5"/></button><SettingsLayoutPicker value={homeLayout} onChange={next=>{setHomeLayout(next);localStorage.setItem('komod-settings-home-layout',next)}}/><span className="min-w-0 flex-1"/><button type="button" onClick={()=>changeConnectionMode(!forceOffline)} className={`btn-icon h-10 w-10 shrink-0 ${forceOffline?'border-primary-400/30 bg-primary-500/15 text-primary-200':'text-dark-300'}`} title={forceOffline?'رفتن به حالت آنلاین':'رفتن به حالت آفلاین'} aria-label={forceOffline?'حالت آفلاین؛ رفتن به حالت آنلاین':'حالت آنلاین؛ رفتن به حالت آفلاین'}>{forceOffline?<WifiOff className="h-4.5 w-4.5"/>:<Wifi className="h-4.5 w-4.5"/>}</button></>}
-                <button type="button" className="btn-icon h-10 w-10 text-primary-200" title={appearanceMode==='light'?'بازگشت به پوسته تاریک':'حالت روشن'} aria-label={appearanceMode==='light'?'بازگشت به پوسته تاریک':'فعال‌کردن حالت روشن'} onClick={()=>chooseAppearanceMode(appearanceMode==='light'?(localStorage.getItem('komod-last-dark-appearance') as AppearanceMode||'dark'):'light')}>{appearanceMode==='light'?<Moon className="h-4.5 w-4.5"/>:<Sun className="h-4.5 w-4.5"/>}</button>
+                <button type="button" className="btn-icon h-10 w-10 text-primary-200" title={isLightAppearance(appearanceMode)?'بازگشت به پوسته تاریک':'حالت روشن'} aria-label={isLightAppearance(appearanceMode)?'بازگشت به پوسته تاریک':'فعال‌کردن حالت روشن'} onClick={()=>chooseAppearanceMode(isLightAppearance(appearanceMode)?(localStorage.getItem('komod-last-dark-appearance') as AppearanceMode||'dark'):'light')}>{isLightAppearance(appearanceMode)?<Moon className="h-4.5 w-4.5"/>:<Sun className="h-4.5 w-4.5"/>}</button>
             </div>
         </header>
 

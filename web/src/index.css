@@ -681,6 +681,55 @@ button:disabled,
     linear-gradient(145deg, #493220 0%, #140d09 78%);
 }
 
+:root[data-appearance="aurora"] {
+  --dark-50: 240 253 250; --dark-100: 204 251 241; --dark-200: 153 246 228;
+  --dark-300: 94 234 212; --dark-400: 84 174 168; --dark-500: 65 124 128;
+  --dark-600: 43 83 94; --dark-700: 30 61 73; --dark-800: 18 43 55;
+  --dark-850: 12 31 42; --dark-900: 8 22 33; --dark-950: 3 9 17;
+  --surface-soft: rgb(18 43 55 / .5); --surface-raised: rgb(12 31 42 / .89); --surface-strong: rgb(8 22 33 / .96);
+}
+:root[data-appearance="aurora"] body {
+  background: radial-gradient(circle at 86% -8%, rgb(45 212 191 / .13), transparent 31rem), radial-gradient(circle at -10% 92%, rgb(var(--primary-600) / .08), transparent 28rem), linear-gradient(145deg, #102f3e 0%, #030911 78%);
+}
+
+:root[data-appearance="burgundy"] {
+  --dark-50: 255 241 242; --dark-100: 255 228 230; --dark-200: 254 205 211;
+  --dark-300: 253 164 175; --dark-400: 202 113 132; --dark-500: 151 77 96;
+  --dark-600: 111 52 68; --dark-700: 83 38 51; --dark-800: 61 27 39;
+  --dark-850: 45 18 29; --dark-900: 32 12 21; --dark-950: 18 5 11;
+  --surface-soft: rgb(61 27 39 / .5); --surface-raised: rgb(45 18 29 / .89); --surface-strong: rgb(32 12 21 / .96);
+}
+:root[data-appearance="burgundy"] body {
+  background: radial-gradient(circle at 84% -10%, rgb(251 113 133 / .13), transparent 32rem), radial-gradient(circle at -8% 90%, rgb(var(--primary-600) / .07), transparent 29rem), linear-gradient(145deg, #46202e 0%, #12050b 78%);
+}
+
+:root.light[data-appearance="paper"] {
+  --app-white: 50 38 24; --dark-50: 45 34 23; --dark-100: 61 47 32; --dark-200: 82 65 46;
+  --dark-300: 107 86 63; --dark-400: 132 108 82; --dark-500: 157 132 103;
+  --dark-600: 196 175 145; --dark-700: 224 208 182; --dark-800: 244 235 220;
+  --dark-850: 250 246 238; --dark-900: 255 253 247; --dark-950: 248 242 231;
+  --surface-soft: rgb(244 235 220 / .68); --surface-raised: rgb(255 253 247 / .92); --surface-strong: rgb(255 253 247 / .97);
+}
+:root.light[data-appearance="paper"] body { background: linear-gradient(140deg, #fffdf7 0%, #f5ecdc 100%); color: #352a1d; }
+
+:root.light[data-appearance="mist"] {
+  --app-white: 15 23 42; --dark-50: 15 23 42; --dark-100: 30 41 59; --dark-200: 51 65 85;
+  --dark-300: 71 85 105; --dark-400: 100 116 139; --dark-500: 126 140 158;
+  --dark-600: 167 178 191; --dark-700: 207 215 224; --dark-800: 235 240 244;
+  --dark-850: 246 248 250; --dark-900: 255 255 255; --dark-950: 241 245 249;
+  --surface-soft: rgb(235 240 244 / .7); --surface-raised: rgb(255 255 255 / .93); --surface-strong: rgb(255 255 255 / .98);
+}
+:root.light[data-appearance="mist"] body { background: linear-gradient(140deg, #ffffff 0%, #e8edf2 100%); color: #172033; }
+
+:root.light[data-appearance="lavender"] {
+  --app-white: 31 22 53; --dark-50: 31 22 53; --dark-100: 48 36 75; --dark-200: 68 52 98;
+  --dark-300: 91 72 123; --dark-400: 116 95 148; --dark-500: 143 121 174;
+  --dark-600: 184 166 207; --dark-700: 218 207 232; --dark-800: 239 233 247;
+  --dark-850: 249 246 253; --dark-900: 253 251 255; --dark-950: 245 241 250;
+  --surface-soft: rgb(239 233 247 / .7); --surface-raised: rgb(253 251 255 / .93); --surface-strong: rgb(253 251 255 / .98);
+}
+:root.light[data-appearance="lavender"] body { background: linear-gradient(140deg, #fdfbff 0%, #eee9f8 100%); color: #281d3f; }
+
 /* File, folder and pack menus intentionally remain dark in every app theme. */
 .black-glass-menu {
   --app-white: 255 255 255;

@@ -2,7 +2,7 @@
  * FolderCard component - displays a folder in grid or list view with drag-drop support
  */
 import { useRef, useState } from 'react';
-import { Check, Folder as FolderIcon, MoreVertical, ChevronRight, Pin, Star } from 'lucide-react';
+import { Check, Folder as FolderIcon, MoreVertical, Pin, Star } from 'lucide-react';
 import { Folder } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { useCardDisplayPreferences } from '../lib/cardDisplay';
@@ -153,7 +153,6 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
                     >
                         <MoreVertical className="w-4 h-4" />
                     </button>
-                    <ChevronRight className="w-4 h-4 text-dark-600 group-hover:text-dark-400 transition-colors" />
                 </div>
             </div>
         );

@@ -17,18 +17,25 @@ export const appearanceThemes = {
     plum: { label: 'آلویی', description: 'بنفش گرم و عمیق', colors: ['#51365f', '#100815', '#e879f9'] },
     sepia: { label: 'قهوه‌ای گرم', description: 'گرم و مناسب مطالعه طولانی', colors: ['#62452f', '#140d09', '#f59e0b'] },
     light: { label: 'روشن', description: 'سفید و خوانا برای محیط پرنور', colors: ['#ffffff', '#eef2ff', '#7c3aed'] },
+    aurora: { label: 'شفق تاریک', description: 'سرمه‌ای عمیق با ته‌رنگ سبز', colors: ['#16384a', '#050b13', '#2dd4bf'] },
+    burgundy: { label: 'شرابی', description: 'قرمز تیره و گرم با کنتراست نرم', colors: ['#542737', '#16080d', '#fb7185'] },
+    paper: { label: 'کاغذ گرم', description: 'روشن و کرم برای مطالعه طولانی', colors: ['#fffdf7', '#f5ecdc', '#b7791f'] },
+    mist: { label: 'مه روشن', description: 'خاکستری روشن، آرام و خنثی', colors: ['#ffffff', '#e8edf2', '#475569'] },
+    lavender: { label: 'یاسی روشن', description: 'روشن با سایه‌های ملایم بنفش', colors: ['#fdfbff', '#eee9f8', '#8b5cf6'] },
 } as const;
 export type AppearanceMode = keyof typeof appearanceThemes;
+export const isLightAppearance = (mode: AppearanceMode) => ['light','paper','mist','lavender'].includes(mode);
 
 export const getStoredAppearanceMode = (): AppearanceMode => {
     const stored = localStorage.getItem('komod-appearance-mode');
     return stored && stored in appearanceThemes ? stored as AppearanceMode : 'dark';
 };
 export const applyAppearanceMode = (mode: AppearanceMode) => {
-    document.documentElement.classList.toggle('light', mode === 'light');
-    document.documentElement.classList.toggle('dark', mode !== 'light');
+    const light=isLightAppearance(mode);
+    document.documentElement.classList.toggle('light', light);
+    document.documentElement.classList.toggle('dark', !light);
     document.documentElement.dataset.appearance = mode;
-    document.documentElement.style.colorScheme = mode === 'light' ? 'light' : 'dark';
+    document.documentElement.style.colorScheme = light ? 'light' : 'dark';
 };
 
 export const getStoredTheme = (): ActiveTheme => {
