@@ -206,8 +206,9 @@ def format_duration(seconds: int) -> str:
     return f"{to_persian_digits(str(secs))} ثانیه"
 
 
-def to_persian_digits(value: str) -> str:
-    return value.translate(str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹"))
+def to_persian_digits(value: object) -> str:
+    """Format strings and numeric counters without requiring callers to cast."""
+    return str(value).translate(str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹"))
 
 
 def display_filename(value: str, *, limit: int | None = None) -> str:
@@ -383,6 +384,15 @@ def decode_group_start_payload(payload: str) -> int | None:
     return -value if match.group(1) == "n" else value
 
 
+async def group_settings_start_url(client, chat_id: int) -> str:
+    """Build a Telegram-owned deep link to the private group panel."""
+    me = await client.get_me()
+    username = str(getattr(me, "username", "") or "").strip().lstrip("@")
+    if not username:
+        raise RuntimeError("Telegram bot username is unavailable")
+    return f"https://t.me/{username}?start={encode_group_start_payload(chat_id)}"
+
+
 async def group_settings_view(
     chat_id: int,
     telegram_user_id: int,
@@ -394,7 +404,13 @@ async def group_settings_view(
         group = await get_or_create_group_settings(db, chat_id, title)
         await db.commit()
         group_usage, member_usage = await get_group_usage(db, chat_id, telegram_user_id)
-        voice = await get_group_voice(db, chat_id)
+        try:
+            voice = await get_group_voice(db, chat_id)
+        except Exception as error:
+            # Voice is an optional preference. A damaged/missing global setting
+            # must never make the whole group management panel unavailable.
+            logger.warning("Could not load group voice chat=%s: %s", chat_id, error)
+            voice = VOICE_OPTIONS[0]["value"]
     operations = (("tts", "🎙 متن به صدا"), ("stt", "📝 صوت به متن"), ("link", "🔗 دریافت لینک"))
     lines = [f"⚙️ مدیریت «{group.title}»", "", "ابزارها و مصرف امروز:"]
     toggle_buttons = []
@@ -416,6 +432,57 @@ async def group_settings_view(
     if back_to_group_menu:
         rows.append([InlineKeyboardButton("↩️ بازگشت به منوی گروه", callback_data="grpmenu:home")])
     return {"text": "\n".join(lines), "reply_markup": InlineKeyboardMarkup(rows), "parse_mode": enums.ParseMode.DISABLED}
+
+
+async def send_group_settings_panel(
+    client,
+    source_message: Message,
+    chat_id: int,
+    telegram_user_id: int,
+    title: str | None = None,
+) -> Message:
+    """Send the panel in-group, retrying without a reply relationship.
+
+    Telegram can reject ``Message.reply`` when the source command belongs to a
+    deleted message or a forum topic with stale reply metadata. A fresh message
+    to the same chat is valid in those cases and keeps management usable.
+    """
+    view = await group_settings_view(
+        chat_id,
+        telegram_user_id,
+        title,
+        back_to_group_menu=True,
+    )
+    try:
+        return await source_message.reply(**view)
+    except Exception as reply_error:
+        logger.warning(
+            "Group settings reply rejected chat=%s user=%s; retrying as a new message: %s",
+            chat_id,
+            telegram_user_id,
+            reply_error,
+        )
+        kwargs = dict(view)
+        message_thread_id = getattr(source_message, "message_thread_id", None)
+        if message_thread_id:
+            kwargs["message_thread_id"] = message_thread_id
+        return await client.send_message(chat_id, **kwargs)
+
+
+async def send_group_settings_fallback(client, source_message: Message, chat_id: int) -> Message:
+    """Offer a private deep link after both in-group send methods fail."""
+    url = await group_settings_start_url(client, chat_id)
+    kwargs = {
+        "text": "تلگرام نمایش پنل داخل گروه را نپذیرفت. مدیریت همین گروه را در گفت‌وگوی خصوصی باز کن:",
+        "reply_markup": InlineKeyboardMarkup([[
+            InlineKeyboardButton("⚙️ باز کردن مدیریت گروه", url=url),
+        ]]),
+        "parse_mode": enums.ParseMode.DISABLED,
+    }
+    message_thread_id = getattr(source_message, "message_thread_id", None)
+    if message_thread_id:
+        kwargs["message_thread_id"] = message_thread_id
+    return await client.send_message(chat_id, **kwargs)
 
 
 def group_quota_menu_view(chat_id: int) -> dict:
@@ -1230,7 +1297,13 @@ async def check_auth(client, message: Message):
     async with async_session() as db:
         known_user = (await db.execute(select(User).where(User.telegram_id == message.from_user.id))).scalar_one_or_none()
     blocked = known_user is not None and not known_user.is_active
-    if blocked or (settings.restrict_users and message.from_user.id not in settings.bootstrap_users and known_user is None):
+    command = list(getattr(message, "command", None) or [])
+    group_deep_link = bool(
+        len(command) > 1
+        and str(command[0]).lower() == "start"
+        and decode_group_start_payload(str(command[1]).strip()) is not None
+    )
+    if blocked or (settings.restrict_users and message.from_user.id not in settings.bootstrap_users and known_user is None and not group_deep_link):
         # Ignore if it's a command we don't want to reply to (to avoid spamming unauthorized users)
         # But for /start, we should give a polite rejection
         if message.text and message.text.startswith("/start"):
@@ -1246,6 +1319,26 @@ async def check_auth(client, message: Message):
 @tg_client.on_message(filters.command("start") & filters.private)
 async def start_command(client, message: Message):
     """Welcome message and bot instructions. Also handles deep-linked login codes."""
+    payload = message.command[1].strip() if len(message.command) > 1 else ""
+    group_chat_id = decode_group_start_payload(payload) if payload else None
+    if group_chat_id is not None:
+        if not await is_connected_group(group_chat_id):
+            await message.reply("این گروه به کمد متصل نیست یا تأییدش متوقف شده.")
+            return
+        if not await is_group_manager(client, group_chat_id, message.from_user.id):
+            await message.reply("مدیریت این بخش فقط در اختیار مدیرهای همان گروه است.")
+            return
+        # Only a verified manager of an approved group is registered here.
+        # This keeps the deep link usable without weakening restricted access.
+        await get_or_create_user(
+            message.from_user.id,
+            message.from_user.username,
+            message.from_user.first_name,
+            message.from_user.last_name,
+        )
+        await message.reply(**(await group_settings_view(group_chat_id, message.from_user.id)))
+        return
+
     await get_or_create_user(
         message.from_user.id,
         message.from_user.username,
@@ -1256,18 +1349,7 @@ async def start_command(client, message: Message):
     await set_current_drawer(message.from_user.id, None)
     
     # Accept the explicit login payload and old plain-code links.
-    if len(message.command) > 1:
-        payload = message.command[1].strip()
-        group_chat_id = decode_group_start_payload(payload)
-        if group_chat_id is not None:
-            if not await is_connected_group(group_chat_id):
-                await message.reply("این گروه به کمد متصل نیست یا تأییدش متوقف شده.")
-                return
-            if not await is_group_manager(client, group_chat_id, message.from_user.id):
-                await message.reply("مدیریت این بخش فقط در اختیار مدیرهای همان گروه است.")
-                return
-            await message.reply(**(await group_settings_view(group_chat_id, message.from_user.id)))
-            return
+    if payload:
         code_input = (payload[6:] if payload.lower().startswith("login_") else payload).upper()
         async with async_session() as db:
             result = await db.execute(select(LoginCode).where(LoginCode.code == code_input))
@@ -1584,17 +1666,29 @@ async def group_settings_command(client, message: Message):
         asyncio.create_task(delete_preview_later(client, notice.chat.id, notice.id, 12))
         return
     try:
-        await message.reply(**(await group_settings_view(
+        await send_group_settings_panel(
+            client,
+            message,
             message.chat.id,
             message.from_user.id,
             message.chat.title,
-            back_to_group_menu=True,
-        )))
+        )
         with contextlib.suppress(Exception):
             await message.delete()
     except Exception as error:
         logger.exception("Could not open group settings chat=%s user=%s: %s", message.chat.id, message.from_user.id, error)
-        await message.reply("بازکردن مدیریت گروه انجام نشد؛ چند لحظه دیگر دوباره تلاش کن.")
+        try:
+            await send_group_settings_fallback(client, message, message.chat.id)
+        except Exception as fallback_error:
+            tracking_code = secrets.token_hex(4)
+            logger.exception(
+                "Group settings fallback failed code=%s chat=%s user=%s: %s",
+                tracking_code,
+                message.chat.id,
+                message.from_user.id,
+                fallback_error,
+            )
+            await message.reply(f"بازکردن مدیریت گروه انجام نشد. کد پیگیری: `{tracking_code}`")
 
 
 @tg_client.on_message(
@@ -1674,17 +1768,18 @@ async def group_limit_command(client, message: Message):
         await message.reply("تغییر سهمیه‌ها فقط در اختیار مدیرهای این گروه است.")
         return
     try:
-        await message.reply(**(await group_settings_view(
+        await send_group_settings_panel(
+            client,
+            message,
             message.chat.id,
             message.from_user.id,
             message.chat.title,
-            back_to_group_menu=True,
-        )))
+        )
         with contextlib.suppress(Exception):
             await message.delete()
     except Exception as error:
         logger.exception("Could not open group limits chat=%s user=%s: %s", message.chat.id, message.from_user.id, error)
-        await message.reply("بازکردن تنظیمات سهمیه انجام نشد؛ چند لحظه دیگر دوباره تلاش کن.")
+        await send_group_settings_fallback(client, message, message.chat.id)
 
 
 @tg_client.on_message(filters.private & (filters.video | filters.audio | filters.voice | filters.document | filters.video_note), group=-1)
@@ -2643,16 +2738,42 @@ async def handle_callback(client, callback: CallbackQuery):
                 await callback.answer("این بخش فقط برای مدیرهای گروه است.", show_alert=True)
                 return
             try:
-                await callback.message.edit_text(**(await group_settings_view(
+                view = await group_settings_view(
                     group_chat_id,
                     callback.from_user.id,
                     callback.message.chat.title,
                     back_to_group_menu=True,
-                )))
+                )
+                try:
+                    await callback.message.edit_text(**view)
+                except Exception as edit_error:
+                    logger.warning(
+                        "Group settings edit rejected chat=%s user=%s; sending a new message: %s",
+                        group_chat_id,
+                        callback.from_user.id,
+                        edit_error,
+                    )
+                    kwargs = dict(view)
+                    message_thread_id = getattr(callback.message, "message_thread_id", None)
+                    if message_thread_id:
+                        kwargs["message_thread_id"] = message_thread_id
+                    await client.send_message(group_chat_id, **kwargs)
                 await callback.answer("پنل مدیریت باز شد.")
             except Exception as error:
                 logger.exception("Could not render group settings chat=%s user=%s: %s", group_chat_id, callback.from_user.id, error)
-                await callback.answer("بازکردن پنل مدیریت انجام نشد؛ دوباره تلاش کن.", show_alert=True)
+                try:
+                    await send_group_settings_fallback(client, callback.message, group_chat_id)
+                    await callback.answer("لینک خصوصی مدیریت پایین منو فرستاده شد.", show_alert=True)
+                except Exception as fallback_error:
+                    tracking_code = secrets.token_hex(4)
+                    logger.exception(
+                        "Group settings callback fallback failed code=%s chat=%s user=%s: %s",
+                        tracking_code,
+                        group_chat_id,
+                        callback.from_user.id,
+                        fallback_error,
+                    )
+                    await callback.answer(f"مدیریت باز نشد. کد پیگیری: {tracking_code}", show_alert=True)
         else:
             await callback.answer()
 

@@ -9,7 +9,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, PropertyMock, patch
+from unittest.mock import AsyncMock, Mock, PropertyMock, patch
 
 _temp = tempfile.TemporaryDirectory()
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{(Path(_temp.name) / 'library.sqlite').as_posix()}"
@@ -72,6 +72,51 @@ from app import telegram
 
 
 class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_restricted_unknown_group_manager_deep_link_reaches_start_handler(self):
+        from app.telegram import build_clients
+        build_clients()
+        from app.bot import check_auth, settings as bot_settings
+
+        message = SimpleNamespace(
+            command=["start", "group_n1006"],
+            text="/start group_n1006",
+            from_user=SimpleNamespace(id=222),
+            video=None, audio=None, voice=None, document=None, photo=None,
+            animation=None, video_note=None,
+            reply=AsyncMock(), stop_propagation=Mock(),
+        )
+        with patch.object(bot_settings, "auth_users_str", "999"):
+            await check_auth(SimpleNamespace(), message)
+
+        message.reply.assert_not_awaited()
+        message.stop_propagation.assert_not_called()
+
+    async def test_group_panel_accepts_numeric_quotas_and_survives_voice_failure(self):
+        from app.telegram import build_clients
+        build_clients()
+        from app.bot import group_quota_view, group_settings_view
+        from app.group_tools import get_or_create_group_settings
+
+        async with async_session() as db:
+            group = await get_or_create_group_settings(db, -1006, "گروه آزمایش")
+            group.approved = True
+            await db.commit()
+
+        with patch("app.bot.get_group_voice", side_effect=RuntimeError("voice store unavailable")):
+            view = await group_settings_view(-1006, 10, "گروه آزمایش", back_to_group_menu=True)
+
+        self.assertIn("مدیریت «گروه آزمایش»", view["text"])
+        rows = view["reply_markup"].inline_keyboard
+        self.assertEqual([len(row) for row in rows], [2, 1, 1, 1, 1])
+        self.assertTrue(all(
+            len((button.callback_data or "").encode("utf-8")) <= 64
+            for row in rows for button in row
+        ))
+        raw_markup = await view["reply_markup"].write(SimpleNamespace())
+        self.assertEqual(len(raw_markup.rows), 5)
+        quota_view = await group_quota_view(-1006, "tts")
+        self.assertIn("کل گروه در روز: ۲۰", quota_view["text"])
+
     def test_monitor_session_env_values_accept_railway_copy_formats(self):
         self.assertEqual(_session_values('"session-one"', "TELEGRAM_MONITOR_SESSION=session-two"), ["session-one", "session-two"])
 
@@ -1397,6 +1442,29 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
 
 
 class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
+    async def test_group_panel_retries_as_fresh_message_when_reply_is_rejected(self):
+        from app.telegram import build_clients
+        build_clients()
+        from app.bot import send_group_settings_panel
+
+        message = SimpleNamespace(
+            message_thread_id=77,
+            reply=AsyncMock(side_effect=RuntimeError("REPLY_MESSAGE_NOT_FOUND")),
+        )
+        client = SimpleNamespace(send_message=AsyncMock(return_value=SimpleNamespace(id=8)))
+        view = {"text": "پنل گروه", "reply_markup": SimpleNamespace(), "parse_mode": None}
+        with patch("app.bot.group_settings_view", new_callable=AsyncMock, return_value=view):
+            result = await send_group_settings_panel(client, message, -10055, 111, "گروه")
+
+        self.assertEqual(result.id, 8)
+        client.send_message.assert_awaited_once_with(
+            -10055,
+            text="پنل گروه",
+            reply_markup=view["reply_markup"],
+            parse_mode=None,
+            message_thread_id=77,
+        )
+
     async def test_group_deep_link_opens_settings_without_a_manual_start_command(self):
         from app.telegram import build_clients
         build_clients()
