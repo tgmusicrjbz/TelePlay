@@ -4,9 +4,9 @@
 import { lazy, Suspense, useEffect, useCallback, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { FolderPlus, Folder as FolderIcon, Grid, LayoutGrid, List, Search, ChevronRight, ChevronDown, Home, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, StickyNote, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ArrowDownUp, ChevronUp, Plus, CheckSquare, Square, ListChecks, ListPlus, Upload, Star, RefreshCw, Link2, DownloadCloud, Download, Send, Eye, EyeOff, Minus, Play, Tags, Cloud, CloudOff, AudioLines, FileAudio, Sparkles, BookmarkPlus, Combine, MoreHorizontal } from 'lucide-react';
-import { api, useFiles, useFolders, useFolderTree, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, Pack, useActivityFeed, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile, useImportLink, useTagSettings, useUnlockVault, useWorkspaces, sendFilesToTelegram, useTTSJobs, useSTTJobs, SavedFilter, useSavedFilters, useUpdateSavedFilters, usePacks, useExpandSmartSearch, formatFileSize, LibraryChangeDetail } from '../lib/api';
+import { api, useFiles, useFolders, useFolderTree, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, Pack, useActivityFeed, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile, useImportLink, useTagSettings, useUnlockVault, useWorkspaces, sendFilesToTelegram, useTTSJobs, useSTTJobs, SavedFilter, useSavedFilters, useUpdateSavedFilters, usePacks, useExpandSmartSearch, formatFileSize, LibraryChangeDetail, useDeletePack, useUpdatePack } from '../lib/api';
 import { useAppStore } from '../lib/store';
-import { cacheAllTextNotes, queueOfflineText, saveFileOffline } from '../lib/offline';
+import { cacheAllTextNotes, queueOfflineText, saveFileOffline, savePackOffline } from '../lib/offline';
 import FileCard from './FileCard';
 import FolderCard from './FolderCard';
 import NewFolderModal from './NewFolderModal';
@@ -203,6 +203,7 @@ export default function FileBrowser() {
     const [selectionMode, setSelectionMode] = useState(false);
     const [showSelectionMore,setShowSelectionMore]=useState(false);
     const [selectedPackIds,setSelectedPackIds]=useState<Set<number>>(new Set());
+    const [showSelectionDelete,setShowSelectionDelete]=useState(false);
     const [pullDistance, setPullDistance] = useState(0);
     const pullStartY = useRef<number | null>(null);
     const [favoriteOnly, setFavoriteOnly] = useState(false);
@@ -523,6 +524,8 @@ export default function FileBrowser() {
     const moveFoldersMutation = useMoveFolders();
     const updateFolderMutation = useUpdateFolder();
     const batchUpdateFilesMutation = useBatchUpdateFiles();
+    const deletePackMutation = useDeletePack();
+    const updatePackMutation = useUpdatePack();
     const uploadFileMutation = useUploadFile();
     const importLinkMutation = useImportLink();
 
@@ -1295,6 +1298,11 @@ export default function FileBrowser() {
         && visibleFileIds.every(id => selectedFileIds.has(id))
         && visibleFolderIds.every(id => selectedFolderIds.has(id))
         && visiblePackIds.every(id=>selectedPackIds.has(id));
+    const someVisibleSelected = !allVisibleSelected && (
+        visibleFileIds.some(id=>selectedFileIds.has(id))
+        || visibleFolderIds.some(id=>selectedFolderIds.has(id))
+        || visiblePackIds.some(id=>selectedPackIds.has(id))
+    );
     const toggleSelectAll = async () => {
         if (allVisibleSelected) {clearSelection();setSelectedPackIds(new Set());}
         else {
@@ -1352,9 +1360,72 @@ export default function FileBrowser() {
     };
     const cancelSelection = () => {
         setShowSelectionMore(false);
+        setShowSelectionDelete(false);
         clearSelection();
         setSelectedPackIds(new Set());
         setSelectionMode(false);
+    };
+    const requestSelectionDelete = () => {
+        setShowSelectionMore(false);
+        if (selectedPacksForActions.length) {
+            setShowSelectionDelete(true);
+            return;
+        }
+        setDeleteConfirm({
+            type: selectedFoldersForActions.length && selectedFilesForActions.length ? 'multiple' : selectedFoldersForActions.length ? 'folder' : 'file',
+            items: selectedItems,
+        });
+    };
+    const deleteSelectedKinds = async (deleteContents: boolean) => {
+        const files=[...selectedFilesForActions];
+        const selectedFolders=[...selectedFoldersForActions];
+        const selectedPacks=[...selectedPacksForActions];
+        setShowSelectionDelete(false);
+        cancelSelection();
+        addToast('حذف در پس‌زمینه شروع شد…','info');
+        try {
+            const packDetails=deleteContents
+                ? await Promise.all(selectedPacks.map(pack=>api.get<Pack>(`/packs/${pack.id}`).then(response=>response.data)))
+                : [];
+            if(selectedFolders.length)await deleteFoldersMutation.mutateAsync({ids:selectedFolders.map(folder=>folder.id),deleteContents});
+            const fileIds=[...new Set([
+                ...files.map(file=>file.id),
+                ...packDetails.flatMap(pack=>pack.items.map(item=>item.file.id)),
+            ])];
+            if(fileIds.length)await deleteFilesMutation.mutateAsync(fileIds);
+            for(const pack of selectedPacks)await deletePackMutation.mutateAsync(pack.id);
+            addToast(`${(files.length+selectedFolders.length+selectedPacks.length).toLocaleString('fa-IR')} مورد حذف شد.`,'success');
+        } catch(error:any) {
+            addToast(error?.response?.data?.detail||'حذف بعضی از موارد انجام نشد.','error');
+        }
+    };
+    const openSelectedPack = (edit=false) => {
+        const pack=selectedPacksForActions[0];
+        if(!pack)return;
+        setShowSelectionMore(false);
+        setOpenPackId(pack.id);
+        if(edit)window.setTimeout(()=>window.dispatchEvent(new Event('komod-pack-edit')),80);
+    };
+    const saveSelectedPacks = async () => {
+        const selected=[...selectedPacksForActions];
+        setShowSelectionMore(false);
+        addToast('ذخیرهٔ جعبه‌ها در پس‌زمینه شروع شد…','info');
+        try {
+            for(const pack of selected){
+                const {data}=await api.get<Pack>(`/packs/${pack.id}`);
+                await savePackOffline(data);
+            }
+            addToast(`${selected.length.toLocaleString('fa-IR')} جعبه آفلاین شد.`,'success');
+        } catch(error:any) { addToast(error?.message||'ذخیرهٔ آفلاین جعبه‌ها انجام نشد.','error'); }
+    };
+    const toggleSelectedPackBlur = async () => {
+        const selected=[...selectedPacksForActions];
+        const blur=selected.some(pack=>!pack.is_blurred);
+        setShowSelectionMore(false);
+        try {
+            for(const pack of selected)await updatePackMutation.mutateAsync({id:pack.id,is_blurred:blur});
+            addToast(blur?'جعبه‌های انتخابی محو شدند.':'جعبه‌های انتخابی واضح شدند.','success');
+        } catch(error:any) { addToast(error?.response?.data?.detail||'تغییر ظاهر جعبه‌ها انجام نشد.','error'); }
     };
     const hideSelectedItems = async () => {
         if (!sessionStorage.getItem('komod-vault-token')) { addToast('برای مخفی‌کردن، اول گاوصندوق را از تنظیمات باز کن.', 'error'); return; }
@@ -1523,10 +1594,14 @@ export default function FileBrowser() {
                             {(selectedFilesForActions.length > 0||selectedPacksForActions.length>0) && <button className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-sky-300 hover:bg-sky-500/10" aria-label="ارسال به تلگرام" title="ارسال به تلگرام" onClick={() => void sendSelectedToTelegram()}><Send className="h-5 w-5" /></button>}
                             {selectedFilesForActions.length > 0 && <button className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-primary-200 hover:bg-primary-500/10" aria-label="ذخیره آفلاین" title="ذخیره آفلاین" onClick={() => { selectedFilesForActions.forEach(file => void saveFileOffline(file)); addToast(`${selectedFilesForActions.length.toLocaleString('fa-IR')} فایل به صف ذخیره آفلاین اضافه شد.`); }}><DownloadCloud className="h-5 w-5" /></button>}
                             <button disabled={!selectedItems.length} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-dark-200 disabled:opacity-30" aria-label="جابه‌جایی" title="جابه‌جایی" onClick={() => setMoveItems({ files: selectedFilesForActions, folders: selectedFoldersForActions })}><FolderInput className="h-5 w-5" /></button>
-                            <button disabled={!selectedItems.length} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-red-300 disabled:opacity-30" aria-label="حذف" title="حذف" onClick={() => setDeleteConfirm({ type: selectedFoldersForActions.length && selectedFilesForActions.length ? 'multiple' : selectedFoldersForActions.length ? 'folder' : 'file', items: selectedItems })}><Trash2 className="h-5 w-5" /></button>
+                            <button disabled={!selectedItemCount} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-red-300 disabled:opacity-30" aria-label="حذف" title="حذف" onClick={requestSelectionDelete}><Trash2 className="h-5 w-5" /></button>
                             <button className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${showSelectionMore?'bg-white/[.08] text-primary-200':'text-dark-300'}`} aria-label="کارهای بیشتر" title="کارهای بیشتر" onClick={()=>setShowSelectionMore(value=>!value)}><MoreHorizontal className="h-5 w-5"/></button>
                             <button className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-dark-300" aria-label="پایان انتخاب گروهی" title="پایان انتخاب" onClick={cancelSelection}><X className="h-5 w-5" /></button>
                             {showSelectionMore&&<div dir="rtl" className="black-glass-menu absolute inset-x-0 top-[calc(100%+.5rem)] grid grid-cols-2 gap-2 rounded-2xl p-2 shadow-2xl">
+                                {selectedPacksForActions.length===1&&selectedItems.length===0&&<button className="context-menu-item rounded-xl" onClick={()=>openSelectedPack(false)}><Boxes className="h-4 w-4"/>بازکردن جعبه</button>}
+                                {selectedPacksForActions.length===1&&selectedItems.length===0&&<button className="context-menu-item rounded-xl" onClick={()=>openSelectedPack(true)}><Pencil className="h-4 w-4"/>ویرایش جعبه</button>}
+                                {selectedPacksForActions.length>0&&<button className="context-menu-item rounded-xl" onClick={()=>void saveSelectedPacks()}><DownloadCloud className="h-4 w-4"/>ذخیره آفلاین</button>}
+                                {selectedPacksForActions.length>0&&<button className="context-menu-item rounded-xl" onClick={()=>void toggleSelectedPackBlur()}>{selectedPacksForActions.every(pack=>pack.is_blurred)?<Eye className="h-4 w-4"/>:<EyeOff className="h-4 w-4"/>}{selectedPacksForActions.every(pack=>pack.is_blurred)?'واضح کردن جعبه‌ها':'محو کردن جعبه‌ها'}</button>}
                                 {selectedItems.length === 1&&selectedPacksForActions.length===0&&<button className="context-menu-item rounded-xl" onClick={()=>{selectedFilesForActions[0]?setRenameFile(selectedFilesForActions[0]):setRenameFolder(selectedFoldersForActions[0]);setShowSelectionMore(false)}}><Pencil className="h-4 w-4"/>تغییر نام</button>}
                                 {selectedFilesForActions.length>0&&<button className="context-menu-item rounded-xl" onClick={()=>{setShowBatchEdit(true);setShowSelectionMore(false)}}><Tags className="h-4 w-4"/>تگ و ویرایش</button>}
                                 {selectedFilesForActions.length>0&&<button className="context-menu-item rounded-xl" onClick={()=>{setShowCreatePack(true);setShowSelectionMore(false)}}><Boxes className="h-4 w-4"/>افزودن به جعبه</button>}
@@ -1536,6 +1611,7 @@ export default function FileBrowser() {
                                 {selectedItems.length>0&&<button className="context-menu-item rounded-xl" onClick={()=>void hideSelectedItems()}><EyeOff className="h-4 w-4"/>گاوصندوق</button>}
                                 {selectedFileIds.size>=2&&<button className="context-menu-item rounded-xl" onClick={selectFileRange}><ListChecks className="h-4 w-4"/>انتخاب فاصله</button>}
                                 {selectedTextFilesForActions.length>1&&<button className="context-menu-item rounded-xl" onClick={()=>{setShowCombineTexts(true);setShowSelectionMore(false)}}><Combine className="h-4 w-4"/>ترکیب متن‌ها</button>}
+                                {selectedItemCount>0&&<button className="context-menu-item rounded-xl text-red-300" onClick={requestSelectionDelete}><Trash2 className="h-4 w-4"/>حذف انتخاب‌ها</button>}
                             </div>}
                         </div>
                     )}
@@ -1560,7 +1636,7 @@ export default function FileBrowser() {
                                  {(selectedFilesForActions.length > 0||selectedPacksForActions.length>0) && <button className="btn-secondary shrink-0 text-sm flex items-center gap-2 text-sky-200" onClick={() => void sendSelectedToTelegram()}><Send className="w-4 h-4" /> ارسال به تلگرام</button>}
                                 {selectedItems.length>0&&<button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={()=>void hideSelectedItems()}><EyeOff className="w-4 h-4"/> مخفی‌کردن</button>}
                                 {selectedItems.length>0&&<button className="btn-secondary shrink-0 text-sm flex items-center gap-2" onClick={() => setMoveItems({ files: selectedFilesForActions, folders: selectedFoldersForActions })}><FolderInput className="w-4 h-4" /> جابه‌جایی</button>}
-                                {selectedItems.length>0&&<button className="btn-secondary shrink-0 text-sm flex items-center gap-2 text-red-300" onClick={() => setDeleteConfirm({ type: selectedFoldersForActions.length && selectedFilesForActions.length ? 'multiple' : selectedFoldersForActions.length ? 'folder' : 'file', items: selectedItems })}><Trash2 className="w-4 h-4" /> حذف</button>}
+                                {selectedItemCount>0&&<button className="btn-secondary shrink-0 text-sm flex items-center gap-2 text-red-300" onClick={requestSelectionDelete}><Trash2 className="w-4 h-4" /> حذف</button>}
                                 <button className="btn-icon shrink-0" title="پایان انتخاب" onClick={cancelSelection}><X className="w-4 h-4" /></button>
                             </div>
                         ) : null}
@@ -1604,9 +1680,9 @@ export default function FileBrowser() {
                                     {!readOnlyWorkspace && <button title="انتخاب گروهی" aria-label="انتخاب گروهی" onClick={toggleSelectionMode} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs transition-colors ${selectionMode ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:text-white'}`}>
                                         <ListChecks className="h-4 w-4" />
                                     </button>}
-                                    {!readOnlyWorkspace && (selectionMode || selectedItems.length > 0) && (
-                                        <button onClick={toggleSelectAll} disabled={visibleItemCount === 0} title={allVisibleSelected ? 'لغو انتخاب همه' : 'انتخاب همه'} aria-label={allVisibleSelected ? 'لغو انتخاب همه' : 'انتخاب همه'} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs transition-colors disabled:opacity-40 ${allVisibleSelected ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:text-white'}`}>
-                                            {allVisibleSelected ? <CheckSquare className="h-4 w-4 text-primary-300" /> : <Square className="h-4 w-4" />}
+                                    {!readOnlyWorkspace && (selectionMode || selectedItemCount > 0) && (
+                                        <button onClick={toggleSelectAll} disabled={visibleItemCount === 0} title={allVisibleSelected ? 'لغو انتخاب همه' : someVisibleSelected ? 'انتخاب دوبارهٔ همه' : 'انتخاب همه'} aria-label={allVisibleSelected ? 'لغو انتخاب همه' : someVisibleSelected ? 'بخشی انتخاب شده' : 'انتخاب همه'} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs transition-colors disabled:opacity-40 ${allVisibleSelected || someVisibleSelected ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:text-white'}`}>
+                                            {allVisibleSelected ? <CheckSquare className="h-4 w-4" /> : someVisibleSelected ? <Minus className="h-4 w-4" /> : <Square className="h-4 w-4" />}
                                         </button>
                                     )}
                                     </div>
@@ -1812,6 +1888,8 @@ export default function FileBrowser() {
                         onClose={() => setMoveItems(null)}
                     />
                 )}
+
+            {showSelectionDelete&&createPortal(<div className="fixed inset-0 z-[290] flex items-end justify-center bg-black/70 p-3 backdrop-blur-sm sm:items-center" onClick={()=>setShowSelectionDelete(false)}><section dir="rtl" className="w-full max-w-sm rounded-3xl border border-white/10 bg-dark-900 p-5 text-right shadow-2xl" onClick={event=>event.stopPropagation()}><header className="flex items-center gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-red-500/10 text-red-300"><Trash2 className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h3 className="font-bold">حذف {selectedItemCount.toLocaleString('fa-IR')} مورد</h3><p className="mt-1 text-xs text-dark-400">{selectedPacksForActions.length.toLocaleString('fa-IR')} جعبه در این انتخاب است.</p></div><button className="btn-icon" onClick={()=>setShowSelectionDelete(false)}><X className="h-4 w-4"/></button></header><p className="mt-4 text-sm leading-7 text-dark-300">می‌خواهی محتویات کشوها و جعبه‌های انتخابی هم از کمد حذف شوند؟ فایل‌هایی که جداگانه انتخاب کرده‌ای در هر دو حالت حذف می‌شوند.</p><div className="mt-5 grid gap-2"><button className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-red-600 text-sm font-semibold text-white" onClick={()=>void deleteSelectedKinds(true)}><Trash2 className="h-4 w-4"/>حذف همراه محتویات</button><button className="btn-secondary min-h-11" onClick={()=>void deleteSelectedKinds(false)}>فقط حذف کشوها و جعبه‌ها</button><button className="min-h-10 text-sm text-dark-400" onClick={()=>setShowSelectionDelete(false)}>بی‌خیال</button></div></section></div>,document.body)}
 
             {deleteConfirm && (
                 <DeleteConfirmModal
