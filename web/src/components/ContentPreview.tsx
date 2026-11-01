@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlignCenter, AlignJustify, AlignLeft, AlignRight, ArrowRight, Bold, BookOpen, Braces, Check, ChevronLeft, ChevronRight, Code2, Copy, Download, ExternalLink, Eye, EyeOff, FileBox, FileText, Heading1, Image as ImageIcon, Italic, Link, Link2, List, ListChecks, ListOrdered, Maximize2, Minimize2, Minus, Moon, MoreHorizontal, MoveHorizontal, PanelBottomClose, Pencil, Plus, Quote, Redo2, Settings2, Smartphone, Sigma, Sparkles, Strikethrough, Sun, Table2, Underline, Undo2, Wand2, WrapText, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { AlignCenter, AlignJustify, AlignLeft, AlignRight, ArrowRight, Bold, BookOpen, Braces, Check, ChevronLeft, ChevronRight, Code2, Copy, Download, ExternalLink, Eye, EyeOff, FileBox, FileText, Heading1, Image as ImageIcon, Italic, Link, Link2, List, ListChecks, ListOrdered, Maximize2, Minimize2, Minus, Moon, MoveHorizontal, PanelBottomClose, Pencil, Plus, Quote, Redo2, Settings2, Smartphone, Sigma, Sparkles, Strikethrough, Sun, Table2, Underline, Undo2, Wand2, WrapText, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { api, canPreviewText, useFiles, useRefineSTTText, useUpdateFile } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { cacheTextFile, getOfflineText, updateOfflineTextDraft } from '../lib/offline';
@@ -27,7 +27,6 @@ export default function ContentPreview() {
     const [openingExternal,setOpeningExternal]=useState(false);
     const [readerFullscreen, setReaderFullscreen] = useState(false);
     const [readerChromeHidden,setReaderChromeHidden]=useState(false);
-    const [readerActionMenu,setReaderActionMenu]=useState(false);
     const initialMarkdown=useRef<MarkdownSettings>(getMarkdownSettings());
     const [readerFontSize, setReaderFontSize] = useState(initialMarkdown.current.fontSize);
     const [readerLineHeight, setReaderLineHeight] = useState(initialMarkdown.current.lineHeight);
@@ -261,6 +260,7 @@ export default function ContentPreview() {
         requestAnimationFrame(() => editor.focus());
     };
     const openAIEditor=()=>{const source=textFirst?(file.description?.trim()||''):content;setAIVersions([source]);setAIVersion(0);setAIText(source);setAIPrompt('');setAIStatus('');setAIError('');setShowAIEditor(true)};
+    const copyReaderText=async()=>{try{await navigator.clipboard.writeText(editing?draft:content);addToast('متن کپی شد 📋')}catch{addToast('کپی متن انجام نشد.')}};
     const applyAIInstruction=async()=>{if(!aiText.trim()||!aiPrompt.trim())return;setAIError('');setAIStatus('درخواست ویرایش در حال ثبت است…');try{const result=await refineText.mutateAsync({content:aiText,prompt:aiPrompt.trim(),onStatus:message=>setAIStatus(message)});const next=[...aiVersions.slice(0,aiVersion+1),result.content];setAIVersions(next);setAIVersion(next.length-1);setAIText(result.content);setAIPrompt('');setAIStatus('نسخه تازه آماده شد.')}catch(reason:any){setAIStatus('');setAIError(reason?.response?.data?.detail||reason?.message||'ویرایش متن انجام نشد.')}};
     const showAIVersion=(nextIndex:number)=>{const next=Math.max(0,Math.min(nextIndex,aiVersions.length-1));setAIVersion(next);setAIText(aiVersions[next]);setAIError('')};
     const saveAIResult=async()=>{if(!file||file.id<0||!aiText.trim())return;setAIError('');setAIStatus('در حال ذخیره در کمد…');try{if(textFirst){const updated=await updateFile.mutateAsync({id:file.id,description:aiText});const description=updated.description?.trim()||'';const label=file.file_type==='video'?'ویدیو':file.file_type==='audio'?'صدا':'فایل پیوست';const attachment=file.file_type==='image'?`![تصویر پیوست](/api/stream/${file.id})`:`[باز کردن ${label}](komod://file/${file.id})`;const nextContent=textAttachmentPosition==='start'?`${attachment}\n\n${description}`:`${description}\n\n${attachment}`;textLoadVersionRef.current+=1;setContent(nextContent);setDraft(description)}else{const {data}=await api.patch<{content:string}>(`/files/${file.id}/text`,{content:aiText});await cacheTextFile(file,data.content);textLoadVersionRef.current+=1;setContent(data.content);setDraft(data.content)}setShowAIEditor(false);addToast('نسخه ویرایش‌شده ذخیره شد.')}catch(reason:any){setAIStatus('');setAIError(reason?.response?.data?.detail||'ذخیره متن انجام نشد.')}};
@@ -270,27 +270,26 @@ export default function ContentPreview() {
     return (
         <div className={`fixed inset-0 z-[220] flex items-center justify-center bg-black/85 backdrop-blur-md ${readerFullscreen ? 'p-0' : 'p-3 sm:p-8'}`} onClick={() => setContentPreviewFile(null)}>
             <section ref={previewRef} className={`relative flex w-full flex-col overflow-hidden border border-white/10 bg-dark-900 shadow-2xl ${readerFullscreen ? 'h-dvh max-h-none max-w-none rounded-none border-0' : 'max-h-full max-w-5xl rounded-2xl'}`} onClick={(event) => event.stopPropagation()}>
-                {!readerChromeHidden&&<header className="relative flex min-h-14 items-center gap-2 border-b border-white/10 px-2 py-2 sm:px-4">
+                {!readerChromeHidden&&(textReader?<header dir="rtl" className="relative shrink-0 border-b border-white/10 px-2 py-2 sm:px-4">
+                    <div className="flex min-h-10 items-center gap-2">
+                        <button onClick={() => setContentPreviewFile(null)} className="btn-icon shrink-0" title="بستن"><X className="h-5 w-5" /></button>
+                        <h2 dir="auto" className="min-w-0 flex-1 truncate text-start font-semibold" title={file.file_name}>{file.file_name}</h2>
+                        {contentPreviewHistory.length>0&&<button onClick={goBackContentPreview} className="btn-icon shrink-0" title="برگشت به فایل قبلی"><ArrowRight className="h-5 w-5"/></button>}
+                    </div>
+                    <nav aria-label="ابزارهای متن" className="mt-1.5 grid grid-flow-col auto-cols-fr gap-1 overflow-x-auto overscroll-x-contain rounded-2xl border border-white/[.07] bg-black/15 p-1">
+                        <button onClick={() => {if(!editing&&textFirst)setDraft(file.description?.trim()||'');setEditing(value => !value)}} className={`flex min-w-12 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[10px] transition hover:bg-white/[.06] ${editing?'bg-primary-500/15 text-primary-200':'text-dark-300'}`} title={editing?'بازگشت به حالت مطالعه':'ویرایش متن'}>{editing?<BookOpen className="h-[18px] w-[18px]"/>:<Pencil className="h-[18px] w-[18px]"/>}<span>{editing?'مطالعه':'ویرایش'}</span></button>
+                        <button onClick={()=>void copyReaderText()} className="flex min-w-12 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[10px] text-dark-300 transition hover:bg-white/[.06] hover:text-white" title="کپی همه متن"><Copy className="h-[18px] w-[18px]"/><span>کپی</span></button>
+                        <button onClick={()=>setReaderToolsVisible(value=>!value)} className={`flex min-w-12 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[10px] transition hover:bg-white/[.06] ${readerToolsVisible?'bg-white/[.06] text-white':'text-dark-300'}`} title={readerToolsVisible?'بستن تنظیمات نمایش':'تنظیمات نمایش متن'}><Settings2 className="h-[18px] w-[18px]"/><span>نمایش</span></button>
+                        <button onClick={openAIEditor} disabled={file.id<0||loading} className="flex min-w-12 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[10px] text-dark-300 transition hover:bg-white/[.06] hover:text-white disabled:opacity-30" title="ویرایش با هوش مصنوعی"><Sparkles className="h-[18px] w-[18px]"/><span>هوش مصنوعی</span></button>
+                        <button onClick={()=>void toggleReaderFullscreen()} className="flex min-w-12 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[10px] text-dark-300 transition hover:bg-white/[.06] hover:text-white" title={readerFullscreen?'خروج از تمام‌صفحه':'نمایش تمام‌صفحه'}>{readerFullscreen?<Minimize2 className="h-[18px] w-[18px]"/>:<Maximize2 className="h-[18px] w-[18px]"/>}<span>{readerFullscreen?'کوچک‌کردن':'تمام‌صفحه'}</span></button>
+                        {readerFullscreen&&<button onClick={()=>setReaderChromeHidden(true)} className="flex min-w-12 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[10px] text-dark-300 transition hover:bg-white/[.06] hover:text-white" title="پنهان کردن همه نوارها و نمایش فقط متن"><EyeOff className="h-[18px] w-[18px]"/><span>فقط متن</span></button>}
+                        <button onClick={()=>void minimizeReader()} className="flex min-w-12 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[10px] text-dark-300 transition hover:bg-white/[.06] hover:text-white" title="مینیمایز کردن متن"><PanelBottomClose className="h-[18px] w-[18px]"/><span>مینیمایز</span></button>
+                    </nav>
+                </header>:<header className="relative flex min-h-14 items-center gap-2 border-b border-white/10 px-2 py-2 sm:px-4">
                     <button onClick={() => setContentPreviewFile(null)} className="btn-icon shrink-0" title="بستن"><X className="h-5 w-5" /></button>
-                    <div className="flex-1 min-w-0">
-                        <h2 dir="auto" className="truncate text-start font-semibold" title={file.file_name}>{file.file_name}</h2>
-                        {!textReader&&file.description&&<p dir="auto" className="mt-0.5 truncate text-start text-xs text-dark-400" title={file.description}>{file.description}</p>}
-                    </div>
-                    <div className="flex shrink-0 items-center gap-1">
-                        {textReader&&<button onClick={()=>void minimizeReader()} className="btn-icon" title="مینیمایز کردن متن"><PanelBottomClose className="h-5 w-5"/></button>}
-                        {textReader&&<button onClick={() => {if(!editing&&textFirst)setDraft(file.description?.trim()||'');setEditing(value => !value)}} className={`btn-icon ${editing?'text-primary-200':''}`} title={editing?'حالت مطالعه':'ویرایش متن'}>{editing?<BookOpen className="h-5 w-5"/>:<Pencil className="h-5 w-5"/>}</button>}
-                        {textReader&&<button onClick={()=>setReaderActionMenu(value=>!value)} className={`btn-icon ${readerActionMenu?'bg-white/[.07] text-primary-200':''}`} title="گزینه‌های بیشتر"><MoreHorizontal className="h-5 w-5"/></button>}
-                    </div>
-                    {readerActionMenu&&textReader&&<div dir="rtl" className="black-glass-menu absolute left-2 top-[calc(100%+.4rem)] z-40 grid w-52 grid-cols-2 gap-1 rounded-2xl p-2 shadow-2xl" onClick={()=>setReaderActionMenu(false)}>
-                        {contentPreviewHistory.length>0&&<button onClick={goBackContentPreview} className="context-menu-item rounded-xl"><ArrowRight className="h-4 w-4"/>برگشت</button>}
-                        <button onClick={()=>setReaderToolsVisible(value=>!value)} className="context-menu-item rounded-xl"><Settings2 className="h-4 w-4"/>تنظیمات</button>
-                        <button onClick={async()=>{await navigator.clipboard.writeText(editing?draft:content);addToast('متن کپی شد 📋')}} className="context-menu-item rounded-xl"><Copy className="h-4 w-4"/>کپی</button>
-                        <button onClick={openAIEditor} disabled={file.id<0||loading} className="context-menu-item rounded-xl disabled:opacity-30"><Sparkles className="h-4 w-4"/>هوش مصنوعی</button>
-                        <button onClick={()=>void toggleReaderFullscreen()} className="context-menu-item rounded-xl">{readerFullscreen?<Minimize2 className="h-4 w-4"/>:<Maximize2 className="h-4 w-4"/>}{readerFullscreen?'خروج':'تمام‌صفحه'}</button>
-                        {readerFullscreen&&<button onClick={()=>setReaderChromeHidden(true)} className="context-menu-item rounded-xl"><EyeOff className="h-4 w-4"/>بی‌مزاحمت</button>}
-                    </div>}
-                </header>}
-                {readerChromeHidden&&<button type="button" onClick={()=>setReaderChromeHidden(false)} className="absolute left-3 top-3 z-20 flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-black/25 text-white/35 opacity-20 backdrop-blur transition hover:opacity-100 focus:opacity-100" title="نمایش نوارها"><Eye className="h-4 w-4"/></button>}
+                    <div className="min-w-0 flex-1"><h2 dir="auto" className="truncate text-start font-semibold" title={file.file_name}>{file.file_name}</h2>{file.description&&<p dir="auto" className="mt-0.5 truncate text-start text-xs text-dark-400" title={file.description}>{file.description}</p>}</div>
+                </header>)}
+                {readerChromeHidden&&<button type="button" onClick={()=>setReaderChromeHidden(false)} className="absolute left-3 top-3 z-20 flex min-h-10 items-center gap-2 rounded-full border border-white/10 bg-black/65 px-3 text-xs text-white/80 shadow-xl backdrop-blur-xl transition hover:bg-black/80 focus:bg-black/80" title="نمایش دوباره نوارهای ابزار"><Eye className="h-4 w-4"/><span>نمایش ابزارها</span></button>}
                 {file.file_type === 'image' && !textFirst ? (
                     <div className="relative min-h-0 flex-1 p-4 pb-20 text-center">
                         {imageFailed ? <div className="mx-auto rounded-2xl border border-dashed border-white/10 p-8 text-center"><p className="text-sm text-dark-400">نمایش عکس انجام نشد.</p><button className="btn-secondary mt-4" onClick={() => { setImageFailed(false); setImageRetry(Date.now()); }}>تلاش دوباره</button></div> : <div className="h-full min-h-[45vh] w-full"><ZoomableImage key={selectedImageUrl} src={selectedImageUrl} previewSrc={imageQuality==='original'?thumbnailUrl:''} alt={file.file_name} scale={imageScale} onScaleChange={setImageScale}/></div>}
