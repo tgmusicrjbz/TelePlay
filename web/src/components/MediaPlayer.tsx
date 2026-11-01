@@ -387,7 +387,9 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
             videoRef.current.playbackRate = playbackSpeed;
             const resumeKey = `komod-player-resume-${file.id}`;
             const resumeAt = Number(sessionStorage.getItem(resumeKey) || 0);
-            if (!inline && Number.isFinite(resumeAt) && resumeAt > 0) {
+            // The pack viewer and the global minimized player are two mounts of
+            // the same media, so either one may consume the hand-off position.
+            if (Number.isFinite(resumeAt) && resumeAt > 0) {
                 videoRef.current.currentTime = nextDuration > 0 ? Math.min(resumeAt, Math.max(0, nextDuration - .1)) : resumeAt;
                 setCurrentTime(videoRef.current.currentTime);
                 sessionStorage.removeItem(resumeKey);
