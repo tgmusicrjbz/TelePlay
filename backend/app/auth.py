@@ -220,8 +220,16 @@ async def get_current_user(
             session.last_seen_at = datetime.utcnow()
             await db.commit()
 
-    # Auth and administration always operate on the signed-in identity.
-    if request and not request.url.path.startswith(("/api/auth", "/api/admin", "/api/accounts")):
+    # Auth, administration and private playback/offline state always operate
+    # on the signed-in identity.  A shared workspace only changes which
+    # library is being browsed; it must never expose the owner's queue,
+    # playback history or offline selections to a member.
+    private_identity_paths = {
+        "/api/files/player-state",
+        "/api/files/play-history",
+        "/api/files/offline-manifest",
+    }
+    if request and request.url.path not in private_identity_paths and not request.url.path.startswith(("/api/auth", "/api/admin", "/api/accounts")):
         workspace_raw = request.headers.get("X-Workspace-User") or request.query_params.get("workspace")
         if workspace_raw:
             try:

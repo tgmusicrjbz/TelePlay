@@ -67,6 +67,13 @@ function PlayerCloudSync() {
     const [hydrated, setHydrated] = useState(false);
     useEffect(() => {
         if (connectivity !== 'online') return;
+        // Queue state is private. Keep a workspace-scoped local queue while
+        // browsing shared content, but never hydrate or publish it through
+        // the shared workspace request context.
+        if (localStorage.getItem('komod-active-workspace')) {
+            setHydrated(false);
+            return;
+        }
         let cancelled = false;
         void api.get('/files/player-state').then(({data}) => {
             if (cancelled) return;
@@ -80,6 +87,7 @@ function PlayerCloudSync() {
     }, [connectivity, setPlayerMinimized, setRepeatMode, startQueue]);
     useEffect(() => {
         if (!hydrated || connectivity !== 'online') return;
+        if (localStorage.getItem('komod-active-workspace')) return;
         const timer = window.setTimeout(() => void api.put('/files/player-state', {
             file_ids: playQueue.map(item => item.id), current_index: queueIndex,
             repeat_mode: repeatMode, position: 0,

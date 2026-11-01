@@ -359,6 +359,77 @@ def _download_pinterest(url: str) -> list[dict]:
         raise
 
 
+def _download_instagram_direct(url: str, quality: str = "auto") -> list[dict]:
+    """Download public Instagram media directly when the helper bot fails.
+
+    This deliberately runs only as the final retry.  It keeps the normal bot
+    path fast while giving Reels and public video posts an independent route.
+    """
+    temp_dir = Path(tempfile.mkdtemp(prefix="komod-instagram-"))
+    try:
+        from yt_dlp import YoutubeDL
+
+        audio_mode = str(quality).casefold() == "audio"
+        height = int(quality) if str(quality).isdigit() else None
+        if audio_mode:
+            format_selector = "bestaudio/best"
+        elif height:
+            format_selector = f"bestvideo[height<={height}]+bestaudio/best[height<={height}]/best"
+        else:
+            format_selector = "bestvideo+bestaudio/best"
+        options = {
+            "quiet": True,
+            "no_warnings": True,
+            "noprogress": True,
+            "logger": _QuietYTDLPLogger(),
+            "format": format_selector,
+            "outtmpl": str(temp_dir / "%(autonumber)03d-%(id)s.%(ext)s"),
+            "merge_output_format": "mp4",
+            "socket_timeout": 30,
+            "retries": 3,
+            "fragment_retries": 3,
+            "extractor_retries": 3,
+        }
+        with YoutubeDL(options) as downloader:
+            info = downloader.extract_info(url, download=True) or {}
+
+        ignored_suffixes = {".part", ".ytdl", ".json", ".description", ".vtt", ".srt"}
+        paths = sorted(
+            path for path in temp_dir.iterdir()
+            if path.is_file() and path.suffix.casefold() not in ignored_suffixes
+        )
+        if not paths:
+            raise RuntimeError("روش مستقیم هم فایل قابل دریافت پیدا نکرد.")
+
+        entries = [entry for entry in (info.get("entries") or []) if isinstance(entry, dict)]
+        root_title = str(info.get("title") or info.get("description") or "پست اینستاگرام").splitlines()[0]
+        root_author = _clean_source_author(info.get("uploader") or info.get("channel") or info.get("uploader_id"))
+        results: list[dict] = []
+        for index, path in enumerate(paths):
+            entry = entries[index] if index < len(entries) else info
+            mime = (mimetypes.guess_type(path.name)[0] or "").casefold()
+            if audio_mode or mime.startswith("audio/"):
+                media_type = "audio"
+            elif mime.startswith("image/"):
+                media_type = "image"
+            else:
+                media_type = "video"
+            entry_title = str(entry.get("title") or entry.get("description") or root_title).splitlines()[0]
+            results.append({
+                "message": None,
+                "local_path": str(path),
+                "temp_dir": str(temp_dir),
+                "title": sanitize_filename(entry_title or "پست اینستاگرام")[:220],
+                "type": media_type,
+                "author": _clean_source_author(entry.get("uploader") or entry.get("channel") or entry.get("uploader_id")) or root_author,
+                "source_url": url,
+            })
+        return results
+    except Exception:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise
+
+
 class ImportCancelled(Exception):
     """Raised internally when a queued or active import is cancelled."""
 
@@ -744,7 +815,11 @@ class LinkImportService:
                 await self._persist_status(job.id)
             except Exception as error:
                 friendly_error = _friendly_import_error(error)
-                retryable = isinstance(error, TimeoutError) or bool(job.instagram_event_id)
+                retryable = (
+                    isinstance(error, TimeoutError)
+                    or classify_import_url(job.url) == "instagram"
+                    or bool(job.instagram_event_id)
+                )
                 if retryable and job.retry_count < 2 and not self.controls.get(job.id, {}).get("cancelled"):
                     job.retry_count += 1
                     logger.warning("Link import failed; retrying %s (%s/2): %s", job.url, job.retry_count, error)
@@ -775,9 +850,23 @@ class LinkImportService:
                 self.queue.task_done()
 
     async def _download(self, client: Client, job: ImportJob, url: str, quality: str) -> list[dict]:
+        is_instagram = classify_import_url(url) == "instagram"
+        # Two attempts use AllSaver.  The third uses an independent direct
+        # extractor, so a stalled or rate-limited helper bot cannot block the
+        # import forever.
+        if is_instagram and job.retry_count >= 2:
+            logger.warning(
+                "AllSaver failed twice for Instagram import %s; using direct extractor",
+                url,
+            )
+            self.statuses[job.id].update(
+                message="دریافت مستقیم از اینستاگرام با روش جایگزین",
+                progress=18,
+            )
+            await self._persist_status(job.id)
+            return await asyncio.to_thread(_download_instagram_direct, url, quality)
         raw_title, source_author = await asyncio.to_thread(_oembed_metadata, url)
         title = sanitize_filename(raw_title)
-        is_instagram = "instagram.com" in url.lower()
         sent = await client.send_message("allsaverbot", url)
         clicked: set[str] = set()
         found: list[dict] = []

@@ -3,6 +3,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import AsyncMock, patch
 from pathlib import Path
 
 _temp = tempfile.TemporaryDirectory()
@@ -15,7 +16,7 @@ os.environ.setdefault("JWT_SECRET", "test-secret")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.database import Base, async_session, engine
-from app.downloader import LinkImportService, _PinterestMetaParser, _pinterest_image_url, _pinterest_video_url, _validate_pinterest_pin_url, classify_import_url
+from app.downloader import ImportJob, LinkImportService, _PinterestMetaParser, _pinterest_image_url, _pinterest_video_url, _validate_pinterest_pin_url, classify_import_url
 from app.models import ProcessingJob, User
 from app.processing_jobs import create_job
 
@@ -77,6 +78,22 @@ class LinkImportDurabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(service.cancel_all(1), 1)
         self.assertEqual(service.statuses["mine"]["state"], "cancelled")
         self.assertEqual(service.statuses["other"]["state"], "queued")
+
+    async def test_final_instagram_retry_uses_direct_fallback_without_helper_bot(self):
+        service = LinkImportService()
+        job = ImportJob(
+            id="instagram-fallback", url="https://www.instagram.com/reel/example/",
+            user_id=1, telegram_id=123, quality="720", retry_count=2,
+        )
+        service.statuses[job.id] = {"id": job.id, "user_id": 1, "state": "downloading"}
+        client = AsyncMock()
+        direct_result = [{"message": None, "local_path": "/tmp/reel.mp4", "type": "video"}]
+        with patch("app.downloader._download_instagram_direct", return_value=direct_result) as fallback:
+            result = await service._download(client, job, job.url, job.quality)
+        self.assertEqual(result, direct_result)
+        fallback.assert_called_once_with(job.url, job.quality)
+        client.send_message.assert_not_awaited()
+        self.assertIn("روش جایگزین", service.statuses[job.id]["message"])
 
     def test_supported_link_classifier_includes_public_pinterest_urls(self):
         self.assertEqual(classify_import_url("https://www.pinterest.com/pin/123456/"), "pinterest")
