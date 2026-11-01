@@ -56,9 +56,11 @@ from app.routers.files import (
     send_files_to_telegram,
     update_file,
     update_file_description,
+    update_text_content,
     upload_file,
     SendToTelegramRequest,
     TextFirstUpdate,
+    TextContentUpdate,
     OfflineManifestUpdate,
 )
 from app.routers.folders import delete_folder_contents, list_folders, update_folder
@@ -256,6 +258,28 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             result = await set_text_first_mode(image.id, TextFirstUpdate(enabled=True), db, user)
             self.assertEqual(result["media_file"]["description"], expected_caption)
             self.assertIsNone(await db.get(File, companion.id))
+
+    async def test_text_update_returns_a_complete_file_response(self):
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            note = self.make_file(user.id, self.folder_id, 996)
+            note.file_type = "text"
+            note.mime_type = "text/markdown"
+            note.file_name = "note.md"
+            note.file_id = "text-post:996"
+            db.add(note)
+            await db.commit()
+            await db.refresh(note)
+
+            result = await update_text_content(
+                note.id, TextContentUpdate(content="# عنوان تازه\n\nمتن ویرایش‌شده"), db, user, None
+            )
+
+            self.assertEqual(result["content"], "# عنوان تازه\n\nمتن ویرایش‌شده")
+            self.assertEqual(result["file"]["id"], note.id)
+            self.assertEqual(result["file"]["last_pos"], 0)
+            stored = await db.get(File, note.id)
+            self.assertEqual(stored.search_text, result["content"])
 
     async def test_file_description_saves_long_markdown_and_can_be_cleared(self):
         async with async_session() as db:

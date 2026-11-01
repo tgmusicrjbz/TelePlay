@@ -1282,50 +1282,88 @@ async def update_text_content(
         file.description = next((line.strip() for line in payload.content.splitlines() if line.strip()), file.description or "")[:240] or None
         file.updated_at = datetime.utcnow()
         await db.commit()
-        await db.refresh(file)
-        return {"content": payload.content, "file": add_urls_to_file(file)}
-    message = await get_message_from_channel(file.channel_message_id, file.storage_channel_id)
+        stored = (await db.execute(select(File).where(
+            File.id == file_id, File.user_id == current_user.id
+        ).options(selectinload(File.watch_progress)))).scalar_one()
+        return {"content": payload.content, "file": add_urls_to_file(stored)}
+    old_message_id = file.channel_message_id
+    storage_channel_id = file.storage_channel_id
+    target_channel_id = storage_channel_id or settings.telegram_storage_channel_id
+    file_name = file.file_name
+    description = file.description
+    user_id = current_user.id
+    # Do not reserve a database connection while Telegram uploads the replacement.
+    # This operation may take several seconds on a busy storage channel.
+    await db.rollback()
+    replacement = None
+    committed = False
     try:
-        if message is not None and message.document is not None:
-            suffix = Path(file.file_name).suffix or ".md"
+        message = await get_message_from_channel(old_message_id, storage_channel_id)
+        if message is None:
+            raise RuntimeError("Telegram storage message was not found")
+        if message.document is not None:
+            suffix = Path(file_name).suffix or ".md"
             with tempfile.TemporaryDirectory(prefix="komod-text-") as temporary_dir:
                 text_path = Path(temporary_dir) / f"note{suffix}"
                 text_path.write_text(payload.content, encoding="utf-8")
                 replacement = await telegram.tg_client.send_document(
-                    chat_id=file.storage_channel_id or settings.telegram_storage_channel_id,
+                    chat_id=target_channel_id,
                     document=str(text_path),
-                    caption=file.description,
+                    caption=description,
                     parse_mode=None,
                 )
             media = replacement.document
             if media is None:
                 raise RuntimeError("Telegram returned no document for edited note")
-            old_message_id = file.channel_message_id
-            file.file_id = media.file_id
-            file.file_unique_id = media.file_unique_id
-            file.channel_message_id = replacement.id
-            file.file_size = media.file_size or len(payload.content.encode("utf-8"))
-            file.mime_type = media.mime_type or "text/markdown"
-            remaining = (await db.execute(select(File.id).where(
-                File.id != file.id,
-                File.storage_channel_id == file.storage_channel_id,
-                File.channel_message_id == old_message_id,
-            ).limit(1))).scalar_one_or_none()
-            if remaining is None:
-                await delete_from_storage_channel(old_message_id, file.storage_channel_id)
+            await db.execute(update(File).where(File.id == file_id, File.user_id == user_id).values(
+                file_id=media.file_id,
+                file_unique_id=media.file_unique_id,
+                channel_message_id=replacement.id,
+                file_size=media.file_size or len(payload.content.encode("utf-8")),
+                mime_type=media.mime_type or "text/markdown",
+                updated_at=datetime.utcnow(),
+                search_text=payload.content,
+                content_hash=hashlib.sha256(payload.content.encode("utf-8")).hexdigest(),
+                is_shortcut=False,
+            ))
         else:
-            await telegram.tg_client.edit_message_text(file.storage_channel_id or settings.telegram_storage_channel_id, file.channel_message_id, payload.content)
-            file.file_name = sanitize_filename(payload.content.strip().splitlines()[0][:80])
-            file.file_size = len(payload.content.encode("utf-8"))
+            await telegram.tg_client.edit_message_text(target_channel_id, old_message_id, payload.content)
+            await db.execute(update(File).where(File.id == file_id, File.user_id == user_id).values(
+                file_name=sanitize_filename(payload.content.strip().splitlines()[0][:80]),
+                file_size=len(payload.content.encode("utf-8")),
+                updated_at=datetime.utcnow(),
+                search_text=payload.content,
+                content_hash=hashlib.sha256(payload.content.encode("utf-8")).hexdigest(),
+                is_shortcut=False,
+            ))
+        await db.commit()
+        committed = True
     except Exception as error:
+        await db.rollback()
+        if replacement is not None and not committed:
+            try:
+                await delete_from_storage_channel(replacement.id, storage_channel_id)
+            except Exception:
+                logger.warning("Could not clean up replacement text message %s", replacement.id, exc_info=True)
         logger.exception("Could not edit text note %s", file_id)
         raise HTTPException(status_code=502, detail="Could not update text in Telegram") from error
-    file.updated_at = datetime.utcnow()
-    file.search_text = payload.content
-    file.content_hash = hashlib.sha256(payload.content.encode("utf-8")).hexdigest()
-    file.is_shortcut = False
-    await db.commit()
-    return {"content": payload.content, "file": add_urls_to_file(file)}
+    if replacement is not None:
+        try:
+            remaining = (await db.execute(select(File.id).where(
+                File.id != file_id,
+                File.storage_channel_id == storage_channel_id,
+                File.channel_message_id == old_message_id,
+            ).limit(1))).scalar_one_or_none()
+            await db.rollback()
+            if remaining is None:
+                await delete_from_storage_channel(old_message_id, storage_channel_id)
+        except Exception:
+            logger.warning("Could not remove the previous text message %s", old_message_id, exc_info=True)
+            await db.rollback()
+    stored = (await db.execute(select(File).where(
+        File.id == file_id, File.user_id == user_id
+    ).options(selectinload(File.watch_progress)))).scalar_one()
+    return {"content": payload.content, "file": add_urls_to_file(stored)}
 
 
 @router.post("/{file_id}/text-first")

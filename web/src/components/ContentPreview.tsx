@@ -18,6 +18,7 @@ export default function ContentPreview() {
     const [loading, setLoading] = useState(false);
     const [editing, setEditing] = useState(false);
     const [draft, setDraft] = useState('');
+    const [savedDraft, setSavedDraft] = useState('');
     const [saving, setSaving] = useState(false);
     const [imageFailed, setImageFailed] = useState(false);
     const [imageRetry, setImageRetry] = useState(0);
@@ -128,7 +129,7 @@ export default function ContentPreview() {
             }
         };
         loadText()
-            .then(text => { if (!cancelled && loadVersion === textLoadVersionRef.current) { setContent(text); setDraft(textFirst ? file.description?.trim()||'' : text); } })
+            .then(text => { if (!cancelled && loadVersion === textLoadVersionRef.current) { const editableText=textFirst ? file.description?.trim()||'' : text;setContent(text);setDraft(editableText);setSavedDraft(editableText); } })
             .catch((err) => { if (!cancelled && loadVersion === textLoadVersionRef.current) setError(err instanceof Error ? err.message : 'متن بارگذاری نشد.'); })
             .finally(() => { if (!cancelled && loadVersion === textLoadVersionRef.current) setLoading(false); });
         return () => { cancelled = true; };
@@ -199,6 +200,7 @@ export default function ContentPreview() {
         }
     };
     const saveText = async () => {
+        if (saving || draft === savedDraft) return;
         setSaving(true);
         try {
             if (textFirst) {
@@ -208,22 +210,25 @@ export default function ContentPreview() {
                 const attachment = file.file_type === 'image' ? `![تصویر پیوست](/api/stream/${file.id})` : `[باز کردن ${label}](komod://file/${file.id})`;
                 const nextContent=textAttachmentPosition==='start'?`${attachment}\n\n${description}`:`${description}\n\n${attachment}`;
                 textLoadVersionRef.current += 1;
-                setContent(nextContent);setDraft(description);setEditing(false);addToast('تغییرات متن ذخیره شد.');
+                setContent(nextContent);setDraft(description);setSavedDraft(description);setEditing(false);addToast('متن با موفقیت ذخیره شد.');
                 return;
             }
             if (file.id < 0) {
                 await updateOfflineTextDraft(file.id, draft);
                 textLoadVersionRef.current += 1;
-                setContent(draft); setDraft(draft); setEditing(false); addToast('تغییرات یادداشت آفلاین ذخیره شد.');
+                setContent(draft); setDraft(draft); setSavedDraft(draft); setEditing(false); addToast('یادداشت آفلاین با موفقیت ذخیره شد.');
                 return;
             }
             const { data } = await api.patch<{ content: string }>(`/files/${file.id}/text`, { content: draft });
             await cacheTextFile(file, data.content);
             textLoadVersionRef.current += 1;
-            setContent(data.content); setDraft(data.content); setEditing(false);
-            addToast('تغییرات متن ذخیره شد.');
+            setContent(data.content); setDraft(data.content); setSavedDraft(data.content); setEditing(false);
+            addToast('متن با موفقیت ذخیره شد.');
         } catch (reason: any) {
-            addToast(reason?.response?.data?.detail || 'ذخیره متن انجام نشد. دوباره تلاش کن.', 'error');
+            const status=Number(reason?.response?.status||0);
+            const detail=reason?.response?.data?.detail;
+            const originUnavailable=[502,503,504,520,521,522,523,524].includes(status)||/origin web server|cloudflare|incomplete response/i.test(String(detail||''));
+            addToast(originUnavailable?'ارتباط با سرور ذخیره‌سازی موقتاً قطع شد. متن پاک نشده؛ کمی بعد دوباره ذخیره کن.':(typeof detail==='string'&&detail.length<240?detail:'ذخیره متن انجام نشد. دوباره تلاش کن.'), 'error');
         } finally { setSaving(false); }
     };
     const toggleReaderFullscreen = async () => {
@@ -323,7 +328,7 @@ export default function ContentPreview() {
                             </div>
                         </div>}
                         <div className={`markdown-reader-surface markdown-reader-surface--${readerTone} min-h-0 flex-1 overflow-auto p-4 transition-colors sm:p-8 ${readerChromeHidden?'pt-12 sm:pt-12':''}`}>
-                            {loading ? <p className="text-dark-400">در حال بارگذاری متن…</p> : error ? <p className="text-red-400">{error}</p> : editing ? <div className={`mx-auto ${readerWide?'max-w-none':'max-w-5xl'}`}><div className="markdown-editor-toolbar mb-2 grid grid-cols-6 gap-1 rounded-2xl border p-1.5 sm:flex sm:flex-wrap"><EditorTool title="سرتیتر" onClick={()=>insertMarkdown('# ','','عنوان',true)}><Heading1/></EditorTool><EditorTool title="بولد" onClick={()=>insertMarkdown('**','**')}><Bold/></EditorTool><EditorTool title="ایتالیک" onClick={()=>insertMarkdown('*','*')}><Italic/></EditorTool><EditorTool title="زیرخط" onClick={()=>insertMarkdown('<u>','</u>')}><Underline/></EditorTool><EditorTool title="خط‌خورده" onClick={()=>insertMarkdown('~~','~~')}><Strikethrough/></EditorTool><EditorTool title="کد کوتاه" onClick={()=>insertMarkdown('`','`','code')}><Code2/></EditorTool><EditorTool title="کدبلاک" onClick={()=>insertMarkdown('```\n','\n```','code',true)}><Code2/></EditorTool><EditorTool title="فرمول ریاضی" onClick={()=>insertMarkdown('$','$','x^2 + y^2')}><Sigma/></EditorTool><EditorTool title="متغیر" onClick={()=>insertMarkdown('{{','}}','نام_متغیر')}><Braces/></EditorTool><EditorTool title="لینک وب" onClick={()=>insertMarkdown('[','](https://)','عنوان لینک')}><Link/></EditorTool><EditorTool title="لینک به فایل کمد" onClick={()=>setShowInternalLinkPicker(true)}><Link2/></EditorTool><EditorTool title="تصویر" onClick={()=>insertMarkdown('![','](https://)','توضیح تصویر')}><ImageIcon/></EditorTool><EditorTool title="نقل‌قول" onClick={()=>insertMarkdown('> ','','متن نقل‌قول',true)}><Quote/></EditorTool><EditorTool title="فهرست" onClick={()=>insertMarkdown('- ','','مورد',true)}><List/></EditorTool><EditorTool title="فهرست شماره‌ای" onClick={()=>insertMarkdown('1. ','','مورد',true)}><ListOrdered/></EditorTool><EditorTool title="چک‌لیست" onClick={()=>insertMarkdown('- [ ] ','','کار',true)}><ListChecks/></EditorTool><EditorTool title="خط جداکننده" onClick={()=>insertTemplate('---\n')}><Minus/></EditorTool><EditorTool title="جدول" onClick={()=>insertTemplate('| ستون ۱ | ستون ۲ |\n| --- | --- |\n| مقدار ۱ | مقدار ۲ |\n')}><Table2/></EditorTool></div><textarea ref={editorRef} dir="auto" value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='b'){event.preventDefault();insertMarkdown('**','**')}if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='i'){event.preventDefault();insertMarkdown('*','*')}}} className={`markdown-editor markdown-font--${readerFont} min-h-[65vh] w-full resize-y rounded-2xl border p-4 caret-primary-300 outline-none selection:bg-primary-500/30 focus:border-primary-400`} style={{ fontSize: readerFontSize, lineHeight: readerLineHeight }}/><div className="mt-3 flex justify-end gap-2"><button className="btn-secondary" onClick={() => { setDraft(content); setEditing(false); }}>لغو</button><button disabled={saving} className="btn-primary flex items-center gap-2" onClick={() => void saveText()}><Check className="h-4 w-4"/> {saving ? 'در حال ذخیره…' : 'ذخیره متن'}</button></div></div> : <MarkdownContent content={content} fontSize={readerFontSize} lineHeight={readerLineHeight} theme={readerTone} fontFamily={readerFont} wrap={readerWrap} wide={readerWide} align={readerAlign} direction={readerDirection} />}
+                            {loading ? <p className="text-dark-400">در حال بارگذاری متن…</p> : error ? <p className="text-red-400">{error}</p> : editing ? <div className={`mx-auto ${readerWide?'max-w-none':'max-w-5xl'}`}><div className="markdown-editor-toolbar mb-2 grid grid-cols-6 gap-1 rounded-2xl border p-1.5 sm:flex sm:flex-wrap"><EditorTool title="سرتیتر" onClick={()=>insertMarkdown('# ','','عنوان',true)}><Heading1/></EditorTool><EditorTool title="بولد" onClick={()=>insertMarkdown('**','**')}><Bold/></EditorTool><EditorTool title="ایتالیک" onClick={()=>insertMarkdown('*','*')}><Italic/></EditorTool><EditorTool title="زیرخط" onClick={()=>insertMarkdown('<u>','</u>')}><Underline/></EditorTool><EditorTool title="خط‌خورده" onClick={()=>insertMarkdown('~~','~~')}><Strikethrough/></EditorTool><EditorTool title="کد کوتاه" onClick={()=>insertMarkdown('`','`','code')}><Code2/></EditorTool><EditorTool title="کدبلاک" onClick={()=>insertMarkdown('```\n','\n```','code',true)}><Code2/></EditorTool><EditorTool title="فرمول ریاضی" onClick={()=>insertMarkdown('$','$','x^2 + y^2')}><Sigma/></EditorTool><EditorTool title="متغیر" onClick={()=>insertMarkdown('{{','}}','نام_متغیر')}><Braces/></EditorTool><EditorTool title="لینک وب" onClick={()=>insertMarkdown('[','](https://)','عنوان لینک')}><Link/></EditorTool><EditorTool title="لینک به فایل کمد" onClick={()=>setShowInternalLinkPicker(true)}><Link2/></EditorTool><EditorTool title="تصویر" onClick={()=>insertMarkdown('![','](https://)','توضیح تصویر')}><ImageIcon/></EditorTool><EditorTool title="نقل‌قول" onClick={()=>insertMarkdown('> ','','متن نقل‌قول',true)}><Quote/></EditorTool><EditorTool title="فهرست" onClick={()=>insertMarkdown('- ','','مورد',true)}><List/></EditorTool><EditorTool title="فهرست شماره‌ای" onClick={()=>insertMarkdown('1. ','','مورد',true)}><ListOrdered/></EditorTool><EditorTool title="چک‌لیست" onClick={()=>insertMarkdown('- [ ] ','','کار',true)}><ListChecks/></EditorTool><EditorTool title="خط جداکننده" onClick={()=>insertTemplate('---\n')}><Minus/></EditorTool><EditorTool title="جدول" onClick={()=>insertTemplate('| ستون ۱ | ستون ۲ |\n| --- | --- |\n| مقدار ۱ | مقدار ۲ |\n')}><Table2/></EditorTool></div><textarea ref={editorRef} dir="auto" value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='b'){event.preventDefault();insertMarkdown('**','**')}if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='i'){event.preventDefault();insertMarkdown('*','*')}}} className={`markdown-editor markdown-font--${readerFont} min-h-[65vh] w-full resize-y rounded-2xl border p-4 caret-primary-300 outline-none selection:bg-primary-500/30 focus:border-primary-400`} style={{ fontSize: readerFontSize, lineHeight: readerLineHeight }}/><div className="mt-3 flex justify-end gap-2"><button className="btn-secondary" onClick={() => { setDraft(savedDraft); setEditing(false); }}>لغو</button><button disabled={saving||draft===savedDraft} className={`flex items-center gap-2 ${draft===savedDraft?'btn-secondary cursor-default text-dark-500':'btn-primary'} disabled:opacity-60`} onClick={() => void saveText()}><Check className="h-4 w-4"/> {saving ? 'در حال ذخیره…' : draft===savedDraft ? 'بدون تغییر' : 'ذخیره متن'}</button></div></div> : <MarkdownContent content={content} fontSize={readerFontSize} lineHeight={readerLineHeight} theme={readerTone} fontFamily={readerFont} wrap={readerWrap} wide={readerWide} align={readerAlign} direction={readerDirection} />}
                         </div>
                     </>
                 ) : (
