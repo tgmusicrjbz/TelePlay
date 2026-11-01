@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlignCenter, AlignJustify, AlignLeft, AlignRight, ArrowRight, Bold, BookOpen, Braces, Check, ChevronLeft, ChevronRight, Code2, Copy, Download, ExternalLink, Eye, EyeOff, FileBox, FileText, Heading1, Image as ImageIcon, Italic, Link, Link2, List, ListChecks, ListOrdered, Maximize2, Minimize2, Minus, Moon, MoveHorizontal, PanelBottomClose, Pencil, Plus, Quote, Redo2, Settings2, Smartphone, Sigma, Sparkles, Strikethrough, Sun, Table2, Underline, Undo2, Wand2, WrapText, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { AlignCenter, AlignJustify, AlignLeft, AlignRight, ArrowRight, Bold, BookOpen, Braces, Check, ChevronLeft, ChevronRight, Code2, Copy, Download, ExternalLink, Eye, EyeOff, FileBox, FileText, Heading1, Image as ImageIcon, Italic, Link, Link2, List, ListChecks, ListOrdered, Maximize2, Minimize2, Minus, Moon, MoreHorizontal, MoveHorizontal, PanelBottomClose, Pencil, Plus, Quote, Redo2, Settings2, Smartphone, Sigma, Sparkles, Strikethrough, Sun, Table2, Underline, Undo2, Wand2, WrapText, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { api, canPreviewText, useFiles, useRefineSTTText, useUpdateFile } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { cacheTextFile, getOfflineText, updateOfflineTextDraft } from '../lib/offline';
@@ -7,7 +7,7 @@ import CustomSelect from './CustomSelect';
 import MarkdownContent, { MarkdownInline } from './MarkdownContent';
 import InternalFileLinkPicker from './InternalFileLinkPicker';
 import ZoomableImage from './ZoomableImage';
-import { getMarkdownSettings, getMarkdownThemeOptions, markdownFonts, MarkdownSettings } from '../lib/markdownSettings';
+import { getMarkdownReaderLayout, getMarkdownSettings, getMarkdownThemeOptions, markdownFonts, MarkdownSettings, saveMarkdownReaderLayout } from '../lib/markdownSettings';
 
 const readerFonts=markdownFonts;
 
@@ -26,8 +26,11 @@ export default function ContentPreview() {
     const [imageDescriptionExpanded, setImageDescriptionExpanded] = useState(false);
     const [openingExternal,setOpeningExternal]=useState(false);
     const [readerFullscreen, setReaderFullscreen] = useState(false);
-    const [readerChromeHidden,setReaderChromeHidden]=useState(false);
     const initialMarkdown=useRef<MarkdownSettings>(getMarkdownSettings());
+    const initialLayout=useRef(getMarkdownReaderLayout(initialMarkdown.current));
+    const [readerChromeHidden,setReaderChromeHidden]=useState(initialLayout.current.focus);
+    const [readerHeaderVisible,setReaderHeaderVisible]=useState(initialLayout.current.header);
+    const [readerActionsVisible,setReaderActionsVisible]=useState(initialLayout.current.actions);
     const [readerFontSize, setReaderFontSize] = useState(initialMarkdown.current.fontSize);
     const [readerLineHeight, setReaderLineHeight] = useState(initialMarkdown.current.lineHeight);
     const [readerTone, setReaderTone] = useState(initialMarkdown.current.theme);
@@ -37,7 +40,8 @@ export default function ContentPreview() {
     const [readerAlign, setReaderAlign] = useState<'right' | 'left' | 'center' | 'justify'>(initialMarkdown.current.align);
     const [readerDirection,setReaderDirection]=useState<'rtl'|'ltr'>(initialMarkdown.current.direction);
     const [textAttachmentPosition,setTextAttachmentPosition]=useState<'start'|'end'>(initialMarkdown.current.textAttachmentPosition);
-    const [readerToolsVisible,setReaderToolsVisible]=useState(initialMarkdown.current.showToolbar);
+    const [readerToolsVisible,setReaderToolsVisible]=useState(initialLayout.current.display);
+    const [readerActionVisibility,setReaderActionVisibility]=useState(initialMarkdown.current.readerActions);
     const [readerToneOptions,setReaderToneOptions]=useState(getMarkdownThemeOptions);
     const [showInternalLinkPicker,setShowInternalLinkPicker]=useState(false);
     const [showAIEditor,setShowAIEditor]=useState(false);
@@ -61,9 +65,9 @@ export default function ContentPreview() {
     const imageIndex=file?.file_type==='image'?imageItems.findIndex(item=>item.id===file.id):-1;
     const showImageAt=(index:number)=>{const next=imageItems[index];if(next)setContentPreviewFile(next)};
 
-    useEffect(() => { setImageFailed(false); setImageRetry(0); setImageScale(1); setImageQuality('optimized'); setImageDescriptionExpanded(false); setReaderFullscreen(false); setReaderChromeHidden(false); setEditing(false); }, [file?.id]);
+    useEffect(() => { const settings=getMarkdownSettings();const layout=getMarkdownReaderLayout(settings);setImageFailed(false);setImageRetry(0);setImageScale(1);setImageQuality('optimized');setImageDescriptionExpanded(false);setReaderFullscreen(false);setReaderChromeHidden(layout.focus);setReaderHeaderVisible(layout.header);setReaderActionsVisible(layout.actions);setReaderToolsVisible(layout.display);setReaderActionVisibility(settings.readerActions);setEditing(false); }, [file?.id]);
     useEffect(()=>{const sync=()=>setReaderToneOptions(getMarkdownThemeOptions());window.addEventListener('komod-markdown-themes-changed',sync);return()=>window.removeEventListener('komod-markdown-themes-changed',sync)},[]);
-    useEffect(()=>{const sync=()=>{const next=getMarkdownSettings();setReaderDirection(next.direction);setTextAttachmentPosition(next.textAttachmentPosition)};window.addEventListener('komod-markdown-settings-changed',sync);return()=>window.removeEventListener('komod-markdown-settings-changed',sync)},[]);
+    useEffect(()=>{const sync=()=>{const next=getMarkdownSettings();setReaderDirection(next.direction);setTextAttachmentPosition(next.textAttachmentPosition);setReaderActionVisibility(next.readerActions)};window.addEventListener('komod-markdown-settings-changed',sync);return()=>window.removeEventListener('komod-markdown-settings-changed',sync)},[]);
 
     useEffect(()=>{
         const startEditing=(event:Event)=>{const requested=(event as CustomEvent<{fileId?:number}>).detail?.fileId;if(file&&textReader&&(!requested||requested===file.id)){if(textFirst)setDraft(file.description?.trim()||'');setEditing(true)}};
@@ -82,10 +86,11 @@ export default function ContentPreview() {
         localStorage.setItem('komod-reader-direction',readerDirection);
         localStorage.setItem('komod-reader-tools',readerToolsVisible?'visible':'hidden');
     }, [readerFontSize, readerLineHeight, readerTone, readerFont, readerWrap, readerWide, readerAlign, readerDirection, readerToolsVisible]);
+    useEffect(()=>{if(!file)return;const settings=getMarkdownSettings();if(settings.rememberReaderLayout)saveMarkdownReaderLayout({header:readerHeaderVisible,actions:readerActionsVisible,display:readerToolsVisible,focus:readerChromeHidden})},[file,readerActionsVisible,readerChromeHidden,readerHeaderVisible,readerToolsVisible]);
 
     useEffect(() => {
         const syncFullscreen = () => {
-            if (!document.fullscreenElement) { setReaderFullscreen(false); setReaderChromeHidden(false); }
+            if (!document.fullscreenElement) setReaderFullscreen(false);
         };
         document.addEventListener('fullscreenchange', syncFullscreen);
         return () => document.removeEventListener('fullscreenchange', syncFullscreen);
@@ -224,7 +229,6 @@ export default function ContentPreview() {
     const toggleReaderFullscreen = async () => {
         const next = !readerFullscreen;
         setReaderFullscreen(next);
-        if (next && (textFirst || file?.file_type !== 'image')) setReaderToolsVisible(true);
         try {
             if (next && previewRef.current?.requestFullscreen) await previewRef.current.requestFullscreen();
             else if (!next && document.fullscreenElement) await document.exitFullscreen();
@@ -270,26 +274,27 @@ export default function ContentPreview() {
     return (
         <div className={`fixed inset-0 z-[220] flex items-center justify-center bg-black/85 backdrop-blur-md ${readerFullscreen ? 'p-0' : 'p-3 sm:p-8'}`} onClick={() => setContentPreviewFile(null)}>
             <section ref={previewRef} className={`relative flex w-full flex-col overflow-hidden border border-white/10 bg-dark-900 shadow-2xl ${readerFullscreen ? 'h-dvh max-h-none max-w-none rounded-none border-0' : 'max-h-full max-w-5xl rounded-2xl'}`} onClick={(event) => event.stopPropagation()}>
-                {!readerChromeHidden&&(textReader?<header dir="rtl" className="relative shrink-0 border-b border-white/10 px-2 py-2 sm:px-4">
-                    <div className="flex min-h-10 items-center gap-2">
+                {!readerChromeHidden&&(textReader?(readerHeaderVisible||readerActionsVisible?<header dir="rtl" className="relative shrink-0 border-b border-white/10 px-2 py-2 sm:px-4">
+                    {readerHeaderVisible&&<div className="flex min-h-10 items-center gap-2">
                         <button onClick={() => setContentPreviewFile(null)} className="btn-icon shrink-0" title="بستن"><X className="h-5 w-5" /></button>
                         <h2 dir="auto" className="min-w-0 flex-1 truncate text-start font-semibold" title={file.file_name}>{file.file_name}</h2>
+                        <button onClick={()=>setReaderActionsVisible(value=>!value)} className={`btn-icon shrink-0 ${readerActionsVisible?'bg-white/[.06] text-white':''}`} title={readerActionsVisible?'بستن دکمه‌ها':'نمایش دکمه‌ها'}><MoreHorizontal className="h-5 w-5"/></button>
                         {contentPreviewHistory.length>0&&<button onClick={goBackContentPreview} className="btn-icon shrink-0" title="برگشت به فایل قبلی"><ArrowRight className="h-5 w-5"/></button>}
-                    </div>
-                    <nav aria-label="ابزارهای متن" className="mt-1.5 grid grid-flow-col auto-cols-fr gap-1 overflow-x-auto overscroll-x-contain rounded-2xl border border-white/[.07] bg-black/15 p-1">
-                        <button onClick={() => {if(!editing&&textFirst)setDraft(file.description?.trim()||'');setEditing(value => !value)}} className={`flex min-w-12 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[10px] transition hover:bg-white/[.06] ${editing?'bg-primary-500/15 text-primary-200':'text-dark-300'}`} title={editing?'بازگشت به حالت مطالعه':'ویرایش متن'}>{editing?<BookOpen className="h-[18px] w-[18px]"/>:<Pencil className="h-[18px] w-[18px]"/>}<span>{editing?'مطالعه':'ویرایش'}</span></button>
-                        <button onClick={()=>void copyReaderText()} className="flex min-w-12 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[10px] text-dark-300 transition hover:bg-white/[.06] hover:text-white" title="کپی همه متن"><Copy className="h-[18px] w-[18px]"/><span>کپی</span></button>
-                        <button onClick={()=>setReaderToolsVisible(value=>!value)} className={`flex min-w-12 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[10px] transition hover:bg-white/[.06] ${readerToolsVisible?'bg-white/[.06] text-white':'text-dark-300'}`} title={readerToolsVisible?'بستن تنظیمات نمایش':'تنظیمات نمایش متن'}><Settings2 className="h-[18px] w-[18px]"/><span>نمایش</span></button>
-                        <button onClick={openAIEditor} disabled={file.id<0||loading} className="flex min-w-12 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[10px] text-dark-300 transition hover:bg-white/[.06] hover:text-white disabled:opacity-30" title="ویرایش با هوش مصنوعی"><Sparkles className="h-[18px] w-[18px]"/><span>هوش مصنوعی</span></button>
-                        <button onClick={()=>void toggleReaderFullscreen()} className="flex min-w-12 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[10px] text-dark-300 transition hover:bg-white/[.06] hover:text-white" title={readerFullscreen?'خروج از تمام‌صفحه':'نمایش تمام‌صفحه'}>{readerFullscreen?<Minimize2 className="h-[18px] w-[18px]"/>:<Maximize2 className="h-[18px] w-[18px]"/>}<span>{readerFullscreen?'کوچک‌کردن':'تمام‌صفحه'}</span></button>
-                        {readerFullscreen&&<button onClick={()=>setReaderChromeHidden(true)} className="flex min-w-12 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[10px] text-dark-300 transition hover:bg-white/[.06] hover:text-white" title="پنهان کردن همه نوارها و نمایش فقط متن"><EyeOff className="h-[18px] w-[18px]"/><span>فقط متن</span></button>}
-                        <button onClick={()=>void minimizeReader()} className="flex min-w-12 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[10px] text-dark-300 transition hover:bg-white/[.06] hover:text-white" title="مینیمایز کردن متن"><PanelBottomClose className="h-[18px] w-[18px]"/><span>مینیمایز</span></button>
-                    </nav>
-                </header>:<header className="relative flex min-h-14 items-center gap-2 border-b border-white/10 px-2 py-2 sm:px-4">
+                    </div>}
+                    {readerActionsVisible&&<nav aria-label="ابزارهای متن" className={`${readerHeaderVisible?'mt-1.5':''} grid grid-flow-col auto-cols-fr gap-1 overflow-x-auto overscroll-x-contain rounded-2xl border border-white/[.07] bg-black/15 p-1`}>
+                        {readerActionVisibility.edit&&<button onClick={() => {if(!editing&&textFirst)setDraft(file.description?.trim()||'');setEditing(value => !value)}} className={`flex min-w-12 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[10px] transition hover:bg-white/[.06] ${editing?'bg-primary-500/15 text-primary-200':'text-dark-300'}`} title={editing?'بازگشت به حالت مطالعه':'ویرایش متن'}>{editing?<BookOpen className="h-[18px] w-[18px]"/>:<Pencil className="h-[18px] w-[18px]"/>}<span>{editing?'مطالعه':'ویرایش'}</span></button>}
+                        {readerActionVisibility.copy&&<button onClick={()=>void copyReaderText()} className="flex min-w-12 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[10px] text-dark-300 transition hover:bg-white/[.06] hover:text-white" title="کپی همه متن"><Copy className="h-[18px] w-[18px]"/><span>کپی</span></button>}
+                        {readerActionVisibility.display&&<button onClick={()=>setReaderToolsVisible(value=>!value)} className={`flex min-w-12 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[10px] transition hover:bg-white/[.06] ${readerToolsVisible?'bg-white/[.06] text-white':'text-dark-300'}`} title={readerToolsVisible?'بستن تنظیمات نمایش':'تنظیمات نمایش متن'}><Settings2 className="h-[18px] w-[18px]"/><span>نمایش</span></button>}
+                        {readerActionVisibility.ai&&<button onClick={openAIEditor} disabled={file.id<0||loading} className="flex min-w-12 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[10px] text-dark-300 transition hover:bg-white/[.06] hover:text-white disabled:opacity-30" title="ویرایش با هوش مصنوعی"><Sparkles className="h-[18px] w-[18px]"/><span>هوش مصنوعی</span></button>}
+                        {readerActionVisibility.fullscreen&&<button onClick={()=>void toggleReaderFullscreen()} className="flex min-w-12 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[10px] text-dark-300 transition hover:bg-white/[.06] hover:text-white" title={readerFullscreen?'خروج از تمام‌صفحه':'نمایش تمام‌صفحه'}>{readerFullscreen?<Minimize2 className="h-[18px] w-[18px]"/>:<Maximize2 className="h-[18px] w-[18px]"/>}<span>{readerFullscreen?'کوچک‌کردن':'تمام‌صفحه'}</span></button>}
+                        {readerActionVisibility.focus&&readerFullscreen&&<button onClick={()=>setReaderChromeHidden(true)} className="flex min-w-12 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[10px] text-dark-300 transition hover:bg-white/[.06] hover:text-white" title="پنهان کردن همه نوارها و نمایش فقط متن"><EyeOff className="h-[18px] w-[18px]"/><span>فقط متن</span></button>}
+                        {readerActionVisibility.minimize&&<button onClick={()=>void minimizeReader()} className="flex min-w-12 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[10px] text-dark-300 transition hover:bg-white/[.06] hover:text-white" title="مینیمایز کردن متن"><PanelBottomClose className="h-[18px] w-[18px]"/><span>مینیمایز</span></button>}
+                    </nav>}
+                </header>:null):<header className="relative flex min-h-14 items-center gap-2 border-b border-white/10 px-2 py-2 sm:px-4">
                     <button onClick={() => setContentPreviewFile(null)} className="btn-icon shrink-0" title="بستن"><X className="h-5 w-5" /></button>
                     <div className="min-w-0 flex-1"><h2 dir="auto" className="truncate text-start font-semibold" title={file.file_name}>{file.file_name}</h2>{file.description&&<p dir="auto" className="mt-0.5 truncate text-start text-xs text-dark-400" title={file.description}>{file.description}</p>}</div>
                 </header>)}
-                {readerChromeHidden&&<button type="button" onClick={()=>setReaderChromeHidden(false)} className="absolute left-3 top-3 z-20 flex min-h-10 items-center gap-2 rounded-full border border-white/10 bg-black/65 px-3 text-xs text-white/80 shadow-xl backdrop-blur-xl transition hover:bg-black/80 focus:bg-black/80" title="نمایش دوباره نوارهای ابزار"><Eye className="h-4 w-4"/><span>نمایش ابزارها</span></button>}
+                {(readerChromeHidden||(textReader&&!readerHeaderVisible&&!readerActionsVisible))&&<button type="button" onClick={()=>{if(readerChromeHidden)setReaderChromeHidden(false);else setReaderHeaderVisible(true)}} className="absolute left-2 top-[max(.35rem,env(safe-area-inset-top))] z-20 flex h-8 w-8 items-center justify-center rounded-full border border-white/[.05] bg-black/25 text-white/25 backdrop-blur-md transition hover:bg-black/50 hover:text-white/70 focus:bg-black/50 focus:text-white/70" title="نمایش نوارها" aria-label="نمایش نوارها"><Eye className="h-4 w-4"/></button>}
                 {file.file_type === 'image' && !textFirst ? (
                     <div className="relative min-h-0 flex-1 p-4 pb-20 text-center">
                         {imageFailed ? <div className="mx-auto rounded-2xl border border-dashed border-white/10 p-8 text-center"><p className="text-sm text-dark-400">نمایش عکس انجام نشد.</p><button className="btn-secondary mt-4" onClick={() => { setImageFailed(false); setImageRetry(Date.now()); }}>تلاش دوباره</button></div> : <div className="h-full min-h-[45vh] w-full"><ZoomableImage key={selectedImageUrl} src={selectedImageUrl} previewSrc={imageQuality==='original'?thumbnailUrl:''} alt={file.file_name} scale={imageScale} onScaleChange={setImageScale}/></div>}
@@ -317,7 +322,7 @@ export default function ContentPreview() {
                                 <button onClick={() => setReaderTone(tone => tone === 'dark' ? 'white' : 'dark')} className="btn-icon h-10 w-10" title="جابجایی سریع حالت شب و روز">{readerTone === 'dark' ? <Sun className="h-4 w-4"/> : <Moon className="h-4 w-4"/>}</button>
                             </div>
                         </div>}
-                        <div className={`markdown-reader-surface markdown-reader-surface--${readerTone} min-h-0 flex-1 overflow-auto p-4 transition-colors sm:p-8`}>
+                        <div className={`markdown-reader-surface markdown-reader-surface--${readerTone} min-h-0 flex-1 overflow-auto p-4 transition-colors sm:p-8 ${readerChromeHidden?'pt-12 sm:pt-12':''}`}>
                             {loading ? <p className="text-dark-400">در حال بارگذاری متن…</p> : error ? <p className="text-red-400">{error}</p> : editing ? <div className={`mx-auto ${readerWide?'max-w-none':'max-w-5xl'}`}><div className="markdown-editor-toolbar mb-2 grid grid-cols-6 gap-1 rounded-2xl border p-1.5 sm:flex sm:flex-wrap"><EditorTool title="سرتیتر" onClick={()=>insertMarkdown('# ','','عنوان',true)}><Heading1/></EditorTool><EditorTool title="بولد" onClick={()=>insertMarkdown('**','**')}><Bold/></EditorTool><EditorTool title="ایتالیک" onClick={()=>insertMarkdown('*','*')}><Italic/></EditorTool><EditorTool title="زیرخط" onClick={()=>insertMarkdown('<u>','</u>')}><Underline/></EditorTool><EditorTool title="خط‌خورده" onClick={()=>insertMarkdown('~~','~~')}><Strikethrough/></EditorTool><EditorTool title="کد کوتاه" onClick={()=>insertMarkdown('`','`','code')}><Code2/></EditorTool><EditorTool title="کدبلاک" onClick={()=>insertMarkdown('```\n','\n```','code',true)}><Code2/></EditorTool><EditorTool title="فرمول ریاضی" onClick={()=>insertMarkdown('$','$','x^2 + y^2')}><Sigma/></EditorTool><EditorTool title="متغیر" onClick={()=>insertMarkdown('{{','}}','نام_متغیر')}><Braces/></EditorTool><EditorTool title="لینک وب" onClick={()=>insertMarkdown('[','](https://)','عنوان لینک')}><Link/></EditorTool><EditorTool title="لینک به فایل کمد" onClick={()=>setShowInternalLinkPicker(true)}><Link2/></EditorTool><EditorTool title="تصویر" onClick={()=>insertMarkdown('![','](https://)','توضیح تصویر')}><ImageIcon/></EditorTool><EditorTool title="نقل‌قول" onClick={()=>insertMarkdown('> ','','متن نقل‌قول',true)}><Quote/></EditorTool><EditorTool title="فهرست" onClick={()=>insertMarkdown('- ','','مورد',true)}><List/></EditorTool><EditorTool title="فهرست شماره‌ای" onClick={()=>insertMarkdown('1. ','','مورد',true)}><ListOrdered/></EditorTool><EditorTool title="چک‌لیست" onClick={()=>insertMarkdown('- [ ] ','','کار',true)}><ListChecks/></EditorTool><EditorTool title="خط جداکننده" onClick={()=>insertTemplate('---\n')}><Minus/></EditorTool><EditorTool title="جدول" onClick={()=>insertTemplate('| ستون ۱ | ستون ۲ |\n| --- | --- |\n| مقدار ۱ | مقدار ۲ |\n')}><Table2/></EditorTool></div><textarea ref={editorRef} dir="auto" value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='b'){event.preventDefault();insertMarkdown('**','**')}if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='i'){event.preventDefault();insertMarkdown('*','*')}}} className={`markdown-editor markdown-font--${readerFont} min-h-[65vh] w-full resize-y rounded-2xl border p-4 caret-primary-300 outline-none selection:bg-primary-500/30 focus:border-primary-400`} style={{ fontSize: readerFontSize, lineHeight: readerLineHeight }}/><div className="mt-3 flex justify-end gap-2"><button className="btn-secondary" onClick={() => { setDraft(content); setEditing(false); }}>لغو</button><button disabled={saving} className="btn-primary flex items-center gap-2" onClick={() => void saveText()}><Check className="h-4 w-4"/> {saving ? 'در حال ذخیره…' : 'ذخیره متن'}</button></div></div> : <MarkdownContent content={content} fontSize={readerFontSize} lineHeight={readerLineHeight} theme={readerTone} fontFamily={readerFont} wrap={readerWrap} wide={readerWide} align={readerAlign} direction={readerDirection} />}
                         </div>
                     </>

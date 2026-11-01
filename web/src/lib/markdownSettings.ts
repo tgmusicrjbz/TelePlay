@@ -8,10 +8,15 @@ export type MarkdownPalette = {
     codeText:string; codeBackground:string;
 };
 export type MarkdownCustomTheme = {id:string;name:string;palette:MarkdownPalette;builtIn?:string};
+export type MarkdownReaderAction = 'edit'|'copy'|'display'|'ai'|'fullscreen'|'focus'|'minimize';
+export type MarkdownReaderActions = Record<MarkdownReaderAction,boolean>;
+export type MarkdownReaderLayout = {header:boolean;actions:boolean;display:boolean;focus:boolean};
 export type MarkdownSettings = {
     font:string; fontSize:number; lineHeight:number; align:MarkdownAlign; direction:MarkdownDirection;
     textAttachmentPosition:'start'|'end';
     theme:string; showToolbar:boolean; wrap:boolean; wide:boolean;
+    showHeaderOnOpen:boolean; showActionsOnOpen:boolean; showDisplayToolbarOnOpen:boolean;
+    rememberReaderLayout:boolean; readerActions:MarkdownReaderActions;
 };
 
 export const markdownFonts=[
@@ -47,6 +52,7 @@ export const markdownBuiltInPalettes:Record<string,MarkdownPalette>={
 const SETTINGS_KEY='komod-markdown-settings';
 const THEMES_KEY='komod-markdown-custom-themes';
 const HIDDEN_BUILT_INS_KEY='komod-markdown-hidden-built-ins';
+const READER_LAYOUT_KEY='komod-markdown-reader-layout';
 function accountKey(base:string){
     const account=localStorage.getItem('komod-current-account')||'guest';
     return `${base}:${account}`;
@@ -61,6 +67,7 @@ function readScoped<T>(base:string,fallback:T):T{
     return fallback;
 }
 export function getMarkdownSettings():MarkdownSettings {
+    const defaultActions:MarkdownReaderActions={edit:true,copy:true,display:true,ai:false,fullscreen:true,focus:true,minimize:true};
     const fallback:MarkdownSettings={
         font:localStorage.getItem('komod-reader-font')||'vazir',
         fontSize:Number(localStorage.getItem('komod-reader-font-size'))||16,
@@ -71,8 +78,11 @@ export function getMarkdownSettings():MarkdownSettings {
         theme:localStorage.getItem('komod-reader-tone')||'dark',
         showToolbar:localStorage.getItem('komod-reader-tools')!=='hidden',
         wrap:localStorage.getItem('komod-reader-wrap')!=='off', wide:localStorage.getItem('komod-reader-wide')==='on',
+        showHeaderOnOpen:true, showActionsOnOpen:false, showDisplayToolbarOnOpen:false,
+        rememberReaderLayout:true, readerActions:defaultActions,
     };
-    return {...fallback,...readScoped<Partial<MarkdownSettings>>(SETTINGS_KEY,{})};
+    const saved=readScoped<Partial<MarkdownSettings>>(SETTINGS_KEY,{});
+    return {...fallback,...saved,readerActions:{...defaultActions,...saved.readerActions}};
 }
 export function saveMarkdownSettings(value:MarkdownSettings){
     localStorage.setItem(accountKey(SETTINGS_KEY),JSON.stringify(value));
@@ -83,6 +93,19 @@ export function saveMarkdownSettings(value:MarkdownSettings){
     localStorage.setItem('komod-reader-wrap',value.wrap?'on':'off'); localStorage.setItem('komod-reader-wide',value.wide?'on':'off');
     window.dispatchEvent(new CustomEvent('komod-markdown-settings-changed',{detail:value}));
 }
+export function getMarkdownReaderLayout(settings=getMarkdownSettings()):MarkdownReaderLayout{
+    const fallback:MarkdownReaderLayout={
+        header:settings.showHeaderOnOpen,
+        actions:settings.showActionsOnOpen,
+        display:settings.showDisplayToolbarOnOpen,
+        focus:false,
+    };
+    return settings.rememberReaderLayout?{...fallback,...readScoped<Partial<MarkdownReaderLayout>>(READER_LAYOUT_KEY,{})}:fallback;
+}
+export function saveMarkdownReaderLayout(value:MarkdownReaderLayout){
+    localStorage.setItem(accountKey(READER_LAYOUT_KEY),JSON.stringify(value));
+}
+export function clearMarkdownReaderLayout(){localStorage.removeItem(accountKey(READER_LAYOUT_KEY))}
 export function getMarkdownCustomThemes():MarkdownCustomTheme[]{return readScoped<MarkdownCustomTheme[]>(THEMES_KEY,[])}
 export function saveMarkdownCustomThemes(themes:MarkdownCustomTheme[]){localStorage.setItem(accountKey(THEMES_KEY),JSON.stringify(themes));window.dispatchEvent(new Event('komod-markdown-themes-changed'))}
 export function getHiddenMarkdownBuiltIns():string[]{return readScoped<string[]>(HIDDEN_BUILT_INS_KEY,[])}
