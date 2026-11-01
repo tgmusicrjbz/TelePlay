@@ -3,6 +3,7 @@ import os
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta
 from pathlib import Path
 
 _temp = tempfile.TemporaryDirectory()
@@ -16,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.database import Base, async_session, engine
 from app.models import ProcessingJob, User
-from app.processing_jobs import create_job
+from app.processing_jobs import create_job, delete_finished_jobs, delete_job, job_status, list_job_statuses, load_jobs
 from app.stt import GeminiSTTProvider, STTJob, STTQueue, extract_interaction_text
 from app.tts import GeminiRequestError
 
@@ -67,6 +68,50 @@ class STTQueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(queue.status("job", 8))
         self.assertFalse(queue.dismiss("job", 8))
         self.assertTrue(queue.dismiss("job", 7))
+
+    async def test_finished_history_is_retained_until_manual_deletion(self):
+        async with async_session() as db:
+            user = User(telegram_id=7007)
+            db.add(user)
+            await db.commit()
+            await db.refresh(user)
+            user_id = user.id
+            old_time = datetime.utcnow() - timedelta(days=30)
+            db.add(ProcessingJob(
+                id="old-stt-history", user_id=user_id, kind="stt", state="done",
+                title="رونویسی قدیمی", progress=100, message="آماده است",
+                payload_json='{"id":"old-stt-history","user_id":1}',
+                result_json='{"id":"old-stt-history","state":"done","title":"رونویسی قدیمی","created_at":"2026-01-01T00:00:00"}',
+                created_at=old_time, finished_at=old_time,
+            ))
+            await db.commit()
+
+        recovered = await load_jobs("stt")
+        self.assertIn("old-stt-history", [status.get("id") for _, status in recovered])
+        self.assertEqual([item["id"] for item in await list_job_statuses("stt", user_id)], ["old-stt-history"])
+        self.assertEqual((await job_status("old-stt-history", user_id, "stt"))["state"], "done")
+        self.assertTrue(await delete_job("old-stt-history", user_id))
+        self.assertIsNone(await job_status("old-stt-history", user_id, "stt"))
+
+    async def test_clear_history_only_deletes_finished_jobs_for_that_user_and_kind(self):
+        async with async_session() as db:
+            user = User(telegram_id=7008)
+            db.add(user)
+            await db.commit()
+            await db.refresh(user)
+            user_id = user.id
+            for job_id, state, kind in (("done-stt", "done", "stt"), ("active-stt", "queued", "stt"), ("done-tts", "done", "tts")):
+                db.add(ProcessingJob(
+                    id=job_id, user_id=user_id, kind=kind, state=state, title=job_id,
+                    progress=100 if state == "done" else 0, message="",
+                    payload_json="{}", result_json="{}",
+                ))
+            await db.commit()
+
+        self.assertEqual(await delete_finished_jobs("stt", user_id), 1)
+        self.assertIsNone(await job_status("done-stt", user_id, "stt"))
+        self.assertIsNotNone(await job_status("active-stt", user_id, "stt"))
+        self.assertIsNotNone(await job_status("done-tts", user_id, "tts"))
 
     async def test_cancelled_queued_job_never_runs(self):
         class Provider:

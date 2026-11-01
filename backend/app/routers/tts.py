@@ -15,6 +15,7 @@ from ..auth import get_current_user
 from ..database import get_db
 from ..config import get_settings
 from ..models import AppSetting, Folder, TTSUsage, TTSVoicePreview, User
+from ..processing_jobs import TERMINAL_STATES, delete_finished_jobs, delete_job, job_status, list_job_statuses
 from ..tts import GeminiTTSProvider, STT_MODEL_OPTIONS, TEXT_MODEL_OPTIONS, TTSJob, TTS_MODEL_OPTIONS, VOICE_OPTIONS, consume_tts_quota, load_tts_settings, model_options, model_quota_cost, normalize_tts_settings, route_ai_model, tts_queue
 from ..gemini_keys import check_gemini_key, decrypt_user_keys, encrypt_user_keys
 
@@ -360,12 +361,15 @@ async def get_tts_job_audio(job_id: str, current_user: User = Depends(get_curren
 
 @router.get("/jobs")
 async def list_tts_jobs(current_user: User = Depends(get_current_user)):
-    return tts_queue.list_statuses(current_user.id)
+    persisted = {item["id"]: item for item in await list_job_statuses("tts", current_user.id)}
+    persisted.update({item["id"]: item for item in tts_queue.list_statuses(current_user.id)})
+    return sorted(persisted.values(), key=lambda item: item.get("created_at", ""), reverse=True)[:100]
 
 
 @router.delete("/jobs")
 async def clear_finished_tts_jobs(current_user: User = Depends(get_current_user)):
-    return {"removed": tts_queue.clear_finished(current_user.id)}
+    tts_queue.clear_finished(current_user.id)
+    return {"removed": await delete_finished_jobs("tts", current_user.id)}
 
 
 @router.post("/jobs/cancel-all")
@@ -383,8 +387,11 @@ async def get_tts_job(job_id: str, current_user: User = Depends(get_current_user
 
 @router.delete("/jobs/{job_id}", status_code=204)
 async def dismiss_tts_job(job_id: str, current_user: User = Depends(get_current_user)):
-    if not tts_queue.dismiss(job_id, current_user.id):
+    status = tts_queue.status(job_id, current_user.id) or await job_status(job_id, current_user.id, "tts")
+    if not status or status.get("state") not in TERMINAL_STATES:
         raise HTTPException(status_code=409, detail="فقط کارهای پایان‌یافته را می‌توان از تاریخچه پاک کرد.")
+    tts_queue.dismiss(job_id, current_user.id)
+    await delete_job(job_id, current_user.id)
 
 
 @router.post("/jobs/{job_id}/{action}")

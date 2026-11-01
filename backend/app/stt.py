@@ -27,7 +27,7 @@ from .config import get_settings
 from .database import async_session
 from .models import File, Folder, TTSUsage, User
 from .gemini_keys import decrypt_user_keys
-from .processing_jobs import create_job, delete_finished_jobs, delete_job, load_jobs, update_job
+from .processing_jobs import create_job, load_jobs, update_job
 from .services import sanitize_filename
 from .tts import GeminiRequestError
 
@@ -522,10 +522,6 @@ class STTQueue:
         job_ids=[job_id for job_id,item in self.statuses.items() if item.get("user_id")==user_id and item.get("state") in TERMINAL_STATES]
         for job_id in job_ids:
             self.statuses.pop(job_id,None); self.controls.pop(job_id,None); self.durable_job_ids.discard(job_id)
-        try:
-            asyncio.get_running_loop().create_task(delete_finished_jobs("stt",user_id))
-        except RuntimeError:
-            pass
         return len(job_ids)
 
     def dismiss(self, job_id: str, user_id: int) -> bool:
@@ -534,10 +530,6 @@ class STTQueue:
             return False
         self.statuses.pop(job_id, None); self.controls.pop(job_id, None)
         self.durable_job_ids.discard(job_id)
-        try:
-            asyncio.get_running_loop().create_task(delete_job(job_id, user_id))
-        except RuntimeError:
-            pass
         return True
 
     async def _run(self) -> None:

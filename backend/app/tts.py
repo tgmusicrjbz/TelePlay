@@ -28,7 +28,7 @@ from .config import get_settings
 from .database import async_session
 from .models import File, Folder, TTSUsage, User
 from .gemini_keys import decrypt_user_keys
-from .processing_jobs import create_job, delete_finished_jobs, delete_job, load_jobs, update_job
+from .processing_jobs import create_job, load_jobs, update_job
 from .services import sanitize_filename, select_best_thumbnail
 
 logger = logging.getLogger(__name__)
@@ -590,9 +590,13 @@ class TTSQueue:
             if not job_id or job_id in self.statuses:
                 continue
             if status.get("state") in TERMINAL_STATES:
-                # Temporary audio bytes cannot survive a process restart.
-                if payload.get("output_mode") != "preview":
-                    self.statuses[job_id] = status
+                # Keep the history entry. Temporary audio bytes cannot survive a
+                # process restart, so only its stale playback link is removed.
+                if payload.get("output_mode") == "preview":
+                    status.pop("stream_url", None)
+                    if status.get("state") == "done":
+                        status["message"] = "پیش‌نمایش موقت ساخته شد"
+                self.statuses[job_id] = status
                 continue
             async with async_session() as db:
                 user = await db.get(User, int(payload["user_id"]))
@@ -695,24 +699,7 @@ class TTSQueue:
         return dict(item) if item and item["user_id"] == user_id else None
 
     def list_statuses(self, user_id: int) -> list[dict]:
-        self._prune_finished()
         return sorted((dict(item) for item in self.statuses.values() if item["user_id"] == user_id), key=lambda item: item["created_at"], reverse=True)[:100]
-
-    def _prune_finished(self, max_age: timedelta = timedelta(minutes=5)) -> None:
-        cutoff = datetime.utcnow() - max_age
-        for job_id, item in list(self.statuses.items()):
-            finished_at = item.get("finished_at")
-            if item.get("state") not in TERMINAL_STATES or not finished_at:
-                continue
-            try:
-                expired = datetime.fromisoformat(finished_at) < cutoff
-            except (TypeError, ValueError):
-                expired = True
-            if expired:
-                self.statuses.pop(job_id, None)
-                self.controls.pop(job_id, None)
-                self.audio_outputs.pop(job_id, None)
-                self.durable_job_ids.discard(job_id)
 
     def dismiss(self, job_id: str, user_id: int) -> bool:
         item = self.statuses.get(job_id)
@@ -722,10 +709,6 @@ class TTSQueue:
         self.controls.pop(job_id, None)
         self.audio_outputs.pop(job_id, None)
         self.durable_job_ids.discard(job_id)
-        try:
-            asyncio.get_running_loop().create_task(delete_job(job_id, user_id))
-        except RuntimeError:
-            pass
         return True
 
     def clear_finished(self, user_id: int) -> int:
@@ -735,10 +718,6 @@ class TTSQueue:
             self.controls.pop(job_id, None)
             self.audio_outputs.pop(job_id, None)
             self.durable_job_ids.discard(job_id)
-        try:
-            asyncio.get_running_loop().create_task(delete_finished_jobs("tts", user_id))
-        except RuntimeError:
-            pass
         return len(job_ids)
 
     def toggle_pause(self, job_id: str, user_id: int) -> dict | None:
