@@ -35,29 +35,20 @@ export default function MoveFileModal({ items, onClose }: MoveFileModalProps) {
     };
     markBlocked(folderTree || []);
 
-    const handleMove = async () => {
-        try {
-            const promises = [];
-            if (items.files.length > 0) {
-                promises.push(moveFiles({ ids: items.files.map(f => f.id), folderId: selectedId }));
-            }
-            if (items.folders.length > 0) {
-                // Prevent moving folder into itself
-                const folderIds = items.folders.map(f => f.id);
-                if (selectedId && blockedIds.has(selectedId)) {
-                    addToast('نمی‌شود یک کشو را داخل خودش یا زیرکشوهایش جابه‌جا کرد.', 'error');
-                    return;
-                }
-                promises.push(moveFolders({ ids: folderIds, folderId: selectedId }));
-            }
-
-            await Promise.all(promises);
-            addToast(`${totalItems.toLocaleString('fa-IR')} مورد با موفقیت جابه‌جا شد.`);
-            clearSelection();
-            onClose();
-        } catch (error) {
-            addToast('جابه‌جایی انجام نشد. دوباره تلاش کن.', 'error');
+    const handleMove = () => {
+        if (items.folders.length && selectedId && blockedIds.has(selectedId)) {
+            addToast('نمی‌شود یک کشو را داخل خودش یا زیرکشوهایش جابه‌جا کرد.', 'error');
+            return;
         }
+        const fileIds=items.files.map(file=>file.id), folderIds=items.folders.map(folder=>folder.id), destination=selectedId;
+        clearSelection();
+        onClose();
+        addToast('جابه‌جایی در پس‌زمینه شروع شد…','info');
+        void Promise.all([
+            ...(fileIds.length?[moveFiles({ids:fileIds,folderId:destination})]:[]),
+            ...(folderIds.length?[moveFolders({ids:folderIds,folderId:destination})]:[]),
+        ]).then(()=>addToast(`${totalItems.toLocaleString('fa-IR')} مورد با موفقیت جابه‌جا شد.`,'success'))
+          .catch(()=>addToast('جابه‌جایی انجام نشد. دوباره تلاش کن.','error'));
     };
     const handleCreateFolder=async()=>{
         const name=folderName.trim();

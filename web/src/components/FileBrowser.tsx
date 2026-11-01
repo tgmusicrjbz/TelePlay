@@ -149,6 +149,7 @@ export default function FileBrowser() {
         viewMode,
         setViewMode,
         previewFile,
+        isPlayerMinimized,
         setPreviewFile,
         setContentPreviewFile,
         showNewFolder,
@@ -686,31 +687,36 @@ export default function FileBrowser() {
     // Handle file rename
     const handleRenameFile = useCallback(async (newName: string) => {
         if (!renameFile) return;
-        await updateFileMutation.mutateAsync({ id: renameFile.id, file_name: newName });
+        const id=renameFile.id;
         setRenameFile(null);
-    }, [renameFile, updateFileMutation, setRenameFile]);
+        addToast('تغییر نام در پس‌زمینه شروع شد…','info');
+        void updateFileMutation.mutateAsync({ id, file_name: newName }).then(()=>addToast('نام فایل تغییر کرد.','success')).catch(()=>addToast('تغییر نام فایل انجام نشد.','error'));
+    }, [addToast, renameFile, updateFileMutation, setRenameFile]);
 
     // Handle folder rename
     const handleRenameFolder = useCallback(async (newName: string) => {
         if (!renameFolder) return;
-        await updateFolderMutation.mutateAsync({ id: renameFolder.id, name: newName });
+        const id=renameFolder.id;
         setRenameFolder(null);
-    }, [renameFolder, updateFolderMutation, setRenameFolder]);
+        addToast('تغییر نام در پس‌زمینه شروع شد…','info');
+        void updateFolderMutation.mutateAsync({ id, name: newName }).then(()=>addToast('نام کشو تغییر کرد.','success')).catch(()=>addToast('تغییر نام کشو انجام نشد.','error'));
+    }, [addToast, renameFolder, updateFolderMutation, setRenameFolder]);
 
     const handleSaveDescription = useCallback(async (description: string) => {
         if (!descriptionItem) return;
-        if (descriptionItem.type === 'file') {
-            await updateFileMutation.mutateAsync({ id: descriptionItem.item.id, description });
-        } else {
-            await updateFolderMutation.mutateAsync({ id: descriptionItem.item.id, description });
-        }
+        const target=descriptionItem;
         setDescriptionItem(null);
-    }, [descriptionItem, updateFileMutation, updateFolderMutation, setDescriptionItem]);
+        addToast('ذخیره توضیحات در پس‌زمینه شروع شد…','info');
+        const request=target.type==='file'?updateFileMutation.mutateAsync({id:target.item.id,description}):updateFolderMutation.mutateAsync({id:target.item.id,description});
+        void request.then(()=>addToast('توضیحات ذخیره شد.','success')).catch(()=>addToast('ذخیره توضیحات انجام نشد.','error'));
+    }, [addToast, descriptionItem, updateFileMutation, updateFolderMutation, setDescriptionItem]);
 
     const handleBatchEdit = useCallback(async (data: Omit<BatchFileEdit, 'ids'>) => {
-        await batchUpdateFilesMutation.mutateAsync({ ids: Array.from(selectedFileIds), ...data });
+        const ids=Array.from(selectedFileIds);
+        setShowBatchEdit(false);
         clearSelection();
-        addToast(`${selectedFileIds.size} فایل با موفقیت ویرایش شد`, 'success');
+        addToast('ویرایش گروهی در پس‌زمینه شروع شد…','info');
+        void batchUpdateFilesMutation.mutateAsync({ids,...data}).then(()=>addToast(`${ids.length.toLocaleString('fa-IR')} فایل با موفقیت ویرایش شد`,'success')).catch(()=>addToast('ویرایش گروهی فایل‌ها انجام نشد.','error'));
     }, [addToast, batchUpdateFilesMutation, clearSelection, selectedFileIds]);
 
     useEffect(() => {
@@ -804,31 +810,17 @@ export default function FileBrowser() {
 
 
     // Handle Paste
-    const handlePaste = useCallback(async () => {
+    const handlePaste = useCallback(() => {
         if (!clipboard) return;
-
-        try {
-            if (clipboard.mode === 'cut') {
-                if (clipboard.files.length > 0) {
-                    await moveFilesMutation.mutateAsync({
-                        ids: clipboard.files.map(f => f.id),
-                        folderId: currentFolderId
-                    });
-                }
-                if (clipboard.folders.length > 0) {
-                    await moveFoldersMutation.mutateAsync({
-                        ids: clipboard.folders.map(f => f.id),
-                        folderId: currentFolderId
-                    });
-                }
-                setClipboard(null);
-            } else if (clipboard.mode === 'copy') {
-                alert('در حال حاضر فقط جابه‌جایی فایل‌ها پشتیبانی می‌شود.');
-            }
-        } catch (error) {
-            console.error('Paste failed:', error);
-        }
-    }, [clipboard, currentFolderId, moveFilesMutation, moveFoldersMutation, setClipboard]);
+        if (clipboard.mode === 'copy') { addToast('در حال حاضر فقط جابه‌جایی فایل‌ها پشتیبانی می‌شود.','error'); return; }
+        const fileIds=clipboard.files.map(file=>file.id), folderIds=clipboard.folders.map(folder=>folder.id), destination=currentFolderId;
+        setClipboard(null);
+        addToast('جابه‌جایی در پس‌زمینه شروع شد…','info');
+        void Promise.all([
+            ...(fileIds.length?[moveFilesMutation.mutateAsync({ids:fileIds,folderId:destination})]:[]),
+            ...(folderIds.length?[moveFoldersMutation.mutateAsync({ids:folderIds,folderId:destination})]:[]),
+        ]).then(()=>addToast(`${(fileIds.length+folderIds.length).toLocaleString('fa-IR')} مورد جابه‌جا شد.`,'success')).catch(error=>{console.error('Paste failed:',error);addToast('جابه‌جایی انجام نشد.','error')});
+    }, [addToast, clipboard, currentFolderId, moveFilesMutation, moveFoldersMutation, setClipboard]);
 
 
     // Selection Box Logic
@@ -1570,7 +1562,7 @@ export default function FileBrowser() {
                 <div
                     ref={containerRef}
                     data-main-scroll="true"
-                    className={`relative flex-1 overflow-auto overscroll-y-contain p-4 pb-28 outline-none transition sm:p-6 md:pb-6 lg:p-8 ${isFileDragOver?'ring-2 ring-inset ring-primary-400/60 bg-primary-500/[.04]':''}`}
+                    className={`relative flex-1 overflow-auto overscroll-y-contain p-4 outline-none transition sm:p-6 lg:p-8 ${previewFile&&isPlayerMinimized?'pb-52 md:pb-24':'pb-28 md:pb-6'} ${isFileDragOver?'ring-2 ring-inset ring-primary-400/60 bg-primary-500/[.04]':''}`}
                     style={{ overscrollBehaviorY: 'contain' }}
                     onTouchStart={handlePullStart}
                     onTouchMove={handlePullMove}

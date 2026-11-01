@@ -3,7 +3,7 @@ import json
 from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import desc, func, select
+from sqlalchemy import delete, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import get_current_user
@@ -55,6 +55,20 @@ async def capabilities(_: User = Depends(get_current_user)):
 async def jobs(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     rows=(await db.execute(select(ProcessingJob).where(ProcessingJob.user_id==current_user.id,ProcessingJob.kind=="media_studio").order_by(desc(ProcessingJob.created_at)).limit(60))).scalars().all()
     return [serialize(row) for row in rows]
+
+
+@router.delete("/jobs/history")
+async def clear_history(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Remove completed history entries without touching their saved output files."""
+    result = await db.execute(
+        delete(ProcessingJob).where(
+            ProcessingJob.user_id == current_user.id,
+            ProcessingJob.kind == "media_studio",
+            ProcessingJob.state.in_(("done", "error", "cancelled")),
+        )
+    )
+    await db.commit()
+    return {"deleted": max(0, int(result.rowcount or 0))}
 
 
 @router.post("/jobs", status_code=202)

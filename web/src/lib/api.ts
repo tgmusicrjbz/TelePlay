@@ -969,6 +969,7 @@ export const useMediaStudioJobs=(enabled=true)=>useQuery<MediaStudioJob[]>({quer
 export const useCreateMediaStudioJob=()=>{const client=useQueryClient();return useMutation({mutationFn:async(payload:{operation:MediaStudioOperation;file_ids:number[];title:string;folder_id?:number|null;options:Record<string,unknown>})=>(await api.post<MediaStudioJob>('/media-studio/jobs',payload)).data,onSuccess:()=>{client.invalidateQueries({queryKey:['mediaStudio','jobs']})}})};
 export const useCancelMediaStudioJob=()=>{const client=useQueryClient();return useMutation({mutationFn:async(id:string)=>(await api.delete(`/media-studio/jobs/${id}`)).data,onSuccess:()=>client.invalidateQueries({queryKey:['mediaStudio','jobs']})})};
 export const useRetryMediaStudioJob=()=>{const client=useQueryClient();return useMutation({mutationFn:async(id:string)=>(await api.post(`/media-studio/jobs/${id}/retry`)).data,onSuccess:()=>client.invalidateQueries({queryKey:['mediaStudio','jobs']})})};
+export const useClearMediaStudioHistory=()=>{const client=useQueryClient();return useMutation({mutationFn:async()=>(await api.delete<{deleted:number}>('/media-studio/jobs/history')).data,onSuccess:()=>client.invalidateQueries({queryKey:['mediaStudio','jobs']})})};
 
 // ============== Mixed-media Pack Hooks ==============
 
