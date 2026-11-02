@@ -30,7 +30,7 @@ from .tts import tts_queue
 from .stt import stt_queue
 from .monitoring import source_monitor_service, telegram_monitor_pool
 from .media_studio import media_studio
-from .routers import files_router, folders_router, streaming_router, auth_router, tv_router, playlists_router, accounts_router, tts_router, stt_router, packs_router, bot_messages_router, admin_groups_router, instagram_router
+from .routers import files_router, folders_router, streaming_router, auth_router, tv_router, playlists_router, accounts_router, tts_router, stt_router, packs_router, bot_messages_router, admin_groups_router, instagram_router, rooms_router
 from .routers.delivery import router as delivery_router
 from .routers.media_studio import router as media_studio_router
 
@@ -234,7 +234,7 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
     
     response.headers["Referrer-Policy"] = "no-referrer"
-    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=()"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(self), geolocation=(), payment=()"
     if request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https":
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     if request.url.path.startswith("/api/auth"):
@@ -261,6 +261,7 @@ app.include_router(bot_messages_router, prefix="/api")
 app.include_router(admin_groups_router, prefix="/api")
 app.include_router(delivery_router, prefix="/api")
 app.include_router(instagram_router, prefix="/api")
+app.include_router(rooms_router, prefix="/api")
 app.include_router(media_studio_router, prefix="/api")
 
 

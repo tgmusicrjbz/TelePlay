@@ -30,6 +30,7 @@ import { useConnectivity } from '../lib/connectivity';
 const SettingsPage = lazy(() => import('./SettingsPage'));
 const PlaylistBrowser = lazy(() => import('./PlaylistBrowser'));
 const DownloadsPage = lazy(() => import('./DownloadsPage'));
+const RoomsPage = lazy(() => import('./RoomsPage'));
 const CreatePackModal = lazy(() => import('./PackModal').then(module => ({ default: module.CreatePackModal })));
 const PackViewer = lazy(() => import('./PackModal').then(module => ({ default: module.PackViewer })));
 const DescriptionModal = lazy(() => import('./DescriptionModal'));
@@ -1511,6 +1512,7 @@ export default function FileBrowser() {
                         {activeSection === 'playlists' && <span className="truncate text-sm font-semibold text-white">🎧 پلی‌لیست‌ها</span>}
                         {activeSection === 'settings' && <span className="truncate text-sm font-semibold text-white">⚙️ تنظیمات</span>}
                         {activeSection === 'downloads' && <span className="truncate text-sm font-semibold text-white">📥 دانلودها</span>}
+                        {activeSection === 'rooms' && <span className="truncate text-sm font-semibold text-white">👥 روم‌ها</span>}
 
                         {/* Vertical Div */}
                         <div className="hidden sm:block w-px h-6 bg-white/[0.1]"></div>
@@ -1607,7 +1609,7 @@ export default function FileBrowser() {
                             </div>}
                         </div>
                     )}
-                    {activeSection === 'playlists' ? <Suspense fallback={<SectionFallback/>}><PlaylistBrowser /></Suspense> : activeSection === 'settings' ? <Suspense fallback={<SectionFallback/>}><SettingsPage /></Suspense> : activeSection === 'downloads' ? <Suspense fallback={<SectionFallback/>}><DownloadsPage /></Suspense> : <>
+                    {activeSection === 'playlists' ? <Suspense fallback={<SectionFallback/>}><PlaylistBrowser /></Suspense> : activeSection === 'rooms' ? <Suspense fallback={<SectionFallback/>}><RoomsPage /></Suspense> : activeSection === 'settings' ? <Suspense fallback={<SectionFallback/>}><SettingsPage /></Suspense> : activeSection === 'downloads' ? <Suspense fallback={<SectionFallback/>}><DownloadsPage /></Suspense> : <>
                     <div className="max-w-7xl mx-auto mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div className="flex min-w-0 items-center gap-3">
                             <h1 className="truncate text-2xl font-bold tracking-tight text-white sm:text-3xl">{sectionTitle}</h1>

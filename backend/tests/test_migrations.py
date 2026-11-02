@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
-HEAD_REVISION = "20261102_0012"
+HEAD_REVISION = "20261102_0013"
 
 
 def migration_env(database_path: Path) -> dict[str, str]:
@@ -58,11 +58,16 @@ class MigrationTests(unittest.TestCase):
             self.assertIn("users", tables)
             self.assertIn("files", tables)
             self.assertIn("processing_jobs", tables)
+            self.assertIn("watch_rooms", tables)
+            self.assertIn("room_members", tables)
+            self.assertIn("room_items", tables)
+            self.assertIn("room_messages", tables)
             for columns in blurred_columns.values():
                 self.assertIn("is_blurred", columns)
             self.assertIn("profile_photo", user_columns)
             self.assertIn("profile_photo_mime", user_columns)
             self.assertIn("profile_photo_updated_at", user_columns)
+            self.assertIn("can_create_rooms", user_columns)
 
     def test_existing_current_schema_is_adopted_without_data_loss(self):
         with tempfile.TemporaryDirectory() as directory:

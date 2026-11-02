@@ -47,6 +47,7 @@ export interface User {
     is_active?: boolean;
     is_admin?: boolean;
     can_use_monitors?: boolean;
+    can_create_rooms?: boolean;
     login_username?: string | null;
     has_profile_photo?: boolean;
     profile_photo_updated_at?: string | null;
@@ -64,6 +65,10 @@ export interface AdminErrorLog { id:number; error_id:string; method:string; path
 export interface InstagramConnectionHealth { checked_at:string; token_ok:boolean; account_matches:boolean; messages_subscribed:boolean; username?:string|null; error?:string|null; }
 export interface InstagramInboxStatus { configured:boolean; reply_configured:boolean; callback_url:string; total_senders:number; pending_senders:number; default_hourly_limit:number; default_daily_limit:number; default_monthly_limit:number; connection_health?:InstagramConnectionHealth|null; }
 export interface InstagramInboxSender { id:number; instagram_user_id:string; username?:string|null; display_name?:string|null; pairing_code:string; telegram_user_id?:number|null; telegram_id?:number|null; telegram_name?:string|null; approved:boolean; blocked:boolean; save_to_library:boolean; selected_destination_id?:number|null; selected_destination_name?:string|null; hourly_limit:number; daily_limit:number; monthly_limit:number; hourly_used:number; daily_used:number; monthly_used:number; pairing_message_sent:boolean; received_count:number; forwarded_count:number; last_message_at?:string|null; created_at:string; }
+export interface RoomMember { user_id:number; telegram_id:number; name:string; username?:string|null; role:'owner'|'controller'|'viewer'; }
+export interface RoomMessage { id:number; user_id:number; name:string; content:string; created_at:string; }
+export interface WatchRoom { id:string; name:string; theme:string; has_password:boolean; max_members:number; chat_enabled:boolean; voice_enabled:boolean; current_index:number; playback_position:number; playback_rate:number; is_playing:boolean; state_updated_at:string; expires_at:string; created_at:string; owner_user_id:number; owner_name:string; my_role:'owner'|'controller'|'viewer'|null; members:RoomMember[]; items:TelegramFile[]; messages?:RoomMessage[]; }
+export interface RoomCreatePayload { name:string; theme:string; password?:string; expires_in_minutes:number; max_members:number; chat_enabled:boolean; voice_enabled:boolean; playlist_id?:number; file_ids:number[]; allowed_users:string[]; controllers:string[]; }
 export interface AccountPreferences { delete_storage_files: boolean; youtube_caption_template: string; instagram_caption_template: string; }
 export interface TagDefinition { name: string; color: string; category?: string; file_count?: number; }
 export interface TagSettings { tags: TagDefinition[]; excluded_tags: string[]; show_file_tags: boolean; display_limit: number; }
@@ -1537,6 +1542,14 @@ export const useRevokeWorkspace = () => {
     const queryClient = useQueryClient();
     return useMutation({ mutationFn: async (id: number) => api.delete(`/accounts/grants/${id}`), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['workspaceGrants'] }) });
 };
+export const useRooms = () => useQuery({queryKey:['rooms'],queryFn:async()=>(await api.get<WatchRoom[]>('/rooms')).data,staleTime:15_000});
+export const useRoom = (id:string|null) => useQuery({queryKey:['room',id],queryFn:async()=>(await api.get<WatchRoom>(`/rooms/${id}`)).data,enabled:Boolean(id),staleTime:5_000});
+export const useCreateRoom = () => {const client=useQueryClient();return useMutation({mutationFn:async(payload:RoomCreatePayload)=>(await api.post<WatchRoom>('/rooms',payload)).data,onSuccess:()=>client.invalidateQueries({queryKey:['rooms']})})};
+export const useJoinRoom = () => {const client=useQueryClient();return useMutation({mutationFn:async({id,password}:{id:string;password?:string})=>(await api.post<WatchRoom>(`/rooms/${id}/join`,{password})).data,onSuccess:room=>{client.setQueryData(['room',room.id],room);client.invalidateQueries({queryKey:['rooms']})}})};
+export const useDeleteRoom = () => {const client=useQueryClient();return useMutation({mutationFn:async(id:string)=>{await api.delete(`/rooms/${id}`);return id},onSuccess:id=>{client.removeQueries({queryKey:['room',id]});client.invalidateQueries({queryKey:['rooms']})}})};
+export const useUpdateRoom = () => {const client=useQueryClient();return useMutation({mutationFn:async({id,...payload}:{id:string}&Record<string,unknown>)=>(await api.patch<WatchRoom>(`/rooms/${id}`,payload)).data,onSuccess:room=>{client.setQueryData(['room',room.id],room);client.invalidateQueries({queryKey:['rooms']})}})};
+export const useUpdateRoomMembers = () => {const client=useQueryClient();return useMutation({mutationFn:async({id,members}:{id:string;members:Array<{identifier:string;role:'viewer'|'controller'}>})=>(await api.put<WatchRoom>(`/rooms/${id}/members`,{members})).data,onSuccess:room=>client.setQueryData(['room',room.id],room)})};
+export const useUpdateRoomItems = () => {const client=useQueryClient();return useMutation({mutationFn:async({id,file_ids}:{id:string;file_ids:number[]})=>(await api.put<WatchRoom>(`/rooms/${id}/items`,{file_ids})).data,onSuccess:room=>{client.setQueryData(['room',room.id],room);client.invalidateQueries({queryKey:['rooms']})}})};
 export const useAdminUsers = (enabled: boolean) => useQuery({ queryKey: ['adminUsers'], queryFn: async () => (await api.get<AdminUser[]>('/admin/users')).data, enabled, retry: 2, staleTime: 30_000 });
 export const useAdminStats = (enabled: boolean) => useQuery({ queryKey: ['adminStats'], queryFn: async () => (await api.get<AdminStats>('/admin/stats')).data, enabled, retry: 2, staleTime: 30_000 });
 export const useAdminHealth = (enabled: boolean) => useQuery({ queryKey: ['adminHealth'], queryFn: async () => (await api.get<AdminHealth>('/admin/health')).data, enabled, retry: 1, staleTime: 10_000, refetchInterval: enabled ? 30_000 : false });
@@ -1605,7 +1618,7 @@ export const useResetStorageChannel = () => { const queryClient=useQueryClient()
 export const useRemoveStorageChannel = () => { const queryClient=useQueryClient(); return useMutation({ mutationFn: async(channel_id:number)=>api.delete(`/accounts/storage-channel/${channel_id}`), onSuccess:()=>queryClient.invalidateQueries({queryKey:['storageChannel']}) }); };
 export const useUpdateAdminUser = () => {
     const queryClient = useQueryClient();
-    return useMutation({ mutationFn: async ({ id, ...payload }: { id: number; display_name?: string|null; is_active?: boolean; tts_daily_limit?:number; tts_max_chars?:number; stt_daily_limit?:number; stt_max_seconds?:number; can_use_monitors?:boolean }) => (await api.patch<AdminUser>(`/admin/users/${id}`, payload)).data, onSuccess: (updated) => { queryClient.setQueryData<AdminUser[]>(['adminUsers'], current=>current?.map(item=>item.id===updated.id?updated:item)); queryClient.invalidateQueries({ queryKey: ['adminUsers'] }); queryClient.invalidateQueries({queryKey:['adminStats']}); } });
+    return useMutation({ mutationFn: async ({ id, ...payload }: { id: number; display_name?: string|null; is_active?: boolean; tts_daily_limit?:number; tts_max_chars?:number; stt_daily_limit?:number; stt_max_seconds?:number; can_use_monitors?:boolean; can_create_rooms?:boolean }) => (await api.patch<AdminUser>(`/admin/users/${id}`, payload)).data, onSuccess: (updated) => { queryClient.setQueryData<AdminUser[]>(['adminUsers'], current=>current?.map(item=>item.id===updated.id?updated:item)); queryClient.invalidateQueries({ queryKey: ['adminUsers'] }); queryClient.invalidateQueries({queryKey:['adminStats']}); } });
 };
 export const useAddAdminUser = () => {
     const queryClient = useQueryClient();

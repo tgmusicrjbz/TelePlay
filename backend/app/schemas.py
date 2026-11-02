@@ -27,6 +27,7 @@ class UserResponse(UserBase):
     is_active: bool = True
     is_admin: bool = False
     can_use_monitors: bool = False
+    can_create_rooms: bool = False
     login_username: Optional[str] = None
     has_profile_photo: bool = False
     profile_photo_updated_at: Optional[datetime] = None
@@ -529,6 +530,7 @@ class AdminUserUpdate(BaseModel):
     stt_daily_limit: Optional[int] = Field(default=None, ge=0, le=10000)
     stt_max_seconds: Optional[int] = Field(default=None, ge=0, le=604_800)
     can_use_monitors: Optional[bool] = None
+    can_create_rooms: Optional[bool] = None
 
 
 class AdminUserCreate(BaseModel):

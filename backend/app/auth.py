@@ -14,7 +14,7 @@ from sqlalchemy import bindparam, select, text
 
 from .config import get_settings
 from .database import get_db
-from .models import AuthSession, File, Folder, User, WorkspaceGrant
+from .models import AuthSession, File, Folder, RoomMember, User, WatchRoom, WorkspaceGrant
 from .schemas import TokenPayload
 
 settings = get_settings()
@@ -105,6 +105,14 @@ def create_public_share_token(public_hash: str) -> str:
     }, settings.jwt_secret, algorithm="HS256")
 
 
+def create_room_stream_token(owner_telegram_id: int, viewer_user_id: int, room_id: str, file_id: int, expires_at: datetime) -> str:
+    """Short-lived proof allowing one room item to stream as its owner."""
+    return jwt.encode({
+        "sub": str(owner_telegram_id), "uid": viewer_user_id, "rid": room_id, "fid": file_id,
+        "exp": expires_at + timedelta(minutes=5), "type": "room-stream",
+    }, settings.jwt_secret, algorithm="HS256")
+
+
 def verify_public_share_token(token: str | None, public_hash: str) -> bool:
     payload = verify_token_payload(token or "", "public-share")
     return bool(payload and payload.get("sub") == public_hash)
@@ -173,6 +181,19 @@ async def get_current_user(
     # Verify token
     try:
         payload = verify_token_payload(token)
+        if not payload and request and request.url.path.startswith("/api/stream/"):
+            room_payload = verify_token_payload(token, "room-stream")
+            path_parts = request.url.path.rstrip("/").split("/")
+            requested_file = next((int(part) for part in reversed(path_parts) if part.isdigit()), None)
+            if room_payload and requested_file == room_payload.get("fid"):
+                access = (await db.execute(
+                    select(RoomMember.id).join(WatchRoom, WatchRoom.id == RoomMember.room_id).where(
+                        RoomMember.room_id == room_payload.get("rid"),
+                        RoomMember.user_id == room_payload.get("uid"),
+                        WatchRoom.expires_at > datetime.utcnow(),
+                    )
+                )).scalar_one_or_none()
+                if access: payload = room_payload
         telegram_id = int(payload.get("sub")) if payload and payload.get("sub") else None
         token_version = payload.get("ver") if payload else None
     except Exception:

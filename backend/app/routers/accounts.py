@@ -953,6 +953,7 @@ async def admin_users(_: User = Depends(require_admin), db: AsyncSession = Depen
         AdminUserResponse.model_validate(user, from_attributes=True).model_copy(update={
             "is_admin": user.telegram_id in settings.admin_users,
             "can_use_monitors": user.telegram_id in settings.admin_users or user.can_use_monitors,
+            "can_create_rooms": user.telegram_id in settings.admin_users or user.can_create_rooms,
             "total_size": int(size or 0), "file_count": int(files or 0), "session_count": int(sessions or 0),
             "tts_daily_limit": usage.daily_limit if usage else 0,
             "tts_max_chars": usage.max_chars if usage else 200_000,
@@ -998,6 +999,7 @@ async def add_authorized_user(payload: AdminUserCreate, _: User = Depends(requir
     return AdminUserResponse.model_validate(user, from_attributes=True).model_copy(update={
         "is_admin": user.telegram_id in settings.admin_users,
         "can_use_monitors": user.telegram_id in settings.admin_users or user.can_use_monitors,
+        "can_create_rooms": user.telegram_id in settings.admin_users or user.can_create_rooms,
     })
 
 
@@ -1055,6 +1057,8 @@ async def update_admin_user(user_id: int, payload: AdminUserUpdate, admin: User 
                 .where(SourceMonitor.user_id == user.id)
                 .values(enabled=False, last_error="دسترسی پایش این حساب توسط مدیر غیرفعال شده است.")
             )
+    if payload.can_create_rooms is not None and user.telegram_id not in settings.admin_users:
+        user.can_create_rooms = payload.can_create_rooms
     usage = await db.get(TTSUsage, user.id)
     if any(value is not None for value in (payload.tts_daily_limit, payload.tts_max_chars, payload.stt_daily_limit, payload.stt_max_seconds)):
         if usage is None:
@@ -1075,6 +1079,7 @@ async def update_admin_user(user_id: int, payload: AdminUserUpdate, admin: User 
     return AdminUserResponse.model_validate(user, from_attributes=True).model_copy(update={
         "is_admin": user.telegram_id in settings.admin_users,
         "can_use_monitors": user.telegram_id in settings.admin_users or user.can_use_monitors,
+        "can_create_rooms": user.telegram_id in settings.admin_users or user.can_create_rooms,
         "total_size": int(size or 0), "file_count": int(files or 0), "session_count": int(sessions or 0),
         "tts_daily_limit": usage.daily_limit if usage else 0,
         "tts_max_chars": usage.max_chars if usage else 200_000,

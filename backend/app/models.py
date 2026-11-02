@@ -3,7 +3,7 @@ Database models for TelePlay streaming app.
 """
 from datetime import date, datetime
 from typing import Optional, List
-from sqlalchemy import BigInteger, String, Integer, Boolean, ForeignKey, Date, DateTime, Text, Index, UniqueConstraint, LargeBinary
+from sqlalchemy import BigInteger, String, Integer, Boolean, ForeignKey, Date, DateTime, Text, Index, UniqueConstraint, LargeBinary, Float
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .database import Base
 
@@ -44,6 +44,7 @@ class User(Base):
     google_drive_credentials_encrypted: Mapped[Optional[str]] = mapped_column(Text)
     google_drive_email: Mapped[Optional[str]] = mapped_column(String(255))
     can_use_monitors: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    can_create_rooms: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     auth_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -505,6 +506,61 @@ class PlaylistItem(Base):
     __table_args__ = (
         Index("idx_playlist_position", playlist_id, position),
     )
+
+
+class WatchRoom(Base):
+    """A temporary synchronized listening or watch room."""
+    __tablename__ = "watch_rooms"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    theme: Mapped[str] = mapped_column(String(24), default="violet", nullable=False)
+    password_hash: Mapped[Optional[str]] = mapped_column(Text)
+    max_members: Mapped[int] = mapped_column(Integer, default=8, nullable=False)
+    chat_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    voice_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    current_index: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    playback_position: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    playback_rate: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
+    is_playing: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    state_updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class RoomMember(Base):
+    __tablename__ = "room_members"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    room_id: Mapped[str] = mapped_column(ForeignKey("watch_rooms.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(16), default="viewer", nullable=False)
+    joined_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (UniqueConstraint("room_id", "user_id", name="uq_room_member"),)
+
+
+class RoomItem(Base):
+    __tablename__ = "room_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    room_id: Mapped[str] = mapped_column(ForeignKey("watch_rooms.id", ondelete="CASCADE"), nullable=False, index=True)
+    file_id: Mapped[int] = mapped_column(ForeignKey("files.id", ondelete="CASCADE"), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    __table_args__ = (Index("idx_room_item_position", room_id, position),)
+
+
+class RoomMessage(Base):
+    __tablename__ = "room_messages"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    room_id: Mapped[str] = mapped_column(ForeignKey("watch_rooms.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    content: Mapped[str] = mapped_column(String(500), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)
 
 
 class Pack(Base):
