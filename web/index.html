@@ -26,6 +26,14 @@
     <style>@keyframes komod-boot{from{transform:translateX(70%)}to{transform:translateX(-70%)}}@media(prefers-reduced-motion:reduce){[data-komod-boot] i{animation:none!important}}</style>
     <button id="komod-recovery" type="button" aria-label="بازیابی کمد" style="display:none;align-items:center;gap:8px;position:fixed;left:12px;bottom:max(12px,env(safe-area-inset-bottom));z-index:2147483647;border:1px solid rgb(168 85 247 / .28);border-radius:16px;padding:11px 14px;background:rgb(15 23 42 / .96);color:#f8fafc;font:600 13px Vazirmatn,system-ui;box-shadow:0 18px 45px #0009;backdrop-filter:blur(18px)"><span style="display:grid;width:28px;height:28px;place-items:center;border-radius:10px;background:rgb(168 85 247 / .16);color:rgb(216 180 254)">↻</span><span>بازیابی کمد</span></button>
     <script>
+      // Register the offline shell before React or any lazy bundle starts. If a
+      // later script fails, the next launch is still controlled by the worker.
+      (() => {
+        if (!('serviceWorker' in navigator) || location.protocol !== 'https:' || ['localhost', '127.0.0.1'].includes(location.hostname)) return;
+        navigator.serviceWorker.register('/sw.js', { scope: '/', updateViaCache: 'none' })
+          .then(() => navigator.storage?.persist?.())
+          .catch(() => undefined);
+      })();
       // Loading Telegram synchronously can block the whole PWA while offline.
       // Load it independently and notify React if it becomes available later.
       (() => {
@@ -73,14 +81,23 @@
           recovery.disabled = true;
           recovery.innerHTML = '<span style="display:grid;width:28px;height:28px;place-items:center;border-radius:10px;background:rgb(168 85 247 / .16);color:rgb(216 180 254)">↻</span><span>در حال بازیابی…</span>';
           try {
-            const tasks = [];
-            if ('serviceWorker' in navigator) {
-              tasks.push(navigator.serviceWorker.getRegistrations().then(items => Promise.allSettled(items.map(item => item.unregister()))));
+            let reachable = false;
+            if (navigator.onLine) {
+              const controller = new AbortController();
+              const timer = setTimeout(() => controller.abort(), 2200);
+              try { reachable = (await fetch('/health', { cache: 'no-store', signal: controller.signal })).ok; }
+              catch {}
+              finally { clearTimeout(timer); }
             }
-            if ('caches' in window) {
-              tasks.push(caches.keys().then(keys => Promise.allSettled(keys.filter(key => key.startsWith('komod-shell-')).map(key => caches.delete(key)))));
+            if (reachable) {
+              const tasks = [];
+              if ('serviceWorker' in navigator) tasks.push(navigator.serviceWorker.getRegistrations().then(items => Promise.allSettled(items.map(item => item.unregister()))));
+              if ('caches' in window) tasks.push(caches.keys().then(keys => Promise.allSettled(keys.filter(key => key.startsWith('komod-shell-')).map(key => caches.delete(key)))));
+              await Promise.allSettled(tasks);
+            } else if ('serviceWorker' in navigator) {
+              const registration = await navigator.serviceWorker.ready.catch(() => null);
+              registration?.active?.postMessage({ type: 'WARM_OFFLINE' });
             }
-            await Promise.allSettled(tasks);
           } catch {}
           const target = new URL('/', location.origin);
           target.searchParams.set('recover', String(Date.now()));

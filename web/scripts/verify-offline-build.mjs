@@ -3,6 +3,9 @@ import path from 'node:path';
 
 const root = path.resolve(process.cwd(), 'dist');
 const worker = await readFile(path.join(root, 'sw.js'), 'utf8');
+const indexHtml = await readFile(path.join(root, 'index.html'), 'utf8');
+const appSource = await readFile(path.resolve(process.cwd(), 'src/App.tsx'), 'utf8');
+const recoverySource = await readFile(path.resolve(process.cwd(), 'src/lib/appRecovery.ts'), 'utf8');
 const parseAssetList = name => {
     const match = worker.match(new RegExp(`const ${name} = (\\[[^;]+\\]);`));
     if (!match) throw new Error(`${name} was not injected into the service worker.`);
@@ -19,6 +22,18 @@ async function walk(directory) {
 
 if (worker.includes('__KOMOD_BUILD_ID__') || worker.includes('__KOMOD_CORE_BUILD_ASSETS__') || worker.includes('__KOMOD_OPTIONAL_BUILD_ASSETS__')) {
     throw new Error('Offline asset placeholder was not replaced.');
+}
+if (!indexHtml.includes("serviceWorker.register('/sw.js'")) {
+    throw new Error('The service worker is not registered during the earliest boot stage.');
+}
+if (!indexHtml.includes("fetch('/health'")) {
+    throw new Error('Boot recovery can erase the offline shell without checking the origin first.');
+}
+if (appSource.includes("if(navigator.onLine&&!sessionStorage.getItem(marker))")) {
+    throw new Error('Lazy bundle recovery still trusts navigator.onLine and may erase a healthy offline shell.');
+}
+if (!appSource.includes('checkServerReachability({force:true,timeout:1800})') || !recoverySource.includes('originIsReachable')) {
+    throw new Error('Application recovery is not guarded by a real origin reachability probe.');
 }
 if (!worker.includes('previousShell') || !worker.includes("key.startsWith('komod-shell-')")) {
     throw new Error('Service worker does not retain the previous shell for open offline clients.');

@@ -16,7 +16,13 @@ function lazyWithRecovery(loader:()=>Promise<{default:()=>JSX.Element}>,key:stri
         const marker=`komod-lazy-retry:${key}`;
         try{const module=await loader();sessionStorage.removeItem(marker);return module}
         catch(error){
-            if(navigator.onLine&&!sessionStorage.getItem(marker)){
+            // `navigator.onLine` only means that the device has a network
+            // interface. Without a VPN the origin can still be unreachable.
+            // Never erase a healthy offline shell unless the server itself was
+            // reached immediately before recovery.
+            const serverReady=!sessionStorage.getItem(marker)
+                && await checkServerReachability({force:true,timeout:1800});
+            if(serverReady){
                 sessionStorage.setItem(marker,'1');
                 await clearBrokenAppShell();
                 const target=new URL(window.location.href);
