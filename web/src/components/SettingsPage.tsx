@@ -1,6 +1,6 @@
-import { createContext, lazy, Suspense, useContext, useEffect, useMemo, useState } from 'react';
-import { Activity, AlertTriangle, ArrowRight, AtSign, BookOpen, BrainCircuit, ChevronDown, ChevronLeft, AudioLines, Check, CheckCircle2, Copy, Database, Download, ExternalLink, FileStack, FileText, FoldVertical, FolderPlus, Gauge, Globe2, Grid2X2, HardDrive, Instagram, KeyRound, LayoutGrid, List, ListRestart, LockKeyhole, LogOut, MessageSquareText, MonitorSmartphone, Moon, MoreVertical, Palette, Pencil, Plus, RefreshCw, Search, Shield, Smartphone, Sparkles, Sun, Tags, Trash2, UnfoldVertical, UserRoundCog, Users, Warehouse, Wifi, WifiOff, XCircle } from 'lucide-react';
-import { AdminUser, Folder, PublicShareItem, TelegramFile, TwoFactorSetup, User, api, formatFileSize, formatIranTime, formatPersianDate, useAccountPreferences, useAddAdminUser, useAdminErrors, useAdminHealth, useAdminStats, useAdminUsers, useClearAdminErrors, useClearSecurityEvents, useCredentials, useCurrentUser, useDisableTwoFactor, useEnableTwoFactor, useFiles, useFolderTree, useGrantWorkspace, useLogoutAll, useLogoutOthers, usePublicShares, useRemoveAdminUser, useRemoveStorageChannel, useResetStorageChannel, useResolveAdminError, useRevokePublicShares, useRevokeSession, useRevokeWorkspace, useSecurityEvents, useSessions, useSetStorageChannel, useSetVaultPassword, useSetupTwoFactor, useStorageChannel, useStorageStats, useUnlockVault, useUpdateAccountPreferences, useUpdateAdminUser, useUpdateCredentials, useVaultStatus, useWorkspaceGrants, useWorkspaces } from '../lib/api';
+import { createContext, lazy, Suspense, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { Activity, AlertTriangle, ArrowRight, AtSign, BookOpen, BrainCircuit, Camera, ChevronDown, ChevronLeft, AudioLines, Check, CheckCircle2, Copy, Database, Download, ExternalLink, FileStack, FileText, FoldVertical, FolderPlus, Gauge, Globe2, Grid2X2, HardDrive, Instagram, KeyRound, LayoutGrid, List, ListRestart, LockKeyhole, LogOut, MessageSquareText, MonitorSmartphone, Moon, MoreVertical, Palette, Pencil, Plus, RefreshCw, Search, Shield, Smartphone, Sparkles, Sun, Tags, Trash2, UnfoldVertical, UserRoundCog, Users, Warehouse, Wifi, WifiOff, XCircle } from 'lucide-react';
+import { AdminUser, Folder, PublicShareItem, TelegramFile, TwoFactorSetup, User, api, formatFileSize, formatIranTime, formatPersianDate, useAccountPreferences, useAddAdminUser, useAdminErrors, useAdminHealth, useAdminStats, useAdminUsers, useClearAdminErrors, useClearSecurityEvents, useCredentials, useCurrentUser, useDeleteProfilePhoto, useDisableTwoFactor, useEnableTwoFactor, useFiles, useFolderTree, useGrantWorkspace, useLogoutAll, useLogoutOthers, usePublicShares, useRemoveAdminUser, useRemoveStorageChannel, useResetStorageChannel, useResolveAdminError, useRevokePublicShares, useRevokeSession, useRevokeWorkspace, useSecurityEvents, useSessions, useSetStorageChannel, useSetVaultPassword, useSetupTwoFactor, useStorageChannel, useStorageStats, useUnlockVault, useUpdateAccountPreferences, useUpdateAdminUser, useUpdateCredentials, useUpdateProfilePhoto, useVaultStatus, useWorkspaceGrants, useWorkspaces } from '../lib/api';
 import { activateAccount, forgetAccount, savedAccounts, saveAuthenticatedAccount, syncCurrentAccount } from '../lib/accounts';
 import { applyAppearanceMode, applyCustomTheme, applyTheme, appearanceThemes, colorThemes, ActiveTheme, AppearanceMode, ColorTheme, getStoredAppearanceMode, getStoredTheme, isLightAppearance } from '../lib/theme';
 import CustomSelect from './CustomSelect';
@@ -52,8 +52,22 @@ const settingsSearchIndex: Array<{view:SettingsView;title:string;text:string;adm
     {view:'admin',title:'گزارش و سلامت',text:'آمار، وضعیت سرویس‌ها و خطاها',admin:true},
 ];
 
+async function prepareProfilePhoto(file: File): Promise<File> {
+    if(!['image/jpeg','image/png','image/webp'].includes(file.type))throw new Error('عکس باید JPEG، PNG یا WebP باشد.');
+    const bitmap=await createImageBitmap(file);
+    const maxSide=720, scale=Math.min(1,maxSide/Math.max(bitmap.width,bitmap.height));
+    const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(bitmap.width*scale));canvas.height=Math.max(1,Math.round(bitmap.height*scale));
+    const context=canvas.getContext('2d');if(!context){bitmap.close();throw new Error('آماده‌سازی عکس انجام نشد.');}
+    context.drawImage(bitmap,0,0,canvas.width,canvas.height);bitmap.close();
+    const blob=await new Promise<Blob|null>(resolve=>canvas.toBlob(resolve,'image/webp',.86));
+    if(!blob)throw new Error('آماده‌سازی عکس انجام نشد.');
+    return new File([blob],'profile.webp',{type:'image/webp'});
+}
+
 export default function SettingsPage() {
     const setActiveSection = useAppStore(state => state.setActiveSection);
+    const addToast = useAppStore(state => state.addToast);
+    const profilePhotoInputRef = useRef<HTMLInputElement>(null);
     const [view, setView] = useState<SettingsView>(() => {
         const target = localStorage.getItem('komod-settings-target') as SettingsView | null;
         localStorage.removeItem('komod-settings-target');
@@ -67,6 +81,8 @@ export default function SettingsPage() {
     const { data: sessions = [] } = useSessions(view==='sessions');
     const { data: securityEvents = [] } = useSecurityEvents(view==='sessions');
     const clearSecurityEvents = useClearSecurityEvents();
+    const updateProfilePhoto = useUpdateProfilePhoto();
+    const deleteProfilePhoto = useDeleteProfilePhoto();
     const { data: workspaces = [] } = useWorkspaces(view==='access');
     const { data: folderTree = [] } = useFolderTree(false,view==='access');
     const { data: grants = [] } = useWorkspaceGrants(view==='access');
@@ -239,6 +255,24 @@ export default function SettingsPage() {
         setNewAdminTelegramId(''); setNewAdminName('');
     };
     const displayName = [user?.first_name, user?.last_name].filter(Boolean).join(' ') || (user?.username ? `@${user.username}` : '') || 'کاربر کمد';
+    const changeProfilePhoto = async (file?: File) => {
+        if(!file)return;
+        try {
+            const prepared=await prepareProfilePhoto(file);
+            await updateProfilePhoto.mutateAsync(prepared);
+            addToast('عکس پروفایل ذخیره شد.','success');
+        } catch(error:any) {
+            addToast(error?.response?.data?.detail||error?.message||'ذخیره عکس پروفایل انجام نشد.','error');
+        }
+    };
+    const removeProfilePhoto = async () => {
+        try {
+            await deleteProfilePhoto.mutateAsync();
+            addToast('عکس پروفایل حذف شد.','success');
+        } catch(error:any) {
+            addToast(error?.response?.data?.detail||'حذف عکس پروفایل انجام نشد.','error');
+        }
+    };
     const activeWorkspace = Number(localStorage.getItem('komod-active-workspace') || user?.id || 0);
     const switchWorkspace = (id: number) => {
         const selected = workspaces.find(space => space.user_id === id);
@@ -415,7 +449,7 @@ export default function SettingsPage() {
         </div>}
 
         {view === 'accounts' && <div className="space-y-4">
-            <Card id="accounts-overview-current" icon={<Smartphone/>} title="حساب فعال"><div className="mt-4 flex items-center gap-3"><ProfileAvatar user={user} className="h-16 w-16"/><div className="min-w-0 flex-1"><p dir="auto" className="truncate text-lg font-bold">{displayName}</p><p className="mt-1 flex items-center gap-1.5 text-sm text-dark-400" dir="ltr"><AtSign className="h-4 w-4"/>{user?.username || 'بدون نام کاربری'}</p><p className="mt-1 text-xs text-dark-500">آیدی تلگرام: <span dir="ltr">{user?.telegram_id || '…'}</span></p></div></div></Card>
+            <Card id="accounts-overview-current" icon={<Smartphone/>} title="حساب فعال"><div className="mt-4 flex flex-wrap items-center gap-3"><button type="button" disabled={updateProfilePhoto.isPending} onClick={()=>profilePhotoInputRef.current?.click()} className="group relative shrink-0 rounded-2xl disabled:opacity-60" aria-label="انتخاب عکس پروفایل"><ProfileAvatar user={user} className="h-16 w-16"/><span className="absolute -bottom-1 -left-1 flex h-7 w-7 items-center justify-center rounded-xl border border-white/10 bg-primary-500 text-white shadow-lg transition group-hover:scale-105"><Camera className="h-3.5 w-3.5"/></span></button><div className="min-w-0 flex-1"><p dir="auto" className="truncate text-lg font-bold">{displayName}</p><p className="mt-1 flex items-center gap-1.5 text-sm text-dark-400" dir="ltr"><AtSign className="h-4 w-4"/>{user?.username || 'بدون نام کاربری'}</p><p className="mt-1 text-xs text-dark-500">آیدی تلگرام: <span dir="ltr">{user?.telegram_id || '…'}</span></p></div><div className="flex w-full gap-2 sm:w-auto sm:flex-col"><button type="button" disabled={updateProfilePhoto.isPending} onClick={()=>profilePhotoInputRef.current?.click()} className="btn-secondary min-h-10 flex-1 px-3 text-xs sm:flex-none">{updateProfilePhoto.isPending?'در حال ذخیره…':user?.has_profile_photo?'تغییر عکس':'انتخاب عکس'}</button>{user?.has_profile_photo&&<button type="button" disabled={deleteProfilePhoto.isPending} onClick={()=>void removeProfilePhoto()} className="min-h-10 flex-1 rounded-xl border border-red-400/15 px-3 text-xs text-red-300 transition hover:bg-red-500/10 disabled:opacity-50 sm:flex-none">{deleteProfilePhoto.isPending?'در حال حذف…':'حذف عکس'}</button>}</div><input ref={profilePhotoInputRef} type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" className="hidden" onChange={event=>{void changeProfilePhoto(event.target.files?.[0]);event.currentTarget.value='';}}/></div></Card>
             <Card id="accounts-overview-device" icon={<Users/>} title="حساب‌های این دستگاه"><div className="mt-4 grid gap-2 sm:grid-cols-2">{accounts.map(account => {const telegramName=[account.user.first_name,account.user.last_name].filter(Boolean).join(' ')||account.user.username||String(account.telegramId);return <div key={account.telegramId} className={`flex items-center gap-3 rounded-xl border p-3 ${account.telegramId === user?.telegram_id ? 'border-primary-400/30 bg-primary-500/10' : 'border-white/[.07] bg-dark-800/50'}`}><div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/[.06] font-bold">{telegramName[0]}</div><div className="min-w-0 flex-1"><strong className="block truncate text-sm">{telegramName}</strong><small className="text-dark-500">{account.telegramId === user?.telegram_id ? 'حساب فعال' : `@${account.user.username || account.telegramId}`}</small></div>{account.telegramId !== user?.telegram_id && <><button className="rounded-xl bg-primary-500/15 px-3 py-2 text-xs font-semibold text-primary-100 transition hover:bg-primary-500/25" onClick={() => activateAccount(account)}>ورود</button><button className="btn-icon text-red-300" title="حذف از این دستگاه" onClick={() => { forgetAccount(account.telegramId); window.location.reload(); }}><Trash2 className="h-4 w-4"/></button></>}</div>})}</div><a href="/login?add=1" className="mt-3 flex min-h-11 items-center justify-center gap-2 rounded-xl border border-primary-400/20 bg-primary-500/[.09] text-sm font-semibold text-primary-100 transition hover:bg-primary-500/15"><Plus className="h-4 w-4"/> افزودن حساب دیگر</a></Card>
             <Card id="accounts-backup" icon={<Database/>} title="پشتیبان حساب" subtitle="کشوها، پلی‌لیست‌ها، تگ‌ها و اطلاعات فایل‌ها را جابه‌جا کن."><div className="mt-4 grid gap-2 sm:grid-cols-2"><button className="flex min-h-11 items-center justify-center gap-2 rounded-xl border border-primary-400/20 bg-primary-500/[.09] px-4 text-xs font-semibold text-primary-100 transition hover:bg-primary-500/15" onClick={async()=>{try{const response=await api.get('/accounts/export',{responseType:'blob'});const url=URL.createObjectURL(response.data);const anchor=document.createElement('a');anchor.href=url;anchor.download=`komod-backup-${user?.telegram_id||'account'}.json`;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch{useAppStore.getState().addToast('گرفتن نسخه پشتیبان انجام نشد.','error');}}}><Download className="h-4 w-4"/>گرفتن نسخه پشتیبان</button><label className={`flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-primary-400/20 bg-primary-500/[.09] px-4 text-xs font-semibold text-primary-100 transition hover:bg-primary-500/15 ${importingBackup?'pointer-events-none opacity-50':''}`}><RefreshCw className={`h-4 w-4 ${importingBackup?'animate-spin':''}`}/>{importingBackup?'در حال بازیابی…':'بازیابی نسخه'}<input type="file" accept="application/json,.json" className="hidden" onChange={event=>{void restoreBackup(event.target.files?.[0]);event.currentTarget.value='';}}/></label></div><p className="mt-3 text-xs leading-6 text-dark-500">رمزها و کلیدهای خصوصی داخل فایل پشتیبان قرار نمی‌گیرند.</p></Card>
         </div>}
@@ -574,11 +608,15 @@ function ProfileAvatar({user,className='h-11 w-11'}:{user?:User;className?:strin
     const name=[user?.first_name,user?.last_name].filter(Boolean).join(' ')||user?.username||'کمد';
     useEffect(()=>{
         if(!user?.telegram_id){setPhoto(null);return}
+        let active=true;
+        let objectUrl:string|null=null;
         const key=`komod-profile-photo-${user.telegram_id}`;
         const telegramUser=(window as Window&{Telegram?:{WebApp?:{initDataUnsafe?:{user?:{id?:number;photo_url?:string}}}}}).Telegram?.WebApp?.initDataUnsafe?.user;
         const livePhoto=Number(telegramUser?.id)===user.telegram_id?telegramUser?.photo_url:null;
-        if(livePhoto){localStorage.setItem(key,livePhoto);setPhoto(livePhoto)}else setPhoto(localStorage.getItem(key));
-    },[user?.telegram_id]);
+        const fallback=()=>{if(!active)return;if(livePhoto)localStorage.setItem(key,livePhoto);setPhoto(livePhoto||localStorage.getItem(key))};
+        if(user.has_profile_photo){void api.get('/accounts/profile-photo',{responseType:'blob'}).then(({data})=>{if(!active)return;objectUrl=URL.createObjectURL(data);setPhoto(objectUrl)}).catch(fallback)}else fallback();
+        return()=>{active=false;if(objectUrl)URL.revokeObjectURL(objectUrl)};
+    },[user?.telegram_id,user?.has_profile_photo,user?.profile_photo_updated_at]);
     return <span className={`${className} flex shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-primary-300/20 bg-gradient-to-br from-primary-500/25 to-pink-500/15 text-lg font-black text-primary-100 shadow-lg shadow-black/10`}>{photo?<img src={photo} alt={`عکس پروفایل ${name}`} referrerPolicy="no-referrer" className="h-full w-full object-cover" onError={()=>{if(user?.telegram_id)localStorage.removeItem(`komod-profile-photo-${user.telegram_id}`);setPhoto(null)}}/>:<span>{name.trim().charAt(0).toLocaleUpperCase('fa')}</span>}</span>;
 }
 function ProfileSummaryCard({user,title}:{user?:User;title:string}) {

@@ -3,7 +3,7 @@
  */
 import axios from 'axios';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { cachedCurrentUser, clearCurrentAccountSession, updateCurrentAccountTokens } from './accounts';
+import { cachedCurrentUser, clearCurrentAccountSession, syncCurrentAccount, updateCurrentAccountTokens } from './accounts';
 import { queueOfflineMutation, shouldQueueOffline } from './offlineMutations';
 import { isEffectivelyOnline, markServerReachable, markServerUnreachable } from './connectivity';
 import { isNativeApp } from './runtime';
@@ -48,6 +48,8 @@ export interface User {
     is_admin?: boolean;
     can_use_monitors?: boolean;
     login_username?: string | null;
+    has_profile_photo?: boolean;
+    profile_photo_updated_at?: string | null;
 }
 
 export interface AuthSession { id: string; device_name: string; user_agent?: string | null; ip_address?: string | null; created_at: string; last_seen_at: string; current: boolean; }
@@ -656,6 +658,22 @@ const removeFilesFromCachedPack = (pack: Pack | undefined, ids: Set<number>) => 
         cover_file_id: pack.cover_file_id && ids.has(pack.cover_file_id) ? null : pack.cover_file_id,
     };
 };
+
+type ProfilePhotoState = { has_profile_photo:boolean; profile_photo_updated_at:string|null };
+const updateCachedProfilePhoto=(client:ReturnType<typeof useQueryClient>,state:ProfilePhotoState)=>{
+    client.setQueryData<User>(['currentUser'],current=>{
+        if(!current)return current;
+        const next={...current,...state};syncCurrentAccount(next);return next;
+    });
+};
+export const useUpdateProfilePhoto=()=>{const client=useQueryClient();return useMutation({
+    mutationFn:async(file:globalThis.File)=>{const form=new FormData();form.append('upload',file,file.name);return (await api.post<ProfilePhotoState>('/accounts/profile-photo',form)).data},
+    onSuccess:state=>updateCachedProfilePhoto(client,state),
+})};
+export const useDeleteProfilePhoto=()=>{const client=useQueryClient();return useMutation({
+    mutationFn:async()=>{await api.delete('/accounts/profile-photo');return {has_profile_photo:false,profile_photo_updated_at:null} satisfies ProfilePhotoState},
+    onSuccess:state=>updateCachedProfilePhoto(client,state),
+})};
 
 export const useSuggestFileMetadata = () => useMutation({
     mutationFn: async (id:number) => (await api.post<FileMetadataSuggestion>(`/files/${id}/ai-metadata`)).data,

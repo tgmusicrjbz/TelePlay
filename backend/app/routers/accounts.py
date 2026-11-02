@@ -6,7 +6,7 @@ import secrets
 import time
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Body, Depends, File as FormFile, HTTPException, Request, Response, UploadFile
 from passlib.context import CryptContext
 from pyrogram.enums import ChatMemberStatus, ChatType
 from slowapi import Limiter
@@ -28,6 +28,53 @@ router = APIRouter(tags=["Accounts"])
 settings = get_settings()
 vault_password_context = CryptContext(schemes=["pbkdf2_sha256"], pbkdf2_sha256__default_rounds=600_000, deprecated="auto")
 limiter = Limiter(key_func=get_remote_address)
+
+PROFILE_PHOTO_TYPES = {"image/jpeg", "image/png", "image/webp"}
+PROFILE_PHOTO_MAX_BYTES = 3 * 1024 * 1024
+
+
+@router.get("/accounts/profile-photo")
+async def profile_photo(current_user: User = Depends(get_current_user)):
+    if not current_user.profile_photo:
+        raise HTTPException(status_code=404, detail="عکس پروفایل ثبت نشده است.")
+    return Response(
+        content=current_user.profile_photo,
+        media_type=current_user.profile_photo_mime or "image/jpeg",
+        headers={"Cache-Control": "private, no-cache"},
+    )
+
+
+@router.post("/accounts/profile-photo")
+async def update_profile_photo(
+    upload: UploadFile = FormFile(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    mime = (upload.content_type or "").lower()
+    if mime not in PROFILE_PHOTO_TYPES:
+        raise HTTPException(status_code=415, detail="عکس باید JPEG، PNG یا WebP باشد.")
+    content = await upload.read(PROFILE_PHOTO_MAX_BYTES + 1)
+    if not content:
+        raise HTTPException(status_code=400, detail="فایل عکس خالی است.")
+    if len(content) > PROFILE_PHOTO_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="حجم عکس پروفایل نباید بیشتر از ۳ مگابایت باشد.")
+    current_user.profile_photo = content
+    current_user.profile_photo_mime = mime
+    current_user.profile_photo_updated_at = datetime.utcnow()
+    await db.commit()
+    return {"has_profile_photo": True, "profile_photo_updated_at": current_user.profile_photo_updated_at}
+
+
+@router.delete("/accounts/profile-photo", status_code=204)
+async def delete_profile_photo(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    current_user.profile_photo = None
+    current_user.profile_photo_mime = None
+    current_user.profile_photo_updated_at = None
+    await db.commit()
+    return None
 
 
 @router.get("/accounts/security-events")

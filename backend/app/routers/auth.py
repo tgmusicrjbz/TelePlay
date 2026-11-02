@@ -96,6 +96,8 @@ def _auth_response(user: User, session: AuthSession) -> AuthResponse:
             is_admin=user.telegram_id in settings.admin_users,
             can_use_monitors=user.telegram_id in settings.admin_users or user.can_use_monitors,
             login_username=user.login_username,
+            has_profile_photo=user.has_profile_photo,
+            profile_photo_updated_at=user.profile_photo_updated_at,
             created_at=user.created_at, last_active=user.last_active,
         ),
     )
@@ -619,6 +621,8 @@ async def get_current_user_info(
         is_admin=current_user.telegram_id in settings.admin_users,
         can_use_monitors=current_user.telegram_id in settings.admin_users or current_user.can_use_monitors,
         login_username=current_user.login_username,
+        has_profile_photo=current_user.has_profile_photo,
+        profile_photo_updated_at=current_user.profile_photo_updated_at,
     )
 
 
@@ -642,6 +646,8 @@ async def register_current_session(
             display_name=current_user.display_name, is_active=current_user.is_active,
             is_admin=current_user.telegram_id in settings.admin_users,
             can_use_monitors=current_user.telegram_id in settings.admin_users or current_user.can_use_monitors,
+            has_profile_photo=current_user.has_profile_photo,
+            profile_photo_updated_at=current_user.profile_photo_updated_at,
             created_at=current_user.created_at, last_active=current_user.last_active,
         ),
     )
@@ -693,6 +699,8 @@ async def login_from_telegram_webapp(
             display_name=user.display_name, is_active=user.is_active,
             is_admin=user.telegram_id in settings.admin_users,
             can_use_monitors=user.telegram_id in settings.admin_users or user.can_use_monitors,
+            has_profile_photo=user.has_profile_photo,
+            profile_photo_updated_at=user.profile_photo_updated_at,
             created_at=user.created_at, last_active=user.last_active,
         ),
     )

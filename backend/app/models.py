@@ -18,6 +18,9 @@ class User(Base):
     first_name: Mapped[Optional[str]] = mapped_column(String(255))
     last_name: Mapped[Optional[str]] = mapped_column(String(255))
     display_name: Mapped[Optional[str]] = mapped_column(String(255))
+    profile_photo: Mapped[Optional[bytes]] = mapped_column(LargeBinary)
+    profile_photo_mime: Mapped[Optional[str]] = mapped_column(String(64))
+    profile_photo_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     login_username: Mapped[Optional[str]] = mapped_column(String(64), unique=True, index=True)
     password_hash: Mapped[Optional[str]] = mapped_column(Text)
     totp_secret_encrypted: Mapped[Optional[str]] = mapped_column(Text)
@@ -45,6 +48,10 @@ class User(Base):
     auth_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     last_active: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    @property
+    def has_profile_photo(self) -> bool:
+        return bool(self.profile_photo)
     
     # Relationships
     folders: Mapped[List["Folder"]] = relationship(back_populates="user", cascade="all, delete-orphan")
