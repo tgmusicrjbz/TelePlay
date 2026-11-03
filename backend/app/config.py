@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     # Extra user sessions for parallel YouTube/Instagram imports.  Keep the
     # original singular setting so existing deployments keep working.
     telegram_worker_sessions_str: str = Field("", alias="TELEGRAM_WORKER_SESSIONS")
+    # YouTube uses the Telegram helper first to avoid Railway bandwidth and
+    # falls back to yt-dlp only after this bounded retry window.
+    youtube_helper_timeout_seconds: int = Field(75, alias="YOUTUBE_HELPER_TIMEOUT_SECONDS", ge=20, le=180)
+    youtube_helper_attempts: int = Field(3, alias="YOUTUBE_HELPER_ATTEMPTS", ge=1, le=5)
     # Dedicated user sessions for Telegram channel/Saved Messages monitoring.
     # They are deliberately never handed to the YouTube/Instagram importer.
     telegram_monitor_session: str = Field("", alias="TELEGRAM_MONITOR_SESSION")

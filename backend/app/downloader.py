@@ -889,17 +889,11 @@ class LinkImportService:
         is_instagram = classify_import_url(url) == "instagram"
         is_youtube = classify_import_url(url) == "youtube"
         if is_youtube:
-            self.statuses[job.id].update(message="دریافت مستقیم از یوتیوب", progress=18)
+            self.statuses[job.id].update(message="ارسال لینک یوتیوب به ربات کمکی", progress=12)
             await self._persist_status(job.id)
-            try:
-                return await asyncio.to_thread(_download_youtube_direct, url, quality)
-            except Exception:
-                logger.warning("Direct YouTube download failed; falling back to helper bot", exc_info=True)
-                self.statuses[job.id].update(message="روش مستقیم پاسخ نداد؛ تلاش با روش جایگزین", progress=20)
-                await self._persist_status(job.id)
-        # Two attempts use AllSaver.  The third uses an independent direct
-        # extractor, so a stalled or rate-limited helper bot cannot block the
-        # import forever.
+        # Prefer AllSaver for YouTube so Railway does not carry the normal
+        # download traffic. A bounded retry window switches to the independent
+        # direct extractor when the helper is unavailable or stalls.
         if is_instagram and job.retry_count >= 2:
             logger.warning(
                 "AllSaver failed twice for Instagram import %s; using direct extractor",
@@ -913,7 +907,15 @@ class LinkImportService:
             return await asyncio.to_thread(_download_instagram_direct, url, quality)
         raw_title, source_author = await asyncio.to_thread(_oembed_metadata, url)
         title = sanitize_filename(raw_title)
-        sent = await client.send_message("allsaverbot", url)
+        try:
+            sent = await client.send_message("allsaverbot", url)
+        except Exception:
+            if not is_youtube:
+                raise
+            logger.warning("YouTube helper bot could not accept the link; using direct fallback", exc_info=True)
+            self.statuses[job.id].update(message="ربات کمکی در دسترس نبود؛ دریافت با روش جایگزین", progress=28)
+            await self._persist_status(job.id)
+            return await asyncio.to_thread(_download_youtube_direct, url, quality)
         clicked: set[str] = set()
         found: list[dict] = []
         seen: set[int] = set()
@@ -968,7 +970,12 @@ class LinkImportService:
         last_media_at: float | None = None
         language_wait_started: float | None = None
         language_retries = 0
-        while time.monotonic() - started_at < 180:
+        helper_resends = 0
+        helper_attempts = max(1, settings.youtube_helper_attempts) if is_youtube else 1
+        helper_timeout = max(20, settings.youtube_helper_timeout_seconds) if is_youtube else 180
+        resend_interval = max(12, helper_timeout / helper_attempts)
+        last_helper_progress = started_at
+        while time.monotonic() - started_at < helper_timeout:
             await asyncio.sleep(2)
             if not await self._checkpoint(job):
                 raise ImportCancelled()
@@ -990,6 +997,7 @@ class LinkImportService:
                     received_now += 1
             if received_now:
                 last_media_at = time.monotonic()
+                last_helper_progress = last_media_at
             # Albums may arrive one item at a time. Wait for a quiet window
             # after the latest item instead of stopping after the first result.
             if found and last_media_at is not None and time.monotonic() - last_media_at >= (10 if is_instagram else 6):
@@ -1022,7 +1030,7 @@ class LinkImportService:
                     # AllSaver occasionally leaves both language callbacks on
                     # an hourglass forever. Re-sending creates a fresh job
                     # instead of blocking Komod's entire FIFO queue.
-                    if waited >= 32 and language_retries < 2:
+                    if not is_youtube and waited >= 32 and language_retries < 2:
                         sent = await client.send_message("allsaverbot", url)
                         clicked.clear()
                         language_retries += 1
@@ -1036,11 +1044,13 @@ class LinkImportService:
                 if language_button and not re.search(r"\b(360|480|720|1080)p?\b", language_button.text, re.IGNORECASE):
                     if await click_button(message, language_button):
                         clicked.add(button_key(message, language_button))
+                        last_helper_progress = time.monotonic()
                         break
                 if audio_mode:
                     audio_button = next((button for button in ready_buttons if any(word in button.text.lower() for word in ("audio", "صوت", "صدا", "mp3")) and button_key(message, button) not in clicked), None)
                     if audio_button and await click_button(message, audio_button):
                         clicked.add(button_key(message, audio_button))
+                        last_helper_progress = time.monotonic()
                         break
                 quality_buttons = [button for button in ready_buttons if re.search(r"\b(360|480|720|1080)p?\b", button.text, re.IGNORECASE)] if not audio_mode else []
                 candidates = quality_buttons or [button for button in ready_buttons if not any(word in button.text.lower() for word in ("back", "بازگشت", "назад"))]
@@ -1057,11 +1067,48 @@ class LinkImportService:
                 if target:
                     if await click_button(message, target):
                         clicked.add(button_key(message, target))
+                        last_helper_progress = time.monotonic()
                         break
             async for message in client.get_chat_history("allsaverbot", limit=3):
                 if message.id > sent.id and message.text and not message.reply_markup and any(word in message.text.lower() for word in ("error", "ошибка", "не удалось")):
-                    raise RuntimeError(message.text[:180])
+                    if not is_youtube:
+                        raise RuntimeError(message.text[:180])
+                    logger.info("YouTube helper bot returned an error; switching to direct fallback: %s", message.text[:180])
+                    self.statuses[job.id].update(message="ربات کمکی پاسخ مناسبی نداد؛ دریافت با روش جایگزین", progress=28)
+                    await self._persist_status(job.id)
+                    return await asyncio.to_thread(_download_youtube_direct, url, quality)
+            now = time.monotonic()
+            if (
+                is_youtube
+                and helper_resends < helper_attempts - 1
+                and now - last_helper_progress >= resend_interval
+            ):
+                try:
+                    sent = await client.send_message("allsaverbot", url)
+                except Exception:
+                    logger.warning("YouTube helper retry could not be sent; using direct fallback", exc_info=True)
+                    self.statuses[job.id].update(message="ارتباط با ربات کمکی قطع شد؛ دریافت با روش جایگزین", progress=28)
+                    await self._persist_status(job.id)
+                    return await asyncio.to_thread(_download_youtube_direct, url, quality)
+                clicked.clear()
+                helper_resends += 1
+                language_wait_started = None
+                last_helper_progress = now
+                self.statuses[job.id].update(
+                    message=f"تلاش دوباره با ربات کمکی ({helper_resends + 1} از {helper_attempts})",
+                    progress=min(26, 14 + helper_resends * 5),
+                )
+                await self._persist_status(job.id)
         if not found:
+            if is_youtube:
+                logger.warning(
+                    "YouTube helper bot timed out after %ss and %s attempt(s); using direct fallback",
+                    helper_timeout,
+                    helper_resends + 1,
+                )
+                self.statuses[job.id].update(message="مهلت ربات کمکی تمام شد؛ دریافت با روش جایگزین", progress=28)
+                await self._persist_status(job.id)
+                return await asyncio.to_thread(_download_youtube_direct, url, quality)
             raise TimeoutError("زمان دریافت فایل از سرویس دانلود تمام شد")
         return sorted(found, key=lambda item: item["message"].id)
 

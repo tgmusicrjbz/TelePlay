@@ -95,6 +95,26 @@ class LinkImportDurabilityTests(unittest.IsolatedAsyncioTestCase):
         client.send_message.assert_not_awaited()
         self.assertIn("روش جایگزین", service.statuses[job.id]["message"])
 
+    async def test_youtube_uses_helper_first_and_direct_download_when_helper_is_unavailable(self):
+        service = LinkImportService()
+        job = ImportJob(
+            id="youtube-helper-first", url="https://www.youtube.com/watch?v=example",
+            user_id=1, telegram_id=123, quality="720",
+        )
+        service.statuses[job.id] = {"id": job.id, "user_id": 1, "state": "downloading"}
+        client = AsyncMock()
+        client.send_message.side_effect = RuntimeError("helper unavailable")
+        direct_result = [{"message": None, "local_path": "/tmp/video.mp4", "type": "video"}]
+        with (
+            patch("app.downloader._oembed_metadata", return_value=("Sample", "Channel")),
+            patch("app.downloader._download_youtube_direct", return_value=direct_result) as fallback,
+        ):
+            result = await service._download(client, job, job.url, job.quality)
+        self.assertEqual(result, direct_result)
+        client.send_message.assert_awaited_once_with("allsaverbot", job.url)
+        fallback.assert_called_once_with(job.url, job.quality)
+        self.assertIn("ربات کمکی", service.statuses[job.id]["message"])
+
     def test_supported_link_classifier_includes_public_pinterest_urls(self):
         self.assertEqual(classify_import_url("https://www.pinterest.com/pin/123456/"), "pinterest")
         self.assertEqual(classify_import_url("https://pin.it/abc123"), "pinterest")
