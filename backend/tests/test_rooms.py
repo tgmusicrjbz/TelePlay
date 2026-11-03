@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.database import Base
 from app.models import File, RoomItem, RoomMember, User, WatchRoom
 from app.auth import verify_token_payload
-from app.routers.rooms import RoomCreate, RoomItemsUpdate, RoomJoin, create_room, join_room, update_items
+from app.routers.rooms import RoomCreate, RoomItemsUpdate, RoomJoin, RoomUpdate, create_room, join_room, update_items, update_room
 
 
 class RoomTests(unittest.IsolatedAsyncioTestCase):
@@ -47,6 +47,10 @@ class RoomTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await db.execute(select(WatchRoom))).scalars().one().name, "Test room")
             self.assertEqual(len((await db.execute(select(RoomMember))).scalars().all()), 1)
             self.assertEqual(len((await db.execute(select(RoomItem))).scalars().all()), 2)
+
+            hidden = await update_room(result["id"], RoomUpdate(queue_visible_to_viewers=False), db, owner)
+            self.assertFalse(hidden["queue_visible_to_viewers"])
+            self.assertFalse((await db.execute(select(WatchRoom))).scalars().one().queue_visible_to_viewers)
 
     async def test_password_join_issues_member_scoped_media_token(self):
         async with self.sessions() as db:

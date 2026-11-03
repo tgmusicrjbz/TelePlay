@@ -17,7 +17,7 @@ from sqlalchemy.orm import selectinload
 from ..auth import create_room_stream_token, get_current_user, verify_token_payload
 from ..config import get_settings
 from ..database import async_session, get_db
-from ..models import File, PlaylistItem, RoomItem, RoomMember, RoomMessage, RoomMessageReaction, User, WatchRoom
+from ..models import File, PlaylistItem, RoomItem, RoomMember, RoomMessage, User, WatchRoom
 from ..services import add_urls_to_file
 
 router = APIRouter(prefix="/rooms", tags=["Rooms"])
@@ -38,6 +38,7 @@ class RoomCreate(BaseModel):
     max_members: int = Field(default=8, ge=2, le=MAX_MEMBERS)
     chat_enabled: bool = True
     voice_enabled: bool = True
+    queue_visible_to_viewers: bool = True
     playlist_id: int | None = None
     file_ids: list[int] = Field(default_factory=list, max_length=100)
     allowed_users: list[str] = Field(default_factory=list, max_length=50)
@@ -53,6 +54,7 @@ class RoomUpdate(BaseModel):
     max_members: int | None = Field(default=None, ge=2, le=MAX_MEMBERS)
     chat_enabled: bool | None = None
     voice_enabled: bool | None = None
+    queue_visible_to_viewers: bool | None = None
 
 
 class RoomJoin(BaseModel):
@@ -145,6 +147,7 @@ async def _serialize(db: AsyncSession, room: WatchRoom, viewer: User, include_me
     payload = {
         "id": room.id, "name": room.name, "theme": room.theme, "has_password": bool(room.password_hash),
         "max_members": room.max_members, "chat_enabled": room.chat_enabled, "voice_enabled": room.voice_enabled,
+        "queue_visible_to_viewers": room.queue_visible_to_viewers,
         "current_index": room.current_index, "playback_position": room.playback_position, "playback_rate": room.playback_rate,
         "is_playing": room.is_playing, "state_updated_at": room.state_updated_at, "expires_at": room.expires_at,
         "created_at": room.created_at, "owner_user_id": room.owner_user_id, "owner_name": _name(owner),
@@ -154,16 +157,7 @@ async def _serialize(db: AsyncSession, room: WatchRoom, viewer: User, include_me
     }
     if include_messages:
         messages = list(reversed((await db.execute(select(RoomMessage, User).join(User, User.id == RoomMessage.user_id).where(RoomMessage.room_id == room.id).order_by(RoomMessage.created_at.desc()).limit(80))).all()))
-        message_ids = [message.id for message, _ in messages]
-        reaction_rows = (await db.execute(select(RoomMessageReaction).where(RoomMessageReaction.message_id.in_(message_ids)))).scalars().all() if message_ids else []
-        reaction_counts: dict[int, dict[str, int]] = {}
-        own_reactions: dict[int, list[str]] = {}
-        for reaction in reaction_rows:
-            values = reaction_counts.setdefault(reaction.message_id, {})
-            values[reaction.emoji] = values.get(reaction.emoji, 0) + 1
-            if reaction.user_id == viewer.id:
-                own_reactions.setdefault(reaction.message_id, []).append(reaction.emoji)
-        payload["messages"] = [{"id": message.id, "user_id": user.id, "name": _name(user), "content": message.content, "created_at": message.created_at, "reactions": reaction_counts.get(message.id, {}), "my_reactions": own_reactions.get(message.id, [])} for message, user in messages]
+        payload["messages"] = [{"id": message.id, "user_id": user.id, "name": _name(user), "content": message.content, "created_at": message.created_at} for message, user in messages]
     return payload
 
 
@@ -187,6 +181,7 @@ async def create_room(payload: RoomCreate, db: AsyncSession = Depends(get_db), u
     room = WatchRoom(id=str(uuid.uuid4()), owner_user_id=user.id, name=payload.name.strip(), theme=theme,
         password_hash=passwords.hash(payload.password) if payload.password else None, max_members=payload.max_members,
         chat_enabled=payload.chat_enabled, voice_enabled=payload.voice_enabled,
+        queue_visible_to_viewers=payload.queue_visible_to_viewers,
         expires_at=datetime.utcnow() + timedelta(minutes=payload.expires_in_minutes), state_updated_at=datetime.utcnow())
     db.add(room); await db.flush()
     db.add(RoomMember(room_id=room.id, user_id=user.id, role="owner"))
@@ -244,7 +239,7 @@ async def update_room(room_id: str, payload: RoomUpdate, db: AsyncSession = Depe
     if payload.max_members is not None:
         member_count = (await db.execute(select(func.count(RoomMember.id)).where(RoomMember.room_id == room.id))).scalar_one()
         if payload.max_members < member_count: raise HTTPException(422, "ظرفیت نمی‌تواند از تعداد اعضای فعلی کمتر باشد.")
-    for key in ("name", "max_members", "chat_enabled", "voice_enabled"):
+    for key in ("name", "max_members", "chat_enabled", "voice_enabled", "queue_visible_to_viewers"):
         if key in changes: setattr(room, key, changes[key].strip() if key == "name" else changes[key])
     if payload.theme is not None: room.theme = payload.theme if payload.theme in THEMES else room.theme
     if payload.clear_password: room.password_hash = None
@@ -360,34 +355,13 @@ async def room_socket(websocket: WebSocket, room_id: str):
                         if message.id % 20 == 0:
                             stale_ids = (await db.execute(select(RoomMessage.id).where(RoomMessage.room_id == room_id).order_by(RoomMessage.created_at.desc()).offset(200))).scalars().all()
                             if stale_ids: await db.execute(delete(RoomMessage).where(RoomMessage.id.in_(stale_ids))); await db.commit()
-                        await hub.broadcast(room_id,{"type":"chat","message":{"id":message.id,"user_id":user.id,"name":_name(user),"content":text,"created_at":message.created_at.isoformat()}})
+                        await hub.broadcast(room_id,{"type":"chat","message":{"id":message.id,"user_id":user.id,"name":_name(user),"content":text,"created_at":message.created_at.isoformat(),"client_id":str(data.get("client_id", ""))[:80] or None}})
                 elif kind == "reaction":
                     now = time.monotonic()
                     if now - last_reaction < 0.3: continue
                     last_reaction = now
                     emoji = str(data.get("emoji", ""))[:12]
-                    if emoji in {"❤️","😂","👏","🔥","😮","😢","🎉","👍"}: await hub.broadcast(room_id,{"type":"reaction","user_id":user.id,"name":_name(user),"emoji":emoji})
-                elif kind == "message_reaction" and room.chat_enabled:
-                    now = time.monotonic()
-                    if now - last_reaction < 0.2:
-                        continue
-                    last_reaction = now
-                    emoji = str(data.get("emoji", ""))[:12]
-                    message_id = int(data.get("message_id", 0))
-                    if emoji not in {"❤️", "😂", "👏", "🔥", "👍"}:
-                        continue
-                    message = (await db.execute(select(RoomMessage).where(RoomMessage.id == message_id, RoomMessage.room_id == room_id))).scalar_one_or_none()
-                    if message is None:
-                        continue
-                    existing = (await db.execute(select(RoomMessageReaction).where(RoomMessageReaction.message_id == message_id, RoomMessageReaction.user_id == user.id, RoomMessageReaction.emoji == emoji))).scalar_one_or_none()
-                    active = existing is None
-                    if existing is None:
-                        db.add(RoomMessageReaction(message_id=message_id, user_id=user.id, emoji=emoji))
-                    else:
-                        await db.delete(existing)
-                    await db.commit()
-                    rows = (await db.execute(select(RoomMessageReaction.emoji, func.count(RoomMessageReaction.id)).where(RoomMessageReaction.message_id == message_id).group_by(RoomMessageReaction.emoji))).all()
-                    await hub.broadcast(room_id, {"type":"message_reaction", "message_id":message_id, "reactions":{value:count for value,count in rows}, "actor_user_id":user.id, "emoji":emoji, "active":active})
+                    if emoji in {"❤️","😂","👏","🔥","😮","😢","🎉","👍"}: await hub.broadcast(room_id,{"type":"reaction","user_id":user.id,"name":_name(user),"emoji":emoji},exclude=user.id)
                 elif kind == "voice_join" and room.voice_enabled:
                     voice = hub.voice.setdefault(room_id,set())
                     if user.id not in voice and len(voice) >= MAX_VOICE_MEMBERS: await websocket.send_json({"type":"voice_error","message":"ظرفیت ویس روم تکمیل شده است."})

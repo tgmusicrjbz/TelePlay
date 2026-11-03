@@ -540,6 +540,7 @@ class WatchRoom(Base):
     max_members: Mapped[int] = mapped_column(Integer, default=8, nullable=False)
     chat_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     voice_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    queue_visible_to_viewers: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     current_index: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     playback_position: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     playback_rate: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)

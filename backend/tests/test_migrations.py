@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
-HEAD_REVISION = "20261103_0015"
+HEAD_REVISION = "20261103_0017"
 
 
 def migration_env(database_path: Path) -> dict[str, str]:
@@ -52,6 +52,7 @@ class MigrationTests(unittest.TestCase):
                     for table in ("files", "folders", "packs")
                 }
                 user_columns = {row[1] for row in connection.execute("PRAGMA table_info(users)")}
+                room_columns = {row[1] for row in connection.execute("PRAGMA table_info(watch_rooms)")}
             finally:
                 connection.close()
             self.assertEqual(revision, HEAD_REVISION)
@@ -69,6 +70,7 @@ class MigrationTests(unittest.TestCase):
             self.assertIn("profile_photo_mime", user_columns)
             self.assertIn("profile_photo_updated_at", user_columns)
             self.assertIn("can_create_rooms", user_columns)
+            self.assertIn("queue_visible_to_viewers", room_columns)
 
     def test_existing_current_schema_is_adopted_without_data_loss(self):
         with tempfile.TemporaryDirectory() as directory:
