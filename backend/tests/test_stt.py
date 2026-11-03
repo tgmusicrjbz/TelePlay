@@ -3,6 +3,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -18,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.database import Base, async_session, engine
 from app.models import ProcessingJob, User
 from app.processing_jobs import create_job, delete_finished_jobs, delete_job, job_status, list_job_statuses, load_jobs
-from app.stt import GeminiSTTProvider, STTJob, STTQueue, extract_interaction_text
+from app.stt import GeminiSTTProvider, STTJob, STTQueue, extract_interaction_text, format_segment_time, split_long_media
 from app.tts import GeminiRequestError
 
 
@@ -26,6 +27,22 @@ class STTQueueTests(unittest.IsolatedAsyncioTestCase):
     def test_interaction_text_supports_direct_and_nested_responses(self):
         self.assertEqual(extract_interaction_text({"output_text": "  سلام  "}), "سلام")
         self.assertEqual(extract_interaction_text({"steps": [{"type": "model_output", "content": [{"type": "text", "text": "متن"}]}]}), "متن")
+
+    def test_long_media_is_split_into_ordered_twenty_minute_chunks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.mp4"
+            source.write_bytes(b"video")
+
+            def fake_run(command, **_kwargs):
+                self.assertIn("1200", command)
+                (root / "speech-001.mp3").write_bytes(b"second")
+                (root / "speech-000.mp3").write_bytes(b"first")
+
+            with patch("app.stt.shutil.which", return_value="/usr/bin/ffmpeg"), patch("app.stt.subprocess.run", side_effect=fake_run):
+                chunks = split_long_media(source, root, 3601)
+            self.assertEqual([item.name for item in chunks], ["speech-000.mp3", "speech-001.mp3"])
+            self.assertEqual(format_segment_time(3723), "01:02:03")
 
     async def asyncSetUp(self):
         async with engine.begin() as connection:

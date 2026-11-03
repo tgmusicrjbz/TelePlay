@@ -965,6 +965,9 @@ async def admin_users(_: User = Depends(require_admin), db: AsyncSession = Depen
             "stt_used_today": usage.stt_used_today if usage and usage.usage_date == datetime.utcnow().date() else 0,
             "stt_total_jobs": usage.stt_total_jobs if usage else 0,
             "stt_total_seconds": usage.stt_total_seconds if usage else 0,
+            "link_hourly_limit": usage.link_hourly_limit if usage else 0,
+            "link_daily_limit": usage.link_daily_limit if usage else 0,
+            "link_monthly_limit": usage.link_monthly_limit if usage else 0,
         })
         for user, size, files, sessions, usage in rows
     ]
@@ -1060,7 +1063,10 @@ async def update_admin_user(user_id: int, payload: AdminUserUpdate, admin: User 
     if payload.can_create_rooms is not None and user.telegram_id not in settings.admin_users:
         user.can_create_rooms = payload.can_create_rooms
     usage = await db.get(TTSUsage, user.id)
-    if any(value is not None for value in (payload.tts_daily_limit, payload.tts_max_chars, payload.stt_daily_limit, payload.stt_max_seconds)):
+    if any(value is not None for value in (
+        payload.tts_daily_limit, payload.tts_max_chars, payload.stt_daily_limit, payload.stt_max_seconds,
+        payload.link_hourly_limit, payload.link_daily_limit, payload.link_monthly_limit,
+    )):
         if usage is None:
             usage = TTSUsage(user_id=user.id, usage_date=datetime.utcnow().date())
             db.add(usage)
@@ -1072,6 +1078,12 @@ async def update_admin_user(user_id: int, payload: AdminUserUpdate, admin: User 
             usage.stt_daily_limit = payload.stt_daily_limit
         if payload.stt_max_seconds is not None:
             usage.stt_max_seconds = payload.stt_max_seconds
+        if payload.link_hourly_limit is not None:
+            usage.link_hourly_limit = payload.link_hourly_limit
+        if payload.link_daily_limit is not None:
+            usage.link_daily_limit = payload.link_daily_limit
+        if payload.link_monthly_limit is not None:
+            usage.link_monthly_limit = payload.link_monthly_limit
     await db.commit()
     size = (await db.execute(select(func.coalesce(func.sum(File.file_size), 0)).where(File.user_id == user.id))).scalar_one()
     files = (await db.execute(select(func.count(File.id)).where(File.user_id == user.id))).scalar_one()
@@ -1091,6 +1103,9 @@ async def update_admin_user(user_id: int, payload: AdminUserUpdate, admin: User 
         "stt_used_today": usage.stt_used_today if usage and usage.usage_date == datetime.utcnow().date() else 0,
         "stt_total_jobs": usage.stt_total_jobs if usage else 0,
         "stt_total_seconds": usage.stt_total_seconds if usage else 0,
+        "link_hourly_limit": usage.link_hourly_limit if usage else 0,
+        "link_daily_limit": usage.link_daily_limit if usage else 0,
+        "link_monthly_limit": usage.link_monthly_limit if usage else 0,
     })
 
 

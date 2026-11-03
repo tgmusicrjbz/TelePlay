@@ -529,6 +529,9 @@ class AdminUserUpdate(BaseModel):
     tts_max_chars: Optional[int] = Field(default=None, ge=100, le=200_000)
     stt_daily_limit: Optional[int] = Field(default=None, ge=0, le=10000)
     stt_max_seconds: Optional[int] = Field(default=None, ge=0, le=604_800)
+    link_hourly_limit: Optional[int] = Field(default=None, ge=0, le=100_000)
+    link_daily_limit: Optional[int] = Field(default=None, ge=0, le=100_000)
+    link_monthly_limit: Optional[int] = Field(default=None, ge=0, le=1_000_000)
     can_use_monitors: Optional[bool] = None
     can_create_rooms: Optional[bool] = None
 
@@ -552,6 +555,9 @@ class AdminUserResponse(UserResponse):
     stt_used_today: int = 0
     stt_total_jobs: int = 0
     stt_total_seconds: int = 0
+    link_hourly_limit: int = 0
+    link_daily_limit: int = 0
+    link_monthly_limit: int = 0
 
 
 class AdminStatsResponse(BaseModel):

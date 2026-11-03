@@ -1609,7 +1609,7 @@ class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
         private_commands, group_commands = command_sets[-2:]
         self.assertIn("search", [command.command for command in private_commands])
         self.assertNotIn("search", [command.command for command in group_commands])
-        self.assertEqual({command.command for command in group_commands}, {"komod", "tts", "stt", "group_usage", "group_settings", "connect_here"})
+        self.assertEqual({command.command for command in group_commands}, {"komod", "tts", "stt", "link", "group_usage", "group_settings", "connect_here"})
         self.assertTrue(all(command.description for commands in command_sets for command in commands))
         client.set_bot_name.assert_awaited_once_with("🗂 کمد | درایو ابری تلگرام")
         client.set_bot_info_short_description.assert_awaited_once_with(
@@ -1627,7 +1627,7 @@ class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
             duration=5, description="توضیح همراه رسانه",
             created_at=datetime(2025, 3, 21, tzinfo=timezone.utc),
             updated_at=datetime(2025, 3, 21, tzinfo=timezone.utc),
-            public_hash=None, id=99,
+            public_hash=None, id=99, user_id=1,
         )
         self.assertIn("توضیح همراه رسانه", file_detail_text(file))
         self.assertIn("۱۴۰۴/۰۱/۰۱", format_jalali(file.created_at))

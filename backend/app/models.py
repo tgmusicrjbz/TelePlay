@@ -189,6 +189,23 @@ class TelegramGroupUsage(Base):
     )
 
 
+class TelegramFileLinkUsage(Base):
+    """One play/download-link request, used for rolling user quotas."""
+    __tablename__ = "telegram_file_link_usage"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    telegram_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    __table_args__ = (
+        Index("idx_file_link_usage_user_created", user_id, created_at),
+    )
+
+
 class SourceMonitor(Base):
     """A scheduled source check that can route new entries to Telegram."""
     __tablename__ = "source_monitors"
@@ -297,6 +314,9 @@ class TTSUsage(Base):
     stt_used_today: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     stt_total_jobs: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     stt_total_seconds: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    link_hourly_limit: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    link_daily_limit: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    link_monthly_limit: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )

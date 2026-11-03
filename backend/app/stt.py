@@ -34,6 +34,42 @@ from .tts import GeminiRequestError
 logger = logging.getLogger(__name__)
 settings = get_settings()
 TERMINAL_STATES = {"done", "error", "cancelled"}
+STT_SEGMENT_SECONDS = 20 * 60
+STT_SEGMENT_THRESHOLD_SECONDS = 40 * 60
+
+
+def format_segment_time(seconds: int) -> str:
+    hours, remainder = divmod(max(0, int(seconds)), 3600)
+    minutes, secs = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
+def probe_media_duration(path: Path) -> int:
+    if not shutil.which("ffprobe"):
+        return 0
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
+            check=True, capture_output=True, text=True, timeout=30,
+        )
+        return max(0, int(float(result.stdout.strip() or 0)))
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return 0
+
+
+def split_long_media(path: Path, directory: Path, duration: int) -> list[Path]:
+    """Convert long media to small speech chunks so no model output is cut off."""
+    if duration < STT_SEGMENT_THRESHOLD_SECONDS or not shutil.which("ffmpeg"):
+        return []
+    pattern = directory / "speech-%03d.mp3"
+    command = [
+        "ffmpeg", "-y", "-loglevel", "error", "-i", str(path), "-vn",
+        "-ac", "1", "-ar", "16000", "-b:a", "48k",
+        "-f", "segment", "-segment_time", str(STT_SEGMENT_SECONDS),
+        "-reset_timestamps", "1", str(pattern),
+    ]
+    subprocess.run(command, check=True, capture_output=True)
+    return sorted(directory.glob("speech-*.mp3"))
 
 
 def extract_interaction_text(payload: dict) -> str:
@@ -594,16 +630,44 @@ class STTQueue:
                     raise RuntimeError("دریافت فایل از فضای ذخیره‌سازی انجام نشد.")
                 media_path = Path(downloaded)
                 mime_type = source.mime_type or mimetypes.guess_type(media_path.name)[0] or "audio/ogg"
-                if shutil.which("ffmpeg") and (source.file_type == "video" or media_path.stat().st_size > 18 * 1024 * 1024):
+                source_duration = int(source.duration or 0)
+                if source_duration <= 0:
+                    source_duration = await asyncio.to_thread(probe_media_duration, media_path)
+                segments = await asyncio.to_thread(split_long_media, media_path, Path(directory), source_duration)
+                if not segments and shutil.which("ffmpeg") and (source.file_type == "video" or media_path.stat().st_size > 18 * 1024 * 1024):
                     compressed = Path(directory) / "speech.mp3"
                     command = ["ffmpeg", "-y", "-loglevel", "error", "-i", str(media_path), "-vn", "-ac", "1", "-ar", "16000", "-b:a", "48k", str(compressed)]
                     await asyncio.to_thread(subprocess.run, command, check=True, capture_output=True)
                     media_path, mime_type = compressed, "audio/mpeg"
                 if self.controls.get(job.id):
                     return
-                self.statuses[job.id].update(state="transcribing", message="در حال تبدیل", progress=45)
-                await self._persist_status(job.id)
-                markdown = await provider.transcribe(media_path, mime_type, job.prompt)
+                if segments:
+                    chunks: list[str] = []
+                    total_segments = len(segments)
+                    for index, segment in enumerate(segments):
+                        if self.controls.get(job.id):
+                            return
+                        progress = 35 + int((index / total_segments) * 42)
+                        self.statuses[job.id].update(
+                            state="transcribing",
+                            message=f"تبدیل بخش {index + 1} از {total_segments}",
+                            progress=progress,
+                        )
+                        await self._persist_status(job.id)
+                        start = index * STT_SEGMENT_SECONDS
+                        end = min(source_duration, (index + 1) * STT_SEGMENT_SECONDS)
+                        segment_prompt = (
+                            f"{job.prompt.strip()}\n\n" if job.prompt.strip() else ""
+                        ) + f"این بخش {index + 1} از {total_segments} فایل است. متن همین بخش را کامل و بدون خلاصه‌سازی بنویس."
+                        content = await provider.transcribe(segment, "audio/mpeg", segment_prompt)
+                        chunks.append(
+                            f"## بخش {index + 1} · {format_segment_time(start)} تا {format_segment_time(end)}\n\n{content.strip()}"
+                        )
+                    markdown = "\n\n---\n\n".join(chunks)
+                else:
+                    self.statuses[job.id].update(state="transcribing", message="در حال تبدیل", progress=45)
+                    await self._persist_status(job.id)
+                    markdown = await provider.transcribe(media_path, mime_type, job.prompt)
             if self.controls.get(job.id):
                 return
             for index, instruction in enumerate(job.post_prompts or []):

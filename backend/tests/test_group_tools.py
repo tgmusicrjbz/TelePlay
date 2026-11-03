@@ -17,7 +17,8 @@ os.environ.setdefault("ADMIN_USERS", "999")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.database import Base, async_session, engine
-from app.group_tools import consume_group_quota, get_group_usage, get_or_create_group_settings
+from app.group_tools import consume_file_link_quota, consume_group_quota, get_group_usage, get_or_create_group_settings
+from app.models import TTSUsage, User
 
 
 class TelegramGroupQuotaTests(unittest.IsolatedAsyncioTestCase):
@@ -93,6 +94,22 @@ class TelegramGroupQuotaTests(unittest.IsolatedAsyncioTestCase):
             with patch("app.group_tools.is_global_admin", return_value=True):
                 with self.assertRaisesRegex(ValueError, "تأیید نشده"):
                     await consume_group_quota(db, chat_id=-1005, telegram_user_id=999, operation="tts")
+
+    async def test_file_link_quota_applies_rolling_user_limits_in_private_and_groups(self):
+        async with async_session() as db:
+            user = User(telegram_id=44)
+            db.add(user)
+            await db.flush()
+            db.add(TTSUsage(
+                user_id=user.id, link_hourly_limit=2,
+                link_daily_limit=5, link_monthly_limit=20,
+            ))
+            await db.commit()
+            await consume_file_link_quota(db, user_id=user.id, telegram_user_id=44, chat_id=44)
+            counts = await consume_file_link_quota(db, user_id=user.id, telegram_user_id=44, chat_id=-10044)
+            self.assertEqual(counts["hourly"], 2)
+            with self.assertRaisesRegex(ValueError, "ساعتی"):
+                await consume_file_link_quota(db, user_id=user.id, telegram_user_id=44, chat_id=44)
 
 
 if __name__ == "__main__":

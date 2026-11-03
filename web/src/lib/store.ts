@@ -239,7 +239,12 @@ export const useAppStore = create<AppState>((set) => ({
 
     // Modals
     previewFile: restoredPlayer.current,
-    setPreviewFile: (file) => set({ previewFile: file }),
+    // Opening a file is an explicit user action, so show the full player. The
+    // state restored during app bootstrap is assigned above and stays paused
+    // and minimized until the user presses play.
+    setPreviewFile: (file) => set(file
+        ? { previewFile: file, isPlayerMinimized: false }
+        : { previewFile: null }),
     contentPreviewFile: null,
     isContentPreviewMinimized: false,
     contentPreviewHistory: [],

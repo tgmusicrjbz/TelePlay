@@ -69,6 +69,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
     const singleTapTimeout = useRef<ReturnType<typeof setTimeout>>();
     const feedbackTimeout = useRef<ReturnType<typeof setTimeout>>();
     const backgroundPlaybackRequested = useRef(false);
+    const restoredPausedSession = useRef(isMinimized);
     const lastTap = useRef<{ at: number; side: 'left' | 'right' } | null>(null);
     const [publicUrl, setPublicUrl] = useState<string | null>(null);
     const [showSpeedMenu, setShowSpeedMenu] = useState(false);
@@ -260,6 +261,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
                 media.pause();
                 saveProgress();
             } else {
+                restoredPausedSession.current = false;
                 backgroundPlaybackRequested.current = true;
                 void media.play();
             }
@@ -663,7 +665,9 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
         };
     }, [isPlaying, isMinimized, revealControls]);
 
-    // Auto-play effect
+    // A restored player is useful as a paused "continue listening" card, but
+    // entering the cabinet must never start audio by itself. Explicitly opened
+    // files and queue changes still begin playing immediately.
     useEffect(() => {
         setError(null);
         setCurrentTime(0);
@@ -674,6 +678,13 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
 
     useEffect(() => {
         if (videoRef.current && !error) {
+            if (restoredPausedSession.current && !backgroundPlaybackRequested.current) {
+                videoRef.current.pause();
+                setIsPlaying(false);
+                return;
+            }
+            restoredPausedSession.current = false;
+            backgroundPlaybackRequested.current = true;
             videoRef.current.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
         }
     }, [error, file.id]); // Re-run when file changes
@@ -724,12 +735,15 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
 
     useEffect(() => {
         if (!('mediaSession' in navigator)) return;
-        const descriptionLine = (file.description || '').split(/\r?\n/).map(line => line.trim()).find(line => line && !/^https?:\/\//i.test(line))?.replace(/^[📺📷🎧🎬]\s*/u, '');
-        const mediaKind = file.file_type === 'audio' ? 'صدای در حال پخش' : file.file_type === 'video' ? 'ویدیوی در حال پخش' : 'در حال پخش';
+        if (restoredPausedSession.current && !isPlaying) return;
+        const notificationTitle = cleanFileName.replace(/\.(mp3|m4a|aac|ogg|opus|wav|flac|mp4|mkv|webm|mov)$/i, '').trim() || cleanFileName;
+        const descriptionLine = (file.description || '').split(/\r?\n/).map(line => line.trim()).find(line => line && !/^https?:\/\//i.test(line))?.replace(/^[📺📷🎧🎬📝]\s*/u, '');
+        const normalizedDescription = descriptionLine?.replace(/\.(mp3|m4a|aac|ogg|opus|wav|flac|mp4|mkv|webm|mov)$/i, '').trim();
+        const usefulDescription = normalizedDescription && normalizedDescription !== notificationTitle ? normalizedDescription.slice(0, 72) : 'کمد';
         navigator.mediaSession.metadata = new MediaMetadata({
-            title: cleanFileName,
-            artist: descriptionLine?.slice(0, 80) || mediaKind,
-            album: hasQueue ? `کمد · قطعه ${queuePosition.toLocaleString('fa-IR')} از ${queueLength.toLocaleString('fa-IR')}` : 'پخش از کمد',
+            title: notificationTitle,
+            artist: usefulDescription,
+            album: hasQueue ? `قطعه ${queuePosition.toLocaleString('fa-IR')} از ${queueLength.toLocaleString('fa-IR')}` : '',
             artwork: authorizedThumbnailUrl ? [96, 128, 192, 256, 384, 512].map(size => ({ src: authorizedThumbnailUrl, sizes: `${size}x${size}` })) : undefined,
         });
         const actions: Array<[MediaSessionAction, MediaSessionActionHandler | null]> = [
@@ -746,7 +760,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
         return () => actions.forEach(([action]) => {
             try { navigator.mediaSession.setActionHandler(action, null); } catch { /* unsupported action */ }
         });
-    }, [file.id, cleanFileName, authorizedThumbnailUrl, hasQueue, queuePosition, queueLength]);
+    }, [file.id, file.description, cleanFileName, authorizedThumbnailUrl, hasQueue, queuePosition, queueLength, isPlaying]);
 
     useEffect(() => {
         if ('mediaSession' in navigator) navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';

@@ -36,7 +36,7 @@ from .tts import TTSJob, VOICE_OPTIONS, consume_tts_quota, load_tts_settings, ro
 from .stt import STTJob, consume_stt_quota, stt_queue
 from .gemini_keys import decrypt_user_keys
 from .link_captions import render_link_caption
-from .group_tools import consume_group_quota, get_group_usage, get_group_usage_breakdown, get_or_create_group_settings, get_group_voice, set_group_voice, is_global_admin
+from .group_tools import consume_file_link_quota, consume_group_quota, get_group_usage, get_group_usage_breakdown, get_or_create_group_settings, get_group_voice, set_group_voice, is_global_admin
 from .bot_messages import bot_message
 from .instagram_inbox import pair_sender_with_telegram
 
@@ -1439,7 +1439,13 @@ async def stt_command(client, message: Message):
         await message.reply(await bot_message("stt_unavailable"))
         return
     replied = message.reply_to_message
-    option = message.text.split(maxsplit=1)[1].strip().lower() if message.text and len(message.text.split(maxsplit=1)) > 1 else ""
+    # Telegram cannot create a literal cross-chat reply for a bot. Forwarding
+    # the media to the bot with `/stt` as its caption is the equivalent one-step
+    # flow and preserves Telegram's stable file_unique_id.
+    if replied is None and any(getattr(message, name, None) for name in ("audio", "voice", "video", "video_note", "document")):
+        replied = message
+    command_text = str(message.text or message.caption or "")
+    option = command_text.split(maxsplit=1)[1].strip().lower() if len(command_text.split(maxsplit=1)) > 1 else ""
     output_mode = "temporary" if option in {"temp", "temporary", "موقت"} else "save"
     if replied is None:
         if option:
@@ -1520,6 +1526,71 @@ async def stt_command(client, message: Message):
     position = await stt_queue.enqueue(job)
     queue_note = f"\nنوبت {to_persian_digits(str(position))} در صف" if position > 1 else ""
     await message.reply(await bot_message("stt_queued", queue_note=queue_note))
+
+
+@tg_client.on_message(filters.command(["link", "playlink", "downloadlink"]) & (filters.private | filters.group))
+async def replied_file_link_command(client, message: Message):
+    """Return signed 24-hour play/download links for a replied stored file."""
+    if not message.from_user:
+        return
+    replied = message.reply_to_message
+    media = next((
+        getattr(replied, name, None)
+        for name in ("audio", "voice", "video", "video_note", "animation", "document", "photo")
+        if replied and getattr(replied, name, None)
+    ), None)
+    if media is None:
+        await message.reply(await bot_message("file_link_reply_required"))
+        return
+
+    requester = await get_or_create_user(
+        message.from_user.id, message.from_user.username,
+        message.from_user.first_name, message.from_user.last_name,
+    )
+    owner = requester
+    async with async_session() as db:
+        if message.chat.type in {enums.ChatType.GROUP, enums.ChatType.SUPERGROUP}:
+            if not await is_connected_group(message.chat.id):
+                await message.reply(await bot_message("group_not_connected"))
+                return
+            destination = (await db.execute(select(TelegramDestination).where(
+                TelegramDestination.chat_id == message.chat.id,
+                TelegramDestination.enabled.is_(True),
+            ))).scalars().first()
+            if destination is not None:
+                owner = await db.get(User, destination.user_id) or requester
+        file = (await db.execute(select(File).where(
+            File.user_id == owner.id,
+            File.file_unique_id == getattr(media, "file_unique_id", ""),
+            File.is_hidden.is_(False),
+        ).order_by(File.id.desc()))).scalars().first()
+        if file is None:
+            await message.reply(await bot_message("file_link_not_found"))
+            return
+        try:
+            await consume_file_link_quota(
+                db, user_id=requester.id, telegram_user_id=message.from_user.id,
+                chat_id=message.chat.id,
+            )
+        except ValueError as error:
+            await message.reply(f"⛔ {error}")
+            return
+
+    command = (message.command or ["link"])[0].lower()
+    base_url = settings.web_base_url.strip().rstrip("/")
+    play_url = f"{base_url}/api/shares/file-link/{create_private_file_link_token(owner.id, file.id, False)}"
+    download_url = f"{base_url}/api/shares/file-link/{create_private_file_link_token(owner.id, file.id, True)}"
+    buttons: list[list[InlineKeyboardButton]] = []
+    if command != "downloadlink":
+        buttons.append([InlineKeyboardButton("▶️ پخش فایل", url=play_url)])
+    if command != "playlink":
+        buttons.append([InlineKeyboardButton("⬇️ دانلود فایل", url=download_url)])
+    message_key = "file_links_private" if message.chat.type == enums.ChatType.PRIVATE else "file_links_group"
+    await message.reply(
+        await bot_message(message_key, title=display_filename(file.file_name)),
+        reply_markup=InlineKeyboardMarkup(buttons),
+        disable_web_page_preview=True,
+    )
 
 
 @tg_client.on_message(filters.command("tts") & filters.group)

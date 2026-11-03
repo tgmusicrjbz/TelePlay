@@ -3,17 +3,18 @@ from __future__ import annotations
 
 import asyncio
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 
 from .config import get_settings
-from .models import AppSetting, TelegramGroupSettings, TelegramGroupUsage, User
+from .models import AppSetting, TelegramFileLinkUsage, TelegramGroupSettings, TelegramGroupUsage, TTSUsage, User
 
 
 OPERATIONS = {"tts", "stt", "link"}
 OPERATION_LABELS = {"tts": "تبدیل متن به صدا", "stt": "تبدیل صوت به متن", "link": "افزودن لینک"}
 _locks: defaultdict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
+_link_locks: defaultdict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 GROUP_VOICE_PREFIX = "telegram.group.voice."
 
 
@@ -74,6 +75,52 @@ async def consume_group_quota(
         setattr(rows[0], counter, getattr(rows[0], counter) + amount)
         setattr(rows[telegram_user_id], counter, getattr(rows[telegram_user_id], counter) + amount)
         await db.commit()
+
+
+async def consume_file_link_quota(
+    db, *, user_id: int, telegram_user_id: int, chat_id: int,
+) -> dict[str, int]:
+    """Apply one user's rolling hourly, daily and monthly link limits."""
+    async with _link_locks[user_id]:
+        usage = await db.get(TTSUsage, user_id)
+        if usage is None:
+            usage = TTSUsage(user_id=user_id, usage_date=datetime.utcnow().date())
+            db.add(usage)
+            await db.flush()
+        now = datetime.utcnow()
+        hour_start = now - timedelta(hours=1)
+        day_start = datetime(now.year, now.month, now.day)
+        month_start = datetime(now.year, now.month, 1)
+
+        async def count_since(start: datetime) -> int:
+            return int((await db.execute(select(func.count()).select_from(TelegramFileLinkUsage).where(
+                TelegramFileLinkUsage.user_id == user_id,
+                TelegramFileLinkUsage.created_at >= start,
+            ))).scalar_one() or 0)
+
+        hourly = await count_since(hour_start)
+        daily = await count_since(day_start)
+        monthly = await count_since(month_start)
+        limits = {
+            "hourly": int(usage.link_hourly_limit or 0),
+            "daily": int(usage.link_daily_limit or 0),
+            "monthly": int(usage.link_monthly_limit or 0),
+        }
+        labels = {"hourly": "ساعتی", "daily": "روزانه", "monthly": "ماهانه"}
+        for scope, used in (("hourly", hourly), ("daily", daily), ("monthly", monthly)):
+            if limits[scope] and used >= limits[scope]:
+                raise ValueError(f"سهمیه {labels[scope]} ساخت لینک فایل برای این حساب تمام شده است.")
+        db.add(TelegramFileLinkUsage(
+            user_id=user_id, telegram_user_id=telegram_user_id,
+            chat_id=chat_id, created_at=now,
+        ))
+        # Events older than the largest rolling window no longer affect limits.
+        await db.execute(delete(TelegramFileLinkUsage).where(
+            TelegramFileLinkUsage.user_id == user_id,
+            TelegramFileLinkUsage.created_at < month_start - timedelta(days=2),
+        ))
+        await db.commit()
+        return {"hourly": hourly + 1, "daily": daily + 1, "monthly": monthly + 1}
 
 
 async def get_group_usage(db, chat_id: int, telegram_user_id: int) -> tuple[TelegramGroupUsage | None, TelegramGroupUsage | None]:
