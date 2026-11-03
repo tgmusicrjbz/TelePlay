@@ -12,6 +12,8 @@ type ShareInfo = {
     expires_at?: string | null;
     view_limit?: number | null;
     views_remaining?: number | null;
+    stream_url?: string;
+    download_url?: string;
 };
 
 type CollectionItem = { id:number; file_name:string; file_type:ShareInfo['file_type']; file_size:number; mime_type?:string|null; duration?:number|null; stream_url:string };
@@ -30,7 +32,7 @@ function humanSize(value: number) {
 }
 
 export default function PublicSharePage() {
-    const { publicHash = '' } = useParams();
+    const { publicHash = '', playToken = '' } = useParams();
     const [info, setInfo] = useState<ShareInfo | CollectionInfo | null>(null);
     const [collection, setCollection] = useState(false);
     const [password, setPassword] = useState('');
@@ -42,6 +44,7 @@ export default function PublicSharePage() {
     useEffect(() => {
         let active = true;
         setLoading(true);
+        if(playToken){fetch(`/api/shares/link-info/${encodeURIComponent(playToken)}`).then(async response=>{const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.detail||'این پیوند در دسترس نیست.');return {data,collection:false}}).then(result=>{if(active){setInfo(result.data);setCollection(false)}}).catch(reason=>{if(active)setError(reason instanceof Error?reason.message:'این پیوند در دسترس نیست.')}).finally(()=>{if(active)setLoading(false)});return()=>{active=false}}
         fetch(`/api/stream/s/${encodeURIComponent(publicHash)}/info`)
             .then(async response => {
                 const data = await response.json().catch(() => ({}));
@@ -55,15 +58,16 @@ export default function PublicSharePage() {
             .catch(reason => { if (active) setError(reason instanceof Error ? reason.message : 'این پیوند در دسترس نیست.'); })
             .finally(() => { if (active) setLoading(false); });
         return () => { active = false; };
-    }, [publicHash]);
+    }, [playToken, publicHash]);
 
     const unlocked = Boolean(info && (!info.password_required || accessToken || (collection && (info as CollectionInfo).unlocked)));
     const streamUrl = useMemo(() => {
         const params = new URLSearchParams();
         if (accessToken) params.set('access_token', accessToken);
         const query = params.toString();
+        if(info&&!collection&&(info as ShareInfo).stream_url)return (info as ShareInfo).stream_url!;
         return `/api/stream/s/${encodeURIComponent(publicHash)}${query ? `?${query}` : ''}`;
-    }, [accessToken, publicHash]);
+    }, [accessToken, collection, info, publicHash]);
 
     const unlock = async (event: FormEvent) => {
         event.preventDefault();
@@ -92,16 +96,13 @@ export default function PublicSharePage() {
     if(collection) return <CollectionShare info={info as CollectionInfo} unlocked={unlocked} password={password} setPassword={setPassword} unlock={unlock} unlocking={unlocking} error={error}/>;
 
     const fileInfo=info as ShareInfo;
-    return <main dir="rtl" className="min-h-dvh bg-dark-950 px-4 py-8 text-white sm:py-12">
-        <section className="mx-auto w-full max-w-3xl overflow-hidden rounded-[2rem] border border-white/[.08] bg-dark-900/90 shadow-2xl">
-            <header className="border-b border-white/[.07] p-5 sm:p-7">
-                <div className="flex items-start gap-3"><span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-primary-500/15 text-primary-200"><ShieldCheck className="h-6 w-6"/></span><div className="min-w-0"><p className="text-xs text-primary-300">پیوند امن کمد</p><h1 dir="auto" className="mt-1 break-words text-xl font-black sm:text-2xl">{fileInfo.file_name}</h1><p className="mt-2 text-xs text-dark-400">{humanSize(fileInfo.file_size)}{fileInfo.expires_at ? ` · معتبر تا ${new Date(fileInfo.expires_at).toLocaleString('fa-IR')}` : ''}</p></div></div>
-            </header>
-            <div className="p-4 sm:p-7">
-                {!unlocked ? <form onSubmit={unlock} className="mx-auto max-w-sm rounded-3xl bg-white/[.035] p-5 text-center"><KeyRound className="mx-auto h-8 w-8 text-primary-300"/><h2 className="mt-3 font-bold">این فایل رمز داره</h2><p className="mt-1 text-xs text-dark-400">رمزی که فرستنده داده رو وارد کن.</p><input autoFocus type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder="رمز پیوند" className="input mt-4 w-full text-right"/><button disabled={!password || unlocking} className="btn-primary mt-3 flex min-h-11 w-full items-center justify-center gap-2 disabled:opacity-50">{unlocking && <Loader2 className="h-4 w-4 animate-spin"/>}باز کردن فایل</button></form> : <MediaPreview info={fileInfo} streamUrl={streamUrl}/>}
-                {error && <p className="mt-4 rounded-2xl bg-red-500/10 px-4 py-3 text-center text-sm text-red-200">{error}</p>}
-                {unlocked && <div className="mt-5 flex flex-wrap items-center justify-center gap-2">{fileInfo.allow_download && <a className="btn-primary flex min-h-11 items-center gap-2 px-5" href={`${streamUrl}${streamUrl.includes('?') ? '&' : '?'}download=1`}><Download className="h-4 w-4"/>دانلود فایل</a>}<span className="rounded-xl bg-white/[.04] px-3 py-2 text-xs text-dark-400">{fileInfo.views_remaining == null ? 'بدون محدودیت مشاهده' : `${fileInfo.views_remaining.toLocaleString('fa-IR')} مشاهده باقی مونده`}</span></div>}
-            </div>
+    const downloadUrl=fileInfo.download_url||`${streamUrl}${streamUrl.includes('?') ? '&' : '?'}download=1`;
+    return <main dir="rtl" className="min-h-dvh bg-[radial-gradient(circle_at_top,#25102d_0%,#09090b_45%,#000_100%)] px-3 py-4 text-white sm:px-5 sm:py-8">
+        <section className="mx-auto w-full max-w-4xl overflow-hidden rounded-[1.75rem] border border-white/[.09] bg-black/55 p-3 shadow-2xl backdrop-blur-xl sm:p-5">
+            {!unlocked ? <form onSubmit={unlock} className="mx-auto my-10 max-w-sm rounded-3xl border border-white/[.08] bg-white/[.035] p-5 text-center"><KeyRound className="mx-auto h-8 w-8 text-primary-300"/><h2 className="mt-3 font-bold">این فایل رمز دارد</h2><input autoFocus type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder="رمز پیوند" className="input mt-4 w-full text-right"/><button disabled={!password || unlocking} className="btn-primary mt-3 flex min-h-11 w-full items-center justify-center gap-2 disabled:opacity-50">{unlocking && <Loader2 className="h-4 w-4 animate-spin"/>}باز کردن فایل</button></form> : <MediaPreview info={fileInfo} streamUrl={streamUrl}/>}
+            {unlocked&&<div className="mt-4 flex min-w-0 items-start gap-3 rounded-2xl border border-white/[.06] bg-white/[.025] p-3 sm:p-4"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-500/15 text-primary-200"><ShieldCheck className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h1 dir="auto" className="break-words text-sm font-bold leading-6 sm:text-base">{fileInfo.file_name}</h1><p className="mt-1 text-[11px] text-dark-400">{humanSize(fileInfo.file_size)}{fileInfo.expires_at?` · تا ${new Date(fileInfo.expires_at).toLocaleString('fa-IR')}`:''}</p></div>{fileInfo.allow_download&&<a className="flex min-h-10 shrink-0 items-center gap-2 rounded-xl bg-primary-500 px-3 text-xs font-semibold text-white shadow-lg" href={downloadUrl}><Download className="h-4 w-4"/><span className="hidden sm:inline">دانلود</span></a>}</div>}
+            {fileInfo.views_remaining!=null&&unlocked&&<p className="mt-2 text-center text-[10px] text-dark-500">{fileInfo.views_remaining.toLocaleString('fa-IR')} مشاهده باقی مانده</p>}
+            {error && <p className="mt-4 rounded-2xl bg-red-500/10 px-4 py-3 text-center text-sm text-red-200">{error}</p>}
         </section>
     </main>;
 }
@@ -123,11 +124,21 @@ function PublicMediaPlayer({info,streamUrl}:{info:ShareInfo;streamUrl:string}){
     const [playing,setPlaying]=useState(false),[current,setCurrent]=useState(0),[duration,setDuration]=useState(0),[muted,setMuted]=useState(false),[speed,setSpeed]=useState(1),[loop,setLoop]=useState(false),[speedOpen,setSpeedOpen]=useState(false);
     const video=info.file_type==='video';
     const seek=(delta:number)=>{const media=mediaRef.current;if(media)media.currentTime=Math.max(0,Math.min(duration||Infinity,media.currentTime+delta))};
+    const toggle=()=>{const media=mediaRef.current;if(media)media.paused?void media.play():media.pause()};
     const setPlaybackSpeed=(value:number)=>{setSpeed(value);setSpeedOpen(false);if(mediaRef.current)mediaRef.current.playbackRate=value};
+    const toggleFullscreen=async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await frameRef.current?.requestFullscreen()}catch{/* browser keeps the inline player */}};
     const mediaProps={src:streamUrl,preload:'metadata' as const,loop,onTimeUpdate:(event:React.SyntheticEvent<HTMLMediaElement>)=>setCurrent(event.currentTarget.currentTime),onLoadedMetadata:(event:React.SyntheticEvent<HTMLMediaElement>)=>{setDuration(Number.isFinite(event.currentTarget.duration)?event.currentTarget.duration:0);event.currentTarget.playbackRate=speed},onPlay:()=>setPlaying(true),onPause:()=>setPlaying(false),onEnded:()=>setPlaying(false)};
-    return <div ref={frameRef} className="video-player relative mx-auto aspect-video w-full overflow-hidden rounded-3xl border border-white/10 bg-black shadow-2xl" data-embedded="true" data-media-kind={video?'video':'audio'}>{video?<video {...mediaProps} ref={node=>{mediaRef.current=node}} className="h-full w-full object-contain" playsInline/>:<><div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-primary-500/20 via-dark-950 to-fuchsia-950"><span className="flex h-28 w-28 items-center justify-center rounded-3xl bg-white/[.06] text-6xl shadow-2xl">🎵</span><strong dir="auto" className="mt-4 max-w-[80%] truncate">{info.file_name}</strong></div><audio {...mediaProps} ref={node=>{mediaRef.current=node}} className="hidden"/></>}<div dir="ltr" className="absolute inset-x-3 bottom-3 z-10 rounded-2xl border border-white/10 bg-black/55 p-3 shadow-xl backdrop-blur-xl"><div className="flex items-center gap-2"><span className="w-10 text-[10px] tabular-nums text-white/70">{Math.floor(current/60)}:{Math.floor(current%60).toString().padStart(2,'0')}</span><input type="range" min="0" max={duration||0} value={Math.min(current,duration||0)} onChange={event=>{if(mediaRef.current)mediaRef.current.currentTime=Number(event.target.value)}} className="h-1 min-w-0 flex-1 accent-primary-500"/><span className="w-10 text-[10px] tabular-nums text-white/70">{Math.floor(duration/60)}:{Math.floor(duration%60).toString().padStart(2,'0')}</span></div><div className="mt-2 flex items-center justify-center gap-1 sm:gap-2"><button onClick={()=>seek(-10)} className="btn-icon h-9 w-9" title="۱۰ ثانیه عقب"><RotateCcw className="h-4 w-4"/></button><button onClick={()=>{const media=mediaRef.current;if(media)media.paused?void media.play():media.pause()}} className="flex h-11 w-11 items-center justify-center rounded-full bg-primary-500 text-white shadow-lg">{playing?<Pause className="h-5 w-5"/>:<Play className="h-5 w-5 fill-current"/>}</button><button onClick={()=>seek(10)} className="btn-icon h-9 w-9" title="۱۰ ثانیه جلو"><RotateCw className="h-4 w-4"/></button><button onClick={()=>{const media=mediaRef.current;if(media){media.muted=!media.muted;setMuted(media.muted)}}} className="btn-icon h-9 w-9" title={muted?'وصل کردن صدا':'قطع صدا'}>{muted?<VolumeX className="h-4 w-4"/>:<Volume2 className="h-4 w-4"/>}</button><button onClick={()=>setLoop(value=>!value)} className={`btn-icon h-9 w-9 ${loop?'bg-primary-500/25 text-primary-200':''}`} title={loop?'تکرار روشن':'تکرار خاموش'}><Repeat2 className="h-4 w-4"/></button><div className="relative"><button onClick={()=>setSpeedOpen(value=>!value)} className="btn-icon h-9 w-9" title="سرعت پخش"><Gauge className="h-4 w-4"/></button>{speedOpen&&<div className="absolute bottom-11 left-1/2 grid w-36 -translate-x-1/2 grid-cols-3 gap-1 rounded-xl border border-white/10 bg-black/90 p-1 shadow-2xl">{[.5,.75,1,1.25,1.5,2].map(value=><button key={value} onClick={()=>setPlaybackSpeed(value)} className={`rounded-lg p-1.5 text-[10px] ${speed===value?'bg-primary-500 text-white':'hover:bg-white/10'}`}>{value}×</button>)}</div>}</div>{video&&document.pictureInPictureEnabled&&<button onClick={()=>{const element=mediaRef.current as HTMLVideoElement;if(document.pictureInPictureElement)void document.exitPictureInPicture();else void element.requestPictureInPicture?.()}} className="btn-icon h-9 w-9" title="تصویر در تصویر"><PictureInPicture2 className="h-4 w-4"/></button>}<button onClick={()=>void frameRef.current?.requestFullscreen()} className="btn-icon h-9 w-9" title="تمام‌صفحه"><Maximize className="h-4 w-4"/></button></div></div></div>;
+    return <div ref={frameRef} className="video-player mx-auto w-full overflow-hidden rounded-[1.6rem] border border-white/10 bg-black shadow-2xl" data-embedded="true" data-media-kind={video?'video':'audio'}>
+        <div className={`relative flex items-center justify-center overflow-hidden bg-black ${video?'aspect-video min-h-[13rem] sm:min-h-0':'aspect-[4/3] max-h-[32rem]'}`}>
+            {video?<video {...mediaProps} ref={node=>{mediaRef.current=node}} className="h-full w-full object-contain" playsInline/>:<><div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-primary-500/20 via-dark-950 to-fuchsia-950"><span className="flex h-28 w-28 items-center justify-center rounded-[2rem] border border-white/10 bg-white/[.06] text-6xl shadow-2xl">🎵</span><strong dir="auto" className="mt-4 max-w-[80%] truncate text-sm">{info.file_name}</strong></div><audio {...mediaProps} ref={node=>{mediaRef.current=node}} className="hidden"/></>}
+            {!playing&&<button onClick={toggle} className="absolute flex h-16 w-16 items-center justify-center rounded-full bg-primary-500 text-white shadow-[0_0_40px_rgba(236,72,153,.38)] transition active:scale-95" aria-label="پخش"><Play className="mr-1 h-7 w-7 fill-current"/></button>}
+        </div>
+        <div dir="ltr" className="border-t border-white/[.08] bg-black/90 p-3 backdrop-blur-xl sm:p-4">
+            <div className="flex items-center gap-2"><span className="w-11 text-center font-player text-[10px] tabular-nums text-white/65">{Math.floor(current/60)}:{Math.floor(current%60).toString().padStart(2,'0')}</span><input aria-label="موقعیت پخش" type="range" min="0" max={duration||0} value={Math.min(current,duration||0)} onChange={event=>{if(mediaRef.current)mediaRef.current.currentTime=Number(event.target.value)}} className="h-1.5 min-w-0 flex-1 accent-primary-500"/><span className="w-11 text-center font-player text-[10px] tabular-nums text-white/65">{Math.floor(duration/60)}:{Math.floor(duration%60).toString().padStart(2,'0')}</span></div>
+            <div className="mt-3 flex items-center justify-center gap-1 overflow-x-auto pb-0.5 sm:gap-2"><button onClick={()=>seek(-10)} className="btn-icon h-10 w-10 shrink-0" title="۱۰ ثانیه عقب"><RotateCcw className="h-4 w-4"/></button><button onClick={toggle} className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary-500 text-white shadow-lg">{playing?<Pause className="h-5 w-5 fill-current"/>:<Play className="mr-0.5 h-5 w-5 fill-current"/>}</button><button onClick={()=>seek(10)} className="btn-icon h-10 w-10 shrink-0" title="۱۰ ثانیه جلو"><RotateCw className="h-4 w-4"/></button><span className="mx-1 h-7 w-px shrink-0 bg-white/10"/><button onClick={()=>{const media=mediaRef.current;if(media){media.muted=!media.muted;setMuted(media.muted)}}} className="btn-icon h-10 w-10 shrink-0" title={muted?'وصل کردن صدا':'قطع صدا'}>{muted?<VolumeX className="h-4 w-4"/>:<Volume2 className="h-4 w-4"/>}</button><button onClick={()=>setLoop(value=>!value)} className={`btn-icon h-10 w-10 shrink-0 ${loop?'bg-primary-500/25 text-primary-200':''}`} title="تکرار"><Repeat2 className="h-4 w-4"/></button><div className="relative shrink-0"><button onClick={()=>setSpeedOpen(value=>!value)} className="btn-icon h-10 w-10" title="سرعت"><Gauge className="h-4 w-4"/></button>{speedOpen&&<div className="absolute bottom-12 left-1/2 z-30 grid w-36 -translate-x-1/2 grid-cols-3 gap-1 rounded-xl border border-white/10 bg-black/95 p-1 shadow-2xl">{[.5,.75,1,1.25,1.5,2].map(value=><button key={value} onClick={()=>setPlaybackSpeed(value)} className={`rounded-lg p-1.5 text-[10px] ${speed===value?'bg-primary-500 text-white':'hover:bg-white/10'}`}>{value}×</button>)}</div>}</div>{video&&document.pictureInPictureEnabled&&<button onClick={()=>{const element=mediaRef.current as HTMLVideoElement;if(document.pictureInPictureElement)void document.exitPictureInPicture();else void element.requestPictureInPicture?.()}} className="btn-icon h-10 w-10 shrink-0" title="تصویر در تصویر"><PictureInPicture2 className="h-4 w-4"/></button>}<button onClick={()=>void toggleFullscreen()} className="btn-icon h-10 w-10 shrink-0" title="تمام‌صفحه"><Maximize className="h-4 w-4"/></button></div>
+        </div>
+    </div>;
 }
-
 function PublicShell({ children }: { children: React.ReactNode }) {
     return <main dir="rtl" className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-dark-950 px-5 text-white">{children}</main>;
 }

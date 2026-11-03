@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import telegram
-from ..auth import create_collection_file_token, create_private_file_link_token, create_public_share_token, get_current_user, verify_public_share_token, verify_token_payload
+from ..auth import create_collection_file_token, create_private_file_link_token, create_public_share_token, create_telegram_message_link_token, get_current_user, verify_public_share_token, verify_token_payload
 from ..database import get_db
 from ..models import File, Folder, Pack, PackItem, Playlist, PlaylistItem, PublicCollectionShare, User
 from ..schemas import PublicShareCreate, PublicShareUnlock
@@ -161,6 +161,48 @@ async def stream_private_link(token: str, request: Request, db: AsyncSession = D
     if file is None:
         raise HTTPException(404, "فایل پیدا نشد.")
     return await _stream_record(file, request, bool(payload.get("download")))
+
+
+@router.get("/link-info/{token}")
+async def temporary_link_info(token: str, db: AsyncSession = Depends(get_db)):
+    """Metadata for the branded player used by Telegram /link URLs."""
+    payload = verify_token_payload(token, "private-file-link")
+    if payload:
+        file = (await db.execute(select(File).where(
+            File.id == int(payload["fid"]), File.user_id == int(payload["sub"]), File.is_hidden.is_(False),
+        ))).scalar_one_or_none()
+        if file is None:
+            raise HTTPException(404, "فایل پیدا نشد.")
+        play_token = create_private_file_link_token(file.user_id, file.id, False)
+        download_token = create_private_file_link_token(file.user_id, file.id, True)
+        return {
+            "file_name": file.file_name, "file_type": file.file_type, "file_size": file.file_size,
+            "mime_type": media_type_for(file), "password_required": False, "allow_download": True,
+            "views_remaining": None, "expires_at": datetime.fromtimestamp(int(payload["exp"])).isoformat(),
+            "stream_url": f"/api/shares/file-link/{play_token}",
+            "download_url": f"/api/shares/file-link/{download_token}",
+        }
+    payload = verify_token_payload(token, "telegram-message-link")
+    if not payload:
+        raise HTTPException(401, "این پیوند موقت منقضی شده یا معتبر نیست.")
+    play_token = create_telegram_message_link_token(
+        int(payload["sub"]), int(payload["mid"]), str(payload.get("name") or "telegram-file"),
+        str(payload.get("mime") or "") or None, str(payload.get("kind") or "document"), int(payload.get("size") or 0), False,
+    )
+    download_token = create_telegram_message_link_token(
+        int(payload["sub"]), int(payload["mid"]), str(payload.get("name") or "telegram-file"),
+        str(payload.get("mime") or "") or None, str(payload.get("kind") or "document"), int(payload.get("size") or 0), True,
+    )
+    raw_kind = str(payload.get("kind") or "document")
+    public_kind = "audio" if raw_kind in {"audio", "voice"} else "video" if raw_kind in {"video", "video_note", "animation"} else "image" if raw_kind == "photo" else "document"
+    return {
+        "file_name": str(payload.get("name") or "فایل تلگرام"), "file_type": public_kind,
+        "file_size": int(payload.get("size") or 0), "mime_type": str(payload.get("mime") or "") or None,
+        "password_required": False, "allow_download": True, "views_remaining": None,
+        "expires_at": datetime.fromtimestamp(int(payload["exp"])).isoformat(),
+        "stream_url": f"/api/shares/message-link/{play_token}",
+        "download_url": f"/api/shares/message-link/{download_token}",
+    }
 
 
 @router.get("/message-link/{token}")

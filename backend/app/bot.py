@@ -1548,6 +1548,7 @@ async def replied_file_link_command(client, message: Message):
         message.from_user.first_name, message.from_user.last_name,
     )
     owner = requester
+    public_hash: str | None = None
     async with async_session() as db:
         if message.chat.type in {enums.ChatType.GROUP, enums.ChatType.SUPERGROUP}:
             if not await is_connected_group(message.chat.id):
@@ -1572,6 +1573,14 @@ async def replied_file_link_command(client, message: Message):
         except ValueError as error:
             await message.reply(f"⛔ {error}")
             return
+        if file is not None:
+            if not file.public_hash:
+                file.public_hash = secrets.token_hex(16)
+                file.public_expires_at = None
+                file.public_view_limit = None
+                file.public_allow_download = True
+                await db.commit()
+            public_hash = file.public_hash
 
     command = (message.command or ["link"])[0].lower()
     base_url = settings.web_base_url.strip().rstrip("/")
@@ -1588,16 +1597,18 @@ async def replied_file_link_command(client, message: Message):
         media_size = getattr(media, "file_size", None)
         play_token = create_telegram_message_link_token(message.chat.id, replied.id, raw_name, mime_type, media_kind, media_size, False)
         download_token = create_telegram_message_link_token(message.chat.id, replied.id, raw_name, mime_type, media_kind, media_size, True)
-    play_url = f"{base_url}/api/shares/message-link/{play_token}"
+    play_url = f"{base_url}/play/{play_token}"
     download_url = f"{base_url}/api/shares/message-link/{download_token}"
     if file is not None:
-        play_url = f"{base_url}/api/shares/file-link/{play_token}"
+        play_url = f"{base_url}/play/{play_token}"
         download_url = f"{base_url}/api/shares/file-link/{download_token}"
     buttons: list[list[InlineKeyboardButton]] = []
     if command != "downloadlink":
-        buttons.append([InlineKeyboardButton("▶️ پخش فایل", url=play_url)])
+        buttons.append([InlineKeyboardButton("🌐 پخش عمومی", url=play_url)])
     if command != "playlink":
-        buttons.append([InlineKeyboardButton("⬇️ دانلود فایل", url=download_url)])
+        buttons.append([InlineKeyboardButton("📥 دریافت فایل", url=download_url)])
+    if public_hash:
+        buttons.append([InlineKeyboardButton("🔗 پیوند دائمی", url=f"{base_url}/s/{public_hash}")])
     message_key = "file_links_private" if message.chat.type == enums.ChatType.PRIVATE else "file_links_group"
     await message.reply(
         await bot_message(message_key, title=title),

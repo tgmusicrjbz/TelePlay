@@ -46,3 +46,23 @@ def test_message_link_route_loads_the_original_telegram_message(monkeypatch):
     descriptor = stream_message.await_args.args[0]
     assert descriptor.file_name == "clip.mp4"
     assert descriptor.file_size == 8192
+
+
+def test_message_link_info_builds_separate_play_and_download_urls():
+    token = create_telegram_message_link_token(
+        -10042, 87, "voice.ogg", "audio/ogg", "voice", 4096, True
+    )
+
+    result = asyncio.run(shares.temporary_link_info(token, None))
+
+    assert result["file_name"] == "voice.ogg"
+    assert result["file_type"] == "audio"
+    assert result["file_size"] == 4096
+    assert result["stream_url"].startswith("/api/shares/message-link/")
+    assert result["download_url"].startswith("/api/shares/message-link/")
+    assert result["stream_url"] != result["download_url"]
+
+    play_payload = verify_token_payload(result["stream_url"].rsplit("/", 1)[-1], "telegram-message-link")
+    download_payload = verify_token_payload(result["download_url"].rsplit("/", 1)[-1], "telegram-message-link")
+    assert play_payload["download"] is False
+    assert download_payload["download"] is True

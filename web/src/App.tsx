@@ -655,6 +655,7 @@ function App() {
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/auth" element={<AuthCallback />} />
                 <Route path="/s/:publicHash" element={<Suspense fallback={<LazyFallback/>}><PublicSharePage /></Suspense>} />
+                <Route path="/play/:playToken" element={<Suspense fallback={<LazyFallback/>}><PublicSharePage /></Suspense>} />
                 <Route
                     path="/*"
                     element={

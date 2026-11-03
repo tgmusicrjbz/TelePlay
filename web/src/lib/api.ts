@@ -665,6 +665,29 @@ const removeFilesFromCachedPack = (pack: Pack | undefined, ids: Set<number>) => 
     };
 };
 
+/** Load every page for pickers that must represent the whole cabinet. */
+export const useAllFiles = (fileType?: string, search?: string, sort = 'created:desc', enabled = true) => useQuery({
+    queryKey: ['all-files-picker', fileType, search, sort],
+    queryFn: async () => {
+        const files: TelegramFile[] = [];
+        let page = 1;
+        let total = 0;
+        do {
+            const {data} = await api.get<FileListResponse>('/files', {params:{
+                file_type:fileType || undefined, search:search || undefined, sort,
+                page, per_page:100, all_levels:true,
+            }});
+            if (!data.files.length) break;
+            files.push(...data.files);
+            total = data.total;
+            page += 1;
+        } while (files.length < total);
+        return {files,total,page:1,per_page:files.length,search_mode:'exact' as const,suggestions:[]};
+    },
+    enabled,
+    staleTime: 30000,
+});
+
 type ProfilePhotoState = { has_profile_photo:boolean; profile_photo_updated_at:string|null };
 const updateCachedProfilePhoto=(client:ReturnType<typeof useQueryClient>,state:ProfilePhotoState)=>{
     client.setQueryData<User>(['currentUser'],current=>{
