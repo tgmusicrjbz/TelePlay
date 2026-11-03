@@ -28,7 +28,7 @@ from .routers.folders import ensure_default_folder
 from .database import async_session
 from .models import User, File, Folder, LoginCode, Playlist, PlaylistItem, BotUserState, TelegramDestination, TelegramGroupSettings, AppSetting
 from .config import get_settings
-from .auth import create_private_file_link_token, create_telegram_login_token
+from .auth import create_private_file_link_token, create_telegram_login_token, create_telegram_message_link_token
 from .services import escape_like, select_best_thumbnail, telegram_text_with_links, unreferenced_audio_variant_messages, unreferenced_storage_messages
 from .caption_metadata import extract_tags_from_caption, parse_file_caption
 from .downloader import ImportJob, link_importer
@@ -1564,9 +1564,6 @@ async def replied_file_link_command(client, message: Message):
             File.file_unique_id == getattr(media, "file_unique_id", ""),
             File.is_hidden.is_(False),
         ).order_by(File.id.desc()))).scalars().first()
-        if file is None:
-            await message.reply(await bot_message("file_link_not_found"))
-            return
         try:
             await consume_file_link_quota(
                 db, user_id=requester.id, telegram_user_id=message.from_user.id,
@@ -1578,8 +1575,23 @@ async def replied_file_link_command(client, message: Message):
 
     command = (message.command or ["link"])[0].lower()
     base_url = settings.web_base_url.strip().rstrip("/")
-    play_url = f"{base_url}/api/shares/file-link/{create_private_file_link_token(owner.id, file.id, False)}"
-    download_url = f"{base_url}/api/shares/file-link/{create_private_file_link_token(owner.id, file.id, True)}"
+    if file is not None:
+        title = display_filename(file.file_name)
+        play_token = create_private_file_link_token(owner.id, file.id, False)
+        download_token = create_private_file_link_token(owner.id, file.id, True)
+    else:
+        media_kind = next((name for name in ("audio", "voice", "video", "video_note", "animation", "document", "photo") if getattr(replied, name, None)), "document")
+        extension = {"audio":"mp3", "voice":"ogg", "video":"mp4", "video_note":"mp4", "animation":"mp4", "photo":"jpg"}.get(media_kind, "bin")
+        raw_name = getattr(media, "file_name", None) or f"telegram-{replied.id}.{extension}"
+        mime_type = getattr(media, "mime_type", None) or {"voice":"audio/ogg", "video":"video/mp4", "video_note":"video/mp4", "animation":"video/mp4", "photo":"image/jpeg"}.get(media_kind)
+        title = display_filename(raw_name)
+        play_token = create_telegram_message_link_token(message.chat.id, replied.id, raw_name, mime_type, media_kind, False)
+        download_token = create_telegram_message_link_token(message.chat.id, replied.id, raw_name, mime_type, media_kind, True)
+    play_url = f"{base_url}/api/shares/message-link/{play_token}"
+    download_url = f"{base_url}/api/shares/message-link/{download_token}"
+    if file is not None:
+        play_url = f"{base_url}/api/shares/file-link/{play_token}"
+        download_url = f"{base_url}/api/shares/file-link/{download_token}"
     buttons: list[list[InlineKeyboardButton]] = []
     if command != "downloadlink":
         buttons.append([InlineKeyboardButton("▶️ پخش فایل", url=play_url)])
@@ -1587,7 +1599,7 @@ async def replied_file_link_command(client, message: Message):
         buttons.append([InlineKeyboardButton("⬇️ دانلود فایل", url=download_url)])
     message_key = "file_links_private" if message.chat.type == enums.ChatType.PRIVATE else "file_links_group"
     await message.reply(
-        await bot_message(message_key, title=display_filename(file.file_name)),
+        await bot_message(message_key, title=title),
         reply_markup=InlineKeyboardMarkup(buttons),
         disable_web_page_preview=True,
     )

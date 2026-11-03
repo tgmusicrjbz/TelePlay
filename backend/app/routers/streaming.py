@@ -62,6 +62,7 @@ def playable_message_media(message):
     """Return every Telegram media shape that can be streamed by the player."""
     return (
         getattr(message, "video", None)
+        or getattr(message, "animation", None)
         or getattr(message, "video_note", None)
         or getattr(message, "audio", None)
         or getattr(message, "voice", None)

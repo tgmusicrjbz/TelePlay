@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import secrets
+from types import SimpleNamespace
 from datetime import datetime, timedelta
 from urllib.parse import quote
 
@@ -122,10 +123,7 @@ async def unlock_collection(public_hash: str, payload: PublicShareUnlock, db: As
     return {"access_token": create_public_share_token(public_hash)}
 
 
-async def _stream_record(file: File, request: Request, download: bool):
-    message = await get_message_from_channel(file.channel_message_id, file.storage_channel_id)
-    if not message:
-        raise HTTPException(404, "فایل در فضای ذخیره‌سازی پیدا نشد.")
+async def _stream_message(file, message, request: Request, download: bool):
     range_header = request.headers.get("range")
     if file.file_type == "text" or message.photo:
         return await stored_message_response(file, message, range_header, int(download))
@@ -145,6 +143,13 @@ async def _stream_record(file: File, request: Request, download: bool):
     return StreamingResponse(chunks(), status_code=206 if range_header else 200, media_type=media_type_for(file), headers=headers)
 
 
+async def _stream_record(file: File, request: Request, download: bool):
+    message = await get_message_from_channel(file.channel_message_id, file.storage_channel_id)
+    if not message:
+        raise HTTPException(404, "فایل در فضای ذخیره‌سازی پیدا نشد.")
+    return await _stream_message(file, message, request, download)
+
+
 @router.get("/file-link/{token}")
 async def stream_private_link(token: str, request: Request, db: AsyncSession = Depends(get_db)):
     payload = verify_token_payload(token, "private-file-link")
@@ -154,6 +159,25 @@ async def stream_private_link(token: str, request: Request, db: AsyncSession = D
     if file is None:
         raise HTTPException(404, "فایل پیدا نشد.")
     return await _stream_record(file, request, bool(payload.get("download")))
+
+
+@router.get("/message-link/{token}")
+async def stream_telegram_message_link(token: str, request: Request):
+    payload = verify_token_payload(token, "telegram-message-link")
+    if not payload:
+        raise HTTPException(401, "این پیوند موقت منقضی شده یا معتبر نیست.")
+    try:
+        message = await telegram.tg_client.get_messages(int(payload["sub"]), int(payload["mid"]))
+    except Exception as error:
+        raise HTTPException(404, "پیام اصلی در تلگرام در دسترس نیست.") from error
+    if not message or getattr(message, "empty", False):
+        raise HTTPException(404, "پیام اصلی حذف شده یا دیگر در دسترس نیست.")
+    descriptor = SimpleNamespace(
+        file_name=str(payload.get("name") or f"telegram-{payload['mid']}"),
+        mime_type=str(payload.get("mime") or "") or None,
+        file_type=str(payload.get("kind") or "document"),
+    )
+    return await _stream_message(descriptor, message, request, bool(payload.get("download")))
 
 
 @router.get("/collection-file/{token}")

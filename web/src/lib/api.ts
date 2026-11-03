@@ -48,6 +48,7 @@ export interface User {
     is_admin?: boolean;
     can_use_monitors?: boolean;
     can_create_rooms?: boolean;
+    storage_channel_configured?: boolean;
     login_username?: string | null;
     has_profile_photo?: boolean;
     profile_photo_updated_at?: string | null;

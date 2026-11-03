@@ -622,6 +622,7 @@ async def get_current_user_info(
         is_admin=current_user.telegram_id in settings.admin_users,
         can_use_monitors=current_user.telegram_id in settings.admin_users or current_user.can_use_monitors,
         can_create_rooms=current_user.telegram_id in settings.admin_users or current_user.can_create_rooms,
+        storage_channel_configured=current_user.storage_channel_id is not None,
         login_username=current_user.login_username,
         has_profile_photo=current_user.has_profile_photo,
         profile_photo_updated_at=current_user.profile_photo_updated_at,

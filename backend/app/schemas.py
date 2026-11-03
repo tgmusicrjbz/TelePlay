@@ -28,6 +28,7 @@ class UserResponse(UserBase):
     is_admin: bool = False
     can_use_monitors: bool = False
     can_create_rooms: bool = False
+    storage_channel_configured: bool = False
     login_username: Optional[str] = None
     has_profile_photo: bool = False
     profile_photo_updated_at: Optional[datetime] = None

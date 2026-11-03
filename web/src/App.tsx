@@ -573,7 +573,7 @@ function BotLink({ code }: { code?: string }) {
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
     restoreSavedSession();
     const connectivity = useConnectivity();
-    const { isLoading, error } = useCurrentUser(connectivity === 'online');
+    const { data: user, isLoading, error } = useCurrentUser(connectivity === 'online');
     const token = localStorage.getItem('access_token');
     const online = connectivity === 'online';
     const [authWaitExpired, setAuthWaitExpired] = useState(false);
@@ -629,7 +629,20 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
         );
     }
 
-    return <>{children}</>;
+    return <>{children}<StorageChannelOnboarding visible={Boolean(user&&!user.storage_channel_configured)} /></>;
+}
+
+function StorageChannelOnboarding({visible}:{visible:boolean}){
+    const [dismissed,setDismissed]=useState(()=>sessionStorage.getItem('komod-storage-onboarding-dismissed')==='1');
+    if(!visible||dismissed)return null;
+    const openSettings=()=>{
+        localStorage.setItem('komod-settings-target','storage');
+        useAppStore.getState().setActiveSection('settings');
+        window.history.pushState({},'', '/');
+        window.dispatchEvent(new PopStateEvent('popstate'));
+        setDismissed(true);
+    };
+    return <div dir="rtl" className="fixed inset-0 z-[260] flex items-end justify-center bg-black/75 p-0 backdrop-blur-sm sm:items-center sm:p-4"><section className="w-full max-w-md rounded-t-3xl border border-white/10 bg-dark-900 p-5 shadow-2xl sm:rounded-3xl"><div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary-500/15 text-2xl">☁️</div><h2 className="mt-4 text-lg font-black">فضای شخصی خودت را وصل کن</h2><p className="mt-2 text-sm leading-7 text-dark-300">یک کانال خصوصی بساز و ربات کمد را مدیرش کن. از آن به بعد فایل‌های تازه داخل کانال خودت نگهداری می‌شوند و خیالت از فضای شخصی راحت است.</p><ol className="mt-4 space-y-2 text-xs leading-6 text-dark-400"><li className="rounded-xl bg-white/[.04] px-3 py-2">۱. در تلگرام یک کانال خصوصی بساز.</li><li className="rounded-xl bg-white/[.04] px-3 py-2">۲. ربات کمد را با اجازه ارسال و حذف پیام مدیر کن.</li><li className="rounded-xl bg-white/[.04] px-3 py-2">۳. آیدی عددی کانال را در تنظیمات فضای ذخیره‌سازی وارد کن.</li></ol><button onClick={openSettings} className="btn-primary mt-5 min-h-12 w-full">وصل کردن کانال شخصی</button><button onClick={()=>{sessionStorage.setItem('komod-storage-onboarding-dismissed','1');setDismissed(true)}} className="mt-2 min-h-10 w-full text-xs text-dark-500">فعلاً بعداً</button></section></div>;
 }
 
 function App() {
