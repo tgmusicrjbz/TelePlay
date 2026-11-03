@@ -1585,8 +1585,9 @@ async def replied_file_link_command(client, message: Message):
         raw_name = getattr(media, "file_name", None) or f"telegram-{replied.id}.{extension}"
         mime_type = getattr(media, "mime_type", None) or {"voice":"audio/ogg", "video":"video/mp4", "video_note":"video/mp4", "animation":"video/mp4", "photo":"image/jpeg"}.get(media_kind)
         title = display_filename(raw_name)
-        play_token = create_telegram_message_link_token(message.chat.id, replied.id, raw_name, mime_type, media_kind, False)
-        download_token = create_telegram_message_link_token(message.chat.id, replied.id, raw_name, mime_type, media_kind, True)
+        media_size = getattr(media, "file_size", None)
+        play_token = create_telegram_message_link_token(message.chat.id, replied.id, raw_name, mime_type, media_kind, media_size, False)
+        download_token = create_telegram_message_link_token(message.chat.id, replied.id, raw_name, mime_type, media_kind, media_size, True)
     play_url = f"{base_url}/api/shares/message-link/{play_token}"
     download_url = f"{base_url}/api/shares/message-link/{download_token}"
     if file is not None:

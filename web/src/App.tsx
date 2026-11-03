@@ -636,6 +636,7 @@ function StorageChannelOnboarding({visible}:{visible:boolean}){
     const [dismissed,setDismissed]=useState(()=>sessionStorage.getItem('komod-storage-onboarding-dismissed')==='1');
     if(!visible||dismissed)return null;
     const openSettings=()=>{
+        sessionStorage.setItem('komod-storage-onboarding-dismissed','1');
         localStorage.setItem('komod-settings-target','storage');
         useAppStore.getState().setActiveSection('settings');
         window.history.pushState({},'', '/');

@@ -130,7 +130,9 @@ async def _stream_message(file, message, request: Request, download: bool):
     media = playable_message_media(message)
     if media is None:
         raise HTTPException(422, "این پیام فایل قابل پخشی ندارد.")
-    size = getattr(media, "file_size", None) or file.file_size
+    size = getattr(media, "file_size", None) or getattr(file, "file_size", None)
+    if not size:
+        raise HTTPException(422, "اندازه فایل از تلگرام دریافت نشد؛ کمی بعد دوباره تلاش کن.")
     start, end = parse_range_header(range_header, size)
     if start >= size or start < 0 or end < start:
         raise HTTPException(416, "بازه فایل معتبر نیست.")
@@ -176,6 +178,7 @@ async def stream_telegram_message_link(token: str, request: Request):
         file_name=str(payload.get("name") or f"telegram-{payload['mid']}"),
         mime_type=str(payload.get("mime") or "") or None,
         file_type=str(payload.get("kind") or "document"),
+        file_size=int(payload.get("size") or 0),
     )
     return await _stream_message(descriptor, message, request, bool(payload.get("download")))
 

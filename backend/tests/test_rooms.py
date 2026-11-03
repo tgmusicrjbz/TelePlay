@@ -44,6 +44,7 @@ class RoomTests(unittest.IsolatedAsyncioTestCase):
 
             updated = await update_items(result["id"], RoomItemsUpdate(file_ids=[second.id, first.id]), db, owner)
             self.assertEqual([item["id"] for item in updated["items"]], [second.id, first.id])
+            self.assertEqual(updated["current_index"], 1)
             self.assertEqual((await db.execute(select(WatchRoom))).scalars().one().name, "Test room")
             self.assertEqual(len((await db.execute(select(RoomMember))).scalars().all()), 1)
             self.assertEqual(len((await db.execute(select(RoomItem))).scalars().all()), 2)

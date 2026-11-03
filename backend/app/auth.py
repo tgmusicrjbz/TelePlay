@@ -113,11 +113,11 @@ def create_private_file_link_token(owner_id: int, file_id: int, download: bool =
     }, settings.jwt_secret, algorithm="HS256")
 
 
-def create_telegram_message_link_token(chat_id: int, message_id: int, file_name: str, mime_type: str | None, file_type: str, download: bool = False) -> str:
+def create_telegram_message_link_token(chat_id: int, message_id: int, file_name: str, mime_type: str | None, file_type: str, file_size: int | None = None, download: bool = False) -> str:
     """Create a temporary link to replied Telegram media without indexing it."""
     return jwt.encode({
         "sub": str(chat_id), "mid": int(message_id), "name": file_name[:255],
-        "mime": (mime_type or "")[:120], "kind": file_type[:24], "download": bool(download),
+        "mime": (mime_type or "")[:120], "kind": file_type[:24], "size": int(file_size or 0), "download": bool(download),
         "exp": datetime.utcnow() + timedelta(hours=24), "type": "telegram-message-link",
     }, settings.jwt_secret, algorithm="HS256")
 

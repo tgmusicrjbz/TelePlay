@@ -255,9 +255,20 @@ async def update_items(room_id: str, payload: RoomItemsUpdate, db: AsyncSession 
     file_ids = list(dict.fromkeys(payload.file_ids))
     owned = set((await db.execute(select(File.id).where(File.id.in_(file_ids), File.user_id == room.owner_user_id, File.is_hidden.is_(False), File.file_type.in_(("audio", "video"))))).scalars().all()) if file_ids else set()
     if owned != set(file_ids): raise HTTPException(422, "بعضی فایل‌ها برای این روم قابل استفاده نیستند.")
+    previous_items = (await db.execute(
+        select(RoomItem).where(RoomItem.room_id == room.id).order_by(RoomItem.position)
+    )).scalars().all()
+    current_file_id = previous_items[room.current_index].file_id if 0 <= room.current_index < len(previous_items) else None
+    previous_index = room.current_index
     await db.execute(delete(RoomItem).where(RoomItem.room_id == room.id))
     for position, file_id in enumerate(file_ids): db.add(RoomItem(room_id=room.id, file_id=file_id, position=position))
-    room.current_index = min(room.current_index, max(0, len(file_ids)-1)); room.playback_position = 0; room.is_playing = False; room.state_updated_at = datetime.utcnow()
+    if current_file_id in file_ids:
+        room.current_index = file_ids.index(current_file_id)
+    else:
+        room.current_index = min(previous_index, max(0, len(file_ids)-1))
+        room.playback_position = 0
+        room.is_playing = False
+    room.state_updated_at = datetime.utcnow()
     await db.commit(); await hub.broadcast(room.id, {"type":"queue_changed"}); return await _serialize(db, room, user, True)
 
 
