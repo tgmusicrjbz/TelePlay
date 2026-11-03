@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
-HEAD_REVISION = "20261102_0013"
+HEAD_REVISION = "20261103_0015"
 
 
 def migration_env(database_path: Path) -> dict[str, str]:
@@ -62,6 +62,7 @@ class MigrationTests(unittest.TestCase):
             self.assertIn("room_members", tables)
             self.assertIn("room_items", tables)
             self.assertIn("room_messages", tables)
+            self.assertIn("room_message_reactions", tables)
             for columns in blurred_columns.values():
                 self.assertIn("is_blurred", columns)
             self.assertIn("profile_photo", user_columns)

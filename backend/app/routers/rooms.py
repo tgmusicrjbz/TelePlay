@@ -17,7 +17,7 @@ from sqlalchemy.orm import selectinload
 from ..auth import create_room_stream_token, get_current_user, verify_token_payload
 from ..config import get_settings
 from ..database import async_session, get_db
-from ..models import File, PlaylistItem, RoomItem, RoomMember, RoomMessage, User, WatchRoom
+from ..models import File, PlaylistItem, RoomItem, RoomMember, RoomMessage, RoomMessageReaction, User, WatchRoom
 from ..services import add_urls_to_file
 
 router = APIRouter(prefix="/rooms", tags=["Rooms"])
@@ -34,7 +34,7 @@ class RoomCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     theme: str = "violet"
     password: str | None = Field(default=None, max_length=100)
-    expires_in_minutes: int = Field(default=180, ge=15, le=10080)
+    expires_in_minutes: int = Field(default=1440, ge=15, le=10080)
     max_members: int = Field(default=8, ge=2, le=MAX_MEMBERS)
     chat_enabled: bool = True
     voice_enabled: bool = True
@@ -154,7 +154,16 @@ async def _serialize(db: AsyncSession, room: WatchRoom, viewer: User, include_me
     }
     if include_messages:
         messages = list(reversed((await db.execute(select(RoomMessage, User).join(User, User.id == RoomMessage.user_id).where(RoomMessage.room_id == room.id).order_by(RoomMessage.created_at.desc()).limit(80))).all()))
-        payload["messages"] = [{"id": message.id, "user_id": user.id, "name": _name(user), "content": message.content, "created_at": message.created_at} for message, user in messages]
+        message_ids = [message.id for message, _ in messages]
+        reaction_rows = (await db.execute(select(RoomMessageReaction).where(RoomMessageReaction.message_id.in_(message_ids)))).scalars().all() if message_ids else []
+        reaction_counts: dict[int, dict[str, int]] = {}
+        own_reactions: dict[int, list[str]] = {}
+        for reaction in reaction_rows:
+            values = reaction_counts.setdefault(reaction.message_id, {})
+            values[reaction.emoji] = values.get(reaction.emoji, 0) + 1
+            if reaction.user_id == viewer.id:
+                own_reactions.setdefault(reaction.message_id, []).append(reaction.emoji)
+        payload["messages"] = [{"id": message.id, "user_id": user.id, "name": _name(user), "content": message.content, "created_at": message.created_at, "reactions": reaction_counts.get(message.id, {}), "my_reactions": own_reactions.get(message.id, [])} for message, user in messages]
     return payload
 
 
@@ -358,6 +367,27 @@ async def room_socket(websocket: WebSocket, room_id: str):
                     last_reaction = now
                     emoji = str(data.get("emoji", ""))[:12]
                     if emoji in {"❤️","😂","👏","🔥","😮","😢","🎉","👍"}: await hub.broadcast(room_id,{"type":"reaction","user_id":user.id,"name":_name(user),"emoji":emoji})
+                elif kind == "message_reaction" and room.chat_enabled:
+                    now = time.monotonic()
+                    if now - last_reaction < 0.2:
+                        continue
+                    last_reaction = now
+                    emoji = str(data.get("emoji", ""))[:12]
+                    message_id = int(data.get("message_id", 0))
+                    if emoji not in {"❤️", "😂", "👏", "🔥", "👍"}:
+                        continue
+                    message = (await db.execute(select(RoomMessage).where(RoomMessage.id == message_id, RoomMessage.room_id == room_id))).scalar_one_or_none()
+                    if message is None:
+                        continue
+                    existing = (await db.execute(select(RoomMessageReaction).where(RoomMessageReaction.message_id == message_id, RoomMessageReaction.user_id == user.id, RoomMessageReaction.emoji == emoji))).scalar_one_or_none()
+                    active = existing is None
+                    if existing is None:
+                        db.add(RoomMessageReaction(message_id=message_id, user_id=user.id, emoji=emoji))
+                    else:
+                        await db.delete(existing)
+                    await db.commit()
+                    rows = (await db.execute(select(RoomMessageReaction.emoji, func.count(RoomMessageReaction.id)).where(RoomMessageReaction.message_id == message_id).group_by(RoomMessageReaction.emoji))).all()
+                    await hub.broadcast(room_id, {"type":"message_reaction", "message_id":message_id, "reactions":{value:count for value,count in rows}, "actor_user_id":user.id, "emoji":emoji, "active":active})
                 elif kind == "voice_join" and room.voice_enabled:
                     voice = hub.voice.setdefault(room_id,set())
                     if user.id not in voice and len(voice) >= MAX_VOICE_MEMBERS: await websocket.send_json({"type":"voice_error","message":"ظرفیت ویس روم تکمیل شده است."})

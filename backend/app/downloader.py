@@ -839,7 +839,8 @@ class LinkImportService:
                 if job.notify:
                     count = str(len(saved)).translate(str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹"))
                     destination = "در تلگرام فرستاده و در کمد ذخیره شد" if job.send_to_telegram and job.save_to_library else "در تلگرام فرستاده شد" if job.send_to_telegram else "به کمد اضافه شد"
-                    await self._notify(job, await bot_message("link_finished", count=count, destination=destination))
+                    context = "group" if (job.notification_chat_id or 0) < 0 else "private"
+                    await self._notify(job, await bot_message(f"link_finished_{context}", count=count, destination=destination))
                 self.statuses[job.id].update(state="done", message="آماده شد", saved=len(saved), progress=100, finished_at=datetime.utcnow().isoformat())
                 await self._persist_status(job.id)
             except asyncio.CancelledError:
@@ -868,7 +869,8 @@ class LinkImportService:
                     continue
                 logger.exception("Link import failed for %s", job.url)
                 if job.notify:
-                    await self._notify(job, await bot_message("link_failed", error=friendly_error))
+                    context = "group" if (job.notification_chat_id or 0) < 0 else "private"
+                    await self._notify(job, await bot_message(f"link_failed_{context}", error=friendly_error))
                 if job.instagram_event_id:
                     from .instagram_inbox import mark_instagram_delivery_failed
                     await mark_instagram_delivery_failed(job.instagram_event_id, friendly_error)

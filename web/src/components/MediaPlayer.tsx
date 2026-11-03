@@ -2,7 +2,7 @@
  * MediaPlayer - full screen video/audio player
  */
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import { X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipBack, SkipForward, Download, AlertTriangle, ArrowUpDown, Copy, PictureInPicture2, Gauge, ChevronDown, ChevronUp, Repeat2, Shuffle, Headphones, RotateCcw, RotateCw, Clock3, ListPlus, ListMusic, GripVertical, Trash2, RectangleHorizontal, Smartphone, MonitorSmartphone, Film, LockKeyhole, UnlockKeyhole, MoreHorizontal, Save, History, EyeOff, StopCircle } from 'lucide-react';
+import { X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipBack, SkipForward, Download, AlertTriangle, ArrowUpDown, Copy, PictureInPicture2, Gauge, ChevronDown, ChevronUp, Repeat2, Shuffle, Headphones, RotateCcw, RotateCw, Clock3, ListPlus, ListMusic, GripVertical, Trash2, RectangleHorizontal, Smartphone, MonitorSmartphone, Film, LockKeyhole, UnlockKeyhole, MoreHorizontal, Save, History, EyeOff, StopCircle, ListEnd } from 'lucide-react';
 import { TelegramFile, useUpdateProgress, useFile, api, useCreatePlaylist, useAddPlaylistItems } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { closestCenter, DndContext, DragEndEvent, DragOverlay, KeyboardSensor, MouseSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core';
@@ -35,7 +35,7 @@ export function InlineMediaPlayer({ file, expanded = false }: { file: TelegramFi
 }
 
 function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline = false, inlineExpanded = false }: MediaPlayerContentProps) {
-    const { playQueue, queueIndex, repeatMode, playNext, playPrevious, shuffleQueue, reverseQueue, removeQueueItem, moveQueueItem, appendQueueItems, setRepeatMode, setPlaylistFile, addToast } = useAppStore();
+    const { playQueue, queueIndex, repeatMode, autoAdvance, playNext, playPrevious, shuffleQueue, reverseQueue, removeQueueItem, moveQueueItem, appendQueueItems, setRepeatMode, setAutoAdvance, setPlaylistFile, addToast } = useAppStore();
     const videoRef = useRef<HTMLVideoElement>(null);
     const nextAudioRef = useRef<HTMLAudioElement>(null);
     const crossfadeCarry = useRef<{fileId:number;time:number}|null>(null);
@@ -445,7 +445,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
             crossfadeCarry.current = {fileId:nextFile.id,time:nextAudioRef.current.currentTime};
         }
         crossfadeStarted.current = false;
-        if (!playNext()) setIsPlaying(false);
+        if (!autoAdvance || !playNext()) setIsPlaying(false);
     };
 
     const handleError = () => {
@@ -806,7 +806,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
             className={`${isMinimized ? 'mini-player' : 'video-player'} ${inline ? 'relative h-full w-full overflow-hidden bg-black' : `fixed ${playerLayer}`} transition-all duration-300 ease-in-out ${
                 inline ? '' :
                 isMinimized
-                    ? 'bottom-[calc(5rem+env(safe-area-inset-bottom))] left-0 right-0 h-20 max-h-[25vh] border-t border-white/10 bg-dark-900 shadow-2xl md:bottom-0'
+                    ? 'bottom-[calc(4.65rem+env(safe-area-inset-bottom))] left-0 right-0 h-20 max-h-[25vh] border-t border-white/10 bg-dark-900 shadow-2xl md:bottom-0'
                 : 'inset-0 bg-black flex items-center justify-center font-sans'
             }`}
             data-media-kind={isVideo ? 'video' : 'audio'}
@@ -1003,6 +1003,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
                                 <button className={`flex min-h-10 w-full items-center gap-2 rounded-lg px-2.5 text-xs transition ${videoHidden?'bg-primary-500/20 text-primary-200':'text-dark-200 hover:bg-white/[.07]'}`} onClick={()=>{setVideoHidden(value=>{if(!value&&audioOnly)setAudioOnly(false);return !value});setShowVideoMoreMenu(false)}}><EyeOff className="h-4 w-4 shrink-0"/><span>{videoHidden?'روشن کردن تصویر':'خاموش کردن تصویر'}</span></button>
                                 <button disabled={preparingAudio} className={`flex min-h-10 w-full items-center gap-2 rounded-lg px-2.5 text-xs transition disabled:opacity-50 ${audioOnly?'bg-primary-500/20 text-primary-200':'text-dark-200 hover:bg-white/[.07]'}`} onClick={()=>void toggleAudioOnly()}><Headphones className="h-4 w-4 shrink-0"/><span>{preparingAudio?'آماده‌سازی…':audioOnly ? 'بازگشت به ویدیو' : 'فقط صدا'}</span></button>
                                 <button className={`flex min-h-10 w-full items-center gap-2 rounded-lg px-2.5 text-xs transition ${repeatMode!=='off'?'bg-primary-500/20 text-primary-200':'text-dark-200 hover:bg-white/[.07]'}`} onClick={() => {setRepeatMode(repeatMode === 'off' ? (hasQueue ? 'all' : 'one') : repeatMode === 'all' ? 'one' : 'off');setShowVideoMoreMenu(false)}}><Repeat2 className="h-4 w-4 shrink-0"/><span>{repeatMode === 'off' ? 'تکرار خاموش' : repeatMode === 'all' ? 'تکرار صف' : 'تکرار همین ویدیو'}</span></button>
+                                {hasQueue && <button className={`flex min-h-10 w-full items-center gap-2 rounded-lg px-2.5 text-xs transition ${autoAdvance?'bg-emerald-500/15 text-emerald-200':'text-dark-200 hover:bg-white/[.07]'}`} onClick={() => {setAutoAdvance(!autoAdvance);setShowVideoMoreMenu(false)}}><ListEnd className="h-4 w-4 shrink-0"/><span>{autoAdvance ? 'پخش بعدی خودکار روشن' : 'پخش بعدی خودکار خاموش'}</span></button>}
                                 <button className={`flex min-h-10 w-full items-center gap-2 rounded-lg px-2.5 text-xs transition ${sleepMode!=='off'?'bg-primary-500/20 text-primary-200':'text-dark-200 hover:bg-white/[.07]'}`} onClick={() => setShowSleepMenu(open => !open)}><Clock3 className="h-4 w-4 shrink-0"/><span>تایمر خواب</span><ChevronDown className={`mr-auto h-3.5 w-3.5 transition ${showSleepMenu?'rotate-180':''}`}/></button>
                                 {showSleepMenu && <div className="grid grid-cols-2 gap-1 rounded-lg bg-black/20 p-1">
                                     {([['15','۱۵ دقیقه'],['30','۳۰ دقیقه'],['45','۴۵ دقیقه'],['60','۱ ساعت'],['track','پایان ویدیو'],['end','پایان صف']] as const).map(([mode,label])=><button key={mode} onClick={()=>setSleepTimer(mode)} className={`rounded-lg px-2 py-2 text-[11px] ${sleepMode===mode?'bg-primary-500/25 text-primary-200':'text-dark-300 hover:bg-white/[.05]'}`}>{label}</button>)}
@@ -1074,7 +1075,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
 
                         {/* Control buttons */}
                         {!isVideo && <div dir="ltr" className="flex items-center justify-between gap-3">
-                            {!isVideo ? <div className="flex items-center gap-1"><button disabled={!hasQueue} onClick={shuffleQueue} className="rounded-full p-2 text-white/75 hover:bg-white/10 disabled:opacity-30" title="شافل"><Shuffle className="h-5 w-5"/></button><button onClick={() => setRepeatMode(repeatMode === 'off' ? 'all' : repeatMode === 'all' ? 'one' : 'off')} className={`rounded-full p-2 ${repeatMode !== 'off' ? 'bg-primary-500/25 text-primary-200' : 'text-white/75 hover:bg-white/10'}`} title="تکرار"><Repeat2 className="h-5 w-5"/></button></div> : <div />}
+                            {!isVideo ? <div className="flex items-center gap-1"><button disabled={!hasQueue} onClick={shuffleQueue} className="rounded-full p-2 text-white/75 hover:bg-white/10 disabled:opacity-30" title="شافل"><Shuffle className="h-5 w-5"/></button><button disabled={!hasQueue} onClick={() => setAutoAdvance(!autoAdvance)} className={`rounded-full p-2 disabled:opacity-30 ${autoAdvance ? 'bg-emerald-500/20 text-emerald-200' : 'text-white/75 hover:bg-white/10'}`} title={autoAdvance?'بعد از پایان، مورد بعدی پخش می‌شود':'پخش پس از این مورد متوقف می‌شود'}><ListEnd className="h-5 w-5"/></button><button onClick={() => setRepeatMode(repeatMode === 'off' ? 'all' : repeatMode === 'all' ? 'one' : 'off')} className={`rounded-full p-2 ${repeatMode !== 'off' ? 'bg-primary-500/25 text-primary-200' : 'text-white/75 hover:bg-white/10'}`} title="تکرار"><Repeat2 className="h-5 w-5"/></button></div> : <div />}
                             <div className="flex items-center gap-3">
                             <div className="relative">
                                 <button

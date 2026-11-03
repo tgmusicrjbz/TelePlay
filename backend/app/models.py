@@ -563,6 +563,18 @@ class RoomMessage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)
 
 
+class RoomMessageReaction(Base):
+    __tablename__ = "room_message_reactions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    message_id: Mapped[int] = mapped_column(ForeignKey("room_messages.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    emoji: Mapped[str] = mapped_column(String(12), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (UniqueConstraint("message_id", "user_id", "emoji", name="uq_room_message_reaction"),)
+
+
 class Pack(Base):
     """A named, ordered collection of mixed files shown beside folders."""
     __tablename__ = "packs"

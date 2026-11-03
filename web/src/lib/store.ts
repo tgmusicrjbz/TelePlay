@@ -23,6 +23,7 @@ type SavedPlayerState = {
     queueIndex: number;
     current: TelegramFile | null;
     repeatMode: 'off' | 'all' | 'one';
+    autoAdvance: boolean;
 };
 
 function playerStorageKey() {
@@ -42,7 +43,7 @@ function restorableMedia(file: unknown): file is TelegramFile {
 }
 
 function loadPlayerState(): SavedPlayerState {
-    const empty: SavedPlayerState = { version: 1, queue: [], queueIndex: -1, current: null, repeatMode: 'off' };
+    const empty: SavedPlayerState = { version: 1, queue: [], queueIndex: -1, current: null, repeatMode: 'off', autoAdvance: true };
     try {
         const raw = JSON.parse(localStorage.getItem(playerStorageKey()) || 'null') as Partial<SavedPlayerState> | null;
         if (!raw || raw.version !== 1) return empty;
@@ -53,7 +54,7 @@ function loadPlayerState(): SavedPlayerState {
         // the same track appears more than once and one occurrence is reordered.
         const current = queue[queueIndex] || (restorableMedia(raw.current) ? createQueueEntry(raw.current) : null);
         const repeatMode = ['off', 'all', 'one'].includes(String(raw.repeatMode)) ? raw.repeatMode as SavedPlayerState['repeatMode'] : 'off';
-        return { version: 1, queue, queueIndex, current, repeatMode };
+        return { version: 1, queue, queueIndex, current, repeatMode, autoAdvance: raw.autoAdvance !== false };
     } catch {
         return empty;
     }
@@ -128,6 +129,7 @@ interface AppState {
     playQueue: TelegramFile[];
     queueIndex: number;
     repeatMode: 'off' | 'all' | 'one';
+    autoAdvance: boolean;
     startQueue: (files: TelegramFile[], index?: number) => void;
     playQueueItem: (index: number) => void;
     playNext: () => boolean;
@@ -138,6 +140,7 @@ interface AppState {
     moveQueueItem: (from: number, to: number) => void;
     appendQueueItems: (files: TelegramFile[]) => void;
     setRepeatMode: (mode: 'off' | 'all' | 'one') => void;
+    setAutoAdvance: (enabled: boolean) => void;
     clearQueue: () => void;
 
     // Search
@@ -294,6 +297,7 @@ export const useAppStore = create<AppState>((set) => ({
     playQueue: restoredPlayer.queue,
     queueIndex: restoredPlayer.queueIndex,
     repeatMode: restoredPlayer.repeatMode,
+    autoAdvance: restoredPlayer.autoAdvance,
     startQueue: (files, index = 0) => set(() => {
         const queue = normalizeQueueEntries(files);
         const safeIndex = queue.length ? Math.min(Math.max(index, 0), queue.length - 1) : -1;
@@ -364,6 +368,7 @@ export const useAppStore = create<AppState>((set) => ({
         return additions.length ? {playQueue:[...state.playQueue,...additions.map(createQueueEntry)]} : state;
     }),
     setRepeatMode: (repeatMode) => set({ repeatMode }),
+    setAutoAdvance: (autoAdvance) => set({ autoAdvance }),
     clearQueue: () => set({ playQueue: [], queueIndex: -1 }),
 
     // Search
@@ -413,6 +418,7 @@ useAppStore.subscribe((state) => {
             queueIndex: queue.length ? Math.min(Math.max(state.queueIndex, 0), queue.length - 1) : -1,
             current,
             repeatMode: state.repeatMode,
+            autoAdvance: state.autoAdvance,
         };
         const serialized = JSON.stringify(payload);
         if (serialized === lastSavedPlayerState) return;
