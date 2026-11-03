@@ -23,6 +23,7 @@ import { folderTreeLabel } from '../lib/folderTreeLabel';
 import PackCard from './PackCard';
 import { EmptyState, LoadingState } from './StatePanel';
 import { useConnectivity } from '../lib/connectivity';
+import { useShallow } from 'zustand/react/shallow';
 
 // Heavy sections are downloaded only when the user opens them. Vite still
 // precaches the resulting chunks in the service worker, so they remain
@@ -179,7 +180,16 @@ export default function FileBrowser() {
         setSelectedFiles,
         setPlaylistFiles,
         startQueue
-    } = useAppStore();
+    } = useAppStore(useShallow(state=>({
+        currentFolderId:state.currentFolderId,setCurrentFolderId:state.setCurrentFolderId,breadcrumbs:state.breadcrumbs,setBreadcrumbs:state.setBreadcrumbs,
+        selectedFileIds:state.selectedFileIds,selectFile:state.selectFile,selectedFolderIds:state.selectedFolderIds,selectFolder:state.selectFolder,clearSelection:state.clearSelection,selectAll:state.selectAll,
+        viewMode:state.viewMode,setViewMode:state.setViewMode,previewFile:state.previewFile,isPlayerMinimized:state.isPlayerMinimized,setPreviewFile:state.setPreviewFile,setContentPreviewFile:state.setContentPreviewFile,
+        showNewFolder:state.showNewFolder,setShowNewFolder:state.setShowNewFolder,moveItems:state.moveItems,setMoveItems:state.setMoveItems,deleteConfirm:state.deleteConfirm,setDeleteConfirm:state.setDeleteConfirm,
+        searchQuery:state.searchQuery,setSearchQuery:state.setSearchQuery,fileTypeFilter:state.fileTypeFilter,setFileTypeFilter:state.setFileTypeFilter,renameFile:state.renameFile,setRenameFile:state.setRenameFile,
+        renameFolder:state.renameFolder,setRenameFolder:state.setRenameFolder,descriptionItem:state.descriptionItem,setDescriptionItem:state.setDescriptionItem,clipboard:state.clipboard,setClipboard:state.setClipboard,
+        selectionBox:state.selectionBox,setSelectionBox:state.setSelectionBox,activeSection:state.activeSection,setActiveSection:state.setActiveSection,addToast:state.addToast,setSelectedFiles:state.setSelectedFiles,
+        setPlaylistFiles:state.setPlaylistFiles,startQueue:state.startQueue,
+    })));
     useEffect(()=>{
         if(localStorage.getItem('komod-open-settings-after-login')!=='1') return;
         localStorage.removeItem('komod-open-settings-after-login');

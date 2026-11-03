@@ -4,14 +4,42 @@ import katex from 'katex';
 import 'katex/dist/katex.min.css';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
 import remarkBreaks from 'remark-breaks';
-import rehypeKatex from 'rehype-katex';
 import { api, TelegramFile } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { getMarkdownPalette, MarkdownPalette } from '../lib/markdownSettings';
 
 type ReaderTone = string;
+type MarkdownNode = { type:string; value?:string; lang?:string; children?:MarkdownNode[] };
+
+// Math support only needs to turn text nodes into code nodes that our renderer
+// already controls. Keeping this tiny transform local avoids shipping a second
+// unified/rehype pipeline beside react-markdown just to recognize $ delimiters.
+function remarkKomodMath() {
+    return (tree:MarkdownNode) => {
+        const visit=(node:MarkdownNode)=>{
+            if(!node.children)return;
+            node.children=node.children.flatMap(child=>{
+                if(child.type!=='text'||!child.value?.includes('$')){visit(child);return [child]}
+                const source=child.value;
+                const pattern=/((?<!\\)\$\$[\s\S]+?(?<!\\)\$\$|(?<!\\)\$[^\n$]+?(?<!\\)\$)/g;
+                const parts:MarkdownNode[]=[];let cursor=0;let match:RegExpExecArray|null;
+                while((match=pattern.exec(source))){
+                    if(match.index>cursor)parts.push({type:'text',value:source.slice(cursor,match.index)});
+                    const display=match[0].startsWith('$$');
+                    const formula=match[0].slice(display?2:1,display?-2:-1).trim();
+                    parts.push({type:'inlineCode',value:`${display?'komod-math-display:':'komod-math:'}${encodeURIComponent(formula)}`});
+                    cursor=pattern.lastIndex;
+                }
+                if(!parts.length)return [child];
+                if(cursor<source.length)parts.push({type:'text',value:source.slice(cursor)});
+                return parts;
+            });
+        };
+        visit(tree);
+    };
+}
+
 function inlineMarkdown(text: string) {
     return text.split(/(!\[[^\]]*\]\([^)]+\)|\[[^\]]+\]\([^)]+\)|<a\s+href=["'][^"']+["'][^>]*>.*?<\/a>|<(?:strong|b)>.*?<\/(?:strong|b)>|<(?:em|i)>.*?<\/(?:em|i)>|https?:\/\/[^\s<]+|\{\{[^{}]+\}\}|\$[^$\n]+\$|\*\*[^*]+\*\*|__[^_]+__|<u>.*?<\/u>|~~[^~]+~~|`[^`]+`|\*[^*]+\*)/gi).map((part, index) => {
         const image = part.match(/^!\[([^\]]*)\]\(([^)]+)\)$/); if (image) { const token=localStorage.getItem('access_token')||''; const source=image[2].startsWith('/api/')?`${image[2]}${image[2].includes('?')?'&':'?'}token=${encodeURIComponent(token)}`:image[2]; return <img key={index} src={source} alt={image[1]} loading="lazy" decoding="async" className="my-4 max-h-[70vh] max-w-full rounded-2xl border border-white/[.07] object-contain shadow-xl"/>; }
@@ -149,8 +177,7 @@ export default function MarkdownContent({ content, fontSize = 15, lineHeight = 2
     return <div className={`markdown-reader-canvas ${palette?'markdown-reader-canvas--custom p-2 sm:p-3':''} mx-auto w-full ${wide?'max-w-none':'max-w-3xl'} overflow-hidden rounded-2xl transition-colors`} style={paletteStyle}>
         <article dir={direction} className={`markdown-article ${palette?'markdown-article--custom':`markdown-article--${theme}`} markdown-font--${fontFamily} w-full max-w-none overflow-hidden rounded-2xl border p-4 shadow-inner transition-colors sm:p-6 ${wrap ? 'break-words' : 'overflow-x-auto whitespace-pre'}`} style={{fontSize, lineHeight, textAlign: align}}>
             <ReactMarkdown
-                remarkPlugins={[remarkGfm,remarkMath,remarkBreaks]}
-                rehypePlugins={[rehypeKatex]}
+                remarkPlugins={[remarkGfm,remarkKomodMath,remarkBreaks]}
                 urlTransform={(url)=>/^(?:komod:\/\/file\/\d+|komod-style:\/\/underline)$/i.test(url)?url:defaultUrlTransform(url)}
                 components={{
                     h1:({children})=><h1 className="mb-2 mt-7 break-words border-b border-white/[.05] pb-2 text-3xl font-black leading-tight text-primary-200">{children}</h1>,
@@ -161,7 +188,7 @@ export default function MarkdownContent({ content, fontSize = 15, lineHeight = 2
                     a:({href='',children})=>{if(href==='komod-style://underline')return <u className="decoration-primary-400/70 decoration-2 underline-offset-4">{children}</u>;const internal=href.match(/^komod:\/\/file\/(\d+)$/i);return internal?<button type="button" onClick={()=>void openInternalFile(Number(internal[1]))} className="inline-flex max-w-full items-center gap-1 break-words font-medium text-primary-200 underline decoration-primary-400/40 underline-offset-4">{children}</button>:<a href={href} target="_blank" rel="noreferrer" className="break-all font-medium text-sky-300 underline decoration-sky-500/40 underline-offset-4">{children}</a>},
                     img:({src='',alt=''})=>{const token=localStorage.getItem('access_token')||'';const source=src.startsWith('/api/')?`${src}${src.includes('?')?'&':'?'}token=${encodeURIComponent(token)}`:src;return <img src={source} alt={alt} loading="lazy" decoding="async" className="my-4 max-h-[70vh] max-w-full rounded-2xl border border-white/[.07] object-contain shadow-xl"/>},
                     pre:({children})=><>{children}</>,
-                    code:({className,children})=>{const raw=String(children);const language=className?.replace(/^language-/,'');if(className||raw.includes('\n'))return <MarkdownCodeBlock code={raw.replace(/\n$/,'')} language={language}/>;return <code dir="ltr" className="mx-0.5 break-all rounded-md border border-cyan-400/15 bg-cyan-400/10 px-1.5 py-0.5 font-mono text-[.9em] text-cyan-200">{children}</code>},
+                    code:({className,children})=>{const raw=String(children).replace(/\n$/,'');const language=className?.replace(/^language-/,'');const displayPrefix='komod-math-display:',inlinePrefix='komod-math:';if(!className&&(raw.startsWith(displayPrefix)||raw.startsWith(inlinePrefix))){const display=raw.startsWith(displayPrefix),prefix=display?displayPrefix:inlinePrefix;try{return <MathFormula source={decodeURIComponent(raw.slice(prefix.length))} displayMode={display}/> }catch{return <code>{raw}</code>}}if(className||raw.includes('\n'))return <MarkdownCodeBlock code={raw} language={language}/>;return <code dir="ltr" className="mx-0.5 break-all rounded-md border border-cyan-400/15 bg-cyan-400/10 px-1.5 py-0.5 font-mono text-[.9em] text-cyan-200">{children}</code>},
                     blockquote:({children})=><blockquote className="my-3 rounded-l-xl border-r-4 border-violet-400/60 bg-violet-400/[.07] px-4 py-2 italic text-violet-100/90">{children}</blockquote>,
                     ul:({children,className})=><ul className={`my-3 list-disc space-y-1 pr-6 marker:text-primary-300 ${className||''}`}>{children}</ul>,
                     ol:({children})=><ol className="my-3 list-decimal space-y-1 pr-7 marker:font-bold marker:text-primary-200">{children}</ol>,

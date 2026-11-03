@@ -291,8 +291,9 @@ function OfflineTextSync() {
         window.addEventListener('online', reconnect);
         window.addEventListener('komod-connectivity-changed', reconnect);
         window.addEventListener('komod-offline-sync-finished',finished);
-        document.addEventListener('visibilitychange', sync);
-        return () => { window.clearInterval(timer); window.removeEventListener('online', reconnect); window.removeEventListener('komod-connectivity-changed', reconnect); window.removeEventListener('komod-offline-sync-finished',finished); document.removeEventListener('visibilitychange', sync); };
+        const onVisible=()=>{if(!document.hidden)sync()};
+        document.addEventListener('visibilitychange', onVisible);
+        return () => { window.clearInterval(timer); window.removeEventListener('online', reconnect); window.removeEventListener('komod-connectivity-changed', reconnect); window.removeEventListener('komod-offline-sync-finished',finished); document.removeEventListener('visibilitychange', onVisible); };
     }, [addToast,queryClient]);
     return null;
 }

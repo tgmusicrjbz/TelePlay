@@ -20,7 +20,8 @@ interface FolderCardProps {
 
 export default function FolderCard({ folder, viewMode, selected, selectionMode = false, onSelect, onOpen, onFileDrop }: FolderCardProps) {
     const [isDragOver, setIsDragOver] = useState(false);
-    const { activeContextMenu, setActiveContextMenu } = useAppStore();
+    const showMenu = useAppStore(state=>state.activeContextMenu?.type==='folder'&&state.activeContextMenu.item.id===folder.id);
+    const setActiveContextMenu = useAppStore(state=>state.setActiveContextMenu);
     const cardDisplay=useCardDisplayPreferences();
     const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const longPressed = useRef(false);
@@ -34,7 +35,6 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
     } : undefined;
 
     // Check if this folder's context menu is active
-    const showMenu = activeContextMenu?.type === 'folder' && activeContextMenu?.item.id === folder.id;
 
     const handleContextMenu = (e: React.MouseEvent) => {
         e.preventDefault();

@@ -9,12 +9,13 @@ import { closestCenter, DndContext, DragEndEvent, DragOverlay, KeyboardSensor, M
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { getOfflineMedia } from '../lib/offline';
+import { useShallow } from 'zustand/react/shallow';
 
 const PLAYBACK_SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4] as const;
 const playbackSpeedLabel = (speed: number) => `${speed === 1 ? '1.0' : speed}x`;
 
 export default function MediaPlayer() {
-    const { previewFile: file, setPreviewFile, isPlayerMinimized, setPlayerMinimized, clearQueue } = useAppStore();
+    const { previewFile: file, setPreviewFile, isPlayerMinimized, setPlayerMinimized, clearQueue } = useAppStore(useShallow(state=>({previewFile:state.previewFile,setPreviewFile:state.setPreviewFile,isPlayerMinimized:state.isPlayerMinimized,setPlayerMinimized:state.setPlayerMinimized,clearQueue:state.clearQueue})));
 
     if (!file || (file.file_type !== 'video' && file.file_type !== 'audio')) return null;
 
@@ -35,7 +36,7 @@ export function InlineMediaPlayer({ file, expanded = false }: { file: TelegramFi
 }
 
 function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline = false, inlineExpanded = false }: MediaPlayerContentProps) {
-    const { playQueue, queueIndex, repeatMode, autoAdvance, playNext, playPrevious, shuffleQueue, reverseQueue, removeQueueItem, moveQueueItem, appendQueueItems, setRepeatMode, setAutoAdvance, setPlaylistFile, addToast } = useAppStore();
+    const { playQueue, queueIndex, repeatMode, autoAdvance, playNext, playPrevious, shuffleQueue, reverseQueue, removeQueueItem, moveQueueItem, appendQueueItems, setRepeatMode, setAutoAdvance, setPlaylistFile, addToast } = useAppStore(useShallow(state=>({playQueue:state.playQueue,queueIndex:state.queueIndex,repeatMode:state.repeatMode,autoAdvance:state.autoAdvance,playNext:state.playNext,playPrevious:state.playPrevious,shuffleQueue:state.shuffleQueue,reverseQueue:state.reverseQueue,removeQueueItem:state.removeQueueItem,moveQueueItem:state.moveQueueItem,appendQueueItems:state.appendQueueItems,setRepeatMode:state.setRepeatMode,setAutoAdvance:state.setAutoAdvance,setPlaylistFile:state.setPlaylistFile,addToast:state.addToast})));
     const videoRef = useRef<HTMLVideoElement>(null);
     const playbackEntryKey = (file as TelegramFile & { _queueEntryId?: string })._queueEntryId || `file-${file.id}`;
     const endedEntryRef = useRef<string | null>(null);

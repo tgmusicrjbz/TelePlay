@@ -509,8 +509,8 @@ export const useCurrentUser = (enabled = true) => {
     const cachedUser = cachedCurrentUser();
     return useQuery({
         queryKey: ['currentUser'],
-        queryFn: async () => {
-            const { data } = await api.get<User>('/auth/me', { timeout: 5000 });
+        queryFn: async ({signal}) => {
+            const { data } = await api.get<User>('/auth/me', { timeout: 5000, signal });
             return data;
         },
         enabled: enabled && !!localStorage.getItem('access_token'),
@@ -576,7 +576,7 @@ export const useFiles = (folderId?: number | null, fileType?: string, search?: s
     const cacheable = page === 1 && !search;
     return useQuery({
         queryKey: ['files', folderId, fileType, search, page, sort, favoriteOnly, includePlaylistCovers, includeHidden, hiddenOnly, allLevels],
-        queryFn: async () => {
+        queryFn: async ({signal}) => {
             const params: Record<string, any> = {};
             if (folderId !== undefined) params.folder_id = folderId;
             if (fileType) params.file_type = fileType;
@@ -590,7 +590,7 @@ export const useFiles = (folderId?: number | null, fileType?: string, search?: s
             if (hiddenOnly) params.hidden_only = true;
             if (allLevels) params.all_levels = true;
             if(offlineRequested()) return (cacheable?readJsonCache<FileListResponse>(cacheKey):undefined) || {files:[],total:0,page,per_page:50,search_mode:'exact' as const,suggestions:[]};
-            const { data } = await api.get<FileListResponse>('/files', { params });
+            const { data } = await api.get<FileListResponse>('/files', { params, signal });
             if(cacheable)writeJsonCache(cacheKey,data);
             return data;
         },
@@ -604,8 +604,8 @@ export const useFiles = (folderId?: number | null, fileType?: string, search?: s
 export const useFile = (fileId: number) => {
     return useQuery({
         queryKey: ['file', fileId],
-        queryFn: async () => {
-            const { data } = await api.get<TelegramFile>(`/files/${fileId}`);
+        queryFn: async ({signal}) => {
+            const { data } = await api.get<TelegramFile>(`/files/${fileId}`, {signal});
             return data;
         },
         enabled: !!fileId,
@@ -786,8 +786,8 @@ export const useMoveFiles = () => {
 export const useRecentFiles = (limit = 20, sort = '') => {
     return useQuery<FileListResponse>({
         queryKey: ['files', 'recent', limit, sort],
-        queryFn: async () => {
-             const { data } = await api.get<FileListResponse>('/files/recent', { params: { limit, sort: sort || undefined } });
+        queryFn: async ({signal}) => {
+             const { data } = await api.get<FileListResponse>('/files/recent', { params: { limit, sort: sort || undefined }, signal });
              return data;
         },
     });
@@ -796,8 +796,8 @@ export const useRecentFiles = (limit = 20, sort = '') => {
 export const useContinueWatching = (limit = 20, sort = '') => {
     return useQuery<FileListResponse>({
         queryKey: ['files', 'continue-watching', limit, sort],
-        queryFn: async () => {
-             const { data } = await api.get<FileListResponse>('/files/continue-watching', { params: { limit, sort: sort || undefined } });
+        queryFn: async ({signal}) => {
+             const { data } = await api.get<FileListResponse>('/files/continue-watching', { params: { limit, sort: sort || undefined }, signal });
              return data;
         },
     });
@@ -806,14 +806,15 @@ export const useContinueWatching = (limit = 20, sort = '') => {
 export const useActivityFeed = (enabled = true, limit = 50) => {
     return useQuery<ActivityFeed>({
         queryKey: ['activity', limit],
-        queryFn: async () => {
+        queryFn: async ({signal}) => {
             try {
-                const { data } = await api.get<ActivityFeed>('/files/activity', { params: { limit } });
+                const { data } = await api.get<ActivityFeed>('/files/activity', { params: { limit }, signal });
                 return data;
-            } catch {
+            } catch (error) {
+                if(signal.aborted)throw error;
                 const [recent, watching] = await Promise.all([
-                    api.get<FileListResponse>('/files/recent', { params: { limit } }),
-                    api.get<FileListResponse>('/files/continue-watching', { params: { limit } }),
+                    api.get<FileListResponse>('/files/recent', { params: { limit }, signal }),
+                    api.get<FileListResponse>('/files/continue-watching', { params: { limit }, signal }),
                 ]);
                 return { recent: recent.data.files, continue_watching: watching.data.files, favorites: [] };
             }
@@ -826,8 +827,8 @@ export const useActivityFeed = (enabled = true, limit = 50) => {
 export const useStorageStats = () => {
     return useQuery<StorageStats>({
         queryKey: ['storage'],
-        queryFn: async () => {
-             const { data } = await api.get<StorageStats>('/files/storage');
+        queryFn: async ({signal}) => {
+             const { data } = await api.get<StorageStats>('/files/storage', {signal});
              return data;
         },
         staleTime: 60000,
@@ -865,14 +866,14 @@ export const useFolders = (parentId?: number | null, sort = '', favoriteOnly = f
     const cacheKey=libraryFolderCacheKey(parentId,sort,favoriteOnly,includeHidden);
     return useQuery({
         queryKey: ['folders', parentId, sort, favoriteOnly, includeHidden],
-        queryFn: async () => {
+        queryFn: async ({signal}) => {
             const params: Record<string, any> = {};
             if (parentId !== undefined) params.parent_id = parentId;
             if (sort) params.sort = sort;
             if (favoriteOnly) params.favorite_only = true;
             if (includeHidden) params.include_hidden = true;
             if(offlineRequested()) return readJsonCache<Folder[]>(cacheKey)||[];
-            const { data } = await api.get<Folder[]>('/folders', { params });
+            const { data } = await api.get<Folder[]>('/folders', { params, signal });
             writeJsonCache(cacheKey,data);
             return data;
         },
@@ -886,9 +887,9 @@ export const useFolderTree = (includeHidden = false, enabled = true) => {
     const cacheKey=libraryFolderTreeCacheKey(includeHidden);
     return useQuery({
         queryKey: ['folderTree', includeHidden],
-        queryFn: async () => {
+        queryFn: async ({signal}) => {
             if(offlineRequested()) return readJsonCache<Folder[]>(cacheKey)||[];
-            const { data } = await api.get<Folder[]>('/folders/tree', { params: includeHidden ? { include_hidden: true } : undefined });
+            const { data } = await api.get<Folder[]>('/folders/tree', { params: includeHidden ? { include_hidden: true } : undefined, signal });
             writeJsonCache(cacheKey,data);
             return data;
         },
@@ -1566,8 +1567,8 @@ export const useRevokeWorkspace = () => {
     const queryClient = useQueryClient();
     return useMutation({ mutationFn: async (id: number) => api.delete(`/accounts/grants/${id}`), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['workspaceGrants'] }) });
 };
-export const useRooms = () => useQuery({queryKey:['rooms'],queryFn:async()=>(await api.get<WatchRoom[]>('/rooms')).data,staleTime:15_000,refetchOnMount:'always',refetchOnWindowFocus:true});
-export const useRoom = (id:string|null) => useQuery({queryKey:['room',id],queryFn:async()=>(await api.get<WatchRoom>(`/rooms/${id}`)).data,enabled:Boolean(id),staleTime:5_000,refetchOnMount:'always',refetchOnWindowFocus:true});
+export const useRooms = () => useQuery({queryKey:['rooms'],queryFn:async({signal})=>(await api.get<WatchRoom[]>('/rooms',{signal})).data,staleTime:15_000,refetchOnMount:'always',refetchOnWindowFocus:false});
+export const useRoom = (id:string|null) => useQuery({queryKey:['room',id],queryFn:async({signal})=>(await api.get<WatchRoom>(`/rooms/${id}`,{signal})).data,enabled:Boolean(id),staleTime:5_000,refetchOnMount:'always',refetchOnWindowFocus:false});
 export const useCreateRoom = () => {const client=useQueryClient();return useMutation({mutationFn:async(payload:RoomCreatePayload)=>(await api.post<WatchRoom>('/rooms',payload)).data,onSuccess:()=>client.invalidateQueries({queryKey:['rooms']})})};
 export const useJoinRoom = () => {const client=useQueryClient();return useMutation({mutationFn:async({id,password}:{id:string;password?:string})=>(await api.post<WatchRoom>(`/rooms/${id}/join`,{password})).data,onSuccess:room=>{client.setQueryData(['room',room.id],room);client.invalidateQueries({queryKey:['rooms']})}})};
 export const useDeleteRoom = () => {const client=useQueryClient();return useMutation({mutationFn:async(id:string)=>{await api.delete(`/rooms/${id}`);return id},onSuccess:id=>{client.removeQueries({queryKey:['room',id]});client.invalidateQueries({queryKey:['rooms']})}})};

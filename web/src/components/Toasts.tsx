@@ -3,7 +3,10 @@ import { X, CheckCircle, AlertCircle, Info } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 
 export default function Toasts() {
-    const { toasts, removeToast, isPlayerMinimized, previewFile } = useAppStore();
+    const toasts = useAppStore(state=>state.toasts);
+    const removeToast = useAppStore(state=>state.removeToast);
+    const isPlayerMinimized = useAppStore(state=>state.isPlayerMinimized);
+    const previewFile = useAppStore(state=>state.previewFile);
     const playerVisible = isPlayerMinimized && previewFile && (previewFile.file_type === 'audio' || previewFile.file_type === 'video');
 
     return (

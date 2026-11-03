@@ -23,7 +23,15 @@ function injectOfflineBuildAssets() {
             const assetsDirectory = path.join(outputDirectory, 'assets')
             const manifestPath = path.join(outputDirectory, '.vite', 'manifest.json')
             const indexPath = path.join(outputDirectory, 'index.html')
-            const assets = (await filesUnder(assetsDirectory))
+            // closeBundle also runs after a failed Rollup build. In that case
+            // dist/assets does not exist and this helper must not hide the real
+            // compiler error with a secondary ENOENT.
+            const builtFiles = await filesUnder(assetsDirectory).catch((error:NodeJS.ErrnoException) => {
+                if (error.code === 'ENOENT') return null
+                throw error
+            })
+            if (!builtFiles) return
+            const assets = builtFiles
                 .map(file => `/${path.relative(outputDirectory, file).replace(/\\/g, '/')}`)
                 // Modern browsers supported by the PWA use WOFF2. Do not
                 // precache duplicate WOFF fallbacks for every KaTeX font.
@@ -89,7 +97,6 @@ export default defineConfig({
                     'interaction-vendor': ['@dnd-kit/core', '@dnd-kit/sortable', '@dnd-kit/utilities'],
                     'markdown-vendor': ['katex'],
                     'markdown-parser': ['react-markdown', 'remark-gfm', 'remark-breaks'],
-                    'markdown-math': ['remark-math', 'rehype-katex'],
                     'icons-vendor': ['lucide-react'],
                 },
             },

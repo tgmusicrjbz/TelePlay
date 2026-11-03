@@ -26,7 +26,9 @@ export default function FileCard({
     onSelect,
     onPlay
 }: FileCardProps) {
-    const { activeContextMenu, setActiveContextMenu, addToast } = useAppStore();
+    const showMenu = useAppStore(state=>state.activeContextMenu?.type==='file'&&state.activeContextMenu.item.id===file.id);
+    const setActiveContextMenu = useAppStore(state=>state.setActiveContextMenu);
+    const addToast = useAppStore(state=>state.addToast);
     const updateFile = useUpdateFile();
     const cardDisplay=useCardDisplayPreferences();
     const [thumbnailFailed, setThumbnailFailed] = useState(false);
@@ -38,9 +40,6 @@ export default function FileCard({
         await updateFile.mutateAsync({ id: file.id, is_favorite: !file.is_favorite });
         addToast(file.is_favorite ? 'از نشان‌شده‌ها برداشته شد' : 'به نشان‌شده‌ها اضافه شد ⭐');
     };
-
-    // Check if this file's context menu is active
-    const showMenu = activeContextMenu?.type === 'file' && activeContextMenu?.item.id === file.id;
 
     const handleContextMenu = (e: React.MouseEvent) => {
         e.preventDefault();
