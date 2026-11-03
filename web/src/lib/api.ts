@@ -668,7 +668,7 @@ const removeFilesFromCachedPack = (pack: Pack | undefined, ids: Set<number>) => 
 /** Load every page for pickers that must represent the whole cabinet. */
 export const useAllFiles = (fileType?: string, search?: string, sort = 'created:desc', enabled = true) => useQuery({
     queryKey: ['all-files-picker', fileType, search, sort],
-    queryFn: async () => {
+    queryFn: async ({signal}) => {
         const files: TelegramFile[] = [];
         let page = 1;
         let total = 0;
@@ -676,7 +676,7 @@ export const useAllFiles = (fileType?: string, search?: string, sort = 'created:
             const {data} = await api.get<FileListResponse>('/files', {params:{
                 file_type:fileType || undefined, search:search || undefined, sort,
                 page, per_page:100, all_levels:true,
-            }});
+            },signal});
             if (!data.files.length) break;
             files.push(...data.files);
             total = data.total;
