@@ -105,6 +105,21 @@ def create_public_share_token(public_hash: str) -> str:
     }, settings.jwt_secret, algorithm="HS256")
 
 
+def create_private_file_link_token(owner_id: int, file_id: int, download: bool = False) -> str:
+    """Create a temporary link scoped to one file and one disposition."""
+    return jwt.encode({
+        "sub": str(owner_id), "fid": file_id, "download": bool(download),
+        "exp": datetime.utcnow() + timedelta(hours=24), "type": "private-file-link",
+    }, settings.jwt_secret, algorithm="HS256")
+
+
+def create_collection_file_token(public_hash: str, file_id: int) -> str:
+    return jwt.encode({
+        "sub": public_hash, "fid": file_id,
+        "exp": datetime.utcnow() + timedelta(hours=12), "type": "collection-file",
+    }, settings.jwt_secret, algorithm="HS256")
+
+
 def create_room_stream_token(owner_telegram_id: int, viewer_user_id: int, room_id: str, file_id: int, expires_at: datetime) -> str:
     """Short-lived proof allowing one room item to stream as its owner."""
     return jwt.encode({

@@ -28,7 +28,7 @@ from .routers.folders import ensure_default_folder
 from .database import async_session
 from .models import User, File, Folder, LoginCode, Playlist, PlaylistItem, BotUserState, TelegramDestination, TelegramGroupSettings, AppSetting
 from .config import get_settings
-from .auth import create_telegram_login_token
+from .auth import create_private_file_link_token, create_telegram_login_token
 from .services import escape_like, select_best_thumbnail, telegram_text_with_links, unreferenced_audio_variant_messages, unreferenced_storage_messages
 from .caption_metadata import extract_tags_from_caption, parse_file_caption
 from .downloader import ImportJob, link_importer
@@ -1035,7 +1035,12 @@ def file_detail_keyboard(file: File, back_callback: str = "files:0") -> InlineKe
         "image": "🖼 نمایش",
         "text": "📖 باز کردن",
     }.get(file.file_type, "👁 پیش‌نمایش")
-    rows = [[InlineKeyboardButton(preview_label, callback_data=f"preview:{file.id}")]]
+    play_token = create_private_file_link_token(file.user_id, file.id, False)
+    download_token = create_private_file_link_token(file.user_id, file.id, True)
+    rows = [[InlineKeyboardButton(preview_label, callback_data=f"preview:{file.id}")], [
+        InlineKeyboardButton("🌐 پخش با لینک", url=f"{settings.web_base_url}/api/shares/file-link/{play_token}"),
+        InlineKeyboardButton("⬇️ لینک دانلود", url=f"{settings.web_base_url}/api/shares/file-link/{download_token}"),
+    ]]
     if file.file_type in ("audio", "video"):
         rows.append([
             InlineKeyboardButton("📝 استخراج متن", callback_data=f"filestt:{file.id}"),

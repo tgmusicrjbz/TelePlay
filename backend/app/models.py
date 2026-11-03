@@ -616,6 +616,28 @@ class PackItem(Base):
     )
 
 
+class PublicCollectionShare(Base):
+    """Revocable public access to a folder, pack, or playlist."""
+    __tablename__ = "public_collection_shares"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    resource_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    resource_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    public_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    password_hash: Mapped[Optional[str]] = mapped_column(Text)
+    allow_download: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    view_limit: Mapped[Optional[int]] = mapped_column(Integer)
+    view_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("owner_user_id", "resource_type", "resource_id", name="uq_public_collection_resource"),
+        Index("idx_public_collection_resource", resource_type, resource_id),
+    )
+
+
 class LoginCode(Base):
     """Temporary login code for TV/Web auth."""
     __tablename__ = "login_codes"

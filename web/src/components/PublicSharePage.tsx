@@ -14,6 +14,12 @@ type ShareInfo = {
     views_remaining?: number | null;
 };
 
+type CollectionItem = { id:number; file_name:string; file_type:ShareInfo['file_type']; file_size:number; mime_type?:string|null; duration?:number|null; stream_url:string };
+type CollectionInfo = {
+    resource_type:'folder'|'pack'|'playlist'; title:string; password_required:boolean; unlocked:boolean;
+    allow_download:boolean; expires_at?:string|null; view_limit?:number|null; views_remaining?:number|null; items:CollectionItem[];
+};
+
 function humanSize(value: number) {
     if (!value) return 'بدون حجم';
     const units = ['بایت', 'کیلوبایت', 'مگابایت', 'گیگابایت'];
@@ -25,7 +31,8 @@ function humanSize(value: number) {
 
 export default function PublicSharePage() {
     const { publicHash = '' } = useParams();
-    const [info, setInfo] = useState<ShareInfo | null>(null);
+    const [info, setInfo] = useState<ShareInfo | CollectionInfo | null>(null);
+    const [collection, setCollection] = useState(false);
     const [password, setPassword] = useState('');
     const [accessToken, setAccessToken] = useState('');
     const [loading, setLoading] = useState(true);
@@ -38,15 +45,19 @@ export default function PublicSharePage() {
         fetch(`/api/stream/s/${encodeURIComponent(publicHash)}/info`)
             .then(async response => {
                 const data = await response.json().catch(() => ({}));
-                if (!response.ok) throw new Error(data.detail || 'این پیوند در دسترس نیست.');
-                if (active) setInfo(data);
+                if (response.ok) return {data,collection:false};
+                const fallback=await fetch(`/api/shares/public/${encodeURIComponent(publicHash)}`);
+                const fallbackData=await fallback.json().catch(() => ({}));
+                if(!fallback.ok) throw new Error(fallbackData.detail || data.detail || 'این پیوند در دسترس نیست.');
+                return {data:fallbackData,collection:true};
             })
+            .then(result=>{if(active){setInfo(result.data);setCollection(result.collection)}})
             .catch(reason => { if (active) setError(reason instanceof Error ? reason.message : 'این پیوند در دسترس نیست.'); })
             .finally(() => { if (active) setLoading(false); });
         return () => { active = false; };
     }, [publicHash]);
 
-    const unlocked = Boolean(info && (!info.password_required || accessToken));
+    const unlocked = Boolean(info && (!info.password_required || accessToken || (collection && (info as CollectionInfo).unlocked)));
     const streamUrl = useMemo(() => {
         const params = new URLSearchParams();
         if (accessToken) params.set('access_token', accessToken);
@@ -58,12 +69,18 @@ export default function PublicSharePage() {
         event.preventDefault();
         setUnlocking(true); setError('');
         try {
-            const response = await fetch(`/api/stream/s/${encodeURIComponent(publicHash)}/unlock`, {
+            const response = await fetch(collection?`/api/shares/public/${encodeURIComponent(publicHash)}/unlock`:`/api/stream/s/${encodeURIComponent(publicHash)}/unlock`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password }),
             });
             const data = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(data.detail || 'باز کردن پیوند انجام نشد.');
             setAccessToken(data.access_token);
+            if(collection){
+                const refreshed=await fetch(`/api/shares/public/${encodeURIComponent(publicHash)}?access_token=${encodeURIComponent(data.access_token)}`);
+                const refreshedData=await refreshed.json();
+                if(!refreshed.ok)throw new Error(refreshedData.detail||'دریافت محتوا انجام نشد.');
+                setInfo(refreshedData);
+            }
         } catch (reason) {
             setError(reason instanceof Error ? reason.message : 'باز کردن پیوند انجام نشد.');
         } finally { setUnlocking(false); }
@@ -72,18 +89,26 @@ export default function PublicSharePage() {
     if (loading) return <PublicShell><Loader2 className="h-8 w-8 animate-spin text-primary-300"/><p>دارم فایل رو آماده می‌کنم…</p></PublicShell>;
     if (!info) return <PublicShell><LockKeyhole className="h-10 w-10 text-red-300"/><h1 className="text-xl font-black">پیوند در دسترس نیست</h1><p className="max-w-sm text-center text-sm text-dark-400">{error || 'ممکنه پیوند لغو شده یا زمانش تموم شده باشه.'}</p></PublicShell>;
 
+    if(collection) return <CollectionShare info={info as CollectionInfo} unlocked={unlocked} password={password} setPassword={setPassword} unlock={unlock} unlocking={unlocking} error={error}/>;
+
+    const fileInfo=info as ShareInfo;
     return <main dir="rtl" className="min-h-dvh bg-dark-950 px-4 py-8 text-white sm:py-12">
         <section className="mx-auto w-full max-w-3xl overflow-hidden rounded-[2rem] border border-white/[.08] bg-dark-900/90 shadow-2xl">
             <header className="border-b border-white/[.07] p-5 sm:p-7">
-                <div className="flex items-start gap-3"><span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-primary-500/15 text-primary-200"><ShieldCheck className="h-6 w-6"/></span><div className="min-w-0"><p className="text-xs text-primary-300">پیوند امن کمد</p><h1 dir="auto" className="mt-1 break-words text-xl font-black sm:text-2xl">{info.file_name}</h1><p className="mt-2 text-xs text-dark-400">{humanSize(info.file_size)}{info.expires_at ? ` · معتبر تا ${new Date(info.expires_at).toLocaleString('fa-IR')}` : ''}</p></div></div>
+                <div className="flex items-start gap-3"><span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-primary-500/15 text-primary-200"><ShieldCheck className="h-6 w-6"/></span><div className="min-w-0"><p className="text-xs text-primary-300">پیوند امن کمد</p><h1 dir="auto" className="mt-1 break-words text-xl font-black sm:text-2xl">{fileInfo.file_name}</h1><p className="mt-2 text-xs text-dark-400">{humanSize(fileInfo.file_size)}{fileInfo.expires_at ? ` · معتبر تا ${new Date(fileInfo.expires_at).toLocaleString('fa-IR')}` : ''}</p></div></div>
             </header>
             <div className="p-4 sm:p-7">
-                {!unlocked ? <form onSubmit={unlock} className="mx-auto max-w-sm rounded-3xl bg-white/[.035] p-5 text-center"><KeyRound className="mx-auto h-8 w-8 text-primary-300"/><h2 className="mt-3 font-bold">این فایل رمز داره</h2><p className="mt-1 text-xs text-dark-400">رمزی که فرستنده داده رو وارد کن.</p><input autoFocus type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder="رمز پیوند" className="input mt-4 w-full text-right"/><button disabled={!password || unlocking} className="btn-primary mt-3 flex min-h-11 w-full items-center justify-center gap-2 disabled:opacity-50">{unlocking && <Loader2 className="h-4 w-4 animate-spin"/>}باز کردن فایل</button></form> : <MediaPreview info={info} streamUrl={streamUrl}/>} 
+                {!unlocked ? <form onSubmit={unlock} className="mx-auto max-w-sm rounded-3xl bg-white/[.035] p-5 text-center"><KeyRound className="mx-auto h-8 w-8 text-primary-300"/><h2 className="mt-3 font-bold">این فایل رمز داره</h2><p className="mt-1 text-xs text-dark-400">رمزی که فرستنده داده رو وارد کن.</p><input autoFocus type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder="رمز پیوند" className="input mt-4 w-full text-right"/><button disabled={!password || unlocking} className="btn-primary mt-3 flex min-h-11 w-full items-center justify-center gap-2 disabled:opacity-50">{unlocking && <Loader2 className="h-4 w-4 animate-spin"/>}باز کردن فایل</button></form> : <MediaPreview info={fileInfo} streamUrl={streamUrl}/>}
                 {error && <p className="mt-4 rounded-2xl bg-red-500/10 px-4 py-3 text-center text-sm text-red-200">{error}</p>}
-                {unlocked && <div className="mt-5 flex flex-wrap items-center justify-center gap-2">{info.allow_download && <a className="btn-primary flex min-h-11 items-center gap-2 px-5" href={`${streamUrl}${streamUrl.includes('?') ? '&' : '?'}download=1`}><Download className="h-4 w-4"/>دانلود فایل</a>}<span className="rounded-xl bg-white/[.04] px-3 py-2 text-xs text-dark-400">{info.views_remaining == null ? 'بدون محدودیت مشاهده' : `${info.views_remaining.toLocaleString('fa-IR')} مشاهده باقی مونده`}</span></div>}
+                {unlocked && <div className="mt-5 flex flex-wrap items-center justify-center gap-2">{fileInfo.allow_download && <a className="btn-primary flex min-h-11 items-center gap-2 px-5" href={`${streamUrl}${streamUrl.includes('?') ? '&' : '?'}download=1`}><Download className="h-4 w-4"/>دانلود فایل</a>}<span className="rounded-xl bg-white/[.04] px-3 py-2 text-xs text-dark-400">{fileInfo.views_remaining == null ? 'بدون محدودیت مشاهده' : `${fileInfo.views_remaining.toLocaleString('fa-IR')} مشاهده باقی مونده`}</span></div>}
             </div>
         </section>
     </main>;
+}
+
+function CollectionShare({info,unlocked,password,setPassword,unlock,unlocking,error}:{info:CollectionInfo;unlocked:boolean;password:string;setPassword:(v:string)=>void;unlock:(e:FormEvent)=>void;unlocking:boolean;error:string}){
+    const labels={folder:'پوشه',pack:'جعبه',playlist:'پلی‌لیست'};
+    return <main dir="rtl" className="min-h-dvh bg-dark-950 px-3 py-6 text-white sm:px-5 sm:py-10"><section className="mx-auto max-w-5xl"><header className="rounded-[2rem] border border-white/[.08] bg-gradient-to-bl from-primary-500/[.15] to-dark-900 p-5 sm:p-7"><p className="text-xs font-bold text-primary-300">{labels[info.resource_type]} عمومی کمد</p><h1 dir="auto" className="mt-2 break-words text-2xl font-black sm:text-4xl">{info.title}</h1><p className="mt-3 text-xs text-dark-400">{unlocked?`${info.items.length.toLocaleString('fa-IR')} فایل قابل مشاهده`:'برای دیدن محتوا رمز را وارد کن.'}</p></header>{!unlocked?<form onSubmit={unlock} className="mx-auto mt-6 max-w-sm rounded-3xl border border-white/[.07] bg-dark-900 p-5 text-center"><KeyRound className="mx-auto h-8 w-8 text-primary-300"/><input autoFocus type="password" value={password} onChange={e=>setPassword(e.target.value)} className="input mt-4 w-full" placeholder="رمز پیوند"/><button disabled={!password||unlocking} className="btn-primary mt-3 min-h-11 w-full disabled:opacity-50">{unlocking?'در حال باز کردن…':'باز کردن مجموعه'}</button></form>:<div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{info.items.map(item=><article key={item.id} className="overflow-hidden rounded-3xl border border-white/[.07] bg-dark-900/85 p-3"><MediaPreview info={{...item,password_required:false,allow_download:info.allow_download}} streamUrl={item.stream_url}/><div className="mt-3 flex items-center gap-2"><strong dir="auto" className="min-w-0 flex-1 truncate text-sm">{item.file_name}</strong>{info.allow_download&&<a title="دانلود" className="btn-icon shrink-0" href={`${item.stream_url}?download=1`}><Download className="h-4 w-4"/></a>}</div><small className="text-dark-500">{humanSize(item.file_size)}</small></article>)}</div>}{error&&<p className="mx-auto mt-4 max-w-md rounded-2xl bg-red-500/10 p-3 text-center text-sm text-red-200">{error}</p>}</section></main>;
 }
 
 function MediaPreview({ info, streamUrl }: { info: ShareInfo; streamUrl: string }) {

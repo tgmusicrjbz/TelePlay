@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Boxes, Check, ChevronLeft, DownloadCloud, ExternalLink, Eye, EyeOff, Loader2, MoreVertical, Pencil, Send, Trash2, X } from 'lucide-react';
+import { Boxes, Check, ChevronLeft, DownloadCloud, ExternalLink, Eye, EyeOff, Globe, Loader2, MoreVertical, Pencil, Send, Trash2, X } from 'lucide-react';
 import { api, Pack, sendFilesToTelegram, type PackSummary, useDeletePack, useUpdatePack } from '../lib/api';
 import { savePackOffline } from '../lib/offline';
 import { useAppStore } from '../lib/store';
@@ -34,6 +34,8 @@ export default function PackCard({ pack, viewMode, onOpen, selected=false, selec
     const saveOffline=async()=>{setMenuOpen(false);setSaving(true);try{const {data}=await api.get<Pack>(`/packs/${pack.id}`);await savePackOffline(data);addToast(`جعبه «${pack.name}» آفلاین شد.`)}catch(error){addToast(error instanceof Error?error.message:'ذخیره جعبه انجام نشد.','error')}finally{setSaving(false)}};
     const sendToTelegram=async()=>{setMenuOpen(false);setSending(true);try{const {data}=await api.get<Pack>(`/packs/${pack.id}`);await sendFilesToTelegram(data.items.map(item=>item.file.id));addToast('محتوای جعبه به تلگرام فرستاده شد.')}catch(error:any){addToast(error?.response?.data?.detail||'ارسال جعبه انجام نشد.','error')}finally{setSending(false)}};
     const toggleBlur=async()=>{setMenuOpen(false);try{await update.mutateAsync({id:pack.id,is_blurred:!pack.is_blurred});addToast(pack.is_blurred?'کارت جعبه واضح شد.':'کارت جعبه محو شد.')}catch(error:any){addToast(error?.response?.data?.detail||'تغییر نمایش جعبه انجام نشد.','error')}};
+    const sharePublic=async()=>{setMenuOpen(false);try{const {data}=await api.post<{url:string}>(`/shares/pack/${pack.id}`,{expires_in_hours:168,allow_download:true});await navigator.clipboard.writeText(`${window.location.origin}${data.url}`);addToast('پیوند عمومی جعبه ساخته و کپی شد.')}catch(error:any){addToast(error?.response?.data?.detail||'ساخت پیوند عمومی انجام نشد.','error')}};
+    const revokePublic=async()=>{setMenuOpen(false);try{const {data}=await api.delete<{revoked:boolean}>(`/shares/pack/${pack.id}`);addToast(data.revoked?'پیوند عمومی جعبه لغو شد.':'پیوند فعالی برای این جعبه نبود.','info')}catch(error:any){addToast(error?.response?.data?.detail||'لغو پیوند انجام نشد.','error')}};
     const deletePack=(deleteFiles:boolean)=>{setConfirmDelete(false);addToast('حذف در پس‌زمینه شروع شد…','info');void remove.mutateAsync({id:pack.id,deleteFiles}).then(()=>addToast(deleteFiles?'جعبه و محتویاتش حذف شدند.':'جعبه حذف شد.')).catch((error:any)=>addToast(error?.response?.data?.detail||'حذف جعبه انجام نشد.','error'))};
     useEffect(()=>{if(!menuOpen&&!confirmDelete)return;const close=(event:KeyboardEvent)=>{if(event.key==='Escape'){setMenuOpen(false);setConfirmDelete(false)}};document.addEventListener('keydown',close);return()=>document.removeEventListener('keydown',close)},[confirmDelete,menuOpen]);
     const isMobile=window.innerWidth<640;
@@ -45,6 +47,8 @@ export default function PackCard({ pack, viewMode, onOpen, selected=false, selec
         <button className="context-menu-item min-h-12 w-full rounded-xl bg-white/[.025]" onClick={()=>{setMenuOpen(false);onOpen()}}><ExternalLink className="h-5 w-5"/> بازکردن</button>
         <button className="context-menu-item min-h-12 w-full rounded-xl bg-white/[.025]" onClick={openEdit}><Pencil className="h-5 w-5"/> ویرایش جعبه</button>
         <button className="context-menu-item min-h-12 w-full rounded-xl bg-white/[.025]" disabled={sending} onClick={()=>void sendToTelegram()}>{sending?<Loader2 className="h-5 w-5 animate-spin"/>:<Send className="h-5 w-5"/>} ارسال به تلگرام</button>
+        <button className="context-menu-item min-h-12 w-full rounded-xl bg-white/[.025]" onClick={()=>void sharePublic()}><Globe className="h-5 w-5"/> پیوند عمومی</button>
+        <button className="context-menu-item min-h-12 w-full rounded-xl bg-white/[.025]" onClick={()=>void revokePublic()}><X className="h-5 w-5"/> لغو پیوند عمومی</button>
         <button className="context-menu-item min-h-12 w-full rounded-xl bg-white/[.025]" disabled={saving} onClick={()=>void saveOffline()}>{saving?<Loader2 className="h-5 w-5 animate-spin"/>:<DownloadCloud className="h-5 w-5"/>} ذخیره آفلاین</button>
         <button className="context-menu-item min-h-12 w-full rounded-xl bg-white/[.025]" disabled={update.isPending} onClick={()=>void toggleBlur()}>{pack.is_blurred?<Eye className="h-5 w-5"/>:<EyeOff className="h-5 w-5"/>} {pack.is_blurred?'واضح کردن':'محو کردن'}</button>
         <button className="context-menu-item min-h-12 w-full rounded-xl bg-red-500/[.06] text-red-300" onClick={()=>{setMenuOpen(false);setConfirmDelete(true)}}><Trash2 className="h-5 w-5"/> حذف جعبه</button>

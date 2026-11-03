@@ -133,13 +133,22 @@ export default function GlobalContextMenu() {
         }
     };
 
-    const privateFileLink = (file: TelegramFile): string => {
-        const raw=file.stream_url||`/api/stream/${file.id}`;
-        const absolute=raw.startsWith('http')?raw:`${window.location.origin}${raw.startsWith('/')?'':'/'}${raw}`;
-        const token = localStorage.getItem('access_token');
-        if(!token||absolute.includes('token='))return absolute;
-        return `${absolute}${absolute.includes('?')?'&':'?'}token=${encodeURIComponent(token)}`;
+    const copyPrivateFileLink = async (file:TelegramFile, mode:'play'|'download') => {
+        try {
+            const {data}=await api.post<{play_url:string;download_url:string}>(`/shares/file/${file.id}/private-links`);
+            const raw=mode==='play'?data.play_url:data.download_url;
+            await handleCopy(`${window.location.origin}${raw}`,mode);
+        } catch(error:any) { addToast(error?.response?.data?.detail||'ساخت پیوند موقت انجام نشد.','error'); }
     };
+
+    const shareCollection = async (kind:'folder', id:number) => {
+        try {
+            const {data}=await api.post<{url:string}>(`/shares/${kind}/${id}`,{expires_in_hours:168,allow_download:true});
+            await navigator.clipboard.writeText(`${window.location.origin}${data.url}`);
+            setActiveContextMenu(null); addToast('پیوند عمومی ساخته و کپی شد.');
+        } catch(error:any) { addToast(error?.response?.data?.detail||'ساخت پیوند عمومی انجام نشد.','error'); }
+    };
+    const revokeCollection=async(kind:'folder',id:number)=>{try{const {data}=await api.delete<{revoked:boolean}>(`/shares/${kind}/${id}`);setActiveContextMenu(null);addToast(data.revoked?'پیوند عمومی لغو شد.':'پیوند فعالی برای این پوشه نبود.','info')}catch(error:any){addToast(error?.response?.data?.detail||'لغو پیوند انجام نشد.','error')}};
 
     const handleDownload = async (file: TelegramFile) => {
         try {
@@ -245,8 +254,8 @@ export default function GlobalContextMenu() {
                                 </>}
                             </div>
                             {!readOnlyWorkspace&&<><div className="rounded-2xl border border-white/[.07] bg-dark-950/40 p-2"><p className="mb-2 px-1 text-[10px] font-medium text-dark-500">پیوندها</p><div className="grid grid-cols-2 gap-2">
-                                <ActionTile icon={<Link/>} label={copiedId==='stream'?'کپی شد':'پیوند خصوصی پخش'} onClick={()=>void handleCopy(privateFileLink(file),'stream')}/>
-                                <ActionTile icon={<HardDriveDownload/>} label={copiedId==='download'?'کپی شد':'پیوند خصوصی دانلود'} onClick={()=>void handleCopy(privateFileLink(file)+(privateFileLink(file).includes('?')?'&':'?')+'download=1','download')}/>
+                                <ActionTile icon={<Link/>} label={copiedId==='play'?'کپی شد':'پیوند موقت پخش'} onClick={()=>void copyPrivateFileLink(file,'play')}/>
+                                <ActionTile icon={<HardDriveDownload/>} label={copiedId==='download'?'کپی شد':'پیوند موقت دانلود'} onClick={()=>void copyPrivateFileLink(file,'download')}/>
                                 {file.public_stream_url?<>
                                     <ActionTile icon={<Globe className="text-emerald-400"/>} label="پیوند عمومی" onClick={()=>handleCopy(publicPageUrl(file),'public')}/>
                                     <ActionTile icon={<ShieldOff/>} label="لغو پیوند عمومی" onClick={()=>handleRevokeShare(file)}/>
@@ -267,6 +276,8 @@ export default function GlobalContextMenu() {
                 </> : folder ? <>
                     {readOnlyWorkspace?<p className="rounded-xl bg-amber-500/[.08] px-3 py-3 text-sm text-amber-200">این کمد با دسترسی فقط مشاهده باز شده است.</p>:<>
                         <div className="grid grid-cols-2 gap-2">
+                            <ActionTile icon={<Globe/>} label="پیوند عمومی پوشه" onClick={()=>void shareCollection('folder',folder.id)}/>
+                            <ActionTile icon={<ShieldOff/>} label="لغو پیوند پوشه" onClick={()=>void revokeCollection('folder',folder.id)}/>
                             <ActionTile icon={<Heart className={folder.is_favorite?'fill-current text-pink-400':''}/>} label={folder.is_favorite?'برداشتن نشان':'نشان کردن'} onClick={async()=>{setActiveContextMenu(null);await updateFolder.mutateAsync({id:folder.id,is_favorite:!folder.is_favorite});addToast(folder.is_favorite?'نشان برداشته شد.':'کشو نشان شد ⭐');}}/>
                             <ActionTile icon={<Pin className={folder.is_pinned?'fill-current text-primary-300':''}/>} label={folder.is_pinned?'برداشتن پین':'پین بالای کمد'} onClick={async()=>{setActiveContextMenu(null);await updateFolder.mutateAsync({id:folder.id,is_pinned:!folder.is_pinned});addToast(folder.is_pinned?'پین برداشته شد.':'کشو پین شد 📌');}}/>
                             <ActionTile icon={<Edit/>} label="تغییر نام" onClick={()=>handleAction(()=>setRenameFolder(folder))}/>

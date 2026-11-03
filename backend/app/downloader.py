@@ -430,6 +430,40 @@ def _download_instagram_direct(url: str, quality: str = "auto") -> list[dict]:
         raise
 
 
+def _download_youtube_direct(url: str, quality: str = "480") -> list[dict]:
+    """Download one public YouTube item on this server without a helper bot."""
+    temp_dir = Path(tempfile.mkdtemp(prefix="komod-youtube-"))
+    try:
+        from yt_dlp import YoutubeDL
+        audio_mode = str(quality).casefold() == "audio"
+        height = int(quality) if str(quality).isdigit() else None
+        selector = "bestaudio/best" if audio_mode else (f"bestvideo[height<={height}]+bestaudio/best[height<={height}]/best" if height else "bestvideo+bestaudio/best")
+        options = {
+            "quiet": True, "no_warnings": True, "noprogress": True,
+            "logger": _QuietYTDLPLogger(), "format": selector,
+            "outtmpl": str(temp_dir / "%(id)s.%(ext)s"),
+            "merge_output_format": "mp4", "socket_timeout": 30,
+            "retries": 3, "fragment_retries": 3, "extractor_retries": 3,
+            "noplaylist": True,
+        }
+        with YoutubeDL(options) as downloader:
+            info = downloader.extract_info(url, download=True) or {}
+        ignored = {".part", ".ytdl", ".json", ".description", ".vtt", ".srt"}
+        path = next((p for p in temp_dir.iterdir() if p.is_file() and p.suffix.casefold() not in ignored), None)
+        if path is None:
+            raise RuntimeError("یوتیوب فایل قابل دریافت برنگرداند.")
+        return [{
+            "message": None, "local_path": str(path), "temp_dir": str(temp_dir),
+            "title": sanitize_filename(str(info.get("title") or "ویدیوی یوتیوب"))[:220],
+            "type": "audio" if audio_mode else "video",
+            "author": _clean_source_author(info.get("uploader") or info.get("channel")),
+            "source_url": url,
+        }]
+    except Exception:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise
+
+
 class ImportCancelled(Exception):
     """Raised internally when a queued or active import is cancelled."""
 
@@ -851,6 +885,16 @@ class LinkImportService:
 
     async def _download(self, client: Client, job: ImportJob, url: str, quality: str) -> list[dict]:
         is_instagram = classify_import_url(url) == "instagram"
+        is_youtube = classify_import_url(url) == "youtube"
+        if is_youtube:
+            self.statuses[job.id].update(message="دریافت مستقیم از یوتیوب", progress=18)
+            await self._persist_status(job.id)
+            try:
+                return await asyncio.to_thread(_download_youtube_direct, url, quality)
+            except Exception:
+                logger.warning("Direct YouTube download failed; falling back to helper bot", exc_info=True)
+                self.statuses[job.id].update(message="روش مستقیم پاسخ نداد؛ تلاش با روش جایگزین", progress=20)
+                await self._persist_status(job.id)
         # Two attempts use AllSaver.  The third uses an independent direct
         # extractor, so a stalled or rate-limited helper bot cannot block the
         # import forever.
