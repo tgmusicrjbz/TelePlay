@@ -37,6 +37,8 @@ export function InlineMediaPlayer({ file, expanded = false }: { file: TelegramFi
 function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline = false, inlineExpanded = false }: MediaPlayerContentProps) {
     const { playQueue, queueIndex, repeatMode, autoAdvance, playNext, playPrevious, shuffleQueue, reverseQueue, removeQueueItem, moveQueueItem, appendQueueItems, setRepeatMode, setAutoAdvance, setPlaylistFile, addToast } = useAppStore();
     const videoRef = useRef<HTMLVideoElement>(null);
+    const playbackEntryKey = (file as TelegramFile & { _queueEntryId?: string })._queueEntryId || `file-${file.id}`;
+    const endedEntryRef = useRef<string | null>(null);
     const nextAudioRef = useRef<HTMLAudioElement>(null);
     const crossfadeCarry = useRef<{fileId:number;time:number}|null>(null);
     const crossfadeStarted = useRef(false);
@@ -360,7 +362,8 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
         orientation?.unlock?.();
     }, []);
 
-    const handleTimeUpdate = () => {
+    const handleTimeUpdate = (event: React.SyntheticEvent<HTMLMediaElement>) => {
+        if (event.currentTarget !== videoRef.current) return;
         if (videoRef.current) {
             const mediaDuration = Number.isFinite(videoRef.current.duration) ? videoRef.current.duration : 0;
             const nextTime = Math.max(0, videoRef.current.currentTime || 0);
@@ -381,7 +384,8 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
         }
     };
 
-    const handleLoadedMetadata = () => {
+    const handleLoadedMetadata = (event: React.SyntheticEvent<HTMLMediaElement>) => {
+        if (event.currentTarget !== videoRef.current) return;
         if (videoRef.current) {
             const nextDuration = Number.isFinite(videoRef.current.duration) ? Math.max(0, videoRef.current.duration) : 0;
             setDuration(nextDuration);
@@ -412,9 +416,10 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
         }
     };
 
-    const handleWaiting = () => setIsLoading(true);
-    const handlePlaying = () => { backgroundPlaybackRequested.current = true; setIsLoading(false); setIsPlaying(true); };
-    const handlePause = () => {
+    const handleWaiting = (event: React.SyntheticEvent<HTMLMediaElement>) => { if (event.currentTarget === videoRef.current) setIsLoading(true); };
+    const handlePlaying = (event: React.SyntheticEvent<HTMLMediaElement>) => { if (event.currentTarget !== videoRef.current) return; backgroundPlaybackRequested.current = true; endedEntryRef.current = null; setIsLoading(false); setIsPlaying(true); };
+    const handlePause = (event: React.SyntheticEvent<HTMLMediaElement>) => {
+        if (event.currentTarget !== videoRef.current) return;
         if (!document.hidden) backgroundPlaybackRequested.current = false;
         setIsPlaying(false);
         // Some mobile WebViews emit a synthetic pause as soon as they are
@@ -424,7 +429,9 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
         }
     };
 
-    const handleEnded = () => {
+    const handleEnded = (event: React.SyntheticEvent<HTMLMediaElement>) => {
+        if (event.currentTarget !== videoRef.current || endedEntryRef.current === playbackEntryKey) return;
+        endedEntryRef.current = playbackEntryKey;
         saveProgress();
         if(stopAfterCurrent){setIsPlaying(false);return}
         if (sleepMode === 'track') {
@@ -438,8 +445,9 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
             return;
         }
         if (repeatMode === 'one' && videoRef.current) {
+            endedEntryRef.current = null;
             videoRef.current.currentTime = 0;
-            videoRef.current.play();
+            void videoRef.current.play();
             return;
         }
         const nextFile = playQueue[queueIndex + 1];
@@ -673,8 +681,9 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
         setCurrentTime(0);
         setDuration(0);
         setIsLoading(true);
+        endedEntryRef.current = null;
         setPublicUrl(null);
-    }, [file.id]);
+    }, [playbackEntryKey]);
 
     useEffect(() => {
         if (videoRef.current && !error) {
@@ -687,7 +696,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
             backgroundPlaybackRequested.current = true;
             videoRef.current.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
         }
-    }, [error, file.id]); // Re-run when file changes
+    }, [error, playbackEntryKey]); // Re-run for every queue occurrence, including duplicate files.
 
     const safeDuration = Number.isFinite(duration) ? Math.max(0, duration) : 0;
     const safeCurrentTime = Number.isFinite(currentTime)
@@ -776,7 +785,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
     // Common Media Element
     const MediaElement = isVideo ? (
         <video
-            key={file.id}
+            key={playbackEntryKey}
             ref={videoRef}
             src={authorizedStreamUrl}
             className={`max-w-full max-h-full w-full h-full object-contain ${isMinimized ? 'hidden' : ''} ${audioOnly || videoHidden ? 'invisible' : 'visible'}`}
@@ -794,7 +803,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
         />
     ) : (
         <audio
-            key={file.id}
+            key={playbackEntryKey}
             ref={videoRef as React.RefObject<HTMLAudioElement>}
             src={authorizedStreamUrl}
             onTimeUpdate={handleTimeUpdate}
