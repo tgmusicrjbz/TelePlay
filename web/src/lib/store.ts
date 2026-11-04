@@ -243,7 +243,7 @@ export const useAppStore = create<AppState>((set) => ({
     // state restored during app bootstrap is assigned above and stays paused
     // and minimized until the user presses play.
     setPreviewFile: (file) => set(file
-        ? { previewFile: file, isPlayerMinimized: false }
+        ? { previewFile: file, playQueue: [], queueIndex: -1, isPlayerMinimized: false }
         : { previewFile: null }),
     contentPreviewFile: null,
     isContentPreviewMinimized: false,
@@ -308,7 +308,10 @@ export const useAppStore = create<AppState>((set) => ({
         const safeIndex = queue.length ? Math.min(Math.max(index, 0), queue.length - 1) : -1;
         return { playQueue: queue, queueIndex: safeIndex, previewFile: queue[safeIndex] || null, isPlayerMinimized: false };
     }),
-    playQueueItem: (index) => set((state) => ({ queueIndex: index, previewFile: state.playQueue[index] || state.previewFile })),
+    playQueueItem: (index) => set((state) => {
+        if (index < 0 || index >= state.playQueue.length) return state;
+        return { queueIndex: index, previewFile: state.playQueue[index] };
+    }),
     playNext: () => {
         let changed = false;
         set((state) => {
@@ -345,16 +348,19 @@ export const useAppStore = create<AppState>((set) => ({
             const randomIndex = Math.floor(Math.random() * (index + 1));
             [rest[index], rest[randomIndex]] = [rest[randomIndex], rest[index]];
         }
-        return { playQueue: [current, ...rest], queueIndex: 0 };
+        return { playQueue: [current, ...rest], queueIndex: 0, previewFile: current || state.previewFile };
     }),
     reverseQueue: () => set((state) => {
         if (state.playQueue.length < 2) return state;
-        return { playQueue: [...state.playQueue].reverse(), queueIndex: state.playQueue.length - 1 - state.queueIndex };
+        const next = [...state.playQueue].reverse();
+        const queueIndex = state.playQueue.length - 1 - state.queueIndex;
+        return { playQueue: next, queueIndex, previewFile: next[queueIndex] || state.previewFile };
     }),
     removeQueueItem: (index) => set((state) => {
         if (index < 0 || index >= state.playQueue.length || index === state.queueIndex) return state;
         const next = state.playQueue.filter((_, itemIndex) => itemIndex !== index);
-        return { playQueue: next, queueIndex: index < state.queueIndex ? state.queueIndex - 1 : state.queueIndex };
+        const queueIndex = index < state.queueIndex ? state.queueIndex - 1 : state.queueIndex;
+        return { playQueue: next, queueIndex, previewFile: next[queueIndex] || state.previewFile };
     }),
     moveQueueItem: (from, to) => set((state) => {
         if (from < 0 || to < 0 || from >= state.playQueue.length || to >= state.playQueue.length || from === to) return state;
@@ -365,7 +371,7 @@ export const useAppStore = create<AppState>((set) => ({
         if (from === queueIndex) queueIndex = to;
         else if (from < queueIndex && to >= queueIndex) queueIndex -= 1;
         else if (from > queueIndex && to <= queueIndex) queueIndex += 1;
-        return { playQueue: next, queueIndex };
+        return { playQueue: next, queueIndex, previewFile: next[queueIndex] || state.previewFile };
     }),
     appendQueueItems: (files) => set((state) => {
         const existing = new Set(state.playQueue.map(item => item.id));

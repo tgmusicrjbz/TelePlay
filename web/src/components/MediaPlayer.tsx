@@ -15,7 +15,12 @@ const PLAYBACK_SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4] as c
 const playbackSpeedLabel = (speed: number) => `${speed === 1 ? '1.0' : speed}x`;
 
 export default function MediaPlayer() {
-    const { previewFile: file, setPreviewFile, isPlayerMinimized, setPlayerMinimized, clearQueue } = useAppStore(useShallow(state=>({previewFile:state.previewFile,setPreviewFile:state.setPreviewFile,isPlayerMinimized:state.isPlayerMinimized,setPlayerMinimized:state.setPlayerMinimized,clearQueue:state.clearQueue})));
+    const { previewFile, playQueue, queueIndex, setPreviewFile, isPlayerMinimized, setPlayerMinimized, clearQueue } = useAppStore(useShallow(state=>({previewFile:state.previewFile,playQueue:state.playQueue,queueIndex:state.queueIndex,setPreviewFile:state.setPreviewFile,isPlayerMinimized:state.isPlayerMinimized,setPlayerMinimized:state.setPlayerMinimized,clearQueue:state.clearQueue})));
+    // The queue index is the playback source of truth. Keeping the compact bar
+    // tied only to previewFile allowed it to show the previous item while the
+    // queue had already advanced.
+    const queuedFile = queueIndex >= 0 && queueIndex < playQueue.length ? playQueue[queueIndex] : null;
+    const file = queuedFile || previewFile;
 
     if (!file || (file.file_type !== 'video' && file.file_type !== 'audio')) return null;
 
@@ -40,9 +45,6 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
     const videoRef = useRef<HTMLVideoElement>(null);
     const playbackEntryKey = (file as TelegramFile & { _queueEntryId?: string })._queueEntryId || `file-${file.id}`;
     const endedEntryRef = useRef<string | null>(null);
-    const nextAudioRef = useRef<HTMLAudioElement>(null);
-    const crossfadeCarry = useRef<{fileId:number;time:number}|null>(null);
-    const crossfadeStarted = useRef(false);
     const containerRef = useRef<HTMLDivElement>(null);
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
@@ -100,7 +102,6 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
     const [showQueueSave, setShowQueueSave] = useState(false);
     const [recommendations, setRecommendations] = useState<TelegramFile[]>([]);
     const [showRecommendations, setShowRecommendations] = useState(false);
-    const crossfadeSeconds = useMemo(()=>Math.max(0,Math.min(6,Number(localStorage.getItem('komod-crossfade-seconds')||0))),[]);
     const createPlaylist = useCreatePlaylist();
     const addPlaylistItems = useAddPlaylistItems();
     const [showVideoMoreMenu, setShowVideoMoreMenu] = useState(false);
@@ -369,19 +370,6 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
             const mediaDuration = Number.isFinite(videoRef.current.duration) ? videoRef.current.duration : 0;
             const nextTime = Math.max(0, videoRef.current.currentTime || 0);
             setCurrentTime(mediaDuration > 0 ? Math.min(nextTime, mediaDuration) : nextTime);
-            const nextFile = playQueue[queueIndex + 1];
-            const remaining = mediaDuration - nextTime;
-            if (!isVideo && nextFile?.file_type === 'audio' && crossfadeSeconds > 0 && remaining > 0 && remaining <= crossfadeSeconds && !crossfadeStarted.current && nextAudioRef.current) {
-                crossfadeStarted.current = true;
-                const outgoing = videoRef.current;
-                const incoming = nextAudioRef.current;
-                incoming.currentTime = 0; incoming.volume = 0;
-                void incoming.play().then(()=>{
-                    const started=performance.now();
-                    const fade=()=>{const ratio=Math.min(1,(performance.now()-started)/(crossfadeSeconds*1000));outgoing.volume=volume*(1-ratio);incoming.volume=volume*ratio;if(ratio<1&&crossfadeStarted.current)requestAnimationFrame(fade)};
-                    requestAnimationFrame(fade);
-                }).catch(()=>{crossfadeStarted.current=false});
-            }
         }
     };
 
@@ -400,13 +388,6 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
                 videoRef.current.currentTime = nextDuration > 0 ? Math.min(resumeAt, Math.max(0, nextDuration - .1)) : resumeAt;
                 setCurrentTime(videoRef.current.currentTime);
                 sessionStorage.removeItem(resumeKey);
-            }
-            const carry = crossfadeCarry.current;
-            if (carry?.fileId === file.id) {
-                videoRef.current.currentTime = Math.min(carry.time, Math.max(0, nextDuration - .1));
-                videoRef.current.volume = volume;
-                nextAudioRef.current?.pause();
-                crossfadeCarry.current = null;
             }
             if (audioSwitchPosition.current !== null) {
                 videoRef.current.currentTime = Math.min(audioSwitchPosition.current, Math.max(0, nextDuration - .1));
@@ -451,12 +432,15 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
             void videoRef.current.play();
             return;
         }
-        const nextFile = playQueue[queueIndex + 1];
-        if (crossfadeStarted.current && nextFile && nextAudioRef.current) {
-            crossfadeCarry.current = {fileId:nextFile.id,time:nextAudioRef.current.currentTime};
+        if (!autoAdvance || !playNext()) {
+            backgroundPlaybackRequested.current = false;
+            setIsPlaying(false);
+        } else {
+            // Keep the transport UI active during the source handoff. The new
+            // media element will confirm the state again through onPlaying.
+            backgroundPlaybackRequested.current = true;
+            setIsPlaying(true);
         }
-        crossfadeStarted.current = false;
-        if (!autoAdvance || !playNext()) setIsPlaying(false);
     };
 
     const handleError = () => {
@@ -734,10 +718,6 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
     const relativeStreamUrl = isOfflineSource ? selectedStreamUrl : `${selectedStreamUrl}${selectedStreamUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(token || '')}&retry=${streamRetry}`;
     const authorizedStreamUrl = isOfflineSource ? relativeStreamUrl : getAbsoluteUrl(relativeStreamUrl);
     const externalUrl = publicUrl || authorizedStreamUrl;
-    const nextQueueFile = playQueue[queueIndex + 1] || (repeatMode === 'all' ? playQueue[0] : undefined);
-    const nextQueueStream = nextQueueFile?.file_type === 'audio'
-        ? (nextQueueFile.stream_url.startsWith('blob:') ? nextQueueFile.stream_url : getAbsoluteUrl(`${nextQueueFile.stream_url}${nextQueueFile.stream_url.includes('?')?'&':'?'}token=${encodeURIComponent(token||'')}`))
-        : null;
 
     // Authorized Thumbnail URL
     const relativeThumbnailUrl = file.thumbnail_url ? `${file.thumbnail_url}${file.thumbnail_url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token || '')}` : null;
@@ -844,7 +824,6 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
             onDoubleClick={!isMinimized && !controlsLocked ? toggleFullscreen : undefined}
         >
             {/* Media Element - Always present */}
-            {nextQueueStream&&<audio ref={nextAudioRef} src={nextQueueStream} preload="auto" className="hidden"/>}
             <div className={`w-full h-full ${isMinimized ? 'hidden' : 'flex items-center justify-center'}`}>
                 {error ? (
                     <div className="text-center p-8 max-w-md glass-panel z-10 animate-scale-in">
