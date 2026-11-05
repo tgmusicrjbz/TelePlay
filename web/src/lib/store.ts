@@ -189,7 +189,7 @@ export const useAppStore = create<AppState>((set) => ({
     setActiveSection: (section) => set({
         activeSection: section,
         currentFolderId: null,
-        breadcrumbs: [{ id: null, name: section === 'files' ? 'کمد من' : section === 'playlists' ? 'پلی‌لیست‌ها' : section === 'rooms' ? 'روم‌ها' : section === 'activity' ? 'فعالیت' : section === 'downloads' ? 'دانلودها' : 'تنظیمات' }],
+        breadcrumbs: [{ id: null, name: section === 'files' ? 'کمد من' : section === 'playlists' ? 'پلی‌لیست‌ها' : section === 'rooms' ? 'هم‌پخش' : section === 'activity' ? 'فعالیت' : section === 'downloads' ? 'دانلودها' : 'تنظیمات' }],
         searchQuery: '',
         fileTypeFilter: [],
         selectedFileIds: new Set(),

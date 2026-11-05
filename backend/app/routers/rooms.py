@@ -85,9 +85,9 @@ def _name(user: User) -> str:
 async def _room(db: AsyncSession, room_id: str) -> WatchRoom:
     room = await db.get(WatchRoom, room_id)
     if room is None:
-        raise HTTPException(404, "روم پیدا نشد.")
+        raise HTTPException(404, "هم‌پخش پیدا نشد.")
     if room.expires_at <= datetime.utcnow():
-        raise HTTPException(410, "زمان این روم تمام شده است.")
+        raise HTTPException(410, "زمان این هم‌پخش تمام شده است.")
     return room
 
 
@@ -103,7 +103,7 @@ async def _member(db: AsyncSession, room_id: str, user_id: int) -> RoomMember | 
 async def _require_member(db: AsyncSession, room: WatchRoom, user: User) -> RoomMember:
     member = await _member(db, room.id, user.id)
     if member is None:
-        raise HTTPException(403, "برای ورود به این روم باید دعوت یا رمز داشته باشی.")
+        raise HTTPException(403, "برای ورود به این هم‌پخش باید دعوت یا رمز داشته باشی.")
     return member
 
 
@@ -172,11 +172,11 @@ async def list_rooms(db: AsyncSession = Depends(get_db), user: User = Depends(ge
 async def create_room(payload: RoomCreate, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     await _cleanup_expired(db)
     if not (_is_admin(user) or user.can_create_rooms):
-        raise HTTPException(403, "مدیر هنوز اجازه ساخت روم را برای حسابت فعال نکرده است.")
+        raise HTTPException(403, "مدیر هنوز اجازه ساخت هم‌پخش را برای حسابت فعال نکرده است.")
     global_count = (await db.execute(select(func.count(WatchRoom.id)).where(WatchRoom.expires_at > datetime.utcnow()))).scalar_one()
     own_count = (await db.execute(select(func.count(WatchRoom.id)).where(WatchRoom.owner_user_id == user.id, WatchRoom.expires_at > datetime.utcnow()))).scalar_one()
     if global_count >= MAX_ACTIVE_ROOMS or (not _is_admin(user) and own_count >= MAX_USER_ROOMS):
-        raise HTTPException(429, "سقف روم‌های هم‌زمان پر شده است؛ یکی از روم‌های قبلی را ببند.")
+        raise HTTPException(429, "سقف هم‌پخش‌های هم‌زمان پر شده است؛ یکی از هم‌پخش‌های قبلی را ببند.")
     theme = payload.theme if payload.theme in THEMES else "violet"
     room = WatchRoom(id=str(uuid.uuid4()), owner_user_id=user.id, name=payload.name.strip(), theme=theme,
         password_hash=passwords.hash(payload.password) if payload.password else None, max_members=payload.max_members,
@@ -189,7 +189,7 @@ async def create_room(payload: RoomCreate, db: AsyncSession = Depends(get_db), u
     controllers = await _resolve_users(db, payload.controllers)
     roles = {candidate.id: "viewer" for candidate in allowed}; roles.update({candidate.id: "controller" for candidate in controllers})
     if len({user.id, *roles.keys()}) > room.max_members:
-        raise HTTPException(422, "تعداد افراد دعوت‌شده از ظرفیت روم بیشتر است.")
+        raise HTTPException(422, "تعداد افراد دعوت‌شده از ظرفیت هم‌پخش بیشتر است.")
     for user_id, role in roles.items():
         if user_id != user.id: db.add(RoomMember(room_id=room.id, user_id=user_id, role=role))
     file_ids = list(dict.fromkeys(payload.file_ids))
@@ -209,9 +209,9 @@ async def join_room(room_id: str, payload: RoomJoin, db: AsyncSession = Depends(
     existing = await _member(db, room.id, user.id)
     if existing is None:
         if not room.password_hash or not payload.password or not passwords.verify(payload.password, room.password_hash):
-            raise HTTPException(403, "رمز روم درست نیست یا برای ورود دعوت نشده‌ای.")
+            raise HTTPException(403, "رمز هم‌پخش درست نیست یا برای ورود دعوت نشده‌ای.")
         count = (await db.execute(select(func.count(RoomMember.id)).where(RoomMember.room_id == room.id))).scalar_one()
-        if count >= room.max_members: raise HTTPException(409, "ظرفیت روم تکمیل شده است.")
+        if count >= room.max_members: raise HTTPException(409, "ظرفیت هم‌پخش تکمیل شده است.")
         db.add(RoomMember(room_id=room.id, user_id=user.id, role="viewer")); await db.commit()
     return await _serialize(db, room, user, True)
 
@@ -234,7 +234,7 @@ async def get_ice_servers(room_id: str, db: AsyncSession = Depends(get_db), user
 @router.patch("/{room_id}")
 async def update_room(room_id: str, payload: RoomUpdate, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     room = await _room(db, room_id); member = await _require_member(db, room, user)
-    if member.role != "owner": raise HTTPException(403, "فقط سازنده روم می‌تواند تنظیمات را تغییر دهد.")
+    if member.role != "owner": raise HTTPException(403, "فقط سازنده هم‌پخش می‌تواند تنظیمات را تغییر دهد.")
     changes = payload.model_dump(exclude_unset=True)
     if payload.max_members is not None:
         member_count = (await db.execute(select(func.count(RoomMember.id)).where(RoomMember.room_id == room.id))).scalar_one()
@@ -254,7 +254,7 @@ async def update_items(room_id: str, payload: RoomItemsUpdate, db: AsyncSession 
     if member.role not in ("owner", "controller"): raise HTTPException(403, "اجازه تغییر صف را نداری.")
     file_ids = list(dict.fromkeys(payload.file_ids))
     owned = set((await db.execute(select(File.id).where(File.id.in_(file_ids), File.user_id == room.owner_user_id, File.is_hidden.is_(False), File.file_type.in_(("audio", "video"))))).scalars().all()) if file_ids else set()
-    if owned != set(file_ids): raise HTTPException(422, "بعضی فایل‌ها برای این روم قابل استفاده نیستند.")
+    if owned != set(file_ids): raise HTTPException(422, "بعضی فایل‌ها برای این هم‌پخش قابل استفاده نیستند.")
     previous_items = (await db.execute(
         select(RoomItem).where(RoomItem.room_id == room.id).order_by(RoomItem.position)
     )).scalars().all()
@@ -275,10 +275,10 @@ async def update_items(room_id: str, payload: RoomItemsUpdate, db: AsyncSession 
 @router.put("/{room_id}/members")
 async def update_members(room_id: str, payload: RoomMembersUpdate, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     room = await _room(db, room_id); member = await _require_member(db, room, user)
-    if member.role != "owner": raise HTTPException(403, "فقط سازنده روم می‌تواند اعضا را مدیریت کند.")
+    if member.role != "owner": raise HTTPException(403, "فقط سازنده هم‌پخش می‌تواند اعضا را مدیریت کند.")
     resolved = [(await _resolve_users(db, [item.identifier]))[0] for item in payload.members]
     if len({room.owner_user_id, *(target.id for target in resolved)}) > room.max_members:
-        raise HTTPException(422, "تعداد اعضا از ظرفیت روم بیشتر است.")
+        raise HTTPException(422, "تعداد اعضا از ظرفیت هم‌پخش بیشتر است.")
     await db.execute(delete(RoomMember).where(RoomMember.room_id == room.id, RoomMember.user_id != room.owner_user_id))
     for item, target in zip(payload.members, resolved):
         if target.id != room.owner_user_id: db.add(RoomMember(room_id=room.id, user_id=target.id, role=item.role))
@@ -288,7 +288,7 @@ async def update_members(room_id: str, payload: RoomMembersUpdate, db: AsyncSess
 @router.delete("/{room_id}", status_code=204)
 async def delete_room(room_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     room = await _room(db, room_id)
-    if room.owner_user_id != user.id and not _is_admin(user): raise HTTPException(403, "اجازه حذف این روم را نداری.")
+    if room.owner_user_id != user.id and not _is_admin(user): raise HTTPException(403, "اجازه حذف این هم‌پخش را نداری.")
     await hub.broadcast(room.id, {"type":"room_closed"}); await db.delete(room); await db.commit(); return Response(status_code=204)
 
 
@@ -375,7 +375,7 @@ async def room_socket(websocket: WebSocket, room_id: str):
                     if emoji in {"❤️","😂","👏","🔥","😮","😢","🎉","👍"}: await hub.broadcast(room_id,{"type":"reaction","user_id":user.id,"name":_name(user),"emoji":emoji},exclude=user.id)
                 elif kind == "voice_join" and room.voice_enabled:
                     voice = hub.voice.setdefault(room_id,set())
-                    if user.id not in voice and len(voice) >= MAX_VOICE_MEMBERS: await websocket.send_json({"type":"voice_error","message":"ظرفیت ویس روم تکمیل شده است."})
+                    if user.id not in voice and len(voice) >= MAX_VOICE_MEMBERS: await websocket.send_json({"type":"voice_error","message":"ظرفیت ویس هم‌پخش تکمیل شده است."})
                     else:
                         peers = list(voice); voice.add(user.id)
                         await websocket.send_json({"type":"voice_peers","user_ids":peers})
