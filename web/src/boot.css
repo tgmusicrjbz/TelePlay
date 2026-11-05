@@ -1,0 +1,24 @@
+@font-face {
+  font-family: "Vazirmatn";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("@fontsource-variable/vazirmatn/files/vazirmatn-arabic-wght-normal.woff2") format("woff2-variations");
+}
+
+@font-face {
+  font-family: "Vazirmatn";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("@fontsource-variable/vazirmatn/files/vazirmatn-latin-wght-normal.woff2") format("woff2-variations");
+}
+
+html,
+body,
+button,
+input,
+textarea,
+select {
+  font-family: "Vazirmatn", Tahoma, system-ui, -apple-system, sans-serif;
+}

@@ -44,6 +44,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
     const { playQueue, queueIndex, repeatMode, autoAdvance, playNext, playPrevious, shuffleQueue, reverseQueue, removeQueueItem, moveQueueItem, appendQueueItems, setRepeatMode, setAutoAdvance, setPlaylistFile, addToast } = useAppStore(useShallow(state=>({playQueue:state.playQueue,queueIndex:state.queueIndex,repeatMode:state.repeatMode,autoAdvance:state.autoAdvance,playNext:state.playNext,playPrevious:state.playPrevious,shuffleQueue:state.shuffleQueue,reverseQueue:state.reverseQueue,removeQueueItem:state.removeQueueItem,moveQueueItem:state.moveQueueItem,appendQueueItems:state.appendQueueItems,setRepeatMode:state.setRepeatMode,setAutoAdvance:state.setAutoAdvance,setPlaylistFile:state.setPlaylistFile,addToast:state.addToast})));
     const videoRef = useRef<HTMLVideoElement>(null);
     const playbackEntryKey = (file as TelegramFile & { _queueEntryId?: string })._queueEntryId || `file-${file.id}`;
+    const playbackSourceKey = `${file.id}:${file.stream_url}`;
     const endedEntryRef = useRef<string | null>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const [isPlaying, setIsPlaying] = useState(false);
@@ -106,7 +107,9 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
     const addPlaylistItems = useAddPlaylistItems();
     const [showVideoMoreMenu, setShowVideoMoreMenu] = useState(false);
     const [activeQueueId, setActiveQueueId] = useState<string | null>(null);
-    const [offlineStreamUrl,setOfflineStreamUrl]=useState<string|null>(null);
+    const [playbackSource,setPlaybackSource]=useState<{key:string;offlineUrl:string|null;ready:boolean}>(()=>({key:playbackSourceKey,offlineUrl:null,ready:file.stream_url.startsWith('blob:')}));
+    const playbackSourceReady=playbackSource.key===playbackSourceKey&&playbackSource.ready;
+    const offlineStreamUrl=playbackSource.key===playbackSourceKey?playbackSource.offlineUrl:null;
     const [stopAfterCurrent,setStopAfterCurrent]=useState(()=>localStorage.getItem('komod-stop-after-current')==='1');
     useEffect(()=>{if(stopAfterCurrent)localStorage.setItem('komod-stop-after-current','1');else localStorage.removeItem('komod-stop-after-current')},[stopAfterCurrent]);
     const queueDropTargetRef = useRef<string | null>(null);
@@ -132,11 +135,19 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
     }, []);
     useEffect(()=>{setAudioOnly(false);setVideoHidden(false);setAudioVariantUrl(file.audio_stream_url||null);setCompatibleVideoUrl(file.compatible_video_stream_url||null);setCompatibilityMessage(null);setCompatibilityProgress(0);compatibilityAttempted.current=false;},[file.id,file.audio_stream_url,file.compatible_video_stream_url]);
     useEffect(()=>{
-        let disposed=false; let objectUrl:string|null=null;
-        setOfflineStreamUrl(null);
-        if(!file.stream_url.startsWith('blob:'))void getOfflineMedia(file.id).then(record=>{if(!record||disposed)return;objectUrl=URL.createObjectURL(record.blob);setOfflineStreamUrl(objectUrl)}).catch(()=>undefined);
-        return()=>{disposed=true;if(objectUrl)URL.revokeObjectURL(objectUrl)};
-    },[file.id,file.stream_url]);
+        let disposed=false; let settled=false; let objectUrl:string|null=null;
+        if(file.stream_url.startsWith('blob:')){setPlaybackSource({key:playbackSourceKey,offlineUrl:null,ready:true});return}
+        setPlaybackSource({key:playbackSourceKey,offlineUrl:null,ready:false});
+        const complete=(record?:Awaited<ReturnType<typeof getOfflineMedia>>)=>{
+            if(disposed||settled)return;
+            settled=true;
+            if(record)objectUrl=URL.createObjectURL(record.blob);
+            setPlaybackSource({key:playbackSourceKey,offlineUrl:objectUrl,ready:true});
+        };
+        const timeout=window.setTimeout(()=>complete(),700);
+        void getOfflineMedia(file.id).then(record=>complete(record)).catch(()=>complete());
+        return()=>{disposed=true;window.clearTimeout(timeout);if(objectUrl)URL.revokeObjectURL(objectUrl)};
+    },[file.id,file.stream_url,playbackSourceKey]);
 
     // Fetch fresh file details to get latest progress
     const { data: extendedFile } = useFile(file.id);
@@ -671,7 +682,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
     }, [playbackEntryKey]);
 
     useEffect(() => {
-        if (videoRef.current && !error) {
+        if (playbackSourceReady && videoRef.current && !error) {
             if (restoredPausedSession.current && !backgroundPlaybackRequested.current) {
                 videoRef.current.pause();
                 setIsPlaying(false);
@@ -681,7 +692,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
             backgroundPlaybackRequested.current = true;
             videoRef.current.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
         }
-    }, [error, playbackEntryKey]); // Re-run for every queue occurrence, including duplicate files.
+    }, [error, playbackEntryKey, playbackSourceReady]); // Re-run for every queue occurrence, including duplicate files.
 
     const safeDuration = Number.isFinite(duration) ? Math.max(0, duration) : 0;
     const safeCurrentTime = Number.isFinite(currentTime)
@@ -768,7 +779,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
         <video
             key={playbackEntryKey}
             ref={videoRef}
-            src={authorizedStreamUrl}
+            src={playbackSourceReady ? authorizedStreamUrl : undefined}
             className={`max-w-full max-h-full w-full h-full object-contain ${isMinimized ? 'hidden' : ''} ${audioOnly || videoHidden ? 'invisible' : 'visible'}`}
             onTimeUpdate={handleTimeUpdate}
             onLoadedMetadata={handleLoadedMetadata}
@@ -780,13 +791,13 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
             loop={repeatMode === 'one' && !stopAfterCurrent && sleepMode !== 'track'}
             controls={false}
             playsInline
-            preload="auto"
+            preload={playbackSourceReady ? 'auto' : 'none'}
         />
     ) : (
         <audio
             key={playbackEntryKey}
             ref={videoRef as React.RefObject<HTMLAudioElement>}
-            src={authorizedStreamUrl}
+            src={playbackSourceReady ? authorizedStreamUrl : undefined}
             onTimeUpdate={handleTimeUpdate}
             onLoadedMetadata={handleLoadedMetadata}
             onWaiting={handleWaiting}
@@ -795,7 +806,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
             onError={handleError}
             onEnded={handleEnded}
             loop={repeatMode === 'one' && !stopAfterCurrent && sleepMode !== 'track'}
-            preload="auto"
+            preload={playbackSourceReady ? 'auto' : 'none'}
         />
     );
 
@@ -1006,7 +1017,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
                                 <button className={`flex min-h-10 w-full items-center gap-2 rounded-lg px-2.5 text-xs transition ${videoHidden?'bg-primary-500/20 text-primary-200':'text-dark-200 hover:bg-white/[.07]'}`} onClick={()=>{setVideoHidden(value=>{if(!value&&audioOnly)setAudioOnly(false);return !value});setShowVideoMoreMenu(false)}}><EyeOff className="h-4 w-4 shrink-0"/><span>{videoHidden?'روشن کردن تصویر':'خاموش کردن تصویر'}</span></button>
                                 <button disabled={preparingAudio} className={`flex min-h-10 w-full items-center gap-2 rounded-lg px-2.5 text-xs transition disabled:opacity-50 ${audioOnly?'bg-primary-500/20 text-primary-200':'text-dark-200 hover:bg-white/[.07]'}`} onClick={()=>void toggleAudioOnly()}><Headphones className="h-4 w-4 shrink-0"/><span>{preparingAudio?'آماده‌سازی…':audioOnly ? 'بازگشت به ویدیو' : 'فقط صدا'}</span></button>
                                 <button className={`flex min-h-10 w-full items-center gap-2 rounded-lg px-2.5 text-xs transition ${repeatMode!=='off'?'bg-primary-500/20 text-primary-200':'text-dark-200 hover:bg-white/[.07]'}`} onClick={() => {setRepeatMode(repeatMode === 'off' ? (hasQueue ? 'all' : 'one') : repeatMode === 'all' ? 'one' : 'off');setShowVideoMoreMenu(false)}}><Repeat2 className="h-4 w-4 shrink-0"/><span>{repeatMode === 'off' ? 'تکرار خاموش' : repeatMode === 'all' ? 'تکرار صف' : 'تکرار همین ویدیو'}</span></button>
-                                {hasQueue && <button className={`flex min-h-10 w-full items-center gap-2 rounded-lg px-2.5 text-xs transition ${autoAdvance?'bg-emerald-500/15 text-emerald-200':'text-dark-200 hover:bg-white/[.07]'}`} onClick={() => {setAutoAdvance(!autoAdvance);setShowVideoMoreMenu(false)}}><ListEnd className="h-4 w-4 shrink-0"/><span>{autoAdvance ? 'پخش بعدی خودکار روشن' : 'پخش بعدی خودکار خاموش'}</span></button>}
+                                {hasQueue && <button className={`flex min-h-10 w-full items-center justify-start gap-2 rounded-lg px-2.5 text-right text-xs transition ${autoAdvance?'bg-primary-500/20 text-primary-200':'text-dark-200 hover:bg-white/[.07]'}`} onClick={() => {setAutoAdvance(!autoAdvance);setShowVideoMoreMenu(false)}}><ListEnd className="h-4 w-4 shrink-0"/><span className="min-w-0 flex-1 text-right">پخش پیوسته</span><span className="text-[10px] opacity-75">{autoAdvance ? 'روشن' : 'خاموش'}</span></button>}
                                 <button className={`flex min-h-10 w-full items-center gap-2 rounded-lg px-2.5 text-xs transition ${sleepMode!=='off'?'bg-primary-500/20 text-primary-200':'text-dark-200 hover:bg-white/[.07]'}`} onClick={() => setShowSleepMenu(open => !open)}><Clock3 className="h-4 w-4 shrink-0"/><span>تایمر خواب</span><ChevronDown className={`mr-auto h-3.5 w-3.5 transition ${showSleepMenu?'rotate-180':''}`}/></button>
                                 {showSleepMenu && <div className="grid grid-cols-2 gap-1 rounded-lg bg-black/20 p-1">
                                     {([['15','۱۵ دقیقه'],['30','۳۰ دقیقه'],['45','۴۵ دقیقه'],['60','۱ ساعت'],['track','پایان ویدیو'],['end','پایان صف']] as const).map(([mode,label])=><button key={mode} onClick={()=>setSleepTimer(mode)} className={`rounded-lg px-2 py-2 text-[11px] ${sleepMode===mode?'bg-primary-500/25 text-primary-200':'text-dark-300 hover:bg-white/[.05]'}`}>{label}</button>)}
@@ -1078,7 +1089,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
 
                         {/* Control buttons */}
                         {!isVideo && <div dir="ltr" className="flex items-center justify-between gap-3">
-                            {!isVideo ? <div className="flex items-center gap-1"><button disabled={!hasQueue} onClick={shuffleQueue} className="rounded-full p-2 text-white/75 hover:bg-white/10 disabled:opacity-30" title="شافل"><Shuffle className="h-5 w-5"/></button><button disabled={!hasQueue} onClick={() => setAutoAdvance(!autoAdvance)} className={`rounded-full p-2 disabled:opacity-30 ${autoAdvance ? 'bg-emerald-500/20 text-emerald-200' : 'text-white/75 hover:bg-white/10'}`} title={autoAdvance?'بعد از پایان، مورد بعدی پخش می‌شود':'پخش پس از این مورد متوقف می‌شود'}><ListEnd className="h-5 w-5"/></button><button onClick={() => setRepeatMode(repeatMode === 'off' ? 'all' : repeatMode === 'all' ? 'one' : 'off')} className={`rounded-full p-2 ${repeatMode !== 'off' ? 'bg-primary-500/25 text-primary-200' : 'text-white/75 hover:bg-white/10'}`} title="تکرار"><Repeat2 className="h-5 w-5"/></button></div> : <div />}
+                            {!isVideo ? <div className="flex items-center gap-1"><button disabled={!hasQueue} onClick={shuffleQueue} className="rounded-full p-2 text-white/75 hover:bg-white/10 disabled:opacity-30" title="شافل"><Shuffle className="h-5 w-5"/></button><button disabled={!hasQueue} onClick={() => setAutoAdvance(!autoAdvance)} className={`rounded-full p-2 disabled:opacity-30 ${autoAdvance ? 'bg-primary-500/25 text-primary-200' : 'text-white/75 hover:bg-white/10'}`} title={`پخش پیوسته ${autoAdvance?'روشن':'خاموش'}`}><ListEnd className="h-5 w-5"/></button><button onClick={() => setRepeatMode(repeatMode === 'off' ? 'all' : repeatMode === 'all' ? 'one' : 'off')} className={`rounded-full p-2 ${repeatMode !== 'off' ? 'bg-primary-500/25 text-primary-200' : 'text-white/75 hover:bg-white/10'}`} title="تکرار"><Repeat2 className="h-5 w-5"/></button></div> : <div />}
                             <div className="flex items-center gap-3">
                             <div className="relative">
                                 <button
