@@ -5,6 +5,7 @@ import CustomSelect from './CustomSelect';
 import { folderTreeLabel } from '../lib/folderTreeLabel';
 import SpeechJobProgress from './SpeechJobProgress';
 import { buildSTTJobPayloads, isFinishedSpeechJob } from '../lib/speechJobs';
+import { useAppStore } from '../lib/store';
 
 const STATES:Record<string,string>={queued:'در صف',paused:'متوقف',synthesizing:'در حال ساخت',merging:'در حال یکپارچه‌سازی',uploading:'در حال ذخیره',done:'آماده',error:'خطا',cancelled:'لغوشده'};
 const GENDERS=[{value:'all',label:'همه صداها'},{value:'female',label:'صدای زن'},{value:'male',label:'صدای مرد'}] as const;
@@ -109,9 +110,10 @@ function STTRefinementEditor({job,folderOptions,onClose,onSaved}:{job:STTJobStat
     const [refineStatus,setRefineStatus]=useState<{message:string;progress:number}|null>(null);
     const refine=useRefineSTTText();
     const upload=useUploadFile();
+    const addToast=useAppStore(state=>state.addToast);
     const goTo=(next:number)=>{const bounded=Math.max(0,Math.min(next,versions.length-1));setVersion(bounded);setDraft(versions[bounded]);setError('')};
     const applyInstruction=async()=>{if(!draft.trim()||!prompt.trim())return;setError('');setRefineStatus({message:'درخواست ویرایش در حال ثبت است…',progress:5});try{const result=await refine.mutateAsync({content:draft,prompt:prompt.trim(),onStatus:(message,progress)=>setRefineStatus({message,progress})});const next=[...versions.slice(0,version+1),result.content];setVersions(next);setVersion(next.length-1);setDraft(result.content);setPrompt('');setRefineStatus({message:'نسخه تازه آماده شد.',progress:100});window.setTimeout(()=>setRefineStatus(null),2500)}catch(reason:any){setRefineStatus(null);setError(reason?.response?.data?.detail||reason?.message||'ویرایش متن انجام نشد. دوباره تلاش کن.')}};
-    const saveFinal=async()=>{if(!draft.trim())return;setError('');try{const raw=title.trim()||'متن ویرایش‌شده';const name=/\.md$/i.test(raw)?raw:`${raw}.md`;await upload.mutateAsync({file:new File([draft],name,{type:'text/markdown;charset=utf-8'}),folderId:folder==='default'?null:Number(folder)});onSaved(name);onClose()}catch(reason:any){setError(reason?.response?.data?.detail||'ذخیره متن نهایی انجام نشد.')}};
+    const saveFinal=()=>{const content=draft.trim();if(!content)return;const raw=title.trim()||'متن ویرایش‌شده';const name=/\.md$/i.test(raw)?raw:`${raw}.md`;const folderId=folder==='default'?null:Number(folder);onClose();addToast('ذخیره متن ویرایش‌شده در پس‌زمینه شروع شد…','info');void upload.mutateAsync({file:new File([content],name,{type:'text/markdown;charset=utf-8'}),folderId}).then(()=>{onSaved(name);addToast(`«${name}» در کمد ذخیره شد.`,'success')}).catch((reason:any)=>addToast(reason?.response?.data?.detail||'ذخیره متن نهایی انجام نشد.','error'))};
     return <div className="fixed inset-0 z-[290] flex items-end justify-center bg-black/75 backdrop-blur-md sm:items-center sm:p-5" onClick={onClose}>
         <section dir="rtl" className="flex h-[94dvh] w-full max-w-4xl flex-col overflow-hidden rounded-t-3xl border border-white/10 bg-dark-900 shadow-2xl sm:h-[88dvh] sm:rounded-3xl" onClick={event=>event.stopPropagation()}>
             <header className="flex items-center gap-3 border-b border-white/[.07] p-4"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-500/15 text-primary-200"><Sparkles className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h2 className="truncate font-bold">ویرایش متن با هوش مصنوعی</h2><p className="mt-1 text-[11px] text-dark-400">هر دستور یک نسخه تازه می‌سازد؛ هر وقت آماده بود ذخیره‌اش کن.</p></div><button className="btn-icon" onClick={onClose} aria-label="بستن"><X className="h-5 w-5"/></button></header>
