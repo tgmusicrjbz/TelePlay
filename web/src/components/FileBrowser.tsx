@@ -272,6 +272,8 @@ export default function FileBrowser() {
     const [uploadPanelMode, setUploadPanelMode] = useState<'open'|'collapsed'|'hidden'>('open');
     const [isFileDragOver, setIsFileDragOver] = useState(false);
     const [importJobs, setImportJobs] = useState<ImportStatus[]>([]);
+    const dismissedImportJobIds = useRef(new Set<string>());
+    const completedImportTimers = useRef(new Map<string,number>());
     const hasActiveImportJobs = useMemo(() => importJobs.some(job => ['queued','downloading','saving','paused'].includes(job.state)), [importJobs]);
     const [importPanelMode, setImportPanelMode] = useState<'open'|'collapsed'|'hidden'>('open');
     const [forceOffline, setForceOffline] = useState(() => localStorage.getItem('komod-force-offline') === '1');
@@ -336,12 +338,38 @@ export default function FileBrowser() {
             if(!cancelled)setImportJobs(mergeImportStatuses([], [
                 ...links.data.map(job=>({...job,source:'link' as const})),
                 ...drives.data.map(job=>({...job,source:'drive' as const})),
-            ]));
+            ]).filter(job=>!dismissedImportJobIds.current.has(job.id)));
         }catch{/* وضعیت محلی حفظ می‌شود */}};
         void syncQueue();
         const timer=hasActiveImportJobs?window.setInterval(()=>{if(document.visibilityState==='visible')void syncQueue()},4000):0;
         return()=>{cancelled=true;window.clearInterval(timer)};
     },[forceOffline,serverOnline,hasActiveImportJobs]);
+
+    const dismissImportJobs = useCallback((jobIds:string[]) => {
+        jobIds.forEach(jobId=>dismissedImportJobIds.current.add(jobId));
+        setImportJobs(current=>current.filter(job=>!dismissedImportJobIds.current.has(job.id)));
+    },[]);
+    const clearFinishedImportJobsOnServer = useCallback(() => {
+        void Promise.allSettled([api.delete('/files/import-link/status'),api.delete('/files/import-drive/status')]);
+    },[]);
+    useEffect(()=>{
+        const completedIds=new Set(importJobs.filter(job=>job.state==='done').map(job=>job.id));
+        completedIds.forEach(jobId=>{
+            if(completedImportTimers.current.has(jobId))return;
+            const timer=window.setTimeout(()=>{
+                completedImportTimers.current.delete(jobId);
+                dismissImportJobs([jobId]);
+                clearFinishedImportJobsOnServer();
+            },2200);
+            completedImportTimers.current.set(jobId,timer);
+        });
+        completedImportTimers.current.forEach((timer,jobId)=>{
+            if(completedIds.has(jobId))return;
+            window.clearTimeout(timer);
+            completedImportTimers.current.delete(jobId);
+        });
+    },[importJobs,dismissImportJobs,clearFinishedImportJobsOnServer]);
+    useEffect(()=>()=>{completedImportTimers.current.forEach(timer=>window.clearTimeout(timer));completedImportTimers.current.clear()},[]);
 
     useEffect(() => {
         sessionStorage.removeItem('komod-show-hidden');
@@ -1075,8 +1103,8 @@ export default function FileBrowser() {
                     try {
                         const {data}=await api.get<{state:'queued'|'downloading'|'saving'|'paused'|'cancelled'|'done'|'error';message:string;saved:number;progress?:number;title?:string;author?:string}>(`/files/import-link/status/${jobId}`);
                         setImportJobs(previous => previous.map(job => job.id === jobId ? {...job,...data} : job));
-                        if(data.state==='done'){ addToast(`${data.saved.toLocaleString('fa-IR')} فایل از لینک به کمد اضافه شد ✅`); handleRefresh(); window.setTimeout(()=>setImportJobs(previous=>previous.filter(job=>job.id!==jobId)),1800); return; }
-                        if(data.state==='error'||data.state==='cancelled'){ if(data.state==='error') addToast(data.message,'error'); window.setTimeout(()=>setImportJobs(previous=>previous.filter(job=>job.id!==jobId)),1800); return; }
+                        if(data.state==='done'){ addToast(`${data.saved.toLocaleString('fa-IR')} فایل از لینک به کمد اضافه شد ✅`); handleRefresh(); return; }
+                        if(data.state==='error'||data.state==='cancelled'){ if(data.state==='error') addToast(data.message,'error'); else window.setTimeout(()=>dismissImportJobs([jobId]),1200); return; }
                     } catch { return; }
                 }
             })(); });
@@ -1112,7 +1140,7 @@ export default function FileBrowser() {
             const {data}=await api.post<any>(endpoint);
             if(action==='retry'&&data.job_id){setImportJobs(previous=>[...previous.filter(job=>job.id!==jobId),{id:data.job_id,source:'link',...data.status}]);addToast('دوباره به صف اضافه شد.');return}
             setImportJobs(previous=>previous.map(job=>job.id===jobId?{...job,...data}:job));
-            if (data.state === 'cancelled') window.setTimeout(()=>setImportJobs(previous=>previous.filter(job=>job.id!==jobId)),1200);
+            if (data.state === 'cancelled') window.setTimeout(()=>dismissImportJobs([jobId]),1200);
         } catch (error:any) { addToast(error?.response?.data?.detail || 'تغییر وضعیت انجام نشد.','error'); }
     };
 
@@ -1290,7 +1318,8 @@ export default function FileBrowser() {
         try{
             await Promise.all([api.post('/files/import-link/cancel-all'),api.post('/files/import-drive/cancel-all')]);
             setImportJobs(previous=>previous.map(job=>['queued','downloading','saving','paused'].includes(job.state)?{...job,state:'cancelled',message:'لغو شد',progress:0}:job));
-            window.setTimeout(()=>setImportJobs(previous=>previous.filter(job=>job.state!=='cancelled')),1200);
+            const cancelledIds=importJobs.filter(job=>['queued','downloading','saving','paused'].includes(job.state)).map(job=>job.id);
+            window.setTimeout(()=>dismissImportJobs(cancelledIds),1200);
         }catch(error:any){addToast(error?.response?.data?.detail||'لغو صف انجام نشد.','error')}
     };
     const sectionTitle = activeSection === 'activity' ? 'فعالیت' : (breadcrumbs[breadcrumbs.length - 1]?.name || 'کمد من');
@@ -1408,12 +1437,12 @@ export default function FileBrowser() {
             addToast(error?.response?.data?.detail || 'ارسال به تلگرام انجام نشد.', 'error');
         } finally { setSendingToTelegram(false); }
     };
-    const clearFinishedImportJobs = async () => {
-        try {
-            await Promise.all([api.delete('/files/import-link/status'),api.delete('/files/import-drive/status')]);
-            setImportJobs(jobs=>jobs.filter(job=>!['done','error','cancelled'].includes(job.state)));
-            addToast('موارد پایان‌یافته از صف پاک شدند.');
-        } catch { addToast('پاک‌کردن صف انجام نشد.', 'error'); }
+    const clearFinishedImportJobs = () => {
+        const finishedIds=importJobs.filter(job=>['done','error','cancelled'].includes(job.state)).map(job=>job.id);
+        if(!finishedIds.length){addToast('مورد پایان‌یافته‌ای برای پاک‌کردن نیست.','info');return}
+        dismissImportJobs(finishedIds);
+        clearFinishedImportJobsOnServer();
+        addToast('موارد پایان‌یافته از صف پاک شدند.');
     };
     const cancelSelection = () => {
         setShowSelectionMore(false);
