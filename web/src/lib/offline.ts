@@ -101,6 +101,14 @@ export async function estimateOfflineStorage(required = 0): Promise<OfflineStora
     try { persistent = Boolean(await navigator.storage?.persisted?.()); } catch { /* unsupported browser */ }
     return { required: Math.max(0, required), usage, quota, available, enough: !Number.isFinite(available) || available >= required, persistent };
 }
+export async function requestOfflineStoragePersistence(): Promise<boolean> {
+    try {
+        if (await navigator.storage?.persisted?.()) return true;
+        return Boolean(await navigator.storage?.persist?.());
+    } catch {
+        return false;
+    }
+}
 const belongsToActiveUser = (record: {ownerUserId?:number;file?:TelegramFile}) => {
     const userId=activeUserId();
     return Boolean(userId && (record.ownerUserId===userId || record.file?.user_id===userId));
