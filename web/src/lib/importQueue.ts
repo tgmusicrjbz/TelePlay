@@ -1,4 +1,6 @@
 export type ImportPlatform = 'youtube' | 'instagram' | 'pinterest';
+export type ImportQuality = 'auto' | 'audio' | '480' | '720' | '1080';
+export type ImportMetadata = { title?: string | null; author?: string | null };
 
 export function extractImportUrls(value: string) {
     const starts = Array.from(value.matchAll(/https?:\/\//gi), match => match.index ?? -1)
