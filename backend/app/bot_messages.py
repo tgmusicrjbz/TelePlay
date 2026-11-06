@@ -46,6 +46,7 @@ BOT_MESSAGE_DEFINITIONS = (
     BotMessageDefinition("stt_invalid_media", "نوع فایل نامعتبر", "متن و صدا", "این فایل صوتی یا ویدیویی نیست."),
     BotMessageDefinition("stt_prepare_failed", "خطای آماده‌سازی صوت", "متن و صدا", "فایل برای استخراج متن آماده نشد؛ دوباره تلاش کن."),
     BotMessageDefinition("file_link_reply_required", "راهنمای لینک فایل", "لینک فایل", "روی یک فایل تلگرام ریپلای کن و `/link` را بفرست؛ لازم نیست فایل از قبل در کمد ذخیره شده باشد."),
+    BotMessageDefinition("file_link_preparing", "در حال ساخت لینک فایل", "لینک فایل", "⏳ در حال ساخت لینک پخش و دانلود…"),
     BotMessageDefinition("file_link_not_found", "پیدا نشدن فایل برای لینک", "لینک فایل", "فایل پیام اصلی در تلگرام در دسترس نیست یا حذف شده است."),
     BotMessageDefinition("file_links_private", "تحویل لینک فایل در ربات", "لینک فایل", "✅ لینک **{title}** آماده‌ست.", ("title",)),
     BotMessageDefinition("file_links_group", "تحویل لینک فایل در گروه", "لینک فایل", "✅ لینک **{title}** آماده شد.", ("title",)),

@@ -1543,78 +1543,82 @@ async def replied_file_link_command(client, message: Message):
         await message.reply(await bot_message("file_link_reply_required"))
         return
 
-    requester = await get_or_create_user(
-        message.from_user.id, message.from_user.username,
-        message.from_user.first_name, message.from_user.last_name,
-    )
-    owner = requester
-    public_hash: str | None = None
-    async with async_session() as db:
-        if message.chat.type in {enums.ChatType.GROUP, enums.ChatType.SUPERGROUP}:
-            if not await is_connected_group(message.chat.id):
-                await message.reply(await bot_message("group_not_connected"))
+    status_message = await message.reply(await bot_message("file_link_preparing"))
+    try:
+        requester = await get_or_create_user(
+            message.from_user.id, message.from_user.username,
+            message.from_user.first_name, message.from_user.last_name,
+        )
+        owner = requester
+        public_hash: str | None = None
+        async with async_session() as db:
+            if message.chat.type in {enums.ChatType.GROUP, enums.ChatType.SUPERGROUP}:
+                if not await is_connected_group(message.chat.id):
+                    await message.reply(await bot_message("group_not_connected"))
+                    return
+                destination = (await db.execute(select(TelegramDestination).where(
+                    TelegramDestination.chat_id == message.chat.id,
+                    TelegramDestination.enabled.is_(True),
+                ))).scalars().first()
+                if destination is not None:
+                    owner = await db.get(User, destination.user_id) or requester
+            file = (await db.execute(select(File).where(
+                File.user_id == owner.id,
+                File.file_unique_id == getattr(media, "file_unique_id", ""),
+                File.is_hidden.is_(False),
+            ).order_by(File.id.desc()))).scalars().first()
+            try:
+                await consume_file_link_quota(
+                    db, user_id=requester.id, telegram_user_id=message.from_user.id,
+                    chat_id=message.chat.id,
+                )
+            except ValueError as error:
+                await message.reply(f"⛔ {error}")
                 return
-            destination = (await db.execute(select(TelegramDestination).where(
-                TelegramDestination.chat_id == message.chat.id,
-                TelegramDestination.enabled.is_(True),
-            ))).scalars().first()
-            if destination is not None:
-                owner = await db.get(User, destination.user_id) or requester
-        file = (await db.execute(select(File).where(
-            File.user_id == owner.id,
-            File.file_unique_id == getattr(media, "file_unique_id", ""),
-            File.is_hidden.is_(False),
-        ).order_by(File.id.desc()))).scalars().first()
-        try:
-            await consume_file_link_quota(
-                db, user_id=requester.id, telegram_user_id=message.from_user.id,
-                chat_id=message.chat.id,
-            )
-        except ValueError as error:
-            await message.reply(f"⛔ {error}")
-            return
-        if file is not None:
-            if not file.public_hash:
-                file.public_hash = secrets.token_hex(16)
-                file.public_expires_at = None
-                file.public_view_limit = None
-                file.public_allow_download = True
-                await db.commit()
-            public_hash = file.public_hash
+            if file is not None:
+                if not file.public_hash:
+                    file.public_hash = secrets.token_hex(16)
+                    file.public_expires_at = None
+                    file.public_view_limit = None
+                    file.public_allow_download = True
+                    await db.commit()
+                public_hash = file.public_hash
 
-    command = (message.command or ["link"])[0].lower()
-    base_url = settings.web_base_url.strip().rstrip("/")
-    if file is not None:
-        title = display_filename(file.file_name)
-        play_token = create_private_file_link_token(owner.id, file.id, False)
-        download_token = create_private_file_link_token(owner.id, file.id, True)
-    else:
-        media_kind = next((name for name in ("audio", "voice", "video", "video_note", "animation", "document", "photo") if getattr(replied, name, None)), "document")
-        extension = {"audio":"mp3", "voice":"ogg", "video":"mp4", "video_note":"mp4", "animation":"mp4", "photo":"jpg"}.get(media_kind, "bin")
-        raw_name = getattr(media, "file_name", None) or f"telegram-{replied.id}.{extension}"
-        mime_type = getattr(media, "mime_type", None) or {"voice":"audio/ogg", "video":"video/mp4", "video_note":"video/mp4", "animation":"video/mp4", "photo":"image/jpeg"}.get(media_kind)
-        title = display_filename(raw_name)
-        media_size = getattr(media, "file_size", None)
-        play_token = create_telegram_message_link_token(message.chat.id, replied.id, raw_name, mime_type, media_kind, media_size, False)
-        download_token = create_telegram_message_link_token(message.chat.id, replied.id, raw_name, mime_type, media_kind, media_size, True)
-    play_url = f"{base_url}/play/{play_token}"
-    download_url = f"{base_url}/api/shares/message-link/{download_token}"
-    if file is not None:
+        command = (message.command or ["link"])[0].lower()
+        base_url = settings.web_base_url.strip().rstrip("/")
+        if file is not None:
+            title = display_filename(file.file_name)
+            play_token = create_private_file_link_token(owner.id, file.id, False)
+            download_token = create_private_file_link_token(owner.id, file.id, True)
+        else:
+            media_kind = next((name for name in ("audio", "voice", "video", "video_note", "animation", "document", "photo") if getattr(replied, name, None)), "document")
+            extension = {"audio":"mp3", "voice":"ogg", "video":"mp4", "video_note":"mp4", "animation":"mp4", "photo":"jpg"}.get(media_kind, "bin")
+            raw_name = getattr(media, "file_name", None) or f"telegram-{replied.id}.{extension}"
+            mime_type = getattr(media, "mime_type", None) or {"voice":"audio/ogg", "video":"video/mp4", "video_note":"video/mp4", "animation":"video/mp4", "photo":"image/jpeg"}.get(media_kind)
+            title = display_filename(raw_name)
+            media_size = getattr(media, "file_size", None)
+            play_token = create_telegram_message_link_token(message.chat.id, replied.id, raw_name, mime_type, media_kind, media_size, False)
+            download_token = create_telegram_message_link_token(message.chat.id, replied.id, raw_name, mime_type, media_kind, media_size, True)
         play_url = f"{base_url}/play/{play_token}"
-        download_url = f"{base_url}/api/shares/file-link/{download_token}"
-    buttons: list[list[InlineKeyboardButton]] = []
-    if command != "downloadlink":
-        buttons.append([InlineKeyboardButton("🌐 پخش عمومی", url=play_url)])
-    if command != "playlink":
-        buttons.append([InlineKeyboardButton("📥 دریافت فایل", url=download_url)])
-    if public_hash:
-        buttons.append([InlineKeyboardButton("🔗 پیوند دائمی", url=f"{base_url}/s/{public_hash}")])
-    message_key = "file_links_private" if message.chat.type == enums.ChatType.PRIVATE else "file_links_group"
-    await message.reply(
-        await bot_message(message_key, title=title),
-        reply_markup=InlineKeyboardMarkup(buttons),
-        disable_web_page_preview=True,
-    )
+        download_url = f"{base_url}/api/shares/message-link/{download_token}"
+        if file is not None:
+            play_url = f"{base_url}/play/{play_token}"
+            download_url = f"{base_url}/api/shares/file-link/{download_token}"
+        buttons: list[list[InlineKeyboardButton]] = []
+        if command != "downloadlink":
+            buttons.append([InlineKeyboardButton("🌐 پخش عمومی", url=play_url)])
+        if command != "playlink":
+            buttons.append([InlineKeyboardButton("📥 دریافت فایل", url=download_url)])
+        if public_hash:
+            buttons.append([InlineKeyboardButton("🔗 پیوند دائمی", url=f"{base_url}/s/{public_hash}")])
+        message_key = "file_links_private" if message.chat.type == enums.ChatType.PRIVATE else "file_links_group"
+        await message.reply(
+            await bot_message(message_key, title=title),
+            reply_markup=InlineKeyboardMarkup(buttons),
+            disable_web_page_preview=True,
+        )
+    finally:
+        await safe_delete(status_message)
 
 
 @tg_client.on_message(filters.command("tts") & filters.group)
