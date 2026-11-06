@@ -412,7 +412,6 @@ export default function SettingsPage() {
                 </div>
             </section>
 
-            <div className={homeLayout==='list'?'space-y-4':homeLayout==='compact'?'grid grid-cols-2 items-start gap-2 lg:grid-cols-3':'grid items-start gap-4 sm:grid-cols-2'}>
             <SettingsGroup title="حساب و امنیت" text="ورود، دستگاه‌ها و دسترسی دیگران" icon={<Shield/>} layout={homeLayout}>
                 <SettingsButton layout={homeLayout} icon={<Users/>} title="حساب‌ها" text="افزودن حساب، جابه‌جایی و پشتیبان" onClick={() => setView('accounts')} />
                 <SettingsButton layout={homeLayout} icon={<KeyRound/>} title="ورود و امنیت" text="رمز عبور، بازیابی و گاوصندوق" onClick={() => setView('security')} />
@@ -453,7 +452,6 @@ export default function SettingsPage() {
                 <SettingsButton layout={homeLayout} icon={<Instagram/>} title="دریافت از اینستاگرام" text="تأیید فرستنده‌ها و اتصال دایرکت به تلگرام" onClick={() => setView('admin-instagram')} />
                 <SettingsButton layout={homeLayout} icon={<Gauge/>} title="گزارش و سلامت" text="آمار کلی، وضعیت سرویس‌ها و خطاها" onClick={() => setView('admin')} />
             </SettingsGroup>}
-            </div>
         </div>}
 
         {view === 'accounts' && <div className="space-y-4">
@@ -604,10 +602,8 @@ function SettingsGroup({title,text,icon,layout,children}:{title:string;text:stri
     const [open,setOpen]=useState(()=>{const own=localStorage.getItem(storageKey);if(own!==null)return own==='1';return localStorage.getItem(SETTINGS_GROUPS_MODE_KEY)==='open'});
     useEffect(()=>{const listener=(event:Event)=>{const next=Boolean((event as CustomEvent<{open:boolean}>).detail?.open);localStorage.setItem(storageKey,next?'1':'0');setOpen(next)};window.addEventListener(SETTINGS_GROUPS_EVENT,listener);return()=>window.removeEventListener(SETTINGS_GROUPS_EVENT,listener)},[storageKey]);
     const toggle=()=>setOpen(value=>{const next=!value;localStorage.setItem(storageKey,next?'1':'0');return next});
-    const compact=layout==='compact';
-    const contentClass=layout==='list'?'grid grid-cols-1 gap-2':layout==='compact'?'grid grid-cols-1 auto-rows-fr gap-1.5 xl:grid-cols-2':'grid auto-rows-fr gap-2 xl:grid-cols-2';
-    const shellClass=layout==='list'?'rounded-3xl p-3 sm:p-4':layout==='compact'?'h-full rounded-2xl p-2':'h-full rounded-3xl p-3 sm:p-4';
-    return <section className={`min-w-0 overflow-hidden border border-white/[.06] bg-dark-950/25 transition ${shellClass}`}><button type="button" className={`flex w-full min-w-0 items-center rounded-2xl text-right transition ${compact?'gap-2 px-0.5 py-1':'gap-3 px-1'} ${open?'mb-3':'hover:bg-white/[.025]'}`} aria-expanded={open} onClick={toggle}><span className={`flex shrink-0 items-center justify-center bg-primary-500/10 text-primary-300 ${compact?'h-8 w-8 rounded-lg [&>svg]:h-4 [&>svg]:w-4':'h-9 w-9 rounded-xl [&>svg]:h-4.5 [&>svg]:w-4.5'}`}>{icon}</span><div className="min-w-0 flex-1"><h2 className={`${compact?'text-xs':'text-sm'} truncate font-bold text-dark-100`}>{title}</h2>{open&&!compact&&<p className="mt-0.5 truncate text-[11px] text-dark-500">{text}</p>}</div><ChevronDown className={`h-4 w-4 shrink-0 text-dark-500 transition-transform duration-200 ${open?'rotate-180 text-primary-300':''}`}/></button>{open&&<div className={contentClass}>{children}</div>}</section>;
+    const contentClass=layout==='list'?'grid grid-cols-1 gap-2':layout==='compact'?'grid grid-cols-2 auto-rows-fr gap-2 sm:grid-cols-3 lg:grid-cols-4':'grid auto-rows-fr gap-3 sm:grid-cols-2 lg:grid-cols-3';
+    return <section className="min-w-0 overflow-hidden rounded-3xl border border-white/[.06] bg-dark-950/25 p-3 sm:p-4"><button type="button" className={`flex w-full min-w-0 items-center gap-3 rounded-2xl px-1 text-right transition ${open?'mb-3':'hover:bg-white/[.025]'}`} aria-expanded={open} onClick={toggle}><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary-500/10 text-primary-300 [&>svg]:h-4.5 [&>svg]:w-4.5">{icon}</span><div className="min-w-0 flex-1"><h2 className="truncate text-sm font-bold text-dark-100">{title}</h2>{open&&<p className="mt-0.5 truncate text-[11px] text-dark-500">{text}</p>}</div><ChevronDown className={`h-4 w-4 shrink-0 text-dark-500 transition-transform duration-200 ${open?'rotate-180 text-primary-300':''}`}/></button>{open&&<div className={contentClass}>{children}</div>}</section>;
 }
 function SettingsButton({icon,title,text,onClick,layout='cards'}:{icon:React.ReactElement;title:string;text?:string;onClick:()=>void;layout?:SettingsHomeLayout}) {
     const compact=layout==='compact';
