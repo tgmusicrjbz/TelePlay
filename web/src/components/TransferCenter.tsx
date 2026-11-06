@@ -7,7 +7,7 @@ import { clearResolvedOfflineMutations, listOfflineMutations, OFFLINE_MUTATIONS_
 import { isEffectivelyOnline } from '../lib/connectivity';
 
 type VisibleState='queued'|'downloading'|'saving'|'paused'|'cancelled'|'done'|'error';
-type LinkJob={id:string;url:string;source?:'link'|'drive';state:string;message:string;saved:number;progress?:number;quality?:string};
+type LinkJob={id:string;url:string;title?:string;source?:'link'|'drive';state:string;message:string;saved:number;progress?:number;quality?:string};
 type SpeechJob={id:string;title?:string;state:string;message:string;progress?:number};
 type Row={id:string;kind:'offline'|'upload'|'link'|'drive'|'sync'|'tts'|'stt';title:string;state:VisibleState;detail:string;percent:number};
 type Filter='all'|'offline'|'upload'|'link'|'speech';
@@ -17,6 +17,7 @@ const visibleState=(state:string):VisibleState=>{
  if(state==='merging')return'saving';
  return(['queued','downloading','saving','paused','cancelled','done','error'].includes(state)?state:'queued') as VisibleState;
 };
+const compactTitle=(value:string,max=72)=>{const clean=value.replace(/\s+/g,' ').trim();return clean.length>max?`${clean.slice(0,max-1)}…`:clean};
 
 export default function TransferCenter(){
  const [local,setLocal]=useState<LocalTransfer[]>(listLocalTransfers);
@@ -42,7 +43,7 @@ export default function TransferCenter(){
  useEffect(()=>{let stopped=false,timer:number|undefined;const poll=async()=>{if(timer)window.clearTimeout(timer);const active=await loadServerJobs();if(!stopped)timer=window.setTimeout(poll,(active??activeServerJobsRef.current)?2500:15000)};const wake=()=>{if(!document.hidden){if(timer)window.clearTimeout(timer);void poll()}};void poll();document.addEventListener('visibilitychange',wake);window.addEventListener('online',wake);return()=>{stopped=true;if(timer)window.clearTimeout(timer);document.removeEventListener('visibilitychange',wake);window.removeEventListener('online',wake)}},[loadServerJobs]);
  const rows=useMemo<Row[]>(()=>[
   ...local.map(item=>({id:item.id,kind:item.kind,title:item.title,state:visibleState(item.state),detail:item.detail||'',percent:item.percent})),
-  ...links.map(item=>({id:item.id,kind:(item.source==='drive'?'drive':'link') as 'drive'|'link',title:item.source==='drive'?'گوگل درایو':item.url,state:visibleState(item.state),detail:item.message,percent:item.progress??(item.state==='done'?100:item.state==='queued'?0:15)})),
+  ...links.map(item=>({id:item.id,kind:(item.source==='drive'?'drive':'link') as 'drive'|'link',title:compactTitle(item.title||(item.source==='drive'?'گوگل درایو':item.url)),state:visibleState(item.state),detail:item.message,percent:item.progress??(item.state==='done'?100:item.state==='queued'?0:15)})),
   ...speech.map(item=>({id:item.id,kind:item.kind,title:item.title||(item.kind==='tts'?'ساخت صدا':'استخراج متن'),state:visibleState(item.state),detail:item.message,percent:item.progress??0})),
   ...mutations.map(item=>({id:item.id,kind:'sync' as const,title:item.entity==='folder'?'تغییر کشو':item.entity==='playlist'?'تغییر پلی‌لیست':'تغییر تگ',state:(item.state==='queued'?'queued':'error') as VisibleState,detail:item.message||(item.state==='queued'?'منتظر اتصال برای همگام‌سازی':'نیاز به بررسی'),percent:0})),
  ].filter(item=>filter==='all'||item.kind===filter||(filter==='link'&&item.kind==='drive')||(filter==='speech'&&(item.kind==='tts'||item.kind==='stt'))),[local,links,speech,mutations,filter]);

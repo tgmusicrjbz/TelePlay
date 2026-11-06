@@ -33,7 +33,7 @@ from ..telegram import delete_from_storage_channel, get_message_from_channel
 from .. import telegram
 from ..config import get_settings
 from ..media_metadata import extract_embedded_cover
-from ..downloader import ImportJob, classify_import_url, link_importer
+from ..downloader import ImportJob, classify_import_url, link_importer, resolve_link_metadata
 from ..drive_importer import drive_importer, extract_google_drive_file_id, infer_google_workspace_mime
 from ..google_drive import authorization_url, decode_state, exchange_code, account_email, access_token as google_access_token, list_files as google_list_files, configured as google_drive_configured, full_configured as google_drive_full_configured, picker_configured as google_picker_configured, picker_bootstrap, active_credentials, account_key, credential_accounts, encrypt_account_store, redirect_uri as google_redirect_uri, web_base_url as google_web_base_url
 from ..processing_jobs import update_job
@@ -448,6 +448,12 @@ class LinkImportRequest(BaseModel):
     save_to_library: bool = True
     send_to_telegram: bool = False
     destination_ids: list[int] = Field(default_factory=list, max_length=20)
+    title: Optional[str] = Field(default=None, max_length=300)
+    author: Optional[str] = Field(default=None, max_length=180)
+
+
+class LinkMetadataRequest(BaseModel):
+    urls: list[str] = Field(min_length=1, max_length=20)
 
 
 class DriveImportRequest(BaseModel):
@@ -616,6 +622,28 @@ async def index_missing_text_notes(db: AsyncSession, user_id: int) -> int:
         return indexed
 
 
+@router.post("/import-link/metadata")
+async def import_link_metadata(payload: LinkMetadataRequest, _: User = Depends(get_current_user)):
+    semaphore = asyncio.Semaphore(4)
+
+    async def resolve(raw_url: str) -> dict[str, str | None]:
+        url = raw_url.strip()
+        if classify_import_url(url) != "youtube":
+            return {"url": url, "title": None, "author": None}
+        try:
+            async with semaphore:
+                title, author = await asyncio.to_thread(resolve_link_metadata, url)
+        except Exception:
+            return {"url": url, "title": None, "author": None}
+        clean_title = re.sub(r"\s+", " ", title).strip()
+        return {
+            "url": url,
+            "title": clean_title[:300] if clean_title and clean_title != "youtube" else None,
+            "author": author[:180] if author else None,
+        }
+    return {"items": await asyncio.gather(*(resolve(url) for url in dict.fromkeys(payload.urls)))}
+
+
 @router.post("/import-link", status_code=202)
 async def import_link(
     payload: LinkImportRequest,
@@ -661,9 +689,10 @@ async def import_link(
         folder_id=folder_id, quality=quality, notify=True,
         save_to_library=payload.save_to_library, send_to_telegram=payload.send_to_telegram,
         destination_ids=payload.destination_ids,
+        title=(payload.title or "").strip() or None, author=(payload.author or "").strip() or None,
     )
     position = await link_importer.enqueue(job)
-    return {"message": "لینک رفت توی صف؛ وضعیتش همین‌جا هم به‌روز می‌شه.", "queue_position": position, "job_id": job.id}
+    return {"message": "لینک رفت توی صف؛ وضعیتش همین‌جا هم به‌روز می‌شه.", "queue_position": position, "job_id": job.id, "title": job.title}
 
 
 @router.get("/import-link/status/{job_id}")
@@ -712,6 +741,8 @@ async def retry_import_link(job_id: str, current_user: User = Depends(get_curren
         telegram_id=current_user.telegram_id, folder_id=previous.get("folder_id"),
         quality=str(previous.get("quality") or "480"), notify=True,
         retry_count=int(previous.get("retry_count") or 0) + 1,
+        title=str(previous.get("title") or "").strip() or None,
+        author=str(previous.get("author") or "").strip() or None,
     )
     position = await link_importer.enqueue(job)
     return {"message": "دوباره به صف اضافه شد.", "queue_position": position, "job_id": job.id, "status": link_importer.status(job.id, current_user.id)}

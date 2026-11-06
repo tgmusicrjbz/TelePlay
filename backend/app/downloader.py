@@ -485,6 +485,8 @@ class ImportJob:
     retry_count: int = 0
     instagram_sender_id: int | None = None
     instagram_event_id: int | None = None
+    title: str | None = None
+    author: str | None = None
     id: str = ""
 
 
@@ -527,6 +529,11 @@ def _oembed_metadata(url: str) -> tuple[str, str | None]:
     except Exception:
         logger.debug("Could not resolve metadata with yt-dlp for %s", url, exc_info=True)
     return ("youtube" if is_youtube else "instagram"), None
+
+
+def resolve_link_metadata(url: str) -> tuple[str, str | None]:
+    """Resolve public display metadata without downloading the media."""
+    return _oembed_metadata(url)
 
 
 def _youtube_playlist_entries(url: str) -> tuple[str | None, list[dict[str, str]]]:
@@ -643,6 +650,8 @@ class LinkImportService:
                 retry_count=int(status.get("retry_count") or 0), id=job_id,
                 instagram_sender_id=payload.get("instagram_sender_id"),
                 instagram_event_id=payload.get("instagram_event_id"),
+                title=str(payload.get("title") or status.get("title") or "").strip() or None,
+                author=str(payload.get("author") or status.get("author") or "").strip() or None,
             )
             status["visible_to_user"] = job.visible_to_user
             status.update(state="queued", message="ادامه پس از راه‌اندازی دوباره", progress=0)
@@ -667,10 +676,10 @@ class LinkImportService:
             await self.start()
         position = 1 + sum(1 for status in self.statuses.values() if status.get("state") not in {"done", "error", "cancelled"})
         job.id = job.id or uuid.uuid4().hex
-        self.statuses[job.id] = {"id": job.id, "user_id": job.user_id, "url": job.url, "quality": job.quality, "folder_id": job.folder_id, "state": "queued", "message": "در صف", "saved": 0, "progress": 0, "retry_count": job.retry_count, "visible_to_user": job.visible_to_user, "created_at": datetime.utcnow().isoformat()}
+        self.statuses[job.id] = {"id": job.id, "user_id": job.user_id, "url": job.url, "title": (job.title or "")[:300], "author": (job.author or "")[:180], "quality": job.quality, "folder_id": job.folder_id, "state": "queued", "message": "در صف", "saved": 0, "progress": 0, "retry_count": job.retry_count, "visible_to_user": job.visible_to_user, "created_at": datetime.utcnow().isoformat()}
         self.controls[job.id] = {"paused": False, "cancelled": False}
         await create_job(
-            job_id=job.id, user_id=job.user_id, kind="link", title=job.url,
+            job_id=job.id, user_id=job.user_id, kind="link", title=(job.title or job.url)[:300],
             payload={"id": job.id, "url": job.url, "user_id": job.user_id,
                      "telegram_id": job.telegram_id, "folder_id": job.folder_id,
                      "quality": job.quality, "notify": job.notify, "default_folder": job.default_folder,
@@ -679,7 +688,8 @@ class LinkImportService:
                      "save_to_library": job.save_to_library, "send_to_telegram": job.send_to_telegram,
                      "destination_ids": job.destination_ids,
                      "instagram_sender_id": job.instagram_sender_id,
-                     "instagram_event_id": job.instagram_event_id},
+                     "instagram_event_id": job.instagram_event_id,
+                     "title": job.title, "author": job.author},
             status=self.statuses[job.id],
         )
         self.durable_job_ids.add(job.id)
@@ -800,6 +810,9 @@ class LinkImportService:
                 )
                 await self._persist_status(job.id)
                 playlist_title, playlist_entries = await asyncio.to_thread(_youtube_playlist_entries, job.url)
+                if playlist_title:
+                    self.statuses[job.id].update(title=playlist_title[:300])
+                    await self._persist_status(job.id)
                 sources = playlist_entries or [{"url": job.url, "title": ""}]
                 items: list[dict] = []
                 for source_index, source in enumerate(sources, 1):
@@ -907,6 +920,9 @@ class LinkImportService:
             return await asyncio.to_thread(_download_instagram_direct, url, quality)
         raw_title, source_author = await asyncio.to_thread(_oembed_metadata, url)
         title = sanitize_filename(raw_title)
+        if title and title not in {"youtube", "instagram"}:
+            self.statuses[job.id].update(title=title[:300], author=(source_author or "")[:180])
+            await self._persist_status(job.id)
         try:
             sent = await client.send_message("allsaverbot", url)
         except Exception:

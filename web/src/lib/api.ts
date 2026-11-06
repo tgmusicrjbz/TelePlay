@@ -1236,8 +1236,8 @@ export const useDisableTwoFactor = () => {
 };
 
 export const useImportLink = () => useMutation({
-    mutationFn: async (payload: { url: string; folder_id?: number | null; new_folder_name?: string; quality?: 'auto' | 'audio' | '480' | '720' | '1080'; save_to_library?:boolean; send_to_telegram?:boolean; destination_ids?:number[] }) =>
-        (await api.post<{ message: string; queue_position: number; job_id: string }>('/files/import-link', payload)).data,
+    mutationFn: async (payload: { url: string; folder_id?: number | null; new_folder_name?: string; quality?: 'auto' | 'audio' | '480' | '720' | '1080'; save_to_library?:boolean; send_to_telegram?:boolean; destination_ids?:number[]; title?:string; author?:string }) =>
+        (await api.post<{ message: string; queue_position: number; job_id: string; title?:string }>('/files/import-link', payload)).data,
 });
 
 export const usePlaylist = (id: number | null) => useQuery<Playlist>({

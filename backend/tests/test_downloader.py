@@ -113,6 +113,8 @@ class LinkImportDurabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, direct_result)
         client.send_message.assert_awaited_once_with("allsaverbot", job.url)
         fallback.assert_called_once_with(job.url, job.quality)
+        self.assertEqual(service.statuses[job.id]["title"], "Sample")
+        self.assertEqual(service.statuses[job.id]["author"], "Channel")
         self.assertIn("ربات کمکی", service.statuses[job.id]["message"])
 
     def test_supported_link_classifier_includes_public_pinterest_urls(self):
