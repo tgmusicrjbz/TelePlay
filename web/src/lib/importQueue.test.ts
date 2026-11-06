@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyImportUrl, compactImportTitle, importSourceLabel, mergeImportStatuses, visibleImportStatuses, type ImportStatus } from './importQueue';
+import { classifyImportUrl, compactImportTitle, extractImportUrls, importSourceLabel, mergeImportStatuses, visibleImportStatuses, type ImportStatus } from './importQueue';
 
 const job = (overrides: Partial<ImportStatus> = {}): ImportStatus => ({
     id: 'job-1',
@@ -16,6 +16,13 @@ describe('import queue', () => {
         expect(classifyImportUrl('https://www.instagram.com/reel/1')).toBe('instagram');
         expect(classifyImportUrl('https://pin.it/example')).toBe('pinterest');
         expect(classifyImportUrl('javascript:alert(1)')).toBeNull();
+    });
+
+    it('extracts adjacent links and removes message punctuation', () => {
+        expect(extractImportUrls('اول https://youtu.be/one، بعد https://pin.it/two!')).toEqual([
+            'https://youtu.be/one',
+            'https://pin.it/two',
+        ]);
     });
 
     it('keeps status titles compact and readable', () => {
