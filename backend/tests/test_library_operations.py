@@ -7,6 +7,7 @@ import json
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
+from http.cookies import SimpleCookie
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, PropertyMock, patch
@@ -20,7 +21,7 @@ os.environ["TELEGRAM_STORAGE_CHANNEL_ID"] = "-1001234567890"
 os.environ["JWT_SECRET"] = "test-secret"
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
 from starlette.datastructures import Headers, UploadFile
 from starlette.requests import Request
 from sqlalchemy import select
@@ -30,7 +31,8 @@ from app.database import Base, async_session, engine
 from app.models import AuthSession, BotUserState, ErrorLog, File, Folder, Pack, PackItem, Playlist, PlaylistItem, ProcessingJob, SecurityEvent, SourceMonitor, TTSUsage, User, WatchProgress
 from app.config import _session_values
 from app.monitoring import TelegramMonitorClientPool, settings as monitor_settings, source_monitor_service, telegram_monitor_pool
-from app.routers.auth import _require_telegram_two_factor, _session_for_device, password_login, password_register, update_credentials
+from app.routers.auth import _require_telegram_two_factor, _session_for_device, password_login, password_register, refresh_token as refresh_access_token, update_credentials
+from app.schemas import RefreshTokenRequest
 from app.account_security import encrypt_secret, new_totp_secret, totp_code
 from app.routers.accounts import admin_error_logs, admin_health, delete_tag_definition, delete_tag_definitions_batch, export_account_data, get_saved_filters, get_tag_settings, import_account_data, report_client_error, resolve_admin_error, update_saved_filters, update_tag_settings
 from app.stt import consume_stt_quota
@@ -387,7 +389,12 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
     def auth_request() -> Request:
         return Request({
             "type": "http", "method": "POST", "path": "/api/auth/password/login",
-            "headers": [(b"user-agent", b"Komod Test"), (b"x-komod-device-id", b"test-device")],
+            "headers": [
+                (b"user-agent", b"Komod Test"),
+                (b"x-komod-device-id", b"test-device"),
+                (b"x-komod-auth-cookie", b"1"),
+                (b"x-forwarded-proto", b"https"),
+            ],
             "client": ("127.0.0.1", 1234),
         })
 
@@ -444,16 +451,39 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             user = await db.get(User, self.user_id)
             response = await update_credentials(
                 self.auth_request(),
+                Response(),
                 CredentialsUpdate(username="mahdi.komod", new_password="Safe-Password-1405"),
                 user, db,
             )
             self.assertEqual(response.user.login_username, "mahdi.komod")
+            login_response = Response()
             login = await password_login(
                 self.auth_request(),
+                login_response,
                 PasswordLoginRequest(username="MAHDI.KOMOD", password="Safe-Password-1405"),
                 db,
             )
             self.assertEqual(login.user.telegram_id, 111)
+            self.assertIsNone(login.refresh_token)
+            cookie = login_response.headers["set-cookie"]
+            self.assertIn("HttpOnly", cookie)
+            self.assertIn("Secure", cookie)
+            self.assertNotIn(login.access_token, cookie)
+            parsed_cookie = SimpleCookie()
+            parsed_cookie.load(cookie)
+            cookie_pair = next(iter(parsed_cookie.values())).OutputString().split(";", 1)[0]
+            refresh_request = Request({
+                "type": "http", "method": "POST", "scheme": "https", "path": "/api/auth/refresh",
+                "headers": [(b"cookie", cookie_pair.encode()), (b"x-komod-auth-cookie", b"1")],
+                "client": ("127.0.0.1", 1234), "server": ("testserver", 443),
+            })
+            rotated_response = Response()
+            rotated = await refresh_access_token(
+                refresh_request, rotated_response, RefreshTokenRequest(account_id=111), db,
+            )
+            self.assertIsNone(rotated.refresh_token)
+            self.assertTrue(rotated.access_token)
+            self.assertIn("HttpOnly", rotated_response.headers["set-cookie"])
             sessions = (await db.execute(select(AuthSession).where(
                 AuthSession.user_id == self.user_id, AuthSession.revoked_at.is_(None)
             ))).scalars().all()
@@ -468,6 +498,7 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             user = await db.get(User, self.user_id)
             await update_credentials(
                 self.auth_request(),
+                Response(),
                 CredentialsUpdate(username="mahdi.2fa", new_password="Safe-Password-1405!"),
                 user, db,
             )
@@ -477,6 +508,7 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(HTTPException) as challenge:
                 await password_login(
                     self.auth_request(),
+                    Response(),
                     PasswordLoginRequest(username="mahdi.2fa", password="Safe-Password-1405!"),
                     db,
                 )
@@ -484,6 +516,7 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(challenge.exception.headers.get("X-Komod-OTP-Required"), "true")
             login = await password_login(
                 self.auth_request(),
+                Response(),
                 PasswordLoginRequest(username="mahdi.2fa", password="Safe-Password-1405!", otp=totp_code(secret)),
                 db,
             )
@@ -515,6 +548,7 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(HTTPException) as pending:
                 await password_login(
                     self.auth_request(),
+                    Response(),
                     PasswordLoginRequest(username="standalone.user", password="Safe-Password-1405!"),
                     db,
                 )
@@ -525,6 +559,7 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             await db.commit()
             login = await password_login(
                 self.auth_request(),
+                Response(),
                 PasswordLoginRequest(username="standalone.user", password="Safe-Password-1405!"),
                 db,
             )
