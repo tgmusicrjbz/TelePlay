@@ -214,10 +214,14 @@ These are the "keys" that make the application work. You must add these regardle
 | `TELEGRAM_BOT_TOKEN`          | From @BotFather (See Step 1.2).                                                                        |
 | `TELEGRAM_STORAGE_CHANNEL_ID` | From your private channel (See Step 1.4). Starts with `-100`.                                          |
 | `JWT_SECRET`                  | A long, random string (e.g., `s0me_v3ry_l0ng_p4ssw0rd_123`). You can make this up, but keep it secret! |
+| `DATA_ENCRYPTION_KEY`         | A separate long random value used for TOTP, personal Gemini keys, and Google Drive credentials. Set this before rotating `JWT_SECRET`. |
+| `DATA_ENCRYPTION_PREVIOUS_KEYS` | Optional comma-separated previous data-encryption keys kept temporarily during key rotation. |
 | `DATABASE_URL`                | The path to your database. See the [Database Setup Guide](#database-setup-guide) below.                |
 | `WEB_BASE_URL`                | The public URL where you visit the app (e.g., `https://teleplay.your-vps.com`).                        |
 | `TELEGRAM_HELPER_BOT_TOKENS`  | (Optional) Comma-separated tokens for extra bots to speed up downloads.                                |
 | `AUTH_USERS`                  | (Optional) Comma-separated Telegram User IDs allowed to use the bot. Leave empty for everyone.         |
+
+For a safe first rollout, add `DATA_ENCRYPTION_KEY` while keeping the current `JWT_SECRET`, deploy once, and wait for the startup rotation log. You can then rotate `JWT_SECRET` without losing TOTP, Gemini, or Drive credentials. When rotating the data key itself, place the old value in `DATA_ENCRYPTION_PREVIOUS_KEYS` for one deployment, then remove it after the rotation log reports no unreadable values.
 
 ---
 

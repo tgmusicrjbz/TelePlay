@@ -1,13 +1,12 @@
 """Google OAuth and Drive API helpers. Tokens are encrypted at rest."""
 from __future__ import annotations
 
-import asyncio, base64, hashlib, json, re, time
+import asyncio, json, re, time
 from urllib.parse import urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 from jose import jwt
-from cryptography.fernet import Fernet, InvalidToken
-
 from .config import get_settings
+from .encrypted_data import decrypt_value, encrypt_value
 
 settings=get_settings()
 FULL_SCOPE="openid email https://www.googleapis.com/auth/drive.readonly"
@@ -48,13 +47,12 @@ def _oauth_config(mode:str)->tuple[str,str,str,str]:
         return settings.google_picker_client_id,settings.google_picker_client_secret,redirect_uri("picker"),PICKER_SCOPE
     if not full_configured(): raise ValueError("اتصال کامل گوگل هنوز روی سرور تنظیم نشده است.")
     return settings.google_client_id,settings.google_client_secret,redirect_uri("full"),FULL_SCOPE
-def _cipher()->Fernet:
-    digest=hashlib.sha256((settings.jwt_secret+":google-drive:v1").encode()).digest()
-    return Fernet(base64.urlsafe_b64encode(digest))
-def encrypt_credentials(value:dict)->str: return _cipher().encrypt(json.dumps(value).encode()).decode()
+def encrypt_credentials(value:dict)->str: return encrypt_value(json.dumps(value),context="google-drive:v1")
 def decrypt_credentials(value:str|None)->dict:
-    try: return json.loads(_cipher().decrypt((value or "").encode()).decode()) if value else {}
-    except (InvalidToken,ValueError,TypeError,json.JSONDecodeError): return {}
+    try:
+        decrypted=decrypt_value(value,context="google-drive:v1")
+        return json.loads(decrypted) if decrypted else {}
+    except (ValueError,TypeError,json.JSONDecodeError): return {}
 
 def account_key(account:dict)->str:
     return f"{account.get('email','')}|{account.get('mode','full')}"

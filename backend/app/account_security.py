@@ -8,14 +8,7 @@ import struct
 import time
 from urllib.parse import quote
 
-from cryptography.fernet import Fernet, InvalidToken
-
-from .config import get_settings
-
-
-def _cipher() -> Fernet:
-    key = hashlib.sha256(f"{get_settings().jwt_secret}:komod-2fa".encode()).digest()
-    return Fernet(base64.urlsafe_b64encode(key))
+from .encrypted_data import decrypt_value, encrypt_value
 
 
 def new_totp_secret() -> str:
@@ -23,30 +16,30 @@ def new_totp_secret() -> str:
 
 
 def encrypt_secret(secret: str) -> str:
-    return _cipher().encrypt(secret.encode()).decode()
+    return encrypt_value(secret, context="komod-2fa")
 
 
 def decrypt_secret(value: str | None) -> str | None:
     if not value:
         return None
-    try:
-        return _cipher().decrypt(value.encode()).decode()
-    except (InvalidToken, ValueError):
-        return None
+    return decrypt_value(value, context="komod-2fa")
 
 
 def setup_token(secret: str, lifetime_seconds: int = 600) -> str:
     payload = {"secret": secret, "exp": int(time.time()) + lifetime_seconds}
-    return _cipher().encrypt(json.dumps(payload).encode()).decode()
+    return encrypt_value(json.dumps(payload), context="komod-2fa")
 
 
 def secret_from_setup_token(value: str) -> str | None:
     try:
-        payload = json.loads(_cipher().decrypt(value.encode()).decode())
+        decrypted = decrypt_value(value, context="komod-2fa")
+        if not decrypted:
+            return None
+        payload = json.loads(decrypted)
         if int(payload.get("exp", 0)) < int(time.time()):
             return None
         return str(payload["secret"])
-    except (InvalidToken, ValueError, KeyError, TypeError, json.JSONDecodeError):
+    except (ValueError, KeyError, TypeError, json.JSONDecodeError):
         return None
 
 

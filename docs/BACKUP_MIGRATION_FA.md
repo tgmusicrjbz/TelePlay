@@ -40,4 +40,4 @@ python scripts/backup_restore.py import --input komod-backup.json.gz --safety-ou
 
 اگر دیتابیس مقصد دادهٔ آزمایشی دارد و می‌خواهی کاملاً جایگزین شود، فقط پس از اطمینان از آدرس دیتابیس از `--clear` استفاده کن.
 
-بعد از انتقال، دسترسی ربات به کانال‌های ذخیره‌سازی و مقدارهای `TELEGRAM_*`، `JWT_SECRET` و کلید رمزگذاری Gemini را نیز بررسی کن. تغییر `JWT_SECRET` نشست‌های قبلی را از اعتبار می‌اندازد.
+بعد از انتقال، دسترسی ربات به کانال‌های ذخیره‌سازی و مقدارهای `TELEGRAM_*`، `JWT_SECRET` و `DATA_ENCRYPTION_KEY` را نیز بررسی کن. تغییر `JWT_SECRET` نشست‌های قبلی را از اعتبار می‌اندازد، اما اگر `DATA_ENCRYPTION_KEY` ثابت بماند اتصال Google Drive، کلیدهای شخصی Gemini و TOTP حفظ می‌شوند.

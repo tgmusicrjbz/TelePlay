@@ -2,7 +2,7 @@
 Configuration settings loaded from environment variables.
 """
 from pydantic_settings import BaseSettings
-from pydantic import Field
+from pydantic import Field, field_validator
 from functools import lru_cache
 
 
@@ -117,6 +117,19 @@ class Settings(BaseSettings):
     jwt_secret: str
     jwt_expiry_minutes: int = 30
     refresh_token_expiry_days: int = 30
+    # Persistent credentials must survive JWT signing-key rotation. If the
+    # dedicated key is not configured yet, legacy JWT-derived encryption stays
+    # available so existing deployments can roll out without downtime.
+    data_encryption_key: str = Field("", alias="DATA_ENCRYPTION_KEY")
+    data_encryption_previous_keys: str = Field("", alias="DATA_ENCRYPTION_PREVIOUS_KEYS")
+
+    @field_validator("data_encryption_key")
+    @classmethod
+    def validate_data_encryption_key(cls, value: str) -> str:
+        value = value.strip()
+        if value and len(value) < 32:
+            raise ValueError("DATA_ENCRYPTION_KEY must contain at least 32 characters")
+        return value
     
     # Server
     server_host: str = "0.0.0.0"

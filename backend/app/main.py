@@ -88,6 +88,15 @@ async def lifespan(app: FastAPI):
             )
             await asyncio.sleep(delay)
     logger.info("Database migration revision verified")
+    if not settings.data_encryption_key:
+        logger.warning("DATA_ENCRYPTION_KEY is not configured; persistent secrets still use the JWT compatibility key")
+    try:
+        from .secret_rotation import rotate_persisted_user_secrets
+        rotated, unreadable = await rotate_persisted_user_secrets()
+        if rotated or unreadable:
+            logger.info("Persistent secret rotation finished: rotated=%s unreadable=%s", rotated, unreadable)
+    except Exception:
+        logger.exception("Persistent secret rotation failed; startup will continue with the configured key ring")
     if not settings.local_dev_mode:
         try:
             from .instagram_inbox import refresh_instagram_connection_health
