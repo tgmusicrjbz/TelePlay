@@ -7,7 +7,7 @@ import { cachedCurrentUser, clearCurrentAccountSession, syncCurrentAccount, upda
 import { queueOfflineMutation, shouldQueueOffline } from './offlineMutations';
 import { isEffectivelyOnline, markServerReachable, markServerUnreachable } from './connectivity';
 import { isNativeApp } from './runtime';
-import { moveFilesInList, moveFoldersInList, removeFilesFromList, removeFoldersFromList } from './libraryCache';
+import { moveFilesInList, moveFoldersInList, removeFilesFromList, removeFoldersFromList, updateFileInList, updateFolderInList } from './libraryCache';
 
 const normalizeServerOrigin = (value?: string | null) => {
     const trimmed = String(value || '').trim().replace(/\/+$/, '');
@@ -633,6 +633,15 @@ export const useUpdateFile = () => {
                 ()=>({...cached,id,...data,updated_at:new Date().toISOString()} as TelegramFile),
             );
         },
+        onMutate: async ({id,...data}) => {
+            await Promise.all([queryClient.cancelQueries({queryKey:['file',id]}),queryClient.cancelQueries({queryKey:['files']})]);
+            const detail=queryClient.getQueryData<TelegramFile>(['file',id]);
+            const lists=queryClient.getQueriesData<FileListResponse>({queryKey:['files']});
+            queryClient.setQueryData<TelegramFile>(['file',id],current=>current?{...current,...data}:current);
+            lists.forEach(([key,current])=>{const moved=Object.prototype.hasOwnProperty.call(data,'folder_id')?moveFilesInList(current,[id],data.folder_id??null,key[1],Boolean(key[10])):current;queryClient.setQueryData(key,updateFileInList(moved,id,data))});
+            return {detail,lists};
+        },
+        onError: (_error,variables,context) => {queryClient.setQueryData(['file',variables.id],context?.detail);context?.lists.forEach(([key,value])=>queryClient.setQueryData(key,value));},
         onSuccess: (updated,variables) => {
             queryClient.setQueryData(['file',variables.id],updated);
             queryClient.setQueriesData<FileListResponse>({queryKey:['files']},current=>current?{
@@ -955,6 +964,15 @@ export const useUpdateFolder = () => {
             const cached=queryClient.getQueriesData<Folder[]>({queryKey:['folders']}).flatMap(([,items])=>items||[]).find(item=>item.id===id);
             return runOrQueueMetadataMutation(async()=>(await api.patch<Folder>(`/folders/${id}`,data)).data,{entity:'folder',method:'patch',url:`/folders/${id}`,payload:data,baseUpdatedAt:cached?.updated_at},()=>({...cached,id,...data,updated_at:new Date().toISOString()} as Folder));
         },
+        onMutate: async ({id,...data}) => {
+            await Promise.all([queryClient.cancelQueries({queryKey:['folders']}),queryClient.cancelQueries({queryKey:['folderTree']})]);
+            const folders=queryClient.getQueriesData<Folder[]>({queryKey:['folders']});
+            const trees=queryClient.getQueriesData<Folder[]>({queryKey:['folderTree']});
+            folders.forEach(([key,current])=>{const moved=Object.prototype.hasOwnProperty.call(data,'parent_id')?moveFoldersInList(current,[id],data.parent_id??null,key[1]):current;queryClient.setQueryData(key,updateFolderInList(moved,id,data))});
+            trees.forEach(([key,current])=>queryClient.setQueryData(key,updateFolderInList(current,id,data)));
+            return {folders,trees};
+        },
+        onError: (_error,_variables,context) => {context?.folders.forEach(([key,value])=>queryClient.setQueryData(key,value));context?.trees.forEach(([key,value])=>queryClient.setQueryData(key,value));},
         onSuccess: (folder) => {
             queryClient.setQueriesData<Folder[]>({queryKey:['folders']},current=>current?.map(item=>item.id===folder.id?folder:item));
             queryClient.invalidateQueries({ queryKey: ['folders'] });

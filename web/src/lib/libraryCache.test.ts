@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { FileListResponse, Folder, TelegramFile } from './api';
-import { moveFilesInList, moveFoldersInList, removeFilesFromList, removeFoldersFromList } from './libraryCache';
+import { moveFilesInList, moveFoldersInList, removeFilesFromList, removeFoldersFromList, updateFileInList, updateFolderInList } from './libraryCache';
 
 const file = (id: number, folderId: number | null): TelegramFile => ({
     id, user_id: 1, folder_id: folderId, file_id: `file-${id}`, file_unique_id: `unique-${id}`,
@@ -29,5 +29,11 @@ describe('library cache updates', () => {
         const nested = [folder(1, null, [folder(2, 1), folder(3, 1)])];
         expect(removeFoldersFromList(nested, [2])?.[0].children?.map(item => item.id)).toEqual([3]);
         expect(moveFoldersInList([folder(4, 1), folder(5, 1)], [4], 9, 1)?.map(item => item.id)).toEqual([5]);
+    });
+
+    it('updates file and nested folder cards without waiting for a refetch', () => {
+        expect(updateFileInList(response([file(1,null)]),1,{file_name:'تازه.mp3',is_blurred:true})?.files[0]).toMatchObject({file_name:'تازه.mp3',is_blurred:true});
+        const updated=updateFolderInList([folder(1,null,[folder(2,1)])],2,{name:'کشوی تازه',is_pinned:true});
+        expect(updated?.[0].children?.[0]).toMatchObject({name:'کشوی تازه',is_pinned:true});
     });
 });

@@ -4,6 +4,7 @@
 import { useState } from 'react';
 import { FolderPlus } from 'lucide-react';
 import { useCreateFolder } from '../lib/api';
+import { useAppStore } from '../lib/store';
 import ModalShell from './ModalShell';
 
 interface NewFolderModalProps {
@@ -14,20 +15,19 @@ interface NewFolderModalProps {
 export default function NewFolderModal({ parentId, onClose }: NewFolderModalProps) {
     const [name, setName] = useState('');
     const [description, setDescription] = useState('');
-    const [error, setError] = useState('');
     const createFolder = useCreateFolder();
+    const addToast = useAppStore(state=>state.addToast);
 
-    const handleSubmit = async (e: React.FormEvent) => {
+    const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!name.trim()) return;
-
-        setError('');
-        try {
-            await createFolder.mutateAsync({ name: name.trim(), description: description.trim(), parent_id: parentId });
-            onClose();
-        } catch {
-            setError('کشوی تازه ساخته نشد. نام را بررسی کن و دوباره تلاش کن.');
-        }
+        const cleanName=name.trim();
+        if (!cleanName) return;
+        const payload={name:cleanName,description:description.trim(),parent_id:parentId};
+        onClose();
+        addToast('ساخت کشوی تازه در پس‌زمینه شروع شد…','info');
+        void createFolder.mutateAsync(payload)
+            .then(()=>addToast(`کشوی «${cleanName}» ساخته شد.`,'success'))
+            .catch((error:any)=>addToast(error?.response?.data?.detail||'کشوی تازه ساخته نشد. نام را بررسی کن و دوباره تلاش کن.','error'));
     };
 
     return (
@@ -51,8 +51,6 @@ export default function NewFolderModal({ parentId, onClose }: NewFolderModalProp
                         className="input min-h-28 w-full resize-y"
                     />
                     <div className="mt-1 text-left text-xs text-dark-500">{description.length.toLocaleString('fa-IR')} / ۱٬۰۲۴</div>
-                    {error && <p className="mt-3 rounded-xl bg-red-500/10 px-3 py-2 text-sm text-red-300" role="alert">{error}</p>}
-
                     <div className="mt-5 grid grid-cols-2 gap-2">
                         <button
                             type="button"

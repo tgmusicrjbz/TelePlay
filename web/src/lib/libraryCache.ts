@@ -1,4 +1,9 @@
-import type { FileListResponse, Folder } from './api';
+import type { FileListResponse, Folder, TelegramFile } from './api';
+
+export function updateFileInList(current: FileListResponse | undefined, id: number, changes: Partial<TelegramFile>): FileListResponse | undefined {
+    if (!current || !current.files.some(file => file.id === id)) return current;
+    return { ...current, files: current.files.map(file => file.id === id ? { ...file, ...changes } : file) };
+}
 
 export function removeFilesFromList(current: FileListResponse | undefined, ids: Iterable<number>): FileListResponse | undefined {
     if (!current) return current;
@@ -31,6 +36,14 @@ export function removeFoldersFromList(current: Folder[] | undefined, ids: Iterab
         .filter(folder => !removed.has(folder.id))
         .map(folder => folder.children?.length ? { ...folder, children: prune(folder.children) } : folder);
     return prune(current);
+}
+
+export function updateFolderInList(current: Folder[] | undefined, id: number, changes: Partial<Folder>): Folder[] | undefined {
+    if (!current) return current;
+    return current.map(folder => ({
+        ...(folder.id === id ? { ...folder, ...changes } : folder),
+        ...(folder.children?.length ? { children: updateFolderInList(folder.children, id, changes) } : {}),
+    }));
 }
 
 export function moveFoldersInList(
