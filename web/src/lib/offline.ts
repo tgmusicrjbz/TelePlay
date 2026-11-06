@@ -30,6 +30,7 @@ const activeControllers = new Map<number, AbortController>();
 const playlistControls = new Map<string, { paused: boolean; cancelled: boolean }>();
 let activeOfflineJobs = 0;
 let manifestTimer: number | undefined;
+let databasePromise: Promise<IDBDatabase> | null = null;
 
 export const offlineDeviceSyncEnabled = () => localStorage.getItem('komod-offline-device-sync') === '1';
 export const setOfflineDeviceSyncEnabled = (enabled:boolean) => localStorage.setItem('komod-offline-device-sync', enabled ? '1' : '0');
@@ -47,7 +48,8 @@ function emitProgress(progress: OfflineJobProgress) {
 }
 
 function openDatabase(): Promise<IDBDatabase> {
-    return new Promise((resolve, reject) => {
+    if (databasePromise) return databasePromise;
+    databasePromise = new Promise((resolve, reject) => {
         const request = indexedDB.open(DB_NAME, DB_VERSION);
         request.onupgradeneeded = () => {
             const db = request.result;
@@ -57,9 +59,21 @@ function openDatabase(): Promise<IDBDatabase> {
             if (!db.objectStoreNames.contains(TEXT_OUTBOX_STORE)) db.createObjectStore(TEXT_OUTBOX_STORE, { keyPath: 'id' });
             if (!db.objectStoreNames.contains(FOLDER_STORE)) db.createObjectStore(FOLDER_STORE, { keyPath: 'id' });
         };
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error || new Error('باز کردن حافظه آفلاین انجام نشد'));
+        request.onsuccess = () => {
+            const db = request.result;
+            db.onversionchange = () => {
+                db.close();
+                databasePromise = null;
+            };
+            db.onclose = () => { databasePromise = null; };
+            resolve(db);
+        };
+        request.onerror = () => {
+            databasePromise = null;
+            reject(request.error || new Error('باز کردن حافظه آفلاین انجام نشد'));
+        };
     });
+    return databasePromise;
 }
 
 async function transaction<T>(storeName: string, mode: IDBTransactionMode, action: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
@@ -67,10 +81,12 @@ async function transaction<T>(storeName: string, mode: IDBTransactionMode, actio
     return new Promise((resolve, reject) => {
         const tx = db.transaction(storeName, mode);
         const request = action(tx.objectStore(storeName));
-        request.onsuccess = () => resolve(request.result);
+        let result!: T;
+        request.onsuccess = () => { result = request.result; };
         request.onerror = () => reject(request.error || new Error('عملیات حافظه آفلاین انجام نشد'));
-        tx.oncomplete = () => db.close();
+        tx.oncomplete = () => resolve(result);
         tx.onerror = () => reject(tx.error || new Error('عملیات حافظه آفلاین انجام نشد'));
+        tx.onabort = () => reject(tx.error || new Error('عملیات حافظه آفلاین لغو شد'));
     });
 }
 
@@ -389,6 +405,31 @@ export async function removeOfflineText(id: number): Promise<void> {
     if (id < 0) await transaction<undefined>(TEXT_OUTBOX_STORE, 'readwrite', store => store.delete(id) as IDBRequest<undefined>);
     window.dispatchEvent(new Event(OFFLINE_CHANGED_EVENT));
     scheduleOfflineManifestSync();
+}
+
+export async function removeOfflineSelection(selection: { playlistIds?: number[]; mediaIds?: number[]; textIds?: number[] }): Promise<void> {
+    const playlistIds = [...new Set(selection.playlistIds || [])];
+    const mediaIds = [...new Set(selection.mediaIds || [])];
+    const textIds = [...new Set(selection.textIds || [])];
+    const stores: string[] = [];
+    if (playlistIds.length) stores.push(PLAYLIST_STORE);
+    if (mediaIds.length) stores.push(MEDIA_STORE);
+    if (textIds.length) stores.push(TEXT_STORE);
+    if (textIds.some(id => id < 0)) stores.push(TEXT_OUTBOX_STORE);
+    if (!stores.length) return;
+    const db = await openDatabase();
+    await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(stores, 'readwrite');
+        if (playlistIds.length) playlistIds.forEach(id => tx.objectStore(PLAYLIST_STORE).delete(id));
+        if (mediaIds.length) mediaIds.forEach(id => tx.objectStore(MEDIA_STORE).delete(id));
+        if (textIds.length) textIds.forEach(id => tx.objectStore(TEXT_STORE).delete(id));
+        if (textIds.some(id => id < 0)) textIds.filter(id => id < 0).forEach(id => tx.objectStore(TEXT_OUTBOX_STORE).delete(id));
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error || new Error('پاک‌سازی حافظه آفلاین انجام نشد'));
+        tx.onabort = () => reject(tx.error || new Error('پاک‌سازی حافظه آفلاین لغو شد'));
+    });
+    window.dispatchEvent(new Event(OFFLINE_CHANGED_EVENT));
+    if (mediaIds.length || textIds.length) scheduleOfflineManifestSync();
 }
 
 export async function offlinePlaybackFile(record: OfflineMedia): Promise<TelegramFile> {
