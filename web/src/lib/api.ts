@@ -7,6 +7,7 @@ import { cachedCurrentUser, clearCurrentAccountSession, syncCurrentAccount, upda
 import { queueOfflineMutation, shouldQueueOffline } from './offlineMutations';
 import { isEffectivelyOnline, markServerReachable, markServerUnreachable } from './connectivity';
 import { isNativeApp } from './runtime';
+import { moveFilesInList, moveFoldersInList, removeFilesFromList, removeFoldersFromList } from './libraryCache';
 
 const normalizeServerOrigin = (value?: string | null) => {
     const trimmed = String(value || '').trim().replace(/\/+$/, '');
@@ -735,6 +736,15 @@ export const useDeleteFile = () => {
             await api.delete(`/files/${id}`);
             return id;
         },
+        onMutate: async id => {
+            await Promise.all([queryClient.cancelQueries({queryKey:['files']}),queryClient.cancelQueries({queryKey:['packs','detail']})]);
+            const files=queryClient.getQueriesData<FileListResponse>({queryKey:['files']});
+            const packs=queryClient.getQueriesData<Pack>({queryKey:['packs','detail']});
+            files.forEach(([key,current])=>queryClient.setQueryData(key,removeFilesFromList(current,[id])));
+            queryClient.setQueriesData<Pack>({queryKey:['packs','detail']},pack=>removeFilesFromCachedPack(pack,new Set([id])));
+            return {files,packs};
+        },
+        onError: (_error,_id,context) => {context?.files.forEach(([key,data])=>queryClient.setQueryData(key,data));context?.packs.forEach(([key,data])=>queryClient.setQueryData(key,data));},
         onSuccess: id => {
             queryClient.setQueriesData<Pack>({ queryKey: ['packs', 'detail'] }, pack => removeFilesFromCachedPack(pack, new Set([id])));
             queryClient.invalidateQueries({ queryKey: ['files'] });
@@ -757,6 +767,15 @@ export const useDeleteFiles = () => {
             }
             return deleted;
         },
+        onMutate: async ids => {
+            await Promise.all([queryClient.cancelQueries({queryKey:['files']}),queryClient.cancelQueries({queryKey:['packs','detail']})]);
+            const files=queryClient.getQueriesData<FileListResponse>({queryKey:['files']});
+            const packs=queryClient.getQueriesData<Pack>({queryKey:['packs','detail']});
+            files.forEach(([key,current])=>queryClient.setQueryData(key,removeFilesFromList(current,ids)));
+            queryClient.setQueriesData<Pack>({queryKey:['packs','detail']},pack=>removeFilesFromCachedPack(pack,new Set(ids)));
+            return {files,packs};
+        },
+        onError: (_error,_ids,context) => {context?.files.forEach(([key,data])=>queryClient.setQueryData(key,data));context?.packs.forEach(([key,data])=>queryClient.setQueryData(key,data));},
         onSuccess: ids => {
             queryClient.setQueriesData<Pack>({ queryKey: ['packs', 'detail'] }, pack => removeFilesFromCachedPack(pack, new Set(ids)));
             queryClient.invalidateQueries({ queryKey: ['files'] });
@@ -774,6 +793,13 @@ export const useMoveFiles = () => {
         mutationFn: async ({ ids, folderId }: { ids: number[]; folderId: number | null }) => {
             await runOrQueueMetadataMutation(async()=>{await api.post('/files/batch-move',{ids,folder_id:folderId})},{entity:'folder',method:'post',url:'/files/batch-move',payload:{ids,folder_id:folderId}},()=>undefined);
         },
+        onMutate: async variables => {
+            await queryClient.cancelQueries({queryKey:['files']});
+            const files=queryClient.getQueriesData<FileListResponse>({queryKey:['files']});
+            files.forEach(([key,current])=>queryClient.setQueryData(key,moveFilesInList(current,variables.ids,variables.folderId,key[1],Boolean(key[10]))));
+            return {files};
+        },
+        onError: (_error,_variables,context) => context?.files.forEach(([key,data])=>queryClient.setQueryData(key,data)),
         onSuccess: (_result, variables) => {
             queryClient.invalidateQueries({ queryKey: ['files'] });
             queryClient.invalidateQueries({ queryKey: ['folders'] });
@@ -855,6 +881,13 @@ export const useMoveFolders = () => {
         mutationFn: async ({ ids, folderId }: { ids: number[]; folderId: number | null }) => {
             await runOrQueueMetadataMutation(async()=>{await api.post('/folders/batch-move',{ids,folder_id:folderId})},{entity:'folder',method:'post',url:'/folders/batch-move',payload:{ids,folder_id:folderId}},()=>undefined);
         },
+        onMutate: async variables => {
+            await queryClient.cancelQueries({queryKey:['folders']});
+            const folders=queryClient.getQueriesData<Folder[]>({queryKey:['folders']});
+            folders.forEach(([key,current])=>queryClient.setQueryData(key,moveFoldersInList(current,variables.ids,variables.folderId,key[1])));
+            return {folders};
+        },
+        onError: (_error,_variables,context) => context?.folders.forEach(([key,data])=>queryClient.setQueryData(key,data)),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['folders'] });
             queryClient.invalidateQueries({ queryKey: ['folderTree'] });
@@ -939,6 +972,15 @@ export const useDeleteFolder = () => {
             await runOrQueueMetadataMutation(async()=>{await api.delete(`/folders/${id}`,{params});return id},{entity:'folder',method:'delete',url:`/folders/${id}?delete_contents=${deleteContents}`,baseUpdatedAt:cached?.updated_at},()=>id);
             return id;
         },
+        onMutate: async ({id}) => {
+            await Promise.all([queryClient.cancelQueries({queryKey:['folders']}),queryClient.cancelQueries({queryKey:['folderTree']})]);
+            const folders=queryClient.getQueriesData<Folder[]>({queryKey:['folders']});
+            const trees=queryClient.getQueriesData<Folder[]>({queryKey:['folderTree']});
+            folders.forEach(([key,current])=>queryClient.setQueryData(key,removeFoldersFromList(current,[id])));
+            trees.forEach(([key,current])=>queryClient.setQueryData(key,removeFoldersFromList(current,[id])));
+            return {folders,trees};
+        },
+        onError: (_error,_variables,context) => {context?.folders.forEach(([key,data])=>queryClient.setQueryData(key,data));context?.trees.forEach(([key,data])=>queryClient.setQueryData(key,data));},
         onSuccess: (id) => {
             queryClient.setQueriesData<Folder[]>({queryKey:['folders']},current=>current?.filter(item=>item.id!==id));
             queryClient.invalidateQueries({ queryKey: ['folders'] });
@@ -954,6 +996,15 @@ export const useDeleteFolders = () => {
         mutationFn: async ({ ids, deleteContents }: { ids: number[]; deleteContents: boolean }) => {
             await runOrQueueMetadataMutation(async()=>{await api.post('/folders/batch-delete',ids,{params:{delete_contents:deleteContents}})},{entity:'folder',method:'post',url:`/folders/batch-delete?delete_contents=${deleteContents}`,payload:ids},()=>undefined);
         },
+        onMutate: async ({ids}) => {
+            await Promise.all([queryClient.cancelQueries({queryKey:['folders']}),queryClient.cancelQueries({queryKey:['folderTree']})]);
+            const folders=queryClient.getQueriesData<Folder[]>({queryKey:['folders']});
+            const trees=queryClient.getQueriesData<Folder[]>({queryKey:['folderTree']});
+            folders.forEach(([key,current])=>queryClient.setQueryData(key,removeFoldersFromList(current,ids)));
+            trees.forEach(([key,current])=>queryClient.setQueryData(key,removeFoldersFromList(current,ids)));
+            return {folders,trees};
+        },
+        onError: (_error,_variables,context) => {context?.folders.forEach(([key,data])=>queryClient.setQueryData(key,data));context?.trees.forEach(([key,data])=>queryClient.setQueryData(key,data));},
         onSuccess: () => {
              queryClient.invalidateQueries({ queryKey: ['folders'] });
              queryClient.invalidateQueries({ queryKey: ['folderTree'] });
