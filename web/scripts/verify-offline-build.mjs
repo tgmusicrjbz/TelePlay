@@ -4,6 +4,7 @@ import path from 'node:path';
 const root = path.resolve(process.cwd(), 'dist');
 const worker = await readFile(path.join(root, 'sw.js'), 'utf8');
 const indexHtml = await readFile(path.join(root, 'index.html'), 'utf8');
+const bootSource = await readFile(path.join(root, 'boot.js'), 'utf8');
 const appSource = await readFile(path.resolve(process.cwd(), 'src/App.tsx'), 'utf8');
 const recoverySource = await readFile(path.resolve(process.cwd(), 'src/lib/appRecovery.ts'), 'utf8');
 const parseAssetList = name => {
@@ -23,10 +24,16 @@ async function walk(directory) {
 if (worker.includes('__KOMOD_BUILD_ID__') || worker.includes('__KOMOD_CORE_BUILD_ASSETS__') || worker.includes('__KOMOD_OPTIONAL_BUILD_ASSETS__')) {
     throw new Error('Offline asset placeholder was not replaced.');
 }
-if (!indexHtml.includes("serviceWorker.register('/sw.js'")) {
+if (!indexHtml.includes('<script src="/boot.js"></script>')) {
+    throw new Error('The external boot script is missing from the application shell.');
+}
+if (/<script(?![^>]*\bsrc=)[^>]*>/i.test(indexHtml)) {
+    throw new Error('Executable inline scripts weaken the production Content Security Policy.');
+}
+if (!bootSource.includes("serviceWorker.register('/sw.js'")) {
     throw new Error('The service worker is not registered during the earliest boot stage.');
 }
-if (!indexHtml.includes("fetch('/health'")) {
+if (!bootSource.includes("fetch('/health'")) {
     throw new Error('Boot recovery can erase the offline shell without checking the origin first.');
 }
 if (appSource.includes("if(navigator.onLine&&!sessionStorage.getItem(marker))")) {

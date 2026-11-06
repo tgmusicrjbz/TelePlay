@@ -2,7 +2,7 @@ const BUILD_ID = '__KOMOD_BUILD_ID__';
 const CACHE_NAME = `komod-shell-${BUILD_ID}`;
 const COVER_CACHE = 'komod-covers-v4';
 const MAX_COVER_ENTRIES = 250;
-const CORE_ASSETS = ['/', '/index.html', '/offline.html', '/manifest.webmanifest', '/komod.svg', '/komod-192.png', '/komod-512.png', '/komod-maskable-512.png', '/apple-touch-icon.png'];
+const CORE_ASSETS = ['/', '/index.html', '/boot.js', '/offline.html', '/manifest.webmanifest', '/komod.svg', '/komod-192.png', '/komod-512.png', '/komod-maskable-512.png', '/apple-touch-icon.png'];
 // Vite replaces these lists after the bundle graph is known. Only the entry
 // and its static imports gate installation; lazy screens are warmed separately
 // so one flaky optional request cannot invalidate an otherwise working update.
@@ -23,14 +23,14 @@ self.addEventListener('install', event => {
       if (!response.ok) throw new Error('Unable to cache the application shell');
       const html = await response.clone().text();
       const assetPaths = [...html.matchAll(/(?:src|href)="(\/assets\/[^\"]+)"/g)].map(match => match[1]);
-      const requiredAssets = [...new Set([...CORE_BUILD_ASSETS, ...assetPaths])];
+      const requiredAssets = [...new Set(['/boot.js', ...CORE_BUILD_ASSETS, ...assetPaths])];
       // Keep the boot graph atomic. The previous worker remains active if the
       // HTML, entry script, CSS, or one of their static imports is unavailable.
       await cache.addAll(requiredAssets.map(asset => new Request(asset, { cache: 'reload' })));
       await Promise.all([
         cache.put('/index.html', response.clone()),
         cache.put('/', response.clone()),
-        ...CORE_ASSETS.filter(asset => asset !== '/' && asset !== '/index.html').map(asset =>
+        ...CORE_ASSETS.filter(asset => !['/', '/index.html', '/boot.js'].includes(asset)).map(asset =>
           fetch(asset, { cache: 'no-store' }).then(optional => optional.ok ? cache.put(asset, optional) : undefined).catch(() => undefined)
         ),
       ]);

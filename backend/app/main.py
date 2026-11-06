@@ -30,6 +30,7 @@ from .tts import tts_queue
 from .stt import stt_queue
 from .monitoring import source_monitor_service, telegram_monitor_pool
 from .media_studio import media_studio
+from .security_headers import browser_security_headers
 from .routers import files_router, folders_router, streaming_router, auth_router, tv_router, playlists_router, accounts_router, tts_router, stt_router, packs_router, bot_messages_router, admin_groups_router, instagram_router, rooms_router, shares_router
 from .routers.delivery import router as delivery_router
 from .routers.media_studio import router as media_studio_router
@@ -226,23 +227,8 @@ app.add_middleware(
 async def add_security_headers(request: Request, call_next):
     """Add security headers to all responses."""
     response = await call_next(request)
-    
-    # Prevent MIME type sniffing
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    
-    # Prevent clickjacking (allow framing only for same origin)
-    response.headers["X-Frame-Options"] = "SAMEORIGIN"
-    
-    response.headers["Referrer-Policy"] = "no-referrer"
-    response.headers["Permissions-Policy"] = "camera=(), microphone=(self), geolocation=(), payment=()"
-    if request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https":
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    if request.url.path.startswith("/api/auth"):
-        response.headers["Cache-Control"] = "no-store"
-    
-    # Content Security Policy (adjust as needed for your frontend)
-    # response.headers["Content-Security-Policy"] = "default-src 'self'"
-    
+    secure = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
+    response.headers.update(browser_security_headers(request.url.path, secure=secure))
     return response
 
 

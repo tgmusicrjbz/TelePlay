@@ -50,7 +50,7 @@
 
 - [ ] انتقال Refresh Token به Cookie امن با `HttpOnly`، `Secure` و `SameSite`
 - [ ] کوتاه‌کردن عمر Access Token و نگه‌داری آن در حافظه برنامه
-- [ ] افزودن Content Security Policy و هدرهای امنیتی
+- [x] افزودن Content Security Policy و هدرهای امنیتی همراه با اسکریپت راه‌اندازی خارجی سازگار با آفلاین
 - [ ] تعریف `DATA_ENCRYPTION_KEY` مستقل از `JWT_SECRET`
 - [ ] نسخه‌بندی داده‌های رمزنگاری‌شده و امکان چرخش کلید
 - [ ] حفظ دسترسی Google Drive، Gemini و TOTP هنگام تغییر JWT Secret

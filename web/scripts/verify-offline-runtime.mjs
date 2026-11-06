@@ -117,6 +117,17 @@ if (!navigation?.ok || !(await navigation.text()).includes('کمد | درایو 
     throw new Error('Offline navigation did not return the installed application shell.');
 }
 
+let bootResponse;
+listeners.get('fetch')?.({
+    request: { method: 'GET', mode: 'cors', destination: 'script', url: `${origin}/boot.js` },
+    respondWith(value) { bootResponse = Promise.resolve(value); },
+    waitUntil() {},
+});
+const offlineBoot = await bootResponse;
+if (!offlineBoot?.ok || !(await offlineBoot.text()).includes("serviceWorker.register('/sw.js'")) {
+    throw new Error('The early boot and recovery script is unavailable offline.');
+}
+
 const coreMatch = source.match(/const CORE_BUILD_ASSETS = (\[[^;]+\]);/);
 const coreAssets = coreMatch ? JSON.parse(coreMatch[1]) : [];
 for (const asset of coreAssets) {
