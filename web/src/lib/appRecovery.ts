@@ -1,7 +1,7 @@
 const SHELL_CACHE_PREFIX = 'komod-shell-';
 const LAZY_RETRY_PREFIX = 'komod-lazy-retry:';
 
-async function originIsReachable(timeout = 2200): Promise<boolean> {
+export async function originIsReachable(timeout = 2200): Promise<boolean> {
     if (!navigator.onLine) return false;
     const controller = new AbortController();
     const timer = window.setTimeout(() => controller.abort(), timeout);
@@ -13,6 +13,12 @@ async function originIsReachable(timeout = 2200): Promise<boolean> {
     } finally {
         window.clearTimeout(timer);
     }
+}
+
+export function buildRecoveryUrl(path?: string, timestamp = Date.now()): string {
+    const target = new URL(path || `${window.location.pathname}${window.location.search}`, window.location.origin);
+    target.searchParams.set('recover', String(timestamp));
+    return target.toString();
 }
 
 export async function clearBrokenAppShell(): Promise<void> {
@@ -52,7 +58,5 @@ export async function recoverApplication(path?: string): Promise<void> {
         const registration = await navigator.serviceWorker.ready.catch(() => null);
         registration?.active?.postMessage({ type: 'WARM_OFFLINE' });
     }
-    const target = new URL(path || `${window.location.pathname}${window.location.search}`, window.location.origin);
-    target.searchParams.set('recover', String(Date.now()));
-    window.location.replace(target.toString());
+    window.location.replace(buildRecoveryUrl(path));
 }
