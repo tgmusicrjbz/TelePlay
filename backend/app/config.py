@@ -115,7 +115,7 @@ class Settings(BaseSettings):
     
     # JWT
     jwt_secret: str
-    jwt_expiry_minutes: int = 30
+    jwt_expiry_minutes: int = Field(30, ge=5, le=60)
     refresh_token_expiry_days: int = 30
     # Persistent credentials must survive JWT signing-key rotation. If the
     # dedicated key is not configured yet, legacy JWT-derived encryption stays
@@ -130,6 +130,16 @@ class Settings(BaseSettings):
         if value and len(value) < 32:
             raise ValueError("DATA_ENCRYPTION_KEY must contain at least 32 characters")
         return value
+
+    @field_validator("jwt_expiry_minutes", mode="before")
+    @classmethod
+    def clamp_legacy_access_token_expiry(cls, value: object) -> int:
+        """Safely migrate old seven-day deployments to short access tokens."""
+        try:
+            minutes = int(value)
+        except (TypeError, ValueError):
+            minutes = 30
+        return max(5, min(minutes, 60))
     
     # Server
     server_host: str = "0.0.0.0"

@@ -1,9 +1,11 @@
 import type { AuthResponse, User } from './api';
+import { clearAccessToken, getAccessToken, setAccessToken } from './authSession';
 
 export interface SavedAccount {
     telegramId: number;
     user: User;
-    accessToken: string;
+    /** Only present while migrating data written by builds before 3509c90. */
+    accessToken?: string;
     refreshToken?: string;
     savedAt: string;
 }
@@ -19,12 +21,11 @@ export function saveAuthenticatedAccount(auth: AuthResponse): void {
     const next: SavedAccount = {
         telegramId: auth.user.telegram_id,
         user: auth.user,
-        accessToken: auth.access_token,
         ...(auth.refresh_token ? { refreshToken: auth.refresh_token } : {}),
         savedAt: new Date().toISOString(),
     };
     localStorage.setItem(KEY, JSON.stringify([next, ...savedAccounts().filter(item => item.telegramId !== next.telegramId)]));
-    localStorage.setItem('access_token', auth.access_token);
+    setAccessToken(auth.access_token);
     if (auth.refresh_token) localStorage.setItem('refresh_token', auth.refresh_token);
     else localStorage.removeItem('refresh_token');
     localStorage.setItem('user', JSON.stringify(auth.user));
@@ -34,22 +35,22 @@ export function saveAuthenticatedAccount(auth: AuthResponse): void {
 }
 
 export function syncCurrentAccount(user: User): void {
-    const accessToken = localStorage.getItem('access_token');
+    const accessToken = getAccessToken();
     if (!accessToken) return;
-    const next: SavedAccount = { telegramId: user.telegram_id, user, accessToken, refreshToken: localStorage.getItem('refresh_token') || undefined, savedAt: new Date().toISOString() };
+    const next: SavedAccount = { telegramId: user.telegram_id, user, refreshToken: localStorage.getItem('refresh_token') || undefined, savedAt: new Date().toISOString() };
     localStorage.setItem(KEY, JSON.stringify([next, ...savedAccounts().filter(item => item.telegramId !== user.telegram_id)]));
     localStorage.setItem('user', JSON.stringify(user));
     localStorage.setItem('komod-current-account', String(user.telegram_id));
 }
 
 export function updateCurrentAccountTokens(accessToken: string, refreshToken?: string): void {
+    setAccessToken(accessToken);
     const currentId = Number(localStorage.getItem('komod-current-account'));
     const accounts = savedAccounts();
     const index = accounts.findIndex(item => item.telegramId === currentId);
     if (index < 0) return;
     accounts[index] = {
         ...accounts[index],
-        accessToken,
         refreshToken: refreshToken || accounts[index].refreshToken,
         savedAt: new Date().toISOString(),
     };
@@ -68,14 +69,15 @@ export function clearCurrentAccountLegacyRefreshToken(): void {
 }
 
 export function clearCurrentAccountSession(): void {
+    clearAccessToken();
     const currentId = Number(localStorage.getItem('komod-current-account'));
     localStorage.setItem(KEY, JSON.stringify(savedAccounts().map(item =>
-        item.telegramId === currentId ? { ...item, accessToken: '', refreshToken: undefined } : item
+        item.telegramId === currentId ? { ...item, accessToken: undefined, refreshToken: undefined } : item
     )));
 }
 
 export function activateAccount(account: SavedAccount): void {
-    localStorage.setItem('access_token', account.accessToken);
+    clearAccessToken();
     if (account.refreshToken) localStorage.setItem('refresh_token', account.refreshToken); else localStorage.removeItem('refresh_token');
     localStorage.setItem('user', JSON.stringify(account.user));
     localStorage.setItem('komod-current-account', String(account.telegramId));
@@ -96,14 +98,20 @@ export function cachedCurrentUser(): User | undefined {
 }
 
 export function restoreSavedSession(): boolean {
-    if (localStorage.getItem('access_token')) return true;
+    if (getAccessToken()) return true;
     const currentId = Number(localStorage.getItem('komod-current-account'));
     const account = savedAccounts().find(item => item.telegramId === currentId) || savedAccounts()[0];
-    if (!account?.accessToken) return false;
-    localStorage.setItem('access_token', account.accessToken);
+    const legacyAccessToken = localStorage.getItem('access_token') || account?.accessToken;
+    if (!legacyAccessToken) return false;
+    setAccessToken(legacyAccessToken);
     if (account.refreshToken) localStorage.setItem('refresh_token', account.refreshToken);
     localStorage.setItem('user', JSON.stringify(account.user));
     localStorage.setItem('komod-current-account', String(account.telegramId));
+    localStorage.setItem(KEY, JSON.stringify(savedAccounts().map(item => {
+        const migrated = { ...item };
+        delete migrated.accessToken;
+        return migrated;
+    })));
     return true;
 }
 
