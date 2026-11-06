@@ -75,6 +75,7 @@ jobs:
       - name: Type-check and build responsive mini-app
         working-directory: web
         run: |
+          npm run test:regressions
           npm run lint
           npm run build
           npm run verify:bundle

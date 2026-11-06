@@ -3,6 +3,7 @@
  */
 import { create } from 'zustand';
 import { TelegramFile, Folder } from './api';
+import { moveQueueEntry, nextQueueIndex, previousQueueIndex } from './playerQueue';
 
 type QueueFile = TelegramFile & { _queueEntryId?: string };
 
@@ -315,12 +316,8 @@ export const useAppStore = create<AppState>((set) => ({
     playNext: () => {
         let changed = false;
         set((state) => {
-            if (!state.playQueue.length) return state;
-            let next = state.queueIndex + 1;
-            if (next >= state.playQueue.length) {
-                if (state.repeatMode !== 'all') return state;
-                next = 0;
-            }
+            const next = nextQueueIndex(state.playQueue.length, state.queueIndex, state.repeatMode);
+            if (next === null) return state;
             changed = true;
             return { queueIndex: next, previewFile: state.playQueue[next] };
         });
@@ -329,12 +326,8 @@ export const useAppStore = create<AppState>((set) => ({
     playPrevious: () => {
         let changed = false;
         set((state) => {
-            if (!state.playQueue.length) return state;
-            let previous = state.queueIndex - 1;
-            if (previous < 0) {
-                if (state.repeatMode !== 'all') return state;
-                previous = state.playQueue.length - 1;
-            }
+            const previous = previousQueueIndex(state.playQueue.length, state.queueIndex, state.repeatMode);
+            if (previous === null) return state;
             changed = true;
             return { queueIndex: previous, previewFile: state.playQueue[previous] };
         });
@@ -363,15 +356,9 @@ export const useAppStore = create<AppState>((set) => ({
         return { playQueue: next, queueIndex, previewFile: next[queueIndex] || state.previewFile };
     }),
     moveQueueItem: (from, to) => set((state) => {
-        if (from < 0 || to < 0 || from >= state.playQueue.length || to >= state.playQueue.length || from === to) return state;
-        const next = [...state.playQueue];
-        const [moved] = next.splice(from, 1);
-        next.splice(to, 0, moved);
-        let queueIndex = state.queueIndex;
-        if (from === queueIndex) queueIndex = to;
-        else if (from < queueIndex && to >= queueIndex) queueIndex -= 1;
-        else if (from > queueIndex && to <= queueIndex) queueIndex += 1;
-        return { playQueue: next, queueIndex, previewFile: next[queueIndex] || state.previewFile };
+        const result = moveQueueEntry(state.playQueue, from, to, state.queueIndex);
+        if (!result) return state;
+        return { playQueue: result.queue, queueIndex: result.currentIndex, previewFile: result.queue[result.currentIndex] || state.previewFile };
     }),
     appendQueueItems: (files) => set((state) => {
         const existing = new Set(state.playQueue.map(item => item.id));

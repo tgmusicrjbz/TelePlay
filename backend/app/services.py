@@ -130,6 +130,11 @@ async def unreferenced_storage_messages(db: AsyncSession, files: List[File]) -> 
     grouped: dict[int | None, list[int]] = {}
     for channel_id, message_id in references - retained:
         grouped.setdefault(channel_id, []).append(message_id)
+    # Sets intentionally remove duplicate references, but their iteration order
+    # differs between Python processes. Stable batches keep Telegram cleanup,
+    # logs and regression tests deterministic without changing what is deleted.
+    for message_ids in grouped.values():
+        message_ids.sort()
     return grouped
 
 
@@ -158,6 +163,8 @@ async def unreferenced_audio_variant_messages(db: AsyncSession, files: List[File
     grouped: dict[int | None, list[int]] = {}
     for channel_id, message_id in references - retained:
         grouped.setdefault(channel_id, []).append(message_id)
+    for message_ids in grouped.values():
+        message_ids.sort()
     return grouped
 
 async def fetch_recent_files(db: AsyncSession, user_id: int, limit: int) -> List[File]:
