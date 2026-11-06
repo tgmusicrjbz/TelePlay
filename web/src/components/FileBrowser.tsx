@@ -24,6 +24,7 @@ import PackCard from './PackCard';
 import { EmptyState, LoadingState } from './StatePanel';
 import { useConnectivity } from '../lib/connectivity';
 import { useShallow } from 'zustand/react/shallow';
+import { classifyImportUrl, compactImportTitle, importSourceLabel, mergeImportStatuses, visibleImportStatuses, type ImportPlatform, type ImportStatus } from '../lib/importQueue';
 
 // Heavy sections are downloaded only when the user opens them. Vite still
 // precaches the resulting chunks in the service worker, so they remain
@@ -53,56 +54,8 @@ const extractImportUrls = (value: string) => {
         .filter(Boolean);
 };
 
-type ImportPlatform = 'youtube' | 'instagram' | 'pinterest';
 type ImportQuality = 'auto' | 'audio' | '480' | '720' | '1080';
 type ImportMetadata = { title?: string | null; author?: string | null };
-const classifyImportUrl = (raw:string):ImportPlatform|null => {
-    try {
-        const parsed=new URL(raw);
-        if(!['http:','https:'].includes(parsed.protocol))return null;
-        const host=parsed.hostname.toLowerCase().replace(/^www\./,'');
-        if(host==='youtu.be'||host==='youtube.com'||host.endsWith('.youtube.com'))return 'youtube';
-        if(host==='instagram.com'||host.endsWith('.instagram.com'))return 'instagram';
-        if(host==='pin.it'||host==='pinterest.com'||host.endsWith('.pinterest.com'))return 'pinterest';
-    } catch { /* incomplete URL */ }
-    return null;
-};
-
-const compactImportTitle = (value: string, max = 72) => {
-    const clean = value.replace(/\s+/g, ' ').trim();
-    return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
-};
-
-const importSourceLabel = (job:Pick<ImportStatus,'source'|'url'|'title'>) => {
-    if (job.title) return compactImportTitle(job.title);
-    if (job.source === 'drive') return 'گوگل درایو';
-    const platform = classifyImportUrl(job.url);
-    return platform === 'youtube' ? 'یوتیوب'
-        : platform === 'pinterest' ? 'پینترست'
-            : platform === 'instagram' ? 'اینستاگرام'
-                : 'لینک';
-};
-
-type ImportStatus = {
-    id: string;
-    source: 'link' | 'drive';
-    url: string;
-    title?: string;
-    author?: string;
-    quality?: string;
-    folder_id?: number | null;
-    created_at?: string;
-    state: 'queued' | 'downloading' | 'saving' | 'paused' | 'cancelled' | 'done' | 'error';
-    message: string;
-    saved?: number;
-    progress?: number;
-};
-const mergeImportStatuses=(current:ImportStatus[],incoming:ImportStatus[])=>{
-    const merged=new Map<string,ImportStatus>();
-    current.forEach(item=>merged.set(item.id,item));
-    incoming.forEach(item=>merged.set(item.id,{...merged.get(item.id),...item}));
-    return Array.from(merged.values());
-};
 type DriveEntry={id:string;name:string;mimeType:string;size?:string;modifiedTime?:string;thumbnailLink?:string};
 type DriveViewMode='list'|'grid'|'dense';
 type DriveTypeFilter='all'|'folder'|'image'|'video'|'audio'|'document';
@@ -335,10 +288,10 @@ export default function FileBrowser() {
                 api.get<Omit<ImportStatus,'source'>[]>('/files/import-link/status'),
                 api.get<Omit<ImportStatus,'source'>[]>('/files/import-drive/status'),
             ]);
-            if(!cancelled)setImportJobs(mergeImportStatuses([], [
+            if(!cancelled)setImportJobs(visibleImportStatuses(mergeImportStatuses([], [
                 ...links.data.map(job=>({...job,source:'link' as const})),
                 ...drives.data.map(job=>({...job,source:'drive' as const})),
-            ]).filter(job=>!dismissedImportJobIds.current.has(job.id)));
+            ]), dismissedImportJobIds.current));
         }catch{/* وضعیت محلی حفظ می‌شود */}};
         void syncQueue();
         const timer=hasActiveImportJobs?window.setInterval(()=>{if(document.visibilityState==='visible')void syncQueue()},4000):0;
@@ -347,7 +300,7 @@ export default function FileBrowser() {
 
     const dismissImportJobs = useCallback((jobIds:string[]) => {
         jobIds.forEach(jobId=>dismissedImportJobIds.current.add(jobId));
-        setImportJobs(current=>current.filter(job=>!dismissedImportJobIds.current.has(job.id)));
+        setImportJobs(current=>visibleImportStatuses(current, dismissedImportJobIds.current));
     },[]);
     const clearFinishedImportJobsOnServer = useCallback(() => {
         void Promise.allSettled([api.delete('/files/import-link/status'),api.delete('/files/import-drive/status')]);
