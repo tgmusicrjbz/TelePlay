@@ -7,11 +7,9 @@ import './index.css'
 import { applyAppearanceMode, applyTheme, getStoredAppearanceMode, getStoredTheme } from './lib/theme'
 import AppErrorBoundary from './components/AppErrorBoundary'
 import { isEffectivelyOnline } from './lib/connectivity'
-import { restoreSavedSession } from './lib/accounts'
 
 applyAppearanceMode(getStoredAppearanceMode())
 applyTheme(getStoredTheme())
-restoreSavedSession()
 
 const queryClient = new QueryClient({
     defaultOptions: {
