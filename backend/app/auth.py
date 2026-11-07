@@ -2,8 +2,13 @@
 JWT authentication utilities.
 """
 from datetime import datetime, timedelta
+import base64
+import hashlib
+import hmac
 import json
 import secrets
+import struct
+import time
 from typing import Optional
 
 from jose import jwt, JWTError
@@ -120,6 +125,47 @@ def create_telegram_message_link_token(chat_id: int, message_id: int, file_name:
         "mime": (mime_type or "")[:120], "kind": file_type[:24], "size": int(file_size or 0), "download": bool(download),
         "exp": datetime.utcnow() + timedelta(hours=24), "type": "telegram-message-link",
     }, settings.jwt_secret, algorithm="HS256")
+
+
+_SHORT_LINK_STRUCT = struct.Struct(">BqqIB")
+_SHORT_LINK_SIGNATURE_BYTES = 12
+
+
+def create_short_link_token(kind: str, owner_or_chat_id: int, object_id: int, download: bool = False) -> str:
+    """Create a compact 24-hour link without server-side URL state."""
+    kind_code = {"file": 1, "message": 2}.get(kind)
+    if kind_code is None:
+        raise ValueError("Unsupported short-link kind")
+    body = _SHORT_LINK_STRUCT.pack(
+        kind_code, int(owner_or_chat_id), int(object_id), int(time.time()) + 24 * 60 * 60, int(download),
+    )
+    signature = hmac.new(settings.jwt_secret.encode(), body, hashlib.sha256).digest()[:_SHORT_LINK_SIGNATURE_BYTES]
+    return base64.urlsafe_b64encode(body + signature).decode().rstrip("=")
+
+
+def verify_short_link_token(token: str) -> Optional[dict]:
+    """Verify and unpack a compact file/message link."""
+    try:
+        raw = base64.urlsafe_b64decode(token + "=" * (-len(token) % 4))
+        expected_size = _SHORT_LINK_STRUCT.size + _SHORT_LINK_SIGNATURE_BYTES
+        if len(raw) != expected_size:
+            return None
+        body, received_signature = raw[:-_SHORT_LINK_SIGNATURE_BYTES], raw[-_SHORT_LINK_SIGNATURE_BYTES:]
+        expected_signature = hmac.new(settings.jwt_secret.encode(), body, hashlib.sha256).digest()[:_SHORT_LINK_SIGNATURE_BYTES]
+        if not hmac.compare_digest(received_signature, expected_signature):
+            return None
+        kind_code, owner_or_chat_id, object_id, expires_at, download = _SHORT_LINK_STRUCT.unpack(body)
+        if expires_at < int(time.time()) or kind_code not in {1, 2}:
+            return None
+        return {
+            "kind": "file" if kind_code == 1 else "message",
+            "sub": owner_or_chat_id,
+            "oid": object_id,
+            "exp": expires_at,
+            "download": bool(download),
+        }
+    except (ValueError, TypeError, struct.error):
+        return None
 
 
 def create_collection_file_token(public_hash: str, file_id: int) -> str:

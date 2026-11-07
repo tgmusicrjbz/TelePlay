@@ -28,7 +28,7 @@ from .routers.folders import ensure_default_folder
 from .database import async_session
 from .models import User, File, Folder, LoginCode, Playlist, PlaylistItem, BotUserState, TelegramDestination, TelegramGroupSettings, AppSetting
 from .config import get_settings
-from .auth import create_private_file_link_token, create_telegram_login_token, create_telegram_message_link_token
+from .auth import create_short_link_token, create_telegram_login_token
 from .services import escape_like, select_best_thumbnail, telegram_text_with_links, unreferenced_audio_variant_messages, unreferenced_storage_messages
 from .caption_metadata import extract_tags_from_caption, parse_file_caption
 from .downloader import ImportJob, link_importer
@@ -1035,11 +1035,11 @@ def file_detail_keyboard(file: File, back_callback: str = "files:0") -> InlineKe
         "image": "🖼 نمایش",
         "text": "📖 باز کردن",
     }.get(file.file_type, "👁 پیش‌نمایش")
-    play_token = create_private_file_link_token(file.user_id, file.id, False)
-    download_token = create_private_file_link_token(file.user_id, file.id, True)
+    play_token = create_short_link_token("file", file.user_id, file.id, False)
+    download_token = create_short_link_token("file", file.user_id, file.id, True)
     rows = [[InlineKeyboardButton(preview_label, callback_data=f"preview:{file.id}")], [
-        InlineKeyboardButton("🌐 پخش با لینک", url=f"{settings.web_base_url}/api/shares/file-link/{play_token}"),
-        InlineKeyboardButton("⬇️ لینک دانلود", url=f"{settings.web_base_url}/api/shares/file-link/{download_token}"),
+        InlineKeyboardButton("▶️ پخش", url=f"{settings.web_base_url}/p/{play_token}"),
+        InlineKeyboardButton("⬇️ دانلود", url=f"{settings.web_base_url}/l/{download_token}"),
     ]]
     if file.file_type in ("audio", "video"):
         rows.append([
@@ -1588,8 +1588,8 @@ async def replied_file_link_command(client, message: Message):
         base_url = settings.web_base_url.strip().rstrip("/")
         if file is not None:
             title = display_filename(file.file_name)
-            play_token = create_private_file_link_token(owner.id, file.id, False)
-            download_token = create_private_file_link_token(owner.id, file.id, True)
+            play_token = create_short_link_token("file", owner.id, file.id, False)
+            download_token = create_short_link_token("file", owner.id, file.id, True)
         else:
             media_kind = next((name for name in ("audio", "voice", "video", "video_note", "animation", "document", "photo") if getattr(replied, name, None)), "document")
             extension = {"audio":"mp3", "voice":"ogg", "video":"mp4", "video_note":"mp4", "animation":"mp4", "photo":"jpg"}.get(media_kind, "bin")
@@ -1597,20 +1597,21 @@ async def replied_file_link_command(client, message: Message):
             mime_type = getattr(media, "mime_type", None) or {"voice":"audio/ogg", "video":"video/mp4", "video_note":"video/mp4", "animation":"video/mp4", "photo":"image/jpeg"}.get(media_kind)
             title = display_filename(raw_name)
             media_size = getattr(media, "file_size", None)
-            play_token = create_telegram_message_link_token(message.chat.id, replied.id, raw_name, mime_type, media_kind, media_size, False)
-            download_token = create_telegram_message_link_token(message.chat.id, replied.id, raw_name, mime_type, media_kind, media_size, True)
-        play_url = f"{base_url}/play/{play_token}"
-        download_url = f"{base_url}/api/shares/message-link/{download_token}"
-        if file is not None:
-            play_url = f"{base_url}/play/{play_token}"
-            download_url = f"{base_url}/api/shares/file-link/{download_token}"
+            play_token = create_short_link_token("message", message.chat.id, replied.id, False)
+            download_token = create_short_link_token("message", message.chat.id, replied.id, True)
+        title = title if len(title) <= 52 else f"{title[:49]}…"
+        play_url = f"{base_url}/p/{play_token}"
+        download_url = f"{base_url}/l/{download_token}"
         buttons: list[list[InlineKeyboardButton]] = []
+        primary_buttons: list[InlineKeyboardButton] = []
         if command != "downloadlink":
-            buttons.append([InlineKeyboardButton("🌐 پخش عمومی", url=play_url)])
+            primary_buttons.append(InlineKeyboardButton("▶️ پخش", url=play_url))
         if command != "playlink":
-            buttons.append([InlineKeyboardButton("📥 دریافت فایل", url=download_url)])
+            primary_buttons.append(InlineKeyboardButton("⬇️ دانلود", url=download_url))
+        if primary_buttons:
+            buttons.append(primary_buttons)
         if public_hash:
-            buttons.append([InlineKeyboardButton("🔗 پیوند دائمی", url=f"{base_url}/s/{public_hash}")])
+            buttons.append([InlineKeyboardButton("🔗 دائمی", url=f"{base_url}/s/{public_hash}")])
         message_key = "file_links_private" if message.chat.type == enums.ChatType.PRIVATE else "file_links_group"
         await message.reply(
             await bot_message(message_key, title=title),

@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import telegram
-from ..auth import create_collection_file_token, create_private_file_link_token, create_public_share_token, create_telegram_message_link_token, get_current_user, verify_public_share_token, verify_token_payload
+from ..auth import create_collection_file_token, create_private_file_link_token, create_public_share_token, create_short_link_token, create_telegram_message_link_token, get_current_user, verify_public_share_token, verify_short_link_token, verify_token_payload
 from ..database import get_db
 from ..models import File, Folder, Pack, PackItem, Playlist, PlaylistItem, PublicCollectionShare, User
 from ..schemas import PublicShareCreate, PublicShareUnlock
@@ -22,6 +22,7 @@ from ..telegram import get_message_from_channel
 from .streaming import media_type_for, parse_range_header, playable_message_media, stored_message_response
 
 router = APIRouter(prefix="/shares", tags=["Public shares"])
+short_router = APIRouter(tags=["Short links"])
 password_context = CryptContext(schemes=["pbkdf2_sha256"], pbkdf2_sha256__default_rounds=310_000, deprecated="auto")
 RESOURCE_MODELS = {"folder": Folder, "pack": Pack, "playlist": Playlist}
 
@@ -152,6 +153,44 @@ async def _stream_record(file: File, request: Request, download: bool):
     return await _stream_message(file, message, request, download)
 
 
+async def _telegram_message_descriptor(chat_id: int, message_id: int):
+    try:
+        message = await telegram.tg_client.get_messages(chat_id, message_id)
+    except Exception as error:
+        raise HTTPException(404, "پیام اصلی در تلگرام در دسترس نیست.") from error
+    if not message or getattr(message, "empty", False):
+        raise HTTPException(404, "پیام اصلی حذف شده یا دیگر در دسترس نیست.")
+    raw_kind = next((kind for kind in ("audio", "voice", "video", "video_note", "animation", "document", "photo") if getattr(message, kind, None)), "document")
+    media = getattr(message, raw_kind, None) or playable_message_media(message)
+    extension = {"audio":"mp3", "voice":"ogg", "video":"mp4", "video_note":"mp4", "animation":"mp4", "photo":"jpg"}.get(raw_kind, "bin")
+    file_name = getattr(media, "file_name", None) or f"telegram-{message_id}.{extension}"
+    mime_type = getattr(media, "mime_type", None) or {"voice":"audio/ogg", "video":"video/mp4", "video_note":"video/mp4", "animation":"video/mp4", "photo":"image/jpeg"}.get(raw_kind)
+    descriptor = SimpleNamespace(
+        file_name=file_name,
+        mime_type=mime_type,
+        file_type=raw_kind,
+        file_size=int(getattr(media, "file_size", 0) or 0),
+    )
+    public_kind = "audio" if raw_kind in {"audio", "voice"} else "video" if raw_kind in {"video", "video_note", "animation"} else "image" if raw_kind == "photo" else "document"
+    return message, descriptor, public_kind
+
+
+@short_router.get("/l/{token}")
+async def stream_short_link(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+    payload = verify_short_link_token(token)
+    if not payload:
+        raise HTTPException(401, "این پیوند کوتاه منقضی شده یا معتبر نیست.")
+    if payload["kind"] == "file":
+        file = (await db.execute(select(File).where(
+            File.id == int(payload["oid"]), File.user_id == int(payload["sub"]), File.is_hidden.is_(False),
+        ))).scalar_one_or_none()
+        if file is None:
+            raise HTTPException(404, "فایل پیدا نشد.")
+        return await _stream_record(file, request, bool(payload["download"]))
+    message, descriptor, _ = await _telegram_message_descriptor(int(payload["sub"]), int(payload["oid"]))
+    return await _stream_message(descriptor, message, request, bool(payload["download"]))
+
+
 @router.get("/file-link/{token}")
 async def stream_private_link(token: str, request: Request, db: AsyncSession = Depends(get_db)):
     payload = verify_token_payload(token, "private-file-link")
@@ -166,6 +205,26 @@ async def stream_private_link(token: str, request: Request, db: AsyncSession = D
 @router.get("/link-info/{token}")
 async def temporary_link_info(token: str, db: AsyncSession = Depends(get_db)):
     """Metadata for the branded player used by Telegram /link URLs."""
+    short_payload = verify_short_link_token(token)
+    if short_payload:
+        play_token = create_short_link_token(short_payload["kind"], int(short_payload["sub"]), int(short_payload["oid"]), False)
+        download_token = create_short_link_token(short_payload["kind"], int(short_payload["sub"]), int(short_payload["oid"]), True)
+        if short_payload["kind"] == "file":
+            file = (await db.execute(select(File).where(
+                File.id == int(short_payload["oid"]), File.user_id == int(short_payload["sub"]), File.is_hidden.is_(False),
+            ))).scalar_one_or_none()
+            if file is None:
+                raise HTTPException(404, "فایل پیدا نشد.")
+            file_name, file_type, file_size, mime_type = file.file_name, file.file_type, file.file_size, media_type_for(file)
+        else:
+            _, descriptor, file_type = await _telegram_message_descriptor(int(short_payload["sub"]), int(short_payload["oid"]))
+            file_name, file_size, mime_type = descriptor.file_name, descriptor.file_size, descriptor.mime_type
+        return {
+            "file_name": file_name, "file_type": file_type, "file_size": file_size,
+            "mime_type": mime_type, "password_required": False, "allow_download": True,
+            "views_remaining": None, "expires_at": datetime.fromtimestamp(int(short_payload["exp"])).isoformat(),
+            "stream_url": f"/l/{play_token}", "download_url": f"/l/{download_token}",
+        }
     payload = verify_token_payload(token, "private-file-link")
     if payload:
         file = (await db.execute(select(File).where(
