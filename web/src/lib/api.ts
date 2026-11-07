@@ -3,7 +3,7 @@
  */
 import axios from 'axios';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { cachedCurrentUser, clearCurrentAccountLegacyRefreshToken, clearCurrentAccountSession, syncCurrentAccount, updateCurrentAccountTokens } from './accounts';
+import { cachedCurrentUser, clearCurrentAccountSession, syncCurrentAccount, updateCurrentAccountTokens } from './accounts';
 import { queueOfflineMutation, shouldQueueOffline } from './offlineMutations';
 import { isEffectivelyOnline, markServerReachable, markServerUnreachable } from './connectivity';
 import { isNativeApp } from './runtime';
@@ -282,7 +282,7 @@ export interface StorageStats {
 
 export interface AuthResponse {
     access_token: string;
-    refresh_token?: string | null;
+    refresh_token: string;
     user: User;
 }
 export interface CredentialsStatus { enabled: boolean; username?: string | null; two_factor_enabled: boolean; recovery_available: boolean; }
@@ -303,7 +303,6 @@ export function getKomodDeviceId(): string {
 export const api = axios.create({
     baseURL: `${getServerOrigin()}/api`,
     timeout: 15000,
-    withCredentials: true,
 });
 
 const MEDIA_URL_KEYS = new Set(['stream_url', 'thumbnail_url', 'cover_url', 'public_stream_url']);
@@ -328,9 +327,6 @@ const resolveResponseMediaUrls = (value: unknown): unknown => {
 // Add auth token to requests
 api.interceptors.request.use((config) => {
     config.headers['X-Komod-Device-ID'] = getKomodDeviceId();
-    // Native WebViews may block cross-site cookies. Their app sandbox keeps
-    // the legacy token isolated until native cookie storage is guaranteed.
-    if (!isNativeApp()) config.headers['X-Komod-Auth-Cookie'] = '1';
     const token = localStorage.getItem('access_token');
     if (token) {
         config.headers.Authorization = `Bearer ${token}`;
@@ -443,24 +439,20 @@ api.interceptors.response.use(
             isRefreshing = true;
 
             try {
-                const legacyRefreshToken = localStorage.getItem('refresh_token');
-                const currentAccountValue = localStorage.getItem('komod-current-account');
-                const currentAccount = Number(currentAccountValue);
-                if (!currentAccountValue || !Number.isFinite(currentAccount)) throw new Error('No account available for refresh');
+                const refreshToken = localStorage.getItem('refresh_token');
+                if (!refreshToken) {
+                    throw new Error('No refresh token available');
+                }
+
                 const { data } = await axios.post(`${getServerOrigin()}/api/auth/refresh`, {
-                    account_id: currentAccount,
-                    ...(legacyRefreshToken ? { refresh_token: legacyRefreshToken } : {}),
-                }, {
-                    withCredentials: true,
-                    headers: isNativeApp() ? {} : { 'X-Komod-Auth-Cookie': '1' },
+                    refresh_token: refreshToken,
                 });
 
-                const { access_token, refresh_token: returnedRefreshToken } = data;
+                const { access_token, refresh_token } = data;
 
                 localStorage.setItem('access_token', access_token);
-                updateCurrentAccountTokens(access_token, returnedRefreshToken || undefined);
-                if (returnedRefreshToken) localStorage.setItem('refresh_token', returnedRefreshToken);
-                else clearCurrentAccountLegacyRefreshToken();
+                localStorage.setItem('refresh_token', refresh_token);
+                updateCurrentAccountTokens(access_token, refresh_token);
 
                 api.defaults.headers.common['Authorization'] = 'Bearer ' + access_token;
                 originalRequest.headers['Authorization'] = 'Bearer ' + access_token;
@@ -1289,8 +1281,7 @@ export const useUpdateCredentials = () => {
         mutationFn: async (payload: { username: string; current_password?: string; new_password?: string }) => (await api.put<AuthResponse>('/auth/credentials', payload)).data,
         onSuccess: data => {
             localStorage.setItem('access_token', data.access_token);
-            if (data.refresh_token) localStorage.setItem('refresh_token', data.refresh_token);
-            else localStorage.removeItem('refresh_token');
+            localStorage.setItem('refresh_token', data.refresh_token);
             localStorage.setItem('user', JSON.stringify(data.user));
             queryClient.setQueryData(['currentUser'], data.user);
             queryClient.invalidateQueries({ queryKey: ['credentials'] });

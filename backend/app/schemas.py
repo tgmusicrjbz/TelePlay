@@ -390,17 +390,13 @@ class WatchProgressResponse(WatchProgressBase):
 
 class Token(BaseModel):
     access_token: str
-    # Refresh credentials are delivered as HttpOnly cookies.  Keeping this
-    # optional field for one transition release lets older clients parse the
-    # response without exposing the new credential to page JavaScript.
-    refresh_token: Optional[str] = None
+    refresh_token: str
     token_type: str = "bearer"
 
 
 class RefreshTokenRequest(BaseModel):
     """Request body for token refresh."""
-    refresh_token: Optional[str] = Field(default=None, alias="refreshToken")
-    account_id: Optional[int] = Field(default=None, alias="accountId")
+    refresh_token: str = Field(..., alias="refreshToken")
     
     model_config = ConfigDict(populate_by_name=True)
 

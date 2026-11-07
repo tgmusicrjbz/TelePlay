@@ -16,17 +16,10 @@ export function savedAccounts(): SavedAccount[] {
 }
 
 export function saveAuthenticatedAccount(auth: AuthResponse): void {
-    const next: SavedAccount = {
-        telegramId: auth.user.telegram_id,
-        user: auth.user,
-        accessToken: auth.access_token,
-        ...(auth.refresh_token ? { refreshToken: auth.refresh_token } : {}),
-        savedAt: new Date().toISOString(),
-    };
+    const next: SavedAccount = { telegramId: auth.user.telegram_id, user: auth.user, accessToken: auth.access_token, refreshToken: auth.refresh_token, savedAt: new Date().toISOString() };
     localStorage.setItem(KEY, JSON.stringify([next, ...savedAccounts().filter(item => item.telegramId !== next.telegramId)]));
     localStorage.setItem('access_token', auth.access_token);
-    if (auth.refresh_token) localStorage.setItem('refresh_token', auth.refresh_token);
-    else localStorage.removeItem('refresh_token');
+    localStorage.setItem('refresh_token', auth.refresh_token);
     localStorage.setItem('user', JSON.stringify(auth.user));
     localStorage.setItem('komod-current-account', String(auth.user.telegram_id));
     localStorage.removeItem('komod-active-workspace');
@@ -54,17 +47,6 @@ export function updateCurrentAccountTokens(accessToken: string, refreshToken?: s
         savedAt: new Date().toISOString(),
     };
     localStorage.setItem(KEY, JSON.stringify(accounts));
-}
-
-export function clearCurrentAccountLegacyRefreshToken(): void {
-    const currentId = Number(localStorage.getItem('komod-current-account'));
-    localStorage.removeItem('refresh_token');
-    localStorage.setItem(KEY, JSON.stringify(savedAccounts().map(item => {
-        if (item.telegramId !== currentId) return item;
-        const safeAccount = { ...item };
-        delete safeAccount.refreshToken;
-        return safeAccount;
-    })));
 }
 
 export function clearCurrentAccountSession(): void {

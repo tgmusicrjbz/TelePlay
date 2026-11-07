@@ -11,7 +11,7 @@ import time
 import re
 import secrets
 from urllib.parse import parse_qsl
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -85,51 +85,10 @@ def _require_telegram_two_factor(user: User, otp: str | None) -> None:
         raise HTTPException(status_code=401, detail="کد تأیید دومرحله‌ای تلگرام را وارد کن.", headers={"X-Komod-OTP-Required": "true"})
 
 
-def _refresh_cookie_name(telegram_id: int) -> str:
-    """Return a valid, stable cookie name while preserving multi-account login."""
-    suffix = f"p{telegram_id}" if telegram_id >= 0 else f"n{abs(telegram_id)}"
-    return f"komod_refresh_{suffix}"
-
-
-def _request_is_secure(request: Request) -> bool:
-    forwarded = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip().lower()
-    return request.url.scheme == "https" or forwarded == "https"
-
-
-def _set_refresh_cookie(response: Response, request: Request, telegram_id: int, token: str) -> None:
-    response.set_cookie(
-        key=_refresh_cookie_name(telegram_id),
-        value=token,
-        max_age=settings.refresh_token_expiry_days * 24 * 60 * 60,
-        httponly=True,
-        secure=_request_is_secure(request),
-        samesite="lax",
-        path="/api/auth",
-    )
-
-
-def _clear_refresh_cookie(response: Response, request: Request, telegram_id: int) -> None:
-    response.delete_cookie(
-        key=_refresh_cookie_name(telegram_id),
-        httponly=True,
-        secure=_request_is_secure(request),
-        samesite="lax",
-        path="/api/auth",
-    )
-
-
-def _uses_cookie_auth(request: Request) -> bool:
-    return request.headers.get("x-komod-auth-cookie", "").strip() == "1"
-
-
-def _auth_response(user: User, session: AuthSession, response: Response, request: Request) -> AuthResponse:
-    refresh_token = create_refresh_token(user.telegram_id, user.auth_version, session.id)
-    _set_refresh_cookie(response, request, user.telegram_id, refresh_token)
+def _auth_response(user: User, session: AuthSession) -> AuthResponse:
     return AuthResponse(
         access_token=create_access_token(user.telegram_id, user.auth_version, session.id),
-        # Installed clients from before the cookie migration need one release
-        # window to keep rotating their body token. New clients never receive it.
-        refresh_token=None if _uses_cookie_auth(request) else refresh_token,
+        refresh_token=create_refresh_token(user.telegram_id, user.auth_version, session.id),
         user=UserResponse(
             id=user.id, telegram_id=user.telegram_id, username=user.username,
             first_name=user.first_name, last_name=user.last_name,
@@ -287,11 +246,10 @@ async def get_bot_info_endpoint():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/password/login", response_model=AuthResponse, response_model_exclude_none=True)
+@router.post("/password/login", response_model=AuthResponse)
 @limiter.limit("5/minute")
 async def password_login(
     request: Request,
-    response: Response,
     payload: PasswordLoginRequest,
     db: AsyncSession = Depends(get_db),
 ):
@@ -339,7 +297,7 @@ async def password_login(
     await db.commit()
     if new_device:
         await _notify_new_device(user, request)
-    return _auth_response(user, session, response, request)
+    return _auth_response(user, session)
 
 
 @router.post("/password/register", response_model=PasswordRegistrationResponse, status_code=202)
@@ -422,10 +380,9 @@ async def credentials_status(request: Request, current_user: User = Depends(get_
     )
 
 
-@router.put("/credentials", response_model=AuthResponse, response_model_exclude_none=True)
+@router.put("/credentials", response_model=AuthResponse)
 async def update_credentials(
     request: Request,
-    response: Response,
     payload: CredentialsUpdate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -474,7 +431,7 @@ async def update_credentials(
     except IntegrityError:
         await db.rollback()
         raise HTTPException(status_code=409, detail="این نام کاربری قبلاً انتخاب شده است.")
-    return _auth_response(current_user, session, response, request)
+    return _auth_response(current_user, session)
 
 
 @router.post("/2fa/setup", response_model=TwoFactorSetupResponse)
@@ -539,31 +496,19 @@ async def disable_two_factor(
     return {"enabled": False}
 
 
-@router.post("/refresh", response_model=Token, response_model_exclude_none=True)
+@router.post("/refresh", response_model=Token)
 async def refresh_token(
-    request: Request,
-    response: Response,
-    payload: RefreshTokenRequest | None = None,
+    request: RefreshTokenRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """Refresh access using an account-scoped HttpOnly cookie.
-
-    A body refresh token remains accepted during the migration from older web
-    builds.  The rotated token is always returned in a cookie only.
-    """
-    account_id = payload.account_id if payload else None
-    legacy_token = payload.refresh_token if payload else None
-    cookie_token = request.cookies.get(_refresh_cookie_name(account_id)) if account_id is not None else None
-    refresh_credential = cookie_token or legacy_token
-    token_payload = verify_token_payload(refresh_credential, token_type="refresh") if refresh_credential else None
-    telegram_id = int(token_payload.get("sub")) if token_payload and token_payload.get("sub") else None
-    token_version = token_payload.get("ver") if token_payload else None
-    session_id = token_payload.get("sid") if token_payload else None
+    """Refresh access token using refresh token."""
+    payload = verify_token_payload(request.refresh_token, token_type="refresh")
+    telegram_id = int(payload.get("sub")) if payload and payload.get("sub") else None
+    token_version = payload.get("ver") if payload else None
+    session_id = payload.get("sid") if payload else None
     
     if not telegram_id:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
-    if account_id is not None and telegram_id != account_id:
-        raise HTTPException(status_code=401, detail="Refresh token does not match account")
     
     # Verify user exists
     result = await db.execute(
@@ -588,18 +533,16 @@ async def refresh_token(
     # Generate new tokens
     new_access_token = create_access_token(telegram_id, version=user.auth_version, session_id=session_id)
     new_refresh_token = create_refresh_token(telegram_id, version=user.auth_version, session_id=session_id)
-    _set_refresh_cookie(response, request, telegram_id, new_refresh_token)
     
     return Token(
         access_token=new_access_token,
-        refresh_token=None if _uses_cookie_auth(request) else new_refresh_token,
+        refresh_token=new_refresh_token,
     )
 
 
 @router.post("/logout-all")
 async def logout_all(
     request: Request,
-    response: Response,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -611,7 +554,6 @@ async def logout_all(
     db.add(current_user)
     add_security_event(db, "sessions_revoked_all", user_id=current_user.id, request=request, target_type="session", details={"count": len(sessions)})
     await db.commit()
-    _clear_refresh_cookie(response, request, current_user.telegram_id)
     return {"message": "All sessions have been invalidated"}
 
 
@@ -687,11 +629,10 @@ async def get_current_user_info(
     )
 
 
-@router.post("/session", response_model=AuthResponse, response_model_exclude_none=True)
+@router.post("/session", response_model=AuthResponse)
 @limiter.limit("20/minute")
 async def register_current_session(
     request: Request,
-    response: Response,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -699,14 +640,27 @@ async def register_current_session(
     session = await _session_for_device(db, request, current_user)
     db.add(session)
     await db.commit()
-    return _auth_response(current_user, session, response, request)
+    return AuthResponse(
+        access_token=create_access_token(current_user.telegram_id, current_user.auth_version, session.id),
+        refresh_token=create_refresh_token(current_user.telegram_id, current_user.auth_version, session.id),
+        user=UserResponse(
+            id=current_user.id, telegram_id=current_user.telegram_id, username=current_user.username,
+            first_name=current_user.first_name, last_name=current_user.last_name,
+            display_name=current_user.display_name, is_active=current_user.is_active,
+            is_admin=current_user.telegram_id in settings.admin_users,
+            can_use_monitors=current_user.telegram_id in settings.admin_users or current_user.can_use_monitors,
+            can_create_rooms=current_user.telegram_id in settings.admin_users or current_user.can_create_rooms,
+            has_profile_photo=current_user.has_profile_photo,
+            profile_photo_updated_at=current_user.profile_photo_updated_at,
+            created_at=current_user.created_at, last_active=current_user.last_active,
+        ),
+    )
 
 
-@router.post("/telegram-webapp", response_model=AuthResponse, response_model_exclude_none=True)
+@router.post("/telegram-webapp", response_model=AuthResponse)
 @limiter.limit("20/minute")
 async def login_from_telegram_webapp(
     request: Request,
-    response: Response,
     payload: TelegramWebAppRequest,
     db: AsyncSession = Depends(get_db),
 ):
@@ -740,14 +694,27 @@ async def login_from_telegram_webapp(
     await db.commit()
     if new_device:
         await _notify_new_device(user, request)
-    return _auth_response(user, session, response, request)
+    return AuthResponse(
+        access_token=create_access_token(user.telegram_id, user.auth_version, session.id),
+        refresh_token=create_refresh_token(user.telegram_id, user.auth_version, session.id),
+        user=UserResponse(
+            id=user.id, telegram_id=user.telegram_id, username=user.username,
+            first_name=user.first_name, last_name=user.last_name,
+            display_name=user.display_name, is_active=user.is_active,
+            is_admin=user.telegram_id in settings.admin_users,
+            can_use_monitors=user.telegram_id in settings.admin_users or user.can_use_monitors,
+            can_create_rooms=user.telegram_id in settings.admin_users or user.can_create_rooms,
+            has_profile_photo=user.has_profile_photo,
+            profile_photo_updated_at=user.profile_photo_updated_at,
+            created_at=user.created_at, last_active=user.last_active,
+        ),
+    )
 
 
-@router.post("/telegram-token", response_model=AuthResponse, response_model_exclude_none=True)
+@router.post("/telegram-token", response_model=AuthResponse)
 @limiter.limit("10/minute")
 async def login_from_telegram_token(
     request: Request,
-    response: Response,
     payload: TelegramTokenLoginRequest,
     db: AsyncSession = Depends(get_db),
 ):
@@ -768,7 +735,7 @@ async def login_from_telegram_token(
     await db.commit()
     if new_device:
         await _notify_new_device(user, request)
-    return _auth_response(user, session, response, request)
+    return _auth_response(user, session)
 
 
 @router.post("/generate-code", response_model=LoginCodeResponse)
@@ -807,11 +774,10 @@ async def generate_login_code(
     )
 
 
-@router.post("/verify-code", response_model=AuthResponse, response_model_exclude_none=True)
+@router.post("/verify-code", response_model=AuthResponse)
 @limiter.limit("40/minute")  # Allow TV polling while limiting brute force attempts
 async def verify_login_code(
     request: Request,  # Required for rate limiter
-    response: Response,
     code_request: VerifyCodeRequest,
     db: AsyncSession = Depends(get_db),
 ):
@@ -855,19 +821,25 @@ async def verify_login_code(
     session.telegram_verified_at = datetime.utcnow()
     db.add(session)
     await db.flush()
+    access_token = create_access_token(user.telegram_id, version=user.auth_version, session_id=session.id)
+    refresh_token = create_refresh_token(user.telegram_id, version=user.auth_version, session_id=session.id)
+    
     # Delete code after successful login
     await db.delete(login_code)
     await db.commit()
     
-    return _auth_response(user, session, response, request)
+    return AuthResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        user=UserResponse.model_validate(user, from_attributes=True)
+    )
 
 
 # Keep this for backward compatibility or direct code login if needed, 
 # but verify-code is the main one for TV flow now.
-@router.post("/code", response_model=AuthResponse, response_model_exclude_none=True)
+@router.post("/code", response_model=AuthResponse)
 async def login_with_code(
     request: Request,
-    response: Response,
     code_request: VerifyCodeRequest,
     db: AsyncSession = Depends(get_db),
 ):
@@ -876,7 +848,6 @@ async def login_with_code(
    # ... (reusing logic or redirecting)
    return await verify_login_code(
        request,
-       response,
        code_request,
        db
    )
