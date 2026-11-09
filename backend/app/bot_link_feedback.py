@@ -10,6 +10,12 @@ from pyrogram.types import Message, ReactionTypeEmoji
 logger = logging.getLogger(__name__)
 
 
+async def reply_to_request(message: Message, *args, **kwargs):
+    """Reply to the originating request in both private and group chats."""
+    kwargs.setdefault("quote", True)
+    return await message.reply(*args, **kwargs)
+
+
 def _post_bot_api_reaction(bot_token: str, chat_id: int, message_id: int, emoji: str) -> tuple[bool, str]:
     request = Request(
         f"https://api.telegram.org/bot{bot_token}/setMessageReaction",

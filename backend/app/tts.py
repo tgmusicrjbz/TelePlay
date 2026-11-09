@@ -550,6 +550,7 @@ class TTSJob:
     output_caption: str | None = None
     status_chat_id: int | None = None
     status_message_id: int | None = None
+    request_message_id: int | None = None
     id: str = ""
 
 
@@ -615,6 +616,7 @@ class TTSQueue:
                 output_caption=payload.get("output_caption"),
                 status_chat_id=payload.get("status_chat_id"),
                 status_message_id=payload.get("status_message_id"),
+                request_message_id=payload.get("request_message_id"),
                 id=job_id,
             )
             status.update(state="queued", message="ادامه پس از راه‌اندازی دوباره", progress=0,
@@ -675,6 +677,7 @@ class TTSQueue:
                 "output_caption": job.output_caption,
                 "status_chat_id": job.status_chat_id,
                 "status_message_id": job.status_message_id,
+                "request_message_id": job.request_message_id,
                 "fingerprint": fingerprint,
             },
             status=self.statuses[job.id],
@@ -831,9 +834,19 @@ class TTSQueue:
             self.statuses[job.id].update(state="uploading", message="ارسال به تلگرام", progress=90)
             await self._persist_status(job.id)
             if output_path.suffix == ".ogg":
-                await telegram.tg_client.send_voice(job.output_chat_id or job.telegram_id, str(output_path), caption=(job.output_caption if job.output_caption is not None else job.title)[:1024])
+                await telegram.tg_client.send_voice(
+                    job.output_chat_id or job.telegram_id,
+                    str(output_path),
+                    caption=(job.output_caption if job.output_caption is not None else job.title)[:1024],
+                    reply_to_message_id=job.request_message_id,
+                )
             else:
-                await telegram.tg_client.send_audio(job.output_chat_id or job.telegram_id, str(output_path), caption=(job.output_caption if job.output_caption is not None else job.title)[:1024])
+                await telegram.tg_client.send_audio(
+                    job.output_chat_id or job.telegram_id,
+                    str(output_path),
+                    caption=(job.output_caption if job.output_caption is not None else job.title)[:1024],
+                    reply_to_message_id=job.request_message_id,
+                )
 
     async def _store(self, job: TTSJob, wav_data: bytes) -> File:
         with tempfile.TemporaryDirectory(prefix="komod-tts-") as temporary_dir:
@@ -893,7 +906,12 @@ class TTSQueue:
                 await db.commit()
                 await db.refresh(record)
                 try:
-                    await telegram.tg_client.copy_message(job.telegram_id, target_channel, message.id)
+                    await telegram.tg_client.copy_message(
+                        job.telegram_id,
+                        target_channel,
+                        message.id,
+                        reply_to_message_id=job.request_message_id,
+                    )
                 except Exception:
                     logger.warning("TTS output was saved but could not be copied to user %s", job.telegram_id, exc_info=True)
                 return record

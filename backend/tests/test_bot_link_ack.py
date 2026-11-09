@@ -13,7 +13,24 @@ os.environ.setdefault("JWT_SECRET", "test-secret")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app import bot_link_feedback
-from app.bot_link_feedback import acknowledge_link_request, acknowledge_request, react_to_request
+from app.bot_link_feedback import acknowledge_link_request, acknowledge_request, react_to_request, reply_to_request
+
+
+def test_reply_to_request_quotes_in_private_chats_too():
+    message = SimpleNamespace(reply=AsyncMock(return_value="sent"))
+
+    result = asyncio.run(reply_to_request(message, "done", reply_markup="keyboard"))
+
+    assert result == "sent"
+    message.reply.assert_awaited_once_with("done", reply_markup="keyboard", quote=True)
+
+
+def test_reply_to_request_preserves_explicit_quote_choice():
+    message = SimpleNamespace(reply=AsyncMock(return_value="sent"))
+
+    asyncio.run(reply_to_request(message, "done", quote=False))
+
+    message.reply.assert_awaited_once_with("done", quote=False)
 
 
 def test_link_ack_uses_eyes_then_falls_back_to_heart():

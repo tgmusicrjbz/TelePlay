@@ -477,6 +477,7 @@ class ImportJob:
     quality: str = "480"
     notify: bool = True
     notification_chat_id: int | None = None
+    request_message_id: int | None = None
     visible_to_user: bool = True
     default_folder: bool = False
     save_to_library: bool = True
@@ -642,6 +643,7 @@ class LinkImportService:
                 telegram_id=int(payload["telegram_id"]), folder_id=payload.get("folder_id"),
                 quality=str(payload.get("quality") or "480"), notify=bool(payload.get("notify", True)),
                 notification_chat_id=payload.get("notification_chat_id"),
+                request_message_id=payload.get("request_message_id"),
                 visible_to_user=bool(payload.get("visible_to_user", True)),
                 default_folder=bool(payload.get("default_folder", False)),
                 save_to_library=bool(payload.get("save_to_library", True)),
@@ -684,6 +686,7 @@ class LinkImportService:
                      "telegram_id": job.telegram_id, "folder_id": job.folder_id,
                      "quality": job.quality, "notify": job.notify, "default_folder": job.default_folder,
                      "notification_chat_id": job.notification_chat_id,
+                     "request_message_id": job.request_message_id,
                      "visible_to_user": job.visible_to_user,
                      "save_to_library": job.save_to_library, "send_to_telegram": job.send_to_telegram,
                      "destination_ids": job.destination_ids,
@@ -1287,6 +1290,7 @@ class LinkImportService:
                     chat_ids = [destination.chat_id]
         if not chat_ids:
             chat_ids = [job.telegram_id]
+        request_chat_id = job.notification_chat_id or job.telegram_id
         for file in files:
             for chat_id in dict.fromkeys(chat_ids):
                 await telegram.copy_message_balanced(
@@ -1294,6 +1298,7 @@ class LinkImportService:
                     from_chat_id=file.storage_channel_id,
                     message_id=file.channel_message_id,
                     caption=file.description or "",
+                    reply_to_message_id=job.request_message_id if chat_id == request_chat_id else None,
                 )
 
     async def _discard_library_copies(self, files: list[File], *, keep_storage: bool = False) -> None:
@@ -1322,7 +1327,12 @@ class LinkImportService:
             url = f"{settings.web_base_url.rstrip('/')}/auth?token={token}"
             if url.startswith("https://"):
                 keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🗄️ باز کردن کمد", web_app=WebAppInfo(url=url))]])
-        message = await telegram.tg_client.send_message(target_chat_id, text, reply_markup=keyboard)
+        message = await telegram.tg_client.send_message(
+            target_chat_id,
+            text,
+            reply_markup=keyboard,
+            reply_to_message_id=job.request_message_id,
+        )
         async def remove_later() -> None:
             await asyncio.sleep(45)
             try:

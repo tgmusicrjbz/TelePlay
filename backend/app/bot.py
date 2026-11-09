@@ -38,7 +38,7 @@ from .gemini_keys import decrypt_user_keys
 from .link_captions import render_link_caption
 from .group_tools import consume_file_link_quota, consume_group_quota, get_group_usage, get_group_usage_breakdown, get_or_create_group_settings, get_group_voice, set_group_voice, is_global_admin
 from .bot_messages import bot_message
-from .bot_link_feedback import acknowledge_link_request, acknowledge_request, react_to_request
+from .bot_link_feedback import acknowledge_link_request, acknowledge_request, react_to_request, reply_to_request
 from .instagram_inbox import pair_sender_with_telegram
 
 settings = get_settings()
@@ -279,7 +279,7 @@ def sanitize_filename(name: str) -> str:
     return name if name else "unnamed_file"
 
 
-async def get_or_create_user(telegram_id: int, username: str = None, 
+async def get_or_create_user(telegram_id: int, username: str = None,
                              first_name: str = None, last_name: str = None) -> User:
     """Get or create a user in the database."""
     async with async_session() as db:
@@ -334,7 +334,7 @@ async def is_connected_group(chat_id: int) -> bool:
 async def require_connected_group(message: Message) -> bool:
     if await is_connected_group(message.chat.id):
         return True
-    await message.reply(await bot_message("group_not_connected"))
+    await reply_to_request(message, await bot_message("group_not_connected"))
     return False
 
 
@@ -455,7 +455,7 @@ async def send_group_settings_panel(
         back_to_group_menu=True,
     )
     try:
-        return await source_message.reply(**view)
+        return await reply_to_request(source_message, **view)
     except Exception as reply_error:
         logger.warning(
             "Group settings reply rejected chat=%s user=%s; retrying as a new message: %s",
@@ -1313,9 +1313,9 @@ async def check_auth(client, message: Message):
         # Ignore if it's a command we don't want to reply to (to avoid spamming unauthorized users)
         # But for /start, we should give a polite rejection
         if message.text and message.text.startswith("/start"):
-            await message.reply(await bot_message("access_denied", telegram_id=message.from_user.id))
+            await reply_to_request(message, await bot_message("access_denied", telegram_id=message.from_user.id))
         elif any(getattr(message, field, None) for field in ("video", "audio", "voice", "document", "photo", "animation", "video_note")):
-            await message.reply(await bot_message("file_access_denied", telegram_id=message.from_user.id))
+            await reply_to_request(message, await bot_message("file_access_denied", telegram_id=message.from_user.id))
         
         # Stop further processing of this message
         message.stop_propagation()
@@ -1330,10 +1330,10 @@ async def start_command(client, message: Message):
     group_chat_id = decode_group_start_payload(payload) if payload else None
     if group_chat_id is not None:
         if not await is_connected_group(group_chat_id):
-            await message.reply("این گروه به کمد متصل نیست یا تأییدش متوقف شده.")
+            await reply_to_request(message, "این گروه به کمد متصل نیست یا تأییدش متوقف شده.")
             return
         if not await is_group_manager(client, group_chat_id, message.from_user.id):
-            await message.reply("مدیریت این بخش فقط در اختیار مدیرهای همان گروه است.")
+            await reply_to_request(message, "مدیریت این بخش فقط در اختیار مدیرهای همان گروه است.")
             return
         # Only a verified manager of an approved group is registered here.
         # This keeps the deep link usable without weakening restricted access.
@@ -1343,7 +1343,7 @@ async def start_command(client, message: Message):
             message.from_user.first_name,
             message.from_user.last_name,
         )
-        await message.reply(**(await group_settings_view(group_chat_id, message.from_user.id)))
+        await reply_to_request(message, **(await group_settings_view(group_chat_id, message.from_user.id)))
         return
 
     await get_or_create_user(
@@ -1368,16 +1368,16 @@ async def start_command(client, message: Message):
                     login_code.telegram_id = message.from_user.id
                     await db.commit()
                     
-                    await message.reply(await bot_message("login_confirmed"))
+                    await reply_to_request(message, await bot_message("login_confirmed"))
                     return
                 elif login_code.telegram_id:
-                     await message.reply(await bot_message("login_code_used"))
+                     await reply_to_request(message, await bot_message("login_code_used"))
                      return
                 else:
-                     await message.reply(await bot_message("login_code_expired"))
+                     await reply_to_request(message, await bot_message("login_code_expired"))
                      return
 
-    await message.reply(
+    await reply_to_request(message,
         await bot_message("welcome", first_name=message.from_user.first_name or "رفیق"),
         reply_markup=main_menu_keyboard(message.from_user.id),
     )
@@ -1389,7 +1389,7 @@ async def help_command(client, message: Message):
     """Show help message."""
     await load_user_ui_state(message.from_user.id)
     await set_current_drawer(message.from_user.id, None)
-    await message.reply(await bot_message("help"), reply_markup=help_keyboard(message.from_user.id))
+    await reply_to_request(message, await bot_message("help"), reply_markup=help_keyboard(message.from_user.id))
 
 
 @tg_client.on_message(filters.command("tts") & filters.private)
@@ -1402,13 +1402,13 @@ async def tts_command(client, message: Message):
     )
     personal_keys = decrypt_user_keys(user.gemini_api_keys_encrypted)
     if not tts_queue.available and not personal_keys:
-        await message.reply(await bot_message("tts_unavailable"))
+        await reply_to_request(message, await bot_message("tts_unavailable"))
         return
     direct_text = message.text.split(maxsplit=1)[1].strip() if message.text and len(message.text.split(maxsplit=1)) > 1 else ""
     replied = message.reply_to_message
     source_text = direct_text or ((replied.text or replied.caption or "").strip() if replied else "")
     if not source_text:
-        await message.reply(**tts_bot_settings_view(load_tts_settings(user)))
+        await reply_to_request(message, **tts_bot_settings_view(load_tts_settings(user)))
         return
     folder_id = await get_active_drawer_id(message.from_user.id)
     title_line = next((line.strip() for line in source_text.splitlines() if line.strip()), "صدای ساخته‌شده")
@@ -1418,17 +1418,18 @@ async def tts_command(client, message: Message):
         try:
             await consume_tts_quota(db, user.id, len(source_text))
         except ValueError as error:
-            await message.reply(f"⛔ {error}")
+            await reply_to_request(message, f"⛔ {error}")
             return
     job = TTSJob(
         user_id=user.id, telegram_id=user.telegram_id, text=source_text,
         title=title_line[:80], folder_id=folder_id,
         preferences=preferences, output_mode=preferences.get("bot_output_mode", "save"),
         api_keys=personal_keys,
+        request_message_id=message.id,
     )
     position = await tts_queue.enqueue(job)
     queue_note = f"\nنوبت {to_persian_digits(str(position))} در صف" if position > 1 else ""
-    await message.reply(await bot_message("tts_queued", queue_note=queue_note))
+    await reply_to_request(message, await bot_message("tts_queued", queue_note=queue_note))
 
 
 @tg_client.on_message(filters.command("stt") & filters.private)
@@ -1441,7 +1442,7 @@ async def stt_command(client, message: Message):
     )
     personal_keys = decrypt_user_keys(user.gemini_api_keys_encrypted)
     if not stt_queue.available and not personal_keys:
-        await message.reply(await bot_message("stt_unavailable"))
+        await reply_to_request(message, await bot_message("stt_unavailable"))
         return
     replied = message.reply_to_message
     # Telegram cannot create a literal cross-chat reply for a bot. Forwarding
@@ -1455,10 +1456,10 @@ async def stt_command(client, message: Message):
     if replied is None:
         if option:
             pending_stt_modes[message.from_user.id] = output_mode
-            await message.reply(await bot_message("stt_waiting_upload"))
+            await reply_to_request(message, await bot_message("stt_waiting_upload"))
         else:
             pending_stt_modes.pop(message.from_user.id, None)
-            await message.reply(
+            await reply_to_request(message,
                 "📝 خروجی متن را چطور می‌خواهی؟",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("فقط همین‌جا", callback_data="stt_mode:temporary"),
@@ -1469,7 +1470,7 @@ async def stt_command(client, message: Message):
         return
     media = next((getattr(replied, name, None) for name in ("audio", "voice", "video", "video_note", "document") if replied and getattr(replied, name, None)), None)
     if media is None:
-        await message.reply(await bot_message("stt_reply_required"))
+        await reply_to_request(message, await bot_message("stt_reply_required"))
         return
     cleanup_source = False
     async with async_session() as db:
@@ -1480,13 +1481,13 @@ async def stt_command(client, message: Message):
         if source is None:
             mime = getattr(media, "mime_type", None) or ("audio/ogg" if replied.voice else "video/mp4" if replied.video or replied.video_note else "application/octet-stream")
             if not (mime.startswith("audio/") or mime.startswith("video/") or replied.audio or replied.voice or replied.video or replied.video_note):
-                await message.reply(await bot_message("stt_invalid_media"))
+                await reply_to_request(message, await bot_message("stt_invalid_media"))
                 return
             target_channel = user.storage_channel_id or settings.telegram_storage_channel_id
             temporary_message = await forward_to_storage_channel(replied, target_channel)
             stored_media = next((getattr(temporary_message, field, None) for field in ("audio", "voice", "video", "video_note", "document") if getattr(temporary_message, field, None)), None)
             if stored_media is None:
-                await message.reply(await bot_message("stt_prepare_failed"))
+                await reply_to_request(message, await bot_message("stt_prepare_failed"))
                 return
             default_folder = await ensure_default_folder(db, user.id)
             source = File(
@@ -1515,7 +1516,7 @@ async def stt_command(client, message: Message):
                     await tg_client.delete_messages(channel_id or settings.telegram_storage_channel_id, message_id)
                 except Exception:
                     logger.warning("Could not remove rejected temporary STT source %s", message_id, exc_info=True)
-            await message.reply(f"⛔ {error}")
+            await reply_to_request(message, f"⛔ {error}")
             return
     folder_id = await get_active_drawer_id(message.from_user.id)
     source_name = Path(source.file_name).stem.strip() or "صدا"
@@ -1527,10 +1528,11 @@ async def stt_command(client, message: Message):
         folder_id=folder_id, output_mode=output_mode, telegram_id=message.from_user.id,
         api_keys=personal_keys, cleanup_source=cleanup_source,
         stt_model=routed_stt_model, text_model=routed_text_model, stt_mode=preferences["stt_mode"],
+        request_message_id=message.id,
     )
     position = await stt_queue.enqueue(job)
     queue_note = f"\nنوبت {to_persian_digits(str(position))} در صف" if position > 1 else ""
-    await message.reply(await bot_message("stt_queued", queue_note=queue_note))
+    await reply_to_request(message, await bot_message("stt_queued", queue_note=queue_note))
 
 
 @tg_client.on_message(filters.command(["link", "playlink", "downloadlink"]) & (filters.private | filters.group))
@@ -1546,10 +1548,10 @@ async def replied_file_link_command(client, message: Message):
         if replied and getattr(replied, name, None)
     ), None)
     if media is None:
-        await message.reply(await bot_message("file_link_reply_required"))
+        await reply_to_request(message, await bot_message("file_link_reply_required"))
         return
 
-    status_message = await message.reply(await bot_message("file_link_preparing"))
+    status_message = await reply_to_request(message, await bot_message("file_link_preparing"))
     try:
         requester = await get_or_create_user(
             message.from_user.id, message.from_user.username,
@@ -1560,7 +1562,7 @@ async def replied_file_link_command(client, message: Message):
         async with async_session() as db:
             if message.chat.type in {enums.ChatType.GROUP, enums.ChatType.SUPERGROUP}:
                 if not await is_connected_group(message.chat.id):
-                    await message.reply(await bot_message("group_not_connected"))
+                    await reply_to_request(message, await bot_message("group_not_connected"))
                     return
                 destination = (await db.execute(select(TelegramDestination).where(
                     TelegramDestination.chat_id == message.chat.id,
@@ -1579,7 +1581,7 @@ async def replied_file_link_command(client, message: Message):
                     chat_id=message.chat.id,
                 )
             except ValueError as error:
-                await message.reply(f"⛔ {error}")
+                await reply_to_request(message, f"⛔ {error}")
                 return
             if file is not None:
                 if not file.public_hash:
@@ -1619,7 +1621,7 @@ async def replied_file_link_command(client, message: Message):
         if public_hash:
             buttons.append([InlineKeyboardButton("🔗 دائمی", url=f"{base_url}/s/{public_hash}")])
         message_key = "file_links_private" if message.chat.type == enums.ChatType.PRIVATE else "file_links_group"
-        await message.reply(
+        await reply_to_request(message,
             await bot_message(message_key, title=title),
             reply_markup=InlineKeyboardMarkup(buttons),
             disable_web_page_preview=True,
@@ -1642,13 +1644,13 @@ async def group_tts_command(client, message: Message, source_message: Message | 
     )
     personal_keys = decrypt_user_keys(user.gemini_api_keys_encrypted)
     if not tts_queue.available and not personal_keys:
-        await message.reply(await bot_message("tts_unavailable"))
+        await reply_to_request(message, await bot_message("tts_unavailable"))
         return
     direct_text = message.text.split(maxsplit=1)[1].strip() if source_message is None and message.text and len(message.text.split(maxsplit=1)) > 1 else ""
     replied = source_message or message.reply_to_message
     source_text = direct_text or ((replied.text or replied.caption or "").strip() if replied else "")
     if not source_text:
-        await message.reply(await bot_message("tts_text_required"))
+        await reply_to_request(message, await bot_message("tts_text_required"))
         return
     async with async_session() as db:
         try:
@@ -1657,7 +1659,7 @@ async def group_tts_command(client, message: Message, source_message: Message | 
                 operation="tts", title=message.chat.title,
             )
         except ValueError as error:
-            await message.reply(f"⛔ {error}")
+            await reply_to_request(message, f"⛔ {error}")
             return
     title_line = next((line.strip() for line in source_text.splitlines() if line.strip()), "صدای ساخته‌شده")
     preferences=load_tts_settings(user)
@@ -1668,8 +1670,9 @@ async def group_tts_command(client, message: Message, source_message: Message | 
         user_id=user.id, telegram_id=message.chat.id, output_chat_id=message.chat.id,
         text=source_text, title=title_line[:80], folder_id=None,
         preferences=preferences, output_mode="telegram", api_keys=personal_keys,
+        request_message_id=message.id,
     )
-    status_message = await message.reply(await bot_message("tts_queued", queue_note=""))
+    status_message = await reply_to_request(message, await bot_message("tts_queued", queue_note=""))
     job.output_caption = await bot_message("group_tts_output_caption", title=job.title)
     job.status_chat_id = message.chat.id
     job.status_message_id = status_message.id
@@ -1679,7 +1682,7 @@ async def group_tts_command(client, message: Message, source_message: Message | 
         logger.exception("Could not queue group TTS: %s", error)
         with contextlib.suppress(Exception):
             await status_message.delete()
-        await message.reply("❌ ساخت صدا در صف قرار نگرفت؛ کمی بعد دوباره تلاش کن.")
+        await reply_to_request(message, "❌ ساخت صدا در صف قرار نگرفت؛ کمی بعد دوباره تلاش کن.")
         return
     if position > 1:
         await status_message.edit(await bot_message("tts_queued", queue_note=f" نوبت {to_persian_digits(str(position))} در صف."))
@@ -1696,11 +1699,11 @@ async def group_stt_command(client, message: Message, source_message: Message | 
     replied = source_message or message.reply_to_message
     media = next((getattr(replied, name, None) for name in ("audio", "voice", "video", "video_note", "document") if replied and getattr(replied, name, None)), None)
     if media is None:
-        await message.reply("روی یک صدا، ویدیو یا فایل صوتی ریپلای کن و `/stt` را بفرست.")
+        await reply_to_request(message, "روی یک صدا، ویدیو یا فایل صوتی ریپلای کن و `/stt` را بفرست.")
         return
     mime = getattr(media, "mime_type", None) or ("audio/ogg" if replied.voice else "video/mp4" if replied.video or replied.video_note else "application/octet-stream")
     if not (mime.startswith("audio/") or mime.startswith("video/") or replied.audio or replied.voice or replied.video or replied.video_note):
-        await message.reply(await bot_message("stt_invalid_media"))
+        await reply_to_request(message, await bot_message("stt_invalid_media"))
         return
     user = await get_or_create_user(
         message.from_user.id, message.from_user.username,
@@ -1708,7 +1711,7 @@ async def group_stt_command(client, message: Message, source_message: Message | 
     )
     personal_keys = decrypt_user_keys(user.gemini_api_keys_encrypted)
     if not stt_queue.available and not personal_keys:
-        await message.reply(await bot_message("stt_unavailable"))
+        await reply_to_request(message, await bot_message("stt_unavailable"))
         return
     async with async_session() as db:
         try:
@@ -1717,7 +1720,7 @@ async def group_stt_command(client, message: Message, source_message: Message | 
                 operation="stt", title=message.chat.title,
             )
         except ValueError as error:
-            await message.reply(f"⛔ {error}")
+            await reply_to_request(message, f"⛔ {error}")
             return
     source = None
     status_message = None
@@ -1740,13 +1743,14 @@ async def group_stt_command(client, message: Message, source_message: Message | 
         preferences = load_tts_settings(user)
         routed_stt_model = route_ai_model(preferences, "stt", int(source.duration or 0))
         routed_text_model = route_ai_model(preferences, "text", 0)
-        status_message = await message.reply(await bot_message("stt_queued", queue_note=""))
+        status_message = await reply_to_request(message, await bot_message("stt_queued", queue_note=""))
         job = STTJob(
             user_id=user.id, source_file_id=source.id,
             title=f"📝 متن {Path(source.file_name).stem or 'صدا'}"[:180], folder_id=None,
             output_mode="temporary", telegram_id=message.chat.id, api_keys=personal_keys,
             cleanup_source=True, delete_telegram_source=False, stt_model=routed_stt_model,
             text_model=routed_text_model, stt_mode=preferences["stt_mode"],
+            request_message_id=message.id,
         )
         job.output_caption = await bot_message("group_stt_output_caption", title=job.title)
         job.status_chat_id = message.chat.id
@@ -1765,7 +1769,7 @@ async def group_stt_command(client, message: Message, source_message: Message | 
         if status_message is not None:
             with contextlib.suppress(Exception):
                 await status_message.delete()
-        await message.reply("❌ فایل برای استخراج متن آماده نشد؛ دوباره تلاش کن.")
+        await reply_to_request(message, "❌ فایل برای استخراج متن آماده نشد؛ دوباره تلاش کن.")
 
 
 @tg_client.on_message(filters.command("group_settings") & filters.group)
@@ -1776,7 +1780,7 @@ async def group_settings_command(client, message: Message):
     if not await require_connected_group(message):
         return
     if not await is_group_manager(client, message.chat.id, message.from_user.id):
-        notice = await message.reply("مدیریت تنظیمات فقط در اختیار مدیرهای این گروه است.")
+        notice = await reply_to_request(message, "مدیریت تنظیمات فقط در اختیار مدیرهای این گروه است.")
         asyncio.create_task(delete_preview_later(client, notice.chat.id, notice.id, 12))
         return
     try:
@@ -1802,7 +1806,7 @@ async def group_settings_command(client, message: Message):
                 message.from_user.id,
                 fallback_error,
             )
-            await message.reply(f"بازکردن مدیریت گروه انجام نشد. کد پیگیری: `{tracking_code}`")
+            await reply_to_request(message, f"بازکردن مدیریت گروه انجام نشد. کد پیگیری: `{tracking_code}`")
 
 
 @tg_client.on_message(
@@ -1820,12 +1824,12 @@ async def handle_pending_group_action(client, message: Message):
     action, expires_at, prompt_message_id = (*pending, None) if len(pending) == 2 else pending
     if datetime.now(timezone.utc) >= expires_at:
         pending_group_actions.pop(key, None)
-        await message.reply("⏱ زمان این درخواست تمام شد؛ دوباره از منوی گروه انتخابش کن.")
+        await reply_to_request(message, "⏱ زمان این درخواست تمام شد؛ دوباره از منوی گروه انتخابش کن.")
         return
     pending_group_actions.pop(key, None)
     if action == "tts":
         if not (message.text or message.caption or "").strip():
-            await message.reply("برای متن به صدا، یک پیام متنی بفرست.")
+            await reply_to_request(message, "برای متن به صدا، یک پیام متنی بفرست.")
             return
         try:
             await group_tts_command(client, message, message)
@@ -1834,7 +1838,7 @@ async def handle_pending_group_action(client, message: Message):
                     await client.edit_message_text(message.chat.id, prompt_message_id, "✅ متن دریافت شد و تبدیل در صف قرار گرفت.", reply_markup=group_menu_keyboard())
         except Exception as error:
             logger.exception("Pending group TTS failed chat=%s user=%s: %s", message.chat.id, message.from_user.id, error)
-            await message.reply("❌ ثبت تبدیل متن به صدا انجام نشد؛ دوباره تلاش کن.")
+            await reply_to_request(message, "❌ ثبت تبدیل متن به صدا انجام نشد؛ دوباره تلاش کن.")
     elif action == "stt":
         media = next((
             getattr(message, name, None)
@@ -1842,7 +1846,7 @@ async def handle_pending_group_action(client, message: Message):
             if getattr(message, name, None)
         ), None)
         if media is None:
-            await message.reply("برای صوت به متن، یک صدا، ویدیو یا فایل صوتی بفرست.")
+            await reply_to_request(message, "برای صوت به متن، یک صدا، ویدیو یا فایل صوتی بفرست.")
             return
         try:
             await group_stt_command(client, message, message)
@@ -1851,11 +1855,11 @@ async def handle_pending_group_action(client, message: Message):
                     await client.edit_message_text(message.chat.id, prompt_message_id, "✅ فایل دریافت شد و استخراج متن در صف قرار گرفت.", reply_markup=group_menu_keyboard())
         except Exception as error:
             logger.exception("Pending group STT failed chat=%s user=%s: %s", message.chat.id, message.from_user.id, error)
-            await message.reply("❌ ثبت تبدیل صوت به متن انجام نشد؛ دوباره تلاش کن.")
+            await reply_to_request(message, "❌ ثبت تبدیل صوت به متن انجام نشد؛ دوباره تلاش کن.")
     elif action == "link":
         if not re.search(r"https?://(?:www\.)?(?:youtube\.com|youtu\.be|instagram\.com|pinterest\.com|pin\.it)/", message.text or "", re.IGNORECASE):
             pending_group_actions[key] = (action, expires_at, prompt_message_id) if prompt_message_id else (action, expires_at)
-            await message.reply("یک لینک یوتیوب، اینستاگرام یا پین پینترست بفرست.")
+            await reply_to_request(message, "یک لینک یوتیوب، اینستاگرام یا پین پینترست بفرست.")
             return
         if prompt_message_id:
             with contextlib.suppress(Exception):
@@ -1866,14 +1870,14 @@ async def handle_pending_group_action(client, message: Message):
 @react_to_request("👀")
 async def group_menu_command(client, message: Message):
     if await require_connected_group(message):
-        await message.reply(group_menu_text(), reply_markup=group_menu_keyboard())
+        await reply_to_request(message, group_menu_text(), reply_markup=group_menu_keyboard())
 
 
 @tg_client.on_message(filters.command("group_usage") & filters.group)
 @react_to_request("👀")
 async def group_usage_command(client, message: Message):
     if message.from_user and await require_connected_group(message):
-        await message.reply(**(await group_usage_view(message.chat.id)))
+        await reply_to_request(message, **(await group_usage_view(message.chat.id)))
 
 
 @tg_client.on_message(filters.command("group_limit") & filters.group)
@@ -1882,7 +1886,7 @@ async def group_limit_command(client, message: Message):
     if not await require_connected_group(message):
         return
     if not message.from_user or not await is_group_manager(client, message.chat.id, message.from_user.id):
-        await message.reply("تغییر سهمیه‌ها فقط در اختیار مدیرهای این گروه است.")
+        await reply_to_request(message, "تغییر سهمیه‌ها فقط در اختیار مدیرهای این گروه است.")
         return
     try:
         await send_group_settings_panel(
@@ -1914,7 +1918,7 @@ async def handle_pending_stt_media(client, message: Message):
         except Exception:
             logger.exception("Direct STT failed for user %s", message.from_user.id)
             with contextlib.suppress(Exception):
-                await message.reply("❌ استخراج متن انجام نشد؛ دوباره تلاش کن.")
+                await reply_to_request(message, "❌ استخراج متن انجام نشد؛ دوباره تلاش کن.")
         finally:
             claimed_stt_messages.discard(claim)
     asyncio.create_task(process())
@@ -1931,18 +1935,18 @@ async def _process_pending_stt_media(client, message: Message, output_mode: str)
     )
     personal_keys = decrypt_user_keys(user.gemini_api_keys_encrypted)
     if not stt_queue.available and not personal_keys:
-        await message.reply(await bot_message("stt_unavailable"))
+        await reply_to_request(message, await bot_message("stt_unavailable"))
         return
     media = next((getattr(message, name, None) for name in ("audio", "voice", "video", "video_note", "document") if getattr(message, name, None)), None)
     mime = getattr(media, "mime_type", None) or ("audio/ogg" if message.voice else "video/mp4" if message.video or message.video_note else "application/octet-stream")
     if media is None or not (mime.startswith("audio/") or mime.startswith("video/") or message.audio or message.voice or message.video or message.video_note):
-        await message.reply("این فایل صوتی یا ویدیویی نیست. دوباره `/stt` را بزن.")
+        await reply_to_request(message, "این فایل صوتی یا ویدیویی نیست. دوباره `/stt` را بزن.")
         return
     target_channel = user.storage_channel_id or settings.telegram_storage_channel_id
     temporary_message = await forward_to_storage_channel(message, target_channel)
     stored_media = next((getattr(temporary_message, field, None) for field in ("audio", "voice", "video", "video_note", "document") if getattr(temporary_message, field, None)), None)
     if stored_media is None:
-        await message.reply("فایل برای استخراج متن آماده نشد.")
+        await reply_to_request(message, "فایل برای استخراج متن آماده نشد.")
         return
     async with async_session() as db:
         default_folder = await ensure_default_folder(db, user.id)
@@ -1965,7 +1969,7 @@ async def _process_pending_stt_media(client, message: Message, output_mode: str)
             await db.delete(source)
             await db.commit()
             await tg_client.delete_messages(target_channel, temporary_message.id)
-            await message.reply(f"⛔ {error}")
+            await reply_to_request(message, f"⛔ {error}")
             return
     folder_id = await get_active_drawer_id(message.from_user.id)
     source_name = Path(source.file_name).stem.strip() or "صدا"
@@ -1977,9 +1981,10 @@ async def _process_pending_stt_media(client, message: Message, output_mode: str)
         folder_id=folder_id, output_mode=output_mode, telegram_id=message.from_user.id,
         api_keys=personal_keys, cleanup_source=True,
         stt_model=routed_stt_model, text_model=routed_text_model, stt_mode=preferences["stt_mode"],
+        request_message_id=message.id,
     ))
     queue_note = f"\nنوبت {to_persian_digits(str(position))} در صف" if position > 1 else ""
-    await message.reply(await bot_message("stt_queued", queue_note=queue_note))
+    await reply_to_request(message, await bot_message("stt_queued", queue_note=queue_note))
 
 
 def tts_bot_settings_view(preferences: dict) -> dict:
@@ -2007,7 +2012,7 @@ def tts_bot_settings_view(preferences: dict) -> dict:
 @react_to_request("👀")
 async def myfiles_command(client, message: Message):
     """List user's recent files."""
-    panel = await message.reply("در حال آماده‌سازی فایل‌ها…")
+    panel = await reply_to_request(message, "در حال آماده‌سازی فایل‌ها…")
     await render_recent_files(panel, message.from_user.id)
 
 
@@ -2015,7 +2020,7 @@ async def myfiles_command(client, message: Message):
 @react_to_request("👀")
 async def folders_command(client, message: Message):
     """Show folder structure."""
-    panel = await message.reply("در حال آماده‌سازی کمد…")
+    panel = await reply_to_request(message, "در حال آماده‌سازی کمد…")
     await render_folder_page(panel, message.from_user.id)
 
 
@@ -2023,7 +2028,7 @@ async def folders_command(client, message: Message):
 @react_to_request("👀")
 async def playlists_command(client, message: Message):
     """Browse and manage audio/video playlists."""
-    panel = await message.reply("در حال آماده‌سازی پلی‌لیست‌ها…")
+    panel = await reply_to_request(message, "در حال آماده‌سازی پلی‌لیست‌ها…")
     await render_playlists(panel, message.from_user.id)
 
 
@@ -2032,12 +2037,12 @@ async def playlists_command(client, message: Message):
 async def newfolder_command(client, message: Message):
     """Create a new folder."""
     if len(message.command) < 2:
-        await message.reply(await bot_message("folder_name_required"))
+        await reply_to_request(message, await bot_message("folder_name_required"))
         return
     
     folder_name = " ".join(message.command[1:]).strip()
     if not folder_name or len(folder_name) > 255:
-        await message.reply(await bot_message("folder_name_invalid"))
+        await reply_to_request(message, await bot_message("folder_name_invalid"))
         return
     
     async with async_session() as db:
@@ -2048,7 +2053,7 @@ async def newfolder_command(client, message: Message):
         user = user_result.scalar_one_or_none()
         
         if not user:
-            await message.reply("برای شروع، دستور /start رو بفرست.")
+            await reply_to_request(message, "برای شروع، دستور /start رو بفرست.")
             return
         
         # Check if folder exists
@@ -2060,7 +2065,7 @@ async def newfolder_command(client, message: Message):
             )
         )
         if existing.scalar_one_or_none():
-            await message.reply(await bot_message("folder_duplicate", folder_name=folder_name))
+            await reply_to_request(message, await bot_message("folder_duplicate", folder_name=folder_name))
             return
         
         # Create folder
@@ -2068,7 +2073,7 @@ async def newfolder_command(client, message: Message):
         db.add(folder)
         await db.commit()
     
-    await message.reply(
+    await reply_to_request(message,
         f"✅ کشوی «{folder_name}» ساخته شد.",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🗃️ باز کردن کشو", callback_data=f"folder:{folder.id}:0")],
@@ -2083,14 +2088,14 @@ async def search_command(client, message: Message):
     """Search file names and descriptions."""
     query = " ".join(message.command[1:]).strip()
     if not query:
-        await message.reply(await bot_message("search_query_required"))
+        await reply_to_request(message, await bot_message("search_query_required"))
         return
     await load_user_ui_state(message.from_user.id)
     search_queries[message.from_user.id] = query[:100]
     search_filters[message.from_user.id] = set()
     current_drawers[message.from_user.id] = None
     await persist_user_ui_state(message.from_user.id)
-    panel = await message.reply("در حال جست‌وجو…")
+    panel = await reply_to_request(message, "در حال جست‌وجو…")
     await render_search_results(panel, message.from_user.id)
 
 
@@ -2111,7 +2116,7 @@ async def web_command(client, message: Message):
         base_url = f"https://{base_url}"
     web_url = f"{base_url}/auth?token={token}"
     
-    await message.reply(
+    await reply_to_request(message,
         "🌐 **نسخهٔ وب کمد**\n\n"
         "با دکمهٔ زیر بازش کن یا لینک رو توی مرورگرت باز کن. این لینک رو برای کسی نفرست.\n"
         f"{web_url}",
@@ -2144,22 +2149,22 @@ async def login_command(client, message: Message):
             login_code = result.scalar_one_or_none()
             
             if not login_code:
-                await message.reply("❌ کد معتبر نیست؛ کد روی دستگاه رو دوباره بررسی کن.")
+                await reply_to_request(message, "❌ کد معتبر نیست؛ کد روی دستگاه رو دوباره بررسی کن.")
                 return
             
             if login_code.expires_at < datetime.utcnow():
-                await message.reply("❌ اعتبار کد تموم شده؛ یه کد تازه بساز.")
+                await reply_to_request(message, "❌ اعتبار کد تموم شده؛ یه کد تازه بساز.")
                 return
                 
             if login_code.telegram_id:
-                await message.reply("❌ این کد قبلاً استفاده شده.")
+                await reply_to_request(message, "❌ این کد قبلاً استفاده شده.")
                 return
 
             # Claim the code
             login_code.telegram_id = message.from_user.id
             await db.commit()
             
-            await message.reply(await bot_message("login_confirmed"))
+            await reply_to_request(message, await bot_message("login_confirmed"))
         return
 
     # Use secrets for cryptographically strong random number generation
@@ -2176,7 +2181,7 @@ async def login_command(client, message: Message):
         db.add(login_code)
         await db.commit()
     
-    await message.reply(
+    await reply_to_request(message,
         "🔐 **ورود به کمد**\n\n"
         f"کد یک‌بارمصرفت: `{code}`\n\n"
         "دکمهٔ زیر رو بزن تا صفحهٔ ورود باز بشه. اگر صفحه از قبل بازه، "
@@ -2201,7 +2206,7 @@ async def instagram_pair_command(client, message: Message):
         message.from_user.last_name,
     )
     if len(message.command) < 2:
-        await message.reply(
+        await reply_to_request(message,
             "کد اتصال را بعد از دستور بفرست. نمونه:\n`/instagram ABCD2345`"
         )
         return
@@ -2214,7 +2219,7 @@ async def instagram_pair_command(client, message: Message):
         "pending_approval": "✅ حساب‌ها به هم وصل شدند. پس از تأیید مدیر، پست برایت ارسال می‌شود.",
         "active": "✅ اتصال فعال شد. پست‌های تأییدشده وارد صف ارسال تلگرام شدند.",
     }
-    await message.reply(replies[status])
+    await reply_to_request(message, replies[status])
 
 @tg_client.on_message(filters.command("logout_all") & filters.private)
 @react_to_request("🫡")
@@ -2229,7 +2234,7 @@ async def logout_all_command(client, message: Message):
         message.from_user.last_name,
     )
     
-    await message.reply(
+    await reply_to_request(message,
         "⚠️ از همهٔ دستگاه‌ها خارج بشی؟\nنشست نسخهٔ وب و دستگاه‌های متصل باطل می‌شه.",
         reply_markup=InlineKeyboardMarkup([
             [
@@ -2460,7 +2465,7 @@ async def handle_file(client, message: Message):
     user_id = message.from_user.id
     queue = upload_message_queues.setdefault(user_id, asyncio.Queue())
     position = queue.qsize() + (1 if user_id in upload_workers else 0)
-    status_msg = await message.reply(await bot_message("file_save_queued", state="در صف ذخیره…" if position else "در حال ذخیره…"))
+    status_msg = await reply_to_request(message, await bot_message("file_save_queued", state="در صف ذخیره…" if position else "در حال ذخیره…"))
     await queue.put((client, message, status_msg))
     worker = upload_workers.get(user_id)
     if worker is None or worker.done():
@@ -2584,23 +2589,23 @@ async def handle_personal_channel_post(client, message: Message):
 async def connect_current_chat(client, message: Message):
     """Connect a group/channel as a reusable Komod output destination."""
     if not message.from_user:
-        await message.reply_text(await bot_message("group_admin_required"))
+        await reply_to_request(message, await bot_message("group_admin_required"))
         return
     try:
         member = await client.get_chat_member(message.chat.id, message.from_user.id)
         status = str(getattr(member, "status", "")).lower()
         if not any(value in status for value in ("owner", "administrator")):
-            await message.reply_text(await bot_message("group_owner_required"))
+            await reply_to_request(message, await bot_message("group_owner_required"))
             return
     except Exception:
-        await message.reply_text(await bot_message("group_access_check_failed"))
+        await reply_to_request(message, await bot_message("group_access_check_failed"))
         return
     async with async_session() as db:
         owner = (await db.execute(select(User).where(
             User.telegram_id == message.from_user.id, User.is_active.is_(True)
         ))).scalar_one_or_none()
         if owner is None:
-            await message.reply_text(await bot_message("group_connect_private_first"))
+            await reply_to_request(message, await bot_message("group_connect_private_first"))
             return
         destination = (await db.execute(select(TelegramDestination).where(
             TelegramDestination.chat_id == message.chat.id,
@@ -2617,7 +2622,7 @@ async def connect_current_chat(client, message: Message):
         else:
             destination.name = str(message.chat.title or destination.name)[:120]
         await db.commit()
-    await message.reply_text(
+    await reply_to_request(message,
         await bot_message("group_connected" if approved else "group_approval_pending"),
         reply_markup=group_menu_keyboard() if approved else None,
     )
@@ -2651,12 +2656,12 @@ async def handle_import_link(client, message: Message):
     else:
         user = await get_or_create_user(message.from_user.id, message.from_user.username, message.from_user.first_name, message.from_user.last_name)
     if not link_importer.available:
-        await message.reply(await bot_message("link_service_unavailable"))
+        await reply_to_request(message, await bot_message("link_service_unavailable"))
         message.stop_propagation()
         return
     count = to_persian_digits(str(len(matches)))
     asyncio.create_task(acknowledge_link_request(client, message))
-    status_message = await message.reply(await bot_message("link_queued", count=count, queue_note=""))
+    status_message = await reply_to_request(message, await bot_message("link_queued", count=count, queue_note=""))
     if message.chat.type in {enums.ChatType.GROUP, enums.ChatType.SUPERGROUP} and message.from_user:
         async with async_session() as db:
             try:
@@ -2680,6 +2685,7 @@ async def handle_import_link(client, message: Message):
             positions.append(await link_importer.enqueue(ImportJob(
                 url=url, user_id=user.id, telegram_id=user.telegram_id, folder_id=None,
                 notify=True, notification_chat_id=message.chat.id if is_group_import else None,
+                request_message_id=message.id,
                 visible_to_user=not is_group_import,
                 default_folder=not is_group_import,
                 save_to_library=delivery_mode != "telegram",
@@ -2729,14 +2735,14 @@ async def handle_text_note(client, message: Message):
             await db.commit()
             await db.refresh(note)
         detail_back_targets[message.from_user.id] = "files:0"
-        management_message = await message.reply(
+        management_message = await reply_to_request(message,
             f"✅ **رفت توی کمد**\n📝 {escape_markdown(title)}",
             reply_markup=post_upload_keyboard(note, message.from_user.id),
         )
         asyncio.create_task(delete_preview_later(client, management_message.chat.id, management_message.id, 30))
     except Exception as error:
         logger.exception("Telegram text upload failed for user %s: %s", message.from_user.id, error)
-        await message.reply("❌ متن ذخیره نشد؛ دوباره تلاش کن.")
+        await reply_to_request(message, "❌ متن ذخیره نشد؛ دوباره تلاش کن.")
 
 
 # ============== Callback Query Handlers ==============
@@ -4616,13 +4622,13 @@ async def handle_callback(client, callback: CallbackQuery):
 async def file_command(client, message: Message):
     """Manage a specific file by ID."""
     if len(message.command) < 2:
-        await message.reply("شناسهٔ فایل رو بعد از دستور بنویس؛ نمونه: `/file 12`.")
+        await reply_to_request(message, "شناسهٔ فایل رو بعد از دستور بنویس؛ نمونه: `/file 12`.")
         return
     
     try:
         file_id = int(message.command[1])
     except ValueError:
-        await message.reply("❌ شناسهٔ فایل درست نیست.")
+        await reply_to_request(message, "❌ شناسهٔ فایل درست نیست.")
         return
     
     async with async_session() as db:
@@ -4633,7 +4639,7 @@ async def file_command(client, message: Message):
         user = user_result.scalar_one_or_none()
         
         if not user:
-            await message.reply("اول /start رو بفرست.")
+            await reply_to_request(message, "اول /start رو بفرست.")
             return
         
         # Get file
@@ -4643,14 +4649,14 @@ async def file_command(client, message: Message):
         file = result.scalar_one_or_none()
     
     if not file:
-        await message.reply("❌ فایل پیدا نشد یا بهش دسترسی نداری.")
+        await reply_to_request(message, "❌ فایل پیدا نشد یا بهش دسترسی نداری.")
         return
     text = file_detail_text(file)
     if file.public_hash:
         public_url = f"{settings.web_base_url}/api/stream/s/{file.public_hash}"
         text += f"\n🔗 لینک عمومی:\n{public_url}\n"
     detail_back_targets[message.from_user.id] = "files:0"
-    await message.reply(text, reply_markup=file_detail_keyboard(file))
+    await reply_to_request(message, text, reply_markup=file_detail_keyboard(file))
 
 
 @tg_client.on_message(filters.command("deletefolder") & filters.private)
@@ -4658,7 +4664,7 @@ async def file_command(client, message: Message):
 async def deletefolder_command(client, message: Message):
     """Delete a folder by name."""
     if len(message.command) < 2:
-        await message.reply("روش استفاده: /deletefolder نام‌کشو")
+        await reply_to_request(message, "روش استفاده: /deletefolder نام‌کشو")
         return
     
     folder_name = " ".join(message.command[1:])
@@ -4671,7 +4677,7 @@ async def deletefolder_command(client, message: Message):
         user = user_result.scalar_one_or_none()
         
         if not user:
-            await message.reply("اول /start رو بفرست.")
+            await reply_to_request(message, "اول /start رو بفرست.")
             return
         
         # Find folder
@@ -4684,15 +4690,15 @@ async def deletefolder_command(client, message: Message):
         matches = result.scalars().all()
         folder = matches[0] if len(matches) == 1 else None
     if len(matches) > 1:
-        await message.reply("چند کشو با این اسم داری؛ برای انتخاب دقیق، /folders رو باز کن.")
+        await reply_to_request(message, "چند کشو با این اسم داری؛ برای انتخاب دقیق، /folders رو باز کن.")
         return
     
     if not folder:
-        await message.reply(f"❌ کشوی «{folder_name}» پیدا نشد.")
+        await reply_to_request(message, f"❌ کشوی «{folder_name}» پیدا نشد.")
         return
     
     # Show confirmation
-    await message.reply(
+    await reply_to_request(message,
         f"🗑 حذف کشوی «{folder_name}»؟\n\n"
         "محتوا بمونه یا همه‌چیز پاک بشه؟",
         reply_markup=InlineKeyboardMarkup([

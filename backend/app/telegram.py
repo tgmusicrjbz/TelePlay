@@ -216,7 +216,14 @@ async def forward_to_storage_channel(message: Message, channel_id: int | None = 
     return await message.copy(storage_channel(channel_id))
 
 
-async def copy_message_balanced(*, chat_id: int, from_chat_id: int, message_id: int, caption: str | None = None):
+async def copy_message_balanced(
+    *,
+    chat_id: int,
+    from_chat_id: int,
+    message_id: int,
+    caption: str | None = None,
+    reply_to_message_id: int | None = None,
+):
     """Use helper bots for outbound copies when they can access both chats.
 
     A helper may not have been started by a private user or added to a channel;
@@ -234,6 +241,8 @@ async def copy_message_balanced(*, chat_id: int, from_chat_id: int, message_id: 
             kwargs = dict(chat_id=chat_id, from_chat_id=from_chat_id, message_id=message_id)
             if caption is not None:
                 kwargs["caption"] = caption
+            if reply_to_message_id is not None:
+                kwargs["reply_to_message_id"] = reply_to_message_id
             return await client.copy_message(**kwargs)
         except Exception as error:
             last_error = error

@@ -47,6 +47,7 @@ class LinkImportDurabilityTests(unittest.IsolatedAsyncioTestCase):
             payload={"id": "recover-link", "url": status["url"], "user_id": user_id,
                      "telegram_id": 112233, "folder_id": None, "quality": "480",
                      "notify": True, "notification_chat_id": -100445566,
+                     "request_message_id": 7788,
                      "visible_to_user": False, "default_folder": False},
             status=status,
         )
@@ -60,6 +61,7 @@ class LinkImportDurabilityTests(unittest.IsolatedAsyncioTestCase):
         job = await service.queue.get()
         self.assertEqual((job.id, job.retry_count), ("recover-link", 1))
         self.assertEqual(job.notification_chat_id, -100445566)
+        self.assertEqual(job.request_message_id, 7788)
         self.assertFalse(job.visible_to_user)
         self.assertEqual(service.list_statuses(user_id), [])
         service.queue.task_done()

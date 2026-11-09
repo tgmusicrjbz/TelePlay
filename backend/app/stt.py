@@ -405,6 +405,7 @@ class STTJob:
     output_caption: str | None = None
     status_chat_id: int | None = None
     status_message_id: int | None = None
+    request_message_id: int | None = None
     id: str = ""
 
 
@@ -459,6 +460,7 @@ class STTQueue:
                 stt_mode=str(payload.get("stt_mode") or "verbatim"),
                 output_caption=payload.get("output_caption"), status_chat_id=payload.get("status_chat_id"),
                 status_message_id=payload.get("status_message_id"),
+                request_message_id=payload.get("request_message_id"),
             )
             status.update(state="queued", message="ادامه پس از راه‌اندازی دوباره", progress=0, output_mode=job.output_mode,
                           fingerprint=payload.get("fingerprint") or status.get("fingerprint"))
@@ -513,7 +515,8 @@ class STTQueue:
                      "delete_telegram_source": job.delete_telegram_source,
                      "text_model": job.text_model, "stt_mode": job.stt_mode,
                      "output_caption": job.output_caption, "status_chat_id": job.status_chat_id,
-                     "status_message_id": job.status_message_id, "fingerprint": fingerprint},
+                     "status_message_id": job.status_message_id,
+                     "request_message_id": job.request_message_id, "fingerprint": fingerprint},
             status=self.statuses[job.id],
         )
         self.durable_job_ids.add(job.id)
@@ -684,7 +687,12 @@ class STTQueue:
                     with tempfile.TemporaryDirectory(prefix="komod-stt-preview-") as directory:
                         path = Path(directory) / f"{sanitize_filename(job.title or 'متن')}.md"
                         path.write_text(markdown, encoding="utf-8")
-                        await telegram.tg_client.send_document(job.telegram_id, str(path), caption=(job.output_caption if job.output_caption is not None else job.title)[:1024])
+                        await telegram.tg_client.send_document(
+                            job.telegram_id,
+                            str(path),
+                            caption=(job.output_caption if job.output_caption is not None else job.title)[:1024],
+                            reply_to_message_id=job.request_message_id,
+                        )
                 return
             self.statuses[job.id].update(state="saving", message="ذخیره Markdown", progress=85)
             await self._persist_status(job.id)
@@ -693,7 +701,12 @@ class STTQueue:
             await self._persist_status(job.id)
             if job.telegram_id:
                 try:
-                    await telegram.tg_client.copy_message(job.telegram_id, stored.storage_channel_id or settings.telegram_storage_channel_id, stored.channel_message_id)
+                    await telegram.tg_client.copy_message(
+                        job.telegram_id,
+                        stored.storage_channel_id or settings.telegram_storage_channel_id,
+                        stored.channel_message_id,
+                        reply_to_message_id=job.request_message_id,
+                    )
                 except Exception:
                     logger.warning("STT output was saved but could not be sent to user %s", job.telegram_id, exc_info=True)
 
