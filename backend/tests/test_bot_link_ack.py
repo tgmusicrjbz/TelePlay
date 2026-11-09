@@ -12,6 +12,7 @@ os.environ.setdefault("TELEGRAM_STORAGE_CHANNEL_ID", "-1001234567890")
 os.environ.setdefault("JWT_SECRET", "test-secret")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from app import bot_link_feedback
 from app.bot_link_feedback import acknowledge_link_request, acknowledge_request, react_to_request
 
 
@@ -23,7 +24,7 @@ def test_link_ack_uses_eyes_then_falls_back_to_heart():
 
     assert client.set_reaction.await_count == 2
     assert client.set_reaction.await_args_list[0].args[2][0].emoji == "👀"
-    assert client.set_reaction.await_args_list[1].args[2][0].emoji == "❤️"
+    assert client.set_reaction.await_args_list[1].args[2][0].emoji == "❤"
 
 
 def test_link_ack_reaction_failure_is_non_blocking():
@@ -40,7 +41,7 @@ def test_related_reaction_falls_back_to_eyes():
 
     asyncio.run(acknowledge_request(client, message, "✍️"))
 
-    assert [call.args[2][0].emoji for call in client.set_reaction.await_args_list] == ["✍️", "👀"]
+    assert [call.args[2][0].emoji for call in client.set_reaction.await_args_list] == ["✍", "👀"]
 
 
 def test_reaction_decorator_does_not_delay_the_handler():
@@ -59,3 +60,30 @@ def test_reaction_decorator_does_not_delay_the_handler():
 
     assert asyncio.run(run()) == "done"
     assert client.set_reaction.await_args.args[2][0].emoji == "🤝"
+
+
+def test_bot_api_is_used_before_mtproto(monkeypatch):
+    calls = []
+
+    def fake_post(token, chat_id, message_id, emoji):
+        calls.append((token, chat_id, message_id, emoji))
+        return True, ""
+
+    monkeypatch.setattr(bot_link_feedback, "_post_bot_api_reaction", fake_post)
+    client = SimpleNamespace(bot_token="secret-token", set_reaction=AsyncMock())
+    message = SimpleNamespace(id=42, chat=SimpleNamespace(id=-1007))
+
+    asyncio.run(acknowledge_request(client, message, "✍️"))
+
+    assert calls == [("secret-token", -1007, 42, "✍")]
+    client.set_reaction.assert_not_awaited()
+
+
+def test_bot_api_failure_falls_back_to_mtproto(monkeypatch):
+    monkeypatch.setattr(bot_link_feedback, "_post_bot_api_reaction", lambda *_: (False, "reaction unavailable"))
+    client = SimpleNamespace(bot_token="secret-token", set_reaction=AsyncMock(return_value=object()))
+    message = SimpleNamespace(id=42, chat=SimpleNamespace(id=-1007))
+
+    asyncio.run(acknowledge_request(client, message, "👀"))
+
+    assert client.set_reaction.await_args.args[2][0].emoji == "👀"
