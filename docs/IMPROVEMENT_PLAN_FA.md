@@ -65,6 +65,7 @@
 بک‌اند پوشش تست گسترده دارد و فرانت‌اند اکنون تست واحد و کامپوننت را در CI اجرا می‌کند؛ پوشش E2E هنوز باقی مانده است.
 
 - [x] راه‌اندازی Vitest و Testing Library
+- [x] تست مستقل بازخورد فوری دریافت لینک و fallback ری‌اکشن تلگرام
 - [ ] راه‌اندازی Playwright برای جریان‌های اصلی
 - [x] افزودن تست سبک صف پخش، مرزهای Repeat و جابه‌جایی مورد جاری و اجرای آن در CI
 - [ ] تست ورود و تأیید دومرحله‌ای
@@ -82,7 +83,7 @@
 
 فایل‌های پرریسک فعلی شامل `bot.py` با حدود ۳۵۰۰ خط، Router فایل‌ها با حدود ۲۰۰۰ خط، `FileBrowser` با حدود ۱۷۰۰ خط، `api.ts` با حدود ۱۴۰۰ خط و `MediaPlayer` با بیش از ۱۱۰۰ خط هستند.
 
-- [ ] تفکیک Bot به Login، Upload، Search، STT و Link Import
+- [-] تفکیک Bot به Login، Upload، Search، STT و Link Import؛ بازخورد Link Import به ماژول مستقل منتقل شد
 - [ ] تفکیک Files Router به CRUD، Search، Share، AI، Import و Batch
 - [ ] تفکیک API فرانت‌اند بر اساس دامنه
 - [ ] تفکیک FileBrowser به Toolbar، List، Selection و Dialogها

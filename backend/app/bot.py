@@ -38,6 +38,7 @@ from .gemini_keys import decrypt_user_keys
 from .link_captions import render_link_caption
 from .group_tools import consume_file_link_quota, consume_group_quota, get_group_usage, get_group_usage_breakdown, get_or_create_group_settings, get_group_voice, set_group_voice, is_global_admin
 from .bot_messages import bot_message
+from .bot_link_feedback import acknowledge_link_request
 from .instagram_inbox import pair_sender_with_telegram
 
 settings = get_settings()
@@ -2602,6 +2603,13 @@ async def connect_current_chat(client, message: Message):
 @tg_client.on_message(filters.regex(r"https?://(?:www\.)?(?:youtube\.com|youtu\.be|instagram\.com|pinterest\.com|pin\.it)/"), group=-1)
 async def handle_import_link(client, message: Message):
     """Queue supported social links without blocking the bot conversation."""
+    matches = re.findall(
+        r"https?://(?:www\.)?(?:youtube\.com|youtu\.be|instagram\.com|pinterest\.com|pin\.it)/(?:(?!https?://|\s).)+",
+        message.text or "",
+        re.IGNORECASE,
+    )
+    if not matches:
+        return
     destination_id = None
     if message.chat.type != enums.ChatType.PRIVATE:
         if not await is_connected_group(message.chat.id):
@@ -2623,13 +2631,9 @@ async def handle_import_link(client, message: Message):
         await message.reply(await bot_message("link_service_unavailable"))
         message.stop_propagation()
         return
-    matches = re.findall(
-        r"https?://(?:www\.)?(?:youtube\.com|youtu\.be|instagram\.com|pinterest\.com|pin\.it)/(?:(?!https?://|\s).)+",
-        message.text or "",
-        re.IGNORECASE,
-    )
-    if not matches:
-        return
+    count = to_persian_digits(str(len(matches)))
+    asyncio.create_task(acknowledge_link_request(client, message))
+    status_message = await message.reply(await bot_message("link_queued", count=count, queue_note=""))
     if message.chat.type in {enums.ChatType.GROUP, enums.ChatType.SUPERGROUP} and message.from_user:
         async with async_session() as db:
             try:
@@ -2638,7 +2642,8 @@ async def handle_import_link(client, message: Message):
                     operation="link", amount=len(matches), title=message.chat.title,
                 )
             except ValueError as error:
-                await message.reply(f"⛔ {error}")
+                await safe_edit(status_message, f"⛔ {error}")
+                asyncio.create_task(delete_preview_later(client, status_message.chat.id, status_message.id, 30))
                 message.stop_propagation()
                 return
     try:
@@ -2658,14 +2663,14 @@ async def handle_import_link(client, message: Message):
                 send_to_telegram=delivery_mode != "library",
                 destination_ids=[destination_id] if destination_id is not None else [],
             )))
-        count = to_persian_digits(str(len(matches)))
         first_position = min(positions) if positions else 1
         queue_note = f" · شروع از نوبت {to_persian_digits(str(first_position))}" if first_position > 1 else ""
-        reply = await message.reply(await bot_message("link_queued", count=count, queue_note=queue_note))
-        asyncio.create_task(delete_preview_later(client, reply.chat.id, reply.id, 30))
+        await safe_edit(status_message, await bot_message("link_queued", count=count, queue_note=queue_note))
+        asyncio.create_task(delete_preview_later(client, status_message.chat.id, status_message.id, 30))
     except Exception as error:
         logger.exception("Could not enqueue link import: %s", error)
-        await message.reply(await bot_message("link_enqueue_failed"))
+        await safe_edit(status_message, await bot_message("link_enqueue_failed"))
+        asyncio.create_task(delete_preview_later(client, status_message.chat.id, status_message.id, 30))
     message.stop_propagation()
 
 
