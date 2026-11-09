@@ -129,6 +129,8 @@ def create_telegram_message_link_token(chat_id: int, message_id: int, file_name:
 
 _SHORT_LINK_STRUCT = struct.Struct(">BqqIB")
 _SHORT_LINK_SIGNATURE_BYTES = 12
+_RECIPIENT_DELIVERY_STRUCT = struct.Struct(">qqqI")
+_RECIPIENT_DELIVERY_SIGNATURE_BYTES = 8
 
 
 def create_short_link_token(kind: str, owner_or_chat_id: int, object_id: int, download: bool = False) -> str:
@@ -164,6 +166,33 @@ def verify_short_link_token(token: str) -> Optional[dict]:
             "exp": expires_at,
             "download": bool(download),
         }
+    except (ValueError, TypeError, struct.error):
+        return None
+
+
+def create_recipient_delivery_token(recipient_telegram_id: int, chat_id: int, message_id: int) -> str:
+    """Create a compact deep-link proof bound to exactly one Telegram recipient."""
+    body = _RECIPIENT_DELIVERY_STRUCT.pack(
+        int(recipient_telegram_id), int(chat_id), int(message_id), int(time.time()) + 10 * 60,
+    )
+    signature = hmac.new(settings.jwt_secret.encode(), body, hashlib.sha256).digest()[:_RECIPIENT_DELIVERY_SIGNATURE_BYTES]
+    return base64.urlsafe_b64encode(body + signature).decode().rstrip("=")
+
+
+def verify_recipient_delivery_token(token: str) -> Optional[dict]:
+    try:
+        raw = base64.urlsafe_b64decode(token + "=" * (-len(token) % 4))
+        expected_size = _RECIPIENT_DELIVERY_STRUCT.size + _RECIPIENT_DELIVERY_SIGNATURE_BYTES
+        if len(raw) != expected_size:
+            return None
+        body, received_signature = raw[:-_RECIPIENT_DELIVERY_SIGNATURE_BYTES], raw[-_RECIPIENT_DELIVERY_SIGNATURE_BYTES:]
+        expected_signature = hmac.new(settings.jwt_secret.encode(), body, hashlib.sha256).digest()[:_RECIPIENT_DELIVERY_SIGNATURE_BYTES]
+        if not hmac.compare_digest(received_signature, expected_signature):
+            return None
+        recipient_id, chat_id, message_id, expires_at = _RECIPIENT_DELIVERY_STRUCT.unpack(body)
+        if expires_at < int(time.time()):
+            return None
+        return {"recipient_id": recipient_id, "chat_id": chat_id, "message_id": message_id, "exp": expires_at}
     except (ValueError, TypeError, struct.error):
         return None
 

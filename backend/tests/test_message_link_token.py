@@ -12,8 +12,10 @@ os.environ.setdefault("TELEGRAM_STORAGE_CHANNEL_ID", "-1001234567890")
 os.environ.setdefault("JWT_SECRET", "message-link-test-secret")
 
 from app.auth import (
+    create_recipient_delivery_token,
     create_short_link_token,
     create_telegram_message_link_token,
+    verify_recipient_delivery_token,
     verify_short_link_token,
     verify_token_payload,
 )
@@ -58,6 +60,20 @@ def test_short_message_link_supports_negative_chat_ids_and_rejects_tampering():
 
     replacement = "A" if token[-1] != "A" else "B"
     assert verify_short_link_token(f"{token[:-1]}{replacement}") is None
+
+
+def test_recipient_delivery_token_is_compact_bound_and_rejects_tampering():
+    token = create_recipient_delivery_token(123456789, -1001234567890, 87)
+    payload = verify_recipient_delivery_token(token)
+
+    assert len(f"private_{token}") <= 64
+    assert payload is not None
+    assert payload["recipient_id"] == 123456789
+    assert payload["chat_id"] == -1001234567890
+    assert payload["message_id"] == 87
+
+    replacement = "A" if token[-1] != "A" else "B"
+    assert verify_recipient_delivery_token(f"{token[:-1]}{replacement}") is None
 
 
 def test_message_link_route_loads_the_original_telegram_message(monkeypatch):

@@ -1466,15 +1466,42 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
 
 
 class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
-    async def test_group_panel_retries_as_fresh_message_when_reply_is_rejected(self):
+    async def test_pending_group_delivery_copies_private_media_with_protection(self):
+        from app.telegram import build_clients
+        build_clients()
+        from app.bot import pending_private_deliveries, pending_private_delivery_upload
+
+        pending_private_deliveries[111] = (
+            "sendto", 222, "@recipient", "@sender", "گروه آزمایش",
+            datetime.now(timezone.utc) + timedelta(minutes=5),
+        )
+        message = SimpleNamespace(
+            id=77,
+            from_user=SimpleNamespace(id=111),
+            chat=SimpleNamespace(id=111),
+            audio=None, voice=None, video=None, video_note=None, animation=None, photo=None,
+            document=SimpleNamespace(file_name="private.pdf"),
+            reply=AsyncMock(return_value=SimpleNamespace()),
+            stop_propagation=Mock(),
+        )
+        with patch("app.bot.telegram.copy_message_balanced", new_callable=AsyncMock) as copy_message:
+            await pending_private_delivery_upload(SimpleNamespace(), message)
+
+        copy_message.assert_awaited_once_with(
+            chat_id=222,
+            from_chat_id=111,
+            message_id=77,
+            caption="🔐 ارسال خصوصی از @sender\n👥 گروه آزمایش",
+            protect_content=True,
+        )
+        message.stop_propagation.assert_called_once()
+
+    async def test_group_panel_is_sent_only_to_requesting_manager_private_chat(self):
         from app.telegram import build_clients
         build_clients()
         from app.bot import send_group_settings_panel
 
-        message = SimpleNamespace(
-            message_thread_id=77,
-            reply=AsyncMock(side_effect=RuntimeError("REPLY_MESSAGE_NOT_FOUND")),
-        )
+        message = SimpleNamespace(message_thread_id=77)
         client = SimpleNamespace(send_message=AsyncMock(return_value=SimpleNamespace(id=8)))
         view = {"text": "پنل گروه", "reply_markup": SimpleNamespace(), "parse_mode": None}
         with patch("app.bot.group_settings_view", new_callable=AsyncMock, return_value=view):
@@ -1482,11 +1509,10 @@ class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.id, 8)
         client.send_message.assert_awaited_once_with(
-            -10055,
+            111,
             text="پنل گروه",
             reply_markup=view["reply_markup"],
             parse_mode=None,
-            message_thread_id=77,
         )
 
     async def test_group_deep_link_opens_settings_without_a_manual_start_command(self):
@@ -1507,7 +1533,7 @@ class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
             "app.bot.group_settings_view", new_callable=AsyncMock, return_value={"text": "پنل گروه"}
         ):
             await start_command(SimpleNamespace(), message)
-        message.reply.assert_awaited_once_with(text="پنل گروه")
+        message.reply.assert_awaited_once_with(text="پنل گروه", quote=True)
 
     async def test_group_manager_check_is_cached_for_fast_settings_buttons(self):
         from app.telegram import build_clients
@@ -1609,7 +1635,10 @@ class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
         private_commands, group_commands = command_sets[-2:]
         self.assertIn("search", [command.command for command in private_commands])
         self.assertNotIn("search", [command.command for command in group_commands])
-        self.assertEqual({command.command for command in group_commands}, {"komod", "tts", "stt", "link", "group_usage", "group_settings", "connect_here"})
+        self.assertEqual(
+            {command.command for command in group_commands},
+            {"komod", "tts", "stt", "link", "sendto", "privatelink", "group_usage", "group_settings", "connect_here"},
+        )
         self.assertTrue(all(command.description for commands in command_sets for command in commands))
         client.set_bot_name.assert_awaited_once_with("🗂 کمد | درایو ابری تلگرام")
         client.set_bot_info_short_description.assert_awaited_once_with(
@@ -1659,6 +1688,7 @@ class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
         menu_labels = [button.text for row in main_menu_keyboard(111).inline_keyboard for button in row]
         self.assertIn("📦 همه‌ی فایل‌ها", menu_labels)
         self.assertIn("🗄️ کشوهای من", menu_labels)
+        self.assertIn("🎧 پلی‌لیست‌ها", menu_labels)
         self.assertIn("🔎 جست‌وجو", menu_labels)
         self.assertIn("✨ باز کردن کمد", menu_labels)
         self.assertIn("⚙️ تنظیمات", menu_labels)
@@ -1667,9 +1697,13 @@ class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload, "group_n10055")
         self.assertEqual(decode_group_start_payload(payload), -10055)
         group_labels = [button.text for row in group_menu_keyboard().inline_keyboard for button in row]
-        self.assertEqual(group_labels, ["📊 مصرف امروز", "⚙️ مدیریت گروه", "💡 راهنمای سریع ابزارها"])
+        self.assertEqual(
+            group_labels,
+            ["🎙 متن به صدا", "📝 صوت به متن", "🔗 دریافت لینک", "📩 ارسال خصوصی", "💡 راهنما", "⚙️ مدیریت خصوصی"],
+        )
         self.assertIn("/tts", group_tool_help("guide"))
         self.assertIn("/stt", group_tool_help("guide"))
+        self.assertIn("/sendto", group_tool_help("guide"))
         self.assertEqual(
             [button.text for row in help_keyboard(111).inline_keyboard for button in row],
             ["✨ ورود به نسخهٔ وب", "🚪 بازگشت به منوی اصلی"],

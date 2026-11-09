@@ -63,7 +63,7 @@ BOT_MESSAGE_DEFINITIONS = (
     BotMessageDefinition("group_access_check_failed", "خطای بررسی دسترسی گروه", "گروه‌ها", "بررسی دسترسی انجام نشد؛ ربات را مدیر این گفت‌وگو کن."),
     BotMessageDefinition("group_connect_private_first", "فعال نبودن کمد مدیر", "گروه‌ها", "اول در گفت‌وگوی خصوصی ربات، کمدت را فعال کن."),
     BotMessageDefinition("group_approval_pending", "درخواست تأیید گروه", "گروه‌ها", "🕓 درخواست اتصال این گروه برای مدیر کمد فرستاده شد. بعد از تأیید، ابزارها فعال می‌شوند."),
-    BotMessageDefinition("group_connected", "اتصال موفق گروه", "گروه‌ها", "✅ این گروه تأیید و به کمد متصل شد.\n\n`/tts` متن را به صدا تبدیل می‌کند، `/stt` از صدا متن می‌گیرد و منوی کمد مصرف و مدیریت گروه را نشان می‌دهد."),
+    BotMessageDefinition("group_connected", "اتصال موفق گروه", "گروه‌ها", "✅ این گروه تأیید و به کمد متصل شد.\n\n`/komod` ابزارها را باز می‌کند؛ تنظیمات و گزارش مدیریتی فقط در پیوی مدیر نمایش داده می‌شوند."),
 )
 
 BOT_MESSAGE_BY_KEY = {item.key: item for item in BOT_MESSAGE_DEFINITIONS}

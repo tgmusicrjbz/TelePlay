@@ -106,6 +106,8 @@ async def configure_main_client(c) -> None:
             BotCommand("tts", "تبدیل متن ریپلای‌شده به صدا"),
             BotCommand("stt", "تبدیل صوت یا ویدیوی ریپلای‌شده به متن"),
             BotCommand("link", "لینک فایل ریپلای‌شده"),
+            BotCommand("sendto", "ارسال خصوصی فایل برای یک عضو"),
+            BotCommand("privatelink", "ارسال خصوصی لینک برای یک عضو"),
             BotCommand("group_usage", "نمایش مصرف امروز گروه"),
             BotCommand("group_settings", "مدیریت ابزارها و سهمیه‌های گروه"),
             BotCommand("connect_here", "درخواست اتصال این گروه"),
@@ -223,6 +225,7 @@ async def copy_message_balanced(
     message_id: int,
     caption: str | None = None,
     reply_to_message_id: int | None = None,
+    protect_content: bool = False,
 ):
     """Use helper bots for outbound copies when they can access both chats.
 
@@ -243,6 +246,8 @@ async def copy_message_balanced(
                 kwargs["caption"] = caption
             if reply_to_message_id is not None:
                 kwargs["reply_to_message_id"] = reply_to_message_id
+            if protect_content:
+                kwargs["protect_content"] = True
             return await client.copy_message(**kwargs)
         except Exception as error:
             last_error = error

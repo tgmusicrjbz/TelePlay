@@ -129,8 +129,8 @@ async def update_group(chat_id: int, payload: GroupSettingsUpdate, _: User = Dep
                 "✅ اتصال این گروه توسط مدیر کمد تأیید شد. ابزارهای فعال از حالا قابل استفاده‌اند.",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("🎙️ متن به صدا", callback_data="grpmenu:tts"), InlineKeyboardButton("📝 صوت به متن", callback_data="grpmenu:stt")],
-                    [InlineKeyboardButton("🔗 دریافت لینک", callback_data="grpmenu:link"), InlineKeyboardButton("📊 مصرف امروز", callback_data="grpmenu:usage")],
-                    [InlineKeyboardButton("⚙️ تنظیمات خصوصی ادمین", callback_data="grpmenu:settings")],
+                    [InlineKeyboardButton("🔗 دریافت لینک", callback_data="grpmenu:link"), InlineKeyboardButton("📩 ارسال خصوصی", callback_data="grpmenu:private")],
+                    [InlineKeyboardButton("💡 راهنما", callback_data="grpmenu:guide"), InlineKeyboardButton("⚙️ مدیریت خصوصی", callback_data="grpmenu:settings")],
                 ]),
             )
         except Exception:
