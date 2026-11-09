@@ -365,6 +365,7 @@ input[dir="ltr"], textarea[dir="ltr"], select[dir="ltr"] {
 
 .modal-backdrop {
   background: rgb(0 0 0 / .64);
+  backdrop-filter: blur(5px) saturate(.85);
   animation: modal-fade-in .16s ease-out both;
 }
 
@@ -373,6 +374,15 @@ input[dir="ltr"], textarea[dir="ltr"], select[dir="ltr"] {
   background: var(--surface-strong);
   box-shadow: 0 24px 64px rgb(0 0 0 / .34), inset 0 1px 0 rgb(var(--app-white) / .045);
   animation: modal-rise-in .2s cubic-bezier(.2,.8,.2,1) both;
+}
+
+.modal-scroll-body {
+  scrollbar-gutter: stable;
+}
+
+.modal-footer {
+  background: linear-gradient(to bottom, rgb(var(--dark-900) / .88), rgb(var(--dark-900) / .98));
+  backdrop-filter: blur(14px);
 }
 
 .select-trigger {
@@ -393,6 +403,14 @@ input[dir="ltr"], textarea[dir="ltr"], select[dir="ltr"] {
   box-shadow: 0 14px 40px rgb(0 0 0 / .28), inset 0 1px 0 rgb(var(--app-white) / .045);
   transition: opacity .18s ease, transform .18s ease;
 }
+
+.toast-lifetime {
+  animation-name: toast-lifetime;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+@keyframes toast-lifetime { from { transform: scaleX(1); } to { transform: scaleX(0); } }
 
 @keyframes modal-fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes modal-rise-in { from { opacity: 0; transform: translateY(8px) scale(.985); } to { opacity: 1; transform: none; } }
@@ -418,6 +436,40 @@ select:focus-visible {
 button:disabled,
 [role="button"][aria-disabled="true"] {
   cursor: not-allowed;
+}
+
+button,
+a,
+[role="button"] {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.skip-link {
+  position: fixed;
+  inset-block-start: max(.5rem, env(safe-area-inset-top));
+  inset-inline-start: .75rem;
+  z-index: 500;
+  transform: translateY(-160%);
+  border: 1px solid rgb(var(--primary-400) / .45);
+  border-radius: .75rem;
+  background: rgb(var(--dark-900) / .98);
+  padding: .65rem .9rem;
+  color: rgb(var(--primary-100));
+  box-shadow: 0 12px 28px rgb(0 0 0 / .3);
+  transition: transform .16s ease;
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+@media (hover: none) and (pointer: coarse) {
+  button:not(:disabled):active,
+  a:active,
+  [role="button"]:not([aria-disabled="true"]):active {
+    transform: scale(.975);
+  }
 }
 
 @media (hover: none) {

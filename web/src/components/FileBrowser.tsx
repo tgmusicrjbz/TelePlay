@@ -1512,10 +1512,11 @@ export default function FileBrowser() {
 
     return (
         <div dir="rtl" className="flex h-screen bg-dark-950 text-white selection:bg-primary-500/30 overflow-hidden">
+            <a href="#main-content" className="skip-link">رفتن به محتوای اصلی</a>
             {hiddenOnly && createPortal(<div className="fixed inset-x-3 top-[calc(env(safe-area-inset-top)+.75rem)] z-[270] mx-auto flex max-w-xl items-center gap-3 rounded-2xl border border-amber-300/25 bg-dark-950/95 p-2.5 text-amber-100 shadow-2xl backdrop-blur-xl"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-400/10"><EyeOff className="h-4 w-4"/></span><div className="min-w-0 flex-1"><strong className="block text-xs">فقط موارد مخفی</strong><span className="block truncate text-[10px] text-amber-100/60">{filesLoading||foldersLoading||folderTreeLoading?'در حال دریافت…':filesError||foldersError||folderTreeError?'نمایش موارد مخفی با خطا روبه‌رو شد':`${(shownFolderCount+shownFileCount).toLocaleString('fa-IR')} مورد`}</span></div><button type="button" onClick={closeVaultItems} className="flex min-h-9 shrink-0 items-center gap-1 rounded-xl bg-white/[.08] px-3 text-xs font-semibold hover:bg-white/[.13]" aria-label="خروج از نمایش موارد مخفی"><ChevronRight className="h-4 w-4"/>بازگشت</button></div>, document.body)}
             <Sidebar />
 
-            <main className="relative flex min-w-0 flex-1 flex-col bg-gradient-to-br from-dark-950 to-dark-900 md:mr-24">
+            <main id="main-content" tabIndex={-1} className="relative flex min-w-0 flex-1 flex-col bg-gradient-to-br from-dark-950 to-dark-900 md:mr-24">
                 {/* Header */}
                 <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-white/[0.07] bg-dark-900/75 px-4 shadow-lg shadow-black/[.06] backdrop-blur-2xl sm:px-6">
                     <div className="flex items-center gap-3 md:gap-6 flex-1 min-w-0">
