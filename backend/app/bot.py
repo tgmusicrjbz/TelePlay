@@ -38,7 +38,7 @@ from .gemini_keys import decrypt_user_keys
 from .link_captions import render_link_caption
 from .group_tools import consume_file_link_quota, consume_group_quota, get_group_usage, get_group_usage_breakdown, get_or_create_group_settings, get_group_voice, set_group_voice, is_global_admin
 from .bot_messages import bot_message
-from .bot_link_feedback import acknowledge_link_request
+from .bot_link_feedback import acknowledge_link_request, acknowledge_request, react_to_request
 from .instagram_inbox import pair_sender_with_telegram
 
 settings = get_settings()
@@ -1323,6 +1323,7 @@ async def check_auth(client, message: Message):
 # ============== Command Handlers ==============
 
 @tg_client.on_message(filters.command("start") & filters.private)
+@react_to_request("🤝")
 async def start_command(client, message: Message):
     """Welcome message and bot instructions. Also handles deep-linked login codes."""
     payload = message.command[1].strip() if len(message.command) > 1 else ""
@@ -1383,6 +1384,7 @@ async def start_command(client, message: Message):
 
 
 @tg_client.on_message(filters.command("help") & filters.private)
+@react_to_request("👀")
 async def help_command(client, message: Message):
     """Show help message."""
     await load_user_ui_state(message.from_user.id)
@@ -1391,6 +1393,7 @@ async def help_command(client, message: Message):
 
 
 @tg_client.on_message(filters.command("tts") & filters.private)
+@react_to_request("👀")
 async def tts_command(client, message: Message):
     """Create a voice from command text or a replied-to text message."""
     user = await get_or_create_user(
@@ -1429,6 +1432,7 @@ async def tts_command(client, message: Message):
 
 
 @tg_client.on_message(filters.command("stt") & filters.private)
+@react_to_request("✍️")
 async def stt_command(client, message: Message):
     """Transcribe a replied audio/video, whether or not it is already stored."""
     user = await get_or_create_user(
@@ -1530,6 +1534,7 @@ async def stt_command(client, message: Message):
 
 
 @tg_client.on_message(filters.command(["link", "playlink", "downloadlink"]) & (filters.private | filters.group))
+@react_to_request("👀")
 async def replied_file_link_command(client, message: Message):
     """Return signed 24-hour play/download links for a replied stored file."""
     if not message.from_user:
@@ -1624,6 +1629,7 @@ async def replied_file_link_command(client, message: Message):
 
 
 @tg_client.on_message(filters.command("tts") & filters.group)
+@react_to_request("👀")
 async def group_tts_command(client, message: Message, source_message: Message | None = None):
     """Create speech in a group without saving the generated file to a cabinet."""
     if not message.from_user:
@@ -1680,6 +1686,7 @@ async def group_tts_command(client, message: Message, source_message: Message | 
 
 
 @tg_client.on_message(filters.command("stt") & filters.group)
+@react_to_request("✍️")
 async def group_stt_command(client, message: Message, source_message: Message | None = None):
     """Transcribe replied group media and return a temporary Markdown file."""
     if not message.from_user:
@@ -1762,6 +1769,7 @@ async def group_stt_command(client, message: Message, source_message: Message | 
 
 
 @tg_client.on_message(filters.command("group_settings") & filters.group)
+@react_to_request("👨‍💻")
 async def group_settings_command(client, message: Message):
     if not message.from_user:
         return
@@ -1855,18 +1863,21 @@ async def handle_pending_group_action(client, message: Message):
 
 
 @tg_client.on_message(filters.command(["komod", "group_menu"]) & filters.group)
+@react_to_request("👀")
 async def group_menu_command(client, message: Message):
     if await require_connected_group(message):
         await message.reply(group_menu_text(), reply_markup=group_menu_keyboard())
 
 
 @tg_client.on_message(filters.command("group_usage") & filters.group)
+@react_to_request("👀")
 async def group_usage_command(client, message: Message):
     if message.from_user and await require_connected_group(message):
         await message.reply(**(await group_usage_view(message.chat.id)))
 
 
 @tg_client.on_message(filters.command("group_limit") & filters.group)
+@react_to_request("👨‍💻")
 async def group_limit_command(client, message: Message):
     if not await require_connected_group(message):
         return
@@ -1894,6 +1905,7 @@ async def handle_pending_stt_media(client, message: Message):
     output_mode = pending_stt_modes.pop(message.from_user.id, None)
     if output_mode is None:
         return
+    asyncio.create_task(acknowledge_request(client, message, "✍️"))
     claim = (message.chat.id, message.id)
     claimed_stt_messages.add(claim)
     async def process() -> None:
@@ -1992,6 +2004,7 @@ def tts_bot_settings_view(preferences: dict) -> dict:
 
 
 @tg_client.on_message(filters.command("myfiles") & filters.private)
+@react_to_request("👀")
 async def myfiles_command(client, message: Message):
     """List user's recent files."""
     panel = await message.reply("در حال آماده‌سازی فایل‌ها…")
@@ -1999,6 +2012,7 @@ async def myfiles_command(client, message: Message):
 
 
 @tg_client.on_message(filters.command("folders") & filters.private)
+@react_to_request("👀")
 async def folders_command(client, message: Message):
     """Show folder structure."""
     panel = await message.reply("در حال آماده‌سازی کمد…")
@@ -2006,6 +2020,7 @@ async def folders_command(client, message: Message):
 
 
 @tg_client.on_message(filters.command("playlists") & filters.private)
+@react_to_request("👀")
 async def playlists_command(client, message: Message):
     """Browse and manage audio/video playlists."""
     panel = await message.reply("در حال آماده‌سازی پلی‌لیست‌ها…")
@@ -2013,6 +2028,7 @@ async def playlists_command(client, message: Message):
 
 
 @tg_client.on_message(filters.command("newfolder") & filters.private)
+@react_to_request("✍️")
 async def newfolder_command(client, message: Message):
     """Create a new folder."""
     if len(message.command) < 2:
@@ -2062,6 +2078,7 @@ async def newfolder_command(client, message: Message):
 
 
 @tg_client.on_message(filters.command("search") & filters.private)
+@react_to_request("👀")
 async def search_command(client, message: Message):
     """Search file names and descriptions."""
     query = " ".join(message.command[1:]).strip()
@@ -2078,6 +2095,7 @@ async def search_command(client, message: Message):
 
 
 @tg_client.on_message(filters.command("web") & filters.private)
+@react_to_request("🤝")
 async def web_command(client, message: Message):
     """Get authenticated web interface link."""
     user = await get_or_create_user(
@@ -2102,6 +2120,7 @@ async def web_command(client, message: Message):
 
 
 @tg_client.on_message(filters.command("login") & filters.private)
+@react_to_request("🤝")
 async def login_command(client, message: Message):
     """
     Handle login command.
@@ -2172,6 +2191,7 @@ async def login_command(client, message: Message):
 
 
 @tg_client.on_message(filters.command("instagram") & filters.private)
+@react_to_request("👀")
 async def instagram_pair_command(client, message: Message):
     """Link an Instagram scoped sender id to this Telegram account."""
     await get_or_create_user(
@@ -2197,6 +2217,7 @@ async def instagram_pair_command(client, message: Message):
     await message.reply(replies[status])
 
 @tg_client.on_message(filters.command("logout_all") & filters.private)
+@react_to_request("🫡")
 async def logout_all_command(client, message: Message):
     """
     Invalidate all active sessions for the current user.
@@ -2435,6 +2456,7 @@ async def handle_file(client, message: Message):
     chat_id = getattr(getattr(message, "chat", None), "id", None) or message.from_user.id
     if (chat_id, message.id) in claimed_stt_messages:
         return
+    asyncio.create_task(acknowledge_request(client, message, "👀"))
     user_id = message.from_user.id
     queue = upload_message_queues.setdefault(user_id, asyncio.Queue())
     position = queue.qsize() + (1 if user_id in upload_workers else 0)
@@ -2558,6 +2580,7 @@ async def handle_personal_channel_post(client, message: Message):
 
 
 @tg_client.on_message(filters.command("connect_here") & ~filters.private)
+@react_to_request("🤝")
 async def connect_current_chat(client, message: Message):
     """Connect a group/channel as a reusable Komod output destination."""
     if not message.from_user:
@@ -2683,6 +2706,7 @@ async def handle_text_note(client, message: Message):
     content = telegram_text_with_links(message.text)
     if not plain_content.strip():
         return
+    asyncio.create_task(acknowledge_request(client, message, "✍️"))
     user = await get_or_create_user(
         message.from_user.id, message.from_user.username,
         message.from_user.first_name, message.from_user.last_name,
@@ -4588,6 +4612,7 @@ async def handle_callback(client, callback: CallbackQuery):
 # ============== File Action Command ==============
 
 @tg_client.on_message(filters.command("file") & filters.private)
+@react_to_request("👀")
 async def file_command(client, message: Message):
     """Manage a specific file by ID."""
     if len(message.command) < 2:
@@ -4629,6 +4654,7 @@ async def file_command(client, message: Message):
 
 
 @tg_client.on_message(filters.command("deletefolder") & filters.private)
+@react_to_request("👀")
 async def deletefolder_command(client, message: Message):
     """Delete a folder by name."""
     if len(message.command) < 2:

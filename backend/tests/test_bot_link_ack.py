@@ -12,7 +12,7 @@ os.environ.setdefault("TELEGRAM_STORAGE_CHANNEL_ID", "-1001234567890")
 os.environ.setdefault("JWT_SECRET", "test-secret")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.bot_link_feedback import acknowledge_link_request
+from app.bot_link_feedback import acknowledge_link_request, acknowledge_request, react_to_request
 
 
 def test_link_ack_uses_eyes_then_falls_back_to_heart():
@@ -32,3 +32,30 @@ def test_link_ack_reaction_failure_is_non_blocking():
 
     assert asyncio.run(acknowledge_link_request(client, message)) is None
     assert client.set_reaction.await_count == 2
+
+
+def test_related_reaction_falls_back_to_eyes():
+    client = SimpleNamespace(set_reaction=AsyncMock(side_effect=[RuntimeError("not allowed"), object()]))
+    message = SimpleNamespace(id=42, chat=SimpleNamespace(id=-1007))
+
+    asyncio.run(acknowledge_request(client, message, "✍️"))
+
+    assert [call.args[2][0].emoji for call in client.set_reaction.await_args_list] == ["✍️", "👀"]
+
+
+def test_reaction_decorator_does_not_delay_the_handler():
+    client = SimpleNamespace(set_reaction=AsyncMock(return_value=object()))
+    message = SimpleNamespace(id=42, chat=SimpleNamespace(id=-1007))
+
+    @react_to_request("🤝")
+    async def handler(_client, _message):
+        await asyncio.sleep(0)
+        return "done"
+
+    async def run():
+        result = await handler(client, message)
+        await asyncio.sleep(0)
+        return result
+
+    assert asyncio.run(run()) == "done"
+    assert client.set_reaction.await_args.args[2][0].emoji == "🤝"
