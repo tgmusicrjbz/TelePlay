@@ -10,6 +10,7 @@ import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalList
 import { CSS } from '@dnd-kit/utilities';
 import { getOfflineMedia } from '../lib/offline';
 import { useShallow } from 'zustand/react/shallow';
+import { withoutFileExtension } from '../lib/fileNames';
 
 const PLAYBACK_SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4] as const;
 const playbackSpeedLabel = (speed: number) => `${speed === 1 ? '1.0' : speed}x`;
@@ -713,7 +714,8 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
         } catch { sessionStorage.removeItem('komod-pack-preview-origin'); }
         setMinimized(false);
     };
-    const cleanFileName = (extendedFile?.file_name || file.file_name).replace(/^[a-f\d]{24,}[-_. ]+/i, '').trim() || file.file_name;
+    const normalizedFileName = (extendedFile?.file_name || file.file_name).replace(/^[a-f\d]{24,}[-_. ]+/i, '').trim() || file.file_name;
+    const cleanFileName = withoutFileExtension(normalizedFileName);
     const queuePosition = hasQueue && queueIndex >= 0 ? queueIndex + 1 : 1;
     const queueLength = hasQueue ? playQueue.length : 1;
     const token = localStorage.getItem('access_token');
@@ -737,7 +739,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
     useEffect(() => {
         if (!('mediaSession' in navigator)) return;
         if (restoredPausedSession.current && !isPlaying) return;
-        const notificationTitle = cleanFileName.replace(/\.(mp3|m4a|aac|ogg|opus|wav|flac|mp4|mkv|webm|mov)$/i, '').trim() || cleanFileName;
+        const notificationTitle = cleanFileName;
         const descriptionLine = (file.description || '').split(/\r?\n/).map(line => line.trim()).find(line => line && !/^https?:\/\//i.test(line))?.replace(/^[📺📷🎧🎬📝]\s*/u, '');
         const normalizedDescription = descriptionLine?.replace(/\.(mp3|m4a|aac|ogg|opus|wav|flac|mp4|mkv|webm|mov)$/i, '').trim();
         const usefulDescription = normalizedDescription && normalizedDescription !== notificationTitle ? normalizedDescription.slice(0, 72) : 'کمد';
