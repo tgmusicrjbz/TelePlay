@@ -1,7 +1,6 @@
 """
 Shared business logic and database queries.
 """
-import json
 import re
 from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +8,7 @@ from sqlalchemy import select, desc, exists, and_, or_
 from sqlalchemy.orm import selectinload
 
 from .models import File, WatchProgress, Folder, Playlist
+from .json_fields import load_json_array
 
 def telegram_text_with_links(value) -> str:
     """Return Telegram text as Markdown so hidden text links survive previews."""
@@ -65,10 +65,7 @@ def sanitize_filename(name: str) -> str:
 
 def add_urls_to_file(file: File) -> dict:
     """Add stream and thumbnail URLs to file response."""
-    try:
-        tags = [str(item) for item in json.loads(file.tags_json or "[]") if str(item).strip()]
-    except (TypeError, ValueError, json.JSONDecodeError):
-        tags = []
+    tags = [str(item) for item in load_json_array(file.tags_json, max_items=100) if str(item).strip()]
     data = {
         "id": file.id,
         "user_id": file.user_id,

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -99,11 +98,8 @@ telegram_monitor_pool = TelegramMonitorClientPool()
 
 
 def _json(raw: str) -> dict:
-    try:
-        value = json.loads(raw or "{}")
-        return value if isinstance(value, dict) else {}
-    except (TypeError, ValueError):
-        return {}
+    from .json_fields import load_json_object
+    return load_json_object(raw)
 
 
 def _extract_entries(source_url: str) -> list[dict]:

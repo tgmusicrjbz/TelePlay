@@ -1,0 +1,13 @@
+.env
+.env.*
+.venv
+__pycache__
+**/__pycache__
+*.py[cod]
+.pytest_cache
+tests
+app/static
+session
+*.sqlite
+*.sqlite3
+*.db

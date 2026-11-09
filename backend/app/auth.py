@@ -5,7 +5,6 @@ from datetime import datetime, timedelta
 import base64
 import hashlib
 import hmac
-import json
 import secrets
 import struct
 import time
@@ -19,6 +18,7 @@ from sqlalchemy import bindparam, select, text
 
 from .config import get_settings
 from .database import get_db
+from .json_fields import load_json_object
 from .models import AuthSession, File, Folder, RoomMember, User, WatchRoom, WorkspaceGrant
 from .schemas import TokenPayload
 
@@ -368,13 +368,12 @@ async def get_current_user(
                 owner = await db.get(User, workspace_user_id)
                 if owner is None or not owner.is_active:
                     raise HTTPException(status_code=404, detail="Workspace is unavailable")
-                try:
-                    raw_scope = json.loads(grant.scope_json or "{}")
-                except (TypeError, ValueError, json.JSONDecodeError):
-                    raw_scope = {}
+                raw_scope = load_json_object(grant.scope_json)
+                raw_folder_ids = raw_scope.get("folder_ids") if isinstance(raw_scope.get("folder_ids"), list) else []
+                raw_file_ids = raw_scope.get("file_ids") if isinstance(raw_scope.get("file_ids"), list) else []
                 scope = {
-                    "folder_ids": [int(value) for value in raw_scope.get("folder_ids", []) if str(value).isdigit()],
-                    "file_ids": [int(value) for value in raw_scope.get("file_ids", []) if str(value).isdigit()],
+                    "folder_ids": [int(value) for value in raw_folder_ids[:5000] if str(value).isdigit()],
+                    "file_ids": [int(value) for value in raw_file_ids[:100000] if str(value).isdigit()],
                 }
                 request.state.workspace_scope = scope
                 if scope["folder_ids"] or scope["file_ids"]:

@@ -1025,6 +1025,20 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual([item.id for item in restored.files], [second.id, first.id])
             self.assertEqual((restored.current_index, restored.repeat_mode, restored.position), (1, "all", 42))
 
+    async def test_corrupted_persisted_player_and_offline_json_fall_back_safely(self):
+        async with async_session() as db:
+            user = await db.get(User, self.user_id)
+            user.player_state_json = '{"file_ids":"invalid","current_index":"bad","position":{},"updated_at":[]}'
+            user.offline_manifest_json = '[]'
+            await db.commit()
+
+            player = await get_player_state(db, user)
+            offline = await get_offline_manifest(db, user)
+
+            self.assertEqual(player.files, [])
+            self.assertEqual((player.current_index, player.position, player.updated_at), (-1, 0, None))
+            self.assertEqual((offline.file_ids, offline.updated_at), ([], None))
+
     async def test_public_share_security_settings_are_persisted_and_unlockable(self):
         async with async_session() as db:
             item = self.make_file(self.user_id, None, 919); item.file_type = "audio"

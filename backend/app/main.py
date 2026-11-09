@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from sqlalchemy import text
 
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, RedirectResponse, JSONResponse
@@ -269,6 +270,30 @@ app.include_router(media_studio_router, prefix="/api")
 async def health():
     """Health check for container orchestration."""
     return {"status": "healthy"}
+
+
+@app.get("/ready")
+async def readiness():
+    """Report readiness only when the core database dependency accepts queries."""
+    started = time.perf_counter()
+    try:
+        async with engine.connect() as connection:
+            await connection.execute(text("SELECT 1"))
+    except Exception:
+        logger.warning("Readiness database probe failed", exc_info=True)
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not_ready", "database": "unavailable"},
+            headers={"Cache-Control": "no-store"},
+        )
+    return JSONResponse(
+        content={
+            "status": "ready",
+            "database": "ok",
+            "latency_ms": round((time.perf_counter() - started) * 1000, 2),
+        },
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.post("/share-target")

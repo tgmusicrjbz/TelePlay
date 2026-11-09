@@ -65,6 +65,12 @@ services:
       WEB_BASE_URL: ${WEB_BASE_URL:-http://localhost}
     ports:
       - "${BACKEND_PORT:-8000}:8000"
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3)" ]
+      interval: 15s
+      timeout: 5s
+      start_period: 45s
+      retries: 3
     volumes:
       # Persist Telegram session files only (do not mount over /app — that hides rebuilt code)
       - telegram_session:/app/session
@@ -78,7 +84,8 @@ services:
     build: ./web
     restart: unless-stopped
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     ports:
       - "${WEB_PORT:-80}:80"
     networks:

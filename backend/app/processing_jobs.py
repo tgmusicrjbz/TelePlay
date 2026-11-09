@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy import delete, select
 
 from .database import async_session
+from .json_fields import load_json_object
 from .models import ProcessingJob
 
 logger = logging.getLogger(__name__)
@@ -16,11 +17,7 @@ TERMINAL_STATES = {"done", "error", "cancelled"}
 
 
 def _parse_json(value: str) -> dict[str, Any]:
-    try:
-        parsed = json.loads(value or "{}")
-        return parsed if isinstance(parsed, dict) else {}
-    except (TypeError, ValueError):
-        return {}
+    return load_json_object(value)
 
 
 def _parse_time(value: Any) -> datetime | None:

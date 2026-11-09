@@ -18,6 +18,7 @@ from sqlalchemy.orm import selectinload
 from ..auth import create_vault_token, get_current_user, require_vault_access
 from ..config import get_settings
 from ..database import get_db
+from ..json_fields import load_json_array, load_json_object
 from ..models import AuthSession, File, Folder, Pack, PackItem, Playlist, PlaylistItem, ProcessingJob, SecurityEvent, SourceMonitor, TTSUsage, User, WorkspaceGrant
 from ..schemas import AccountPreferences, AccountPreferencesUpdate, AdminHealthResponse, AdminStatsResponse, AdminUserCreate, AdminUserResponse, AdminUserUpdate, SavedFilter, SavedFiltersUpdate, ServiceHealthItem, StorageChannelItem, StorageChannelResponse, StorageChannelUpdate, StuckJobResponse, TagBatchDelete, TagDefinitionResponse, TagSettingsResponse, TagSettingsUpdate, VaultPasswordRequest, VaultStatus, VaultTokenResponse, WorkspaceGrantCreate, WorkspaceResponse
 from .. import telegram
@@ -378,13 +379,12 @@ def user_name(user: User) -> str:
 
 
 def grant_scope(grant: WorkspaceGrant) -> dict[str, list[int]]:
-    try:
-        raw = json.loads(grant.scope_json or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError):
-        raw = {}
+    raw = load_json_object(grant.scope_json)
+    raw_folder_ids = raw.get("folder_ids") if isinstance(raw.get("folder_ids"), list) else []
+    raw_file_ids = raw.get("file_ids") if isinstance(raw.get("file_ids"), list) else []
     return {
-        "folder_ids": [int(value) for value in raw.get("folder_ids", []) if str(value).isdigit()],
-        "file_ids": [int(value) for value in raw.get("file_ids", []) if str(value).isdigit()],
+        "folder_ids": [int(value) for value in raw_folder_ids[:5000] if str(value).isdigit()],
+        "file_ids": [int(value) for value in raw_file_ids[:100000] if str(value).isdigit()],
     }
 
 
@@ -644,10 +644,7 @@ def require_admin(current_user: User = Depends(get_current_user)) -> User:
 
 
 def _storage_channel_ids(user: User) -> list[int]:
-    try:
-        values = json.loads(user.storage_channels_json or "[]")
-    except (TypeError, ValueError):
-        values = []
+    values = load_json_array(user.storage_channels_json, max_items=100)
     channel_ids: list[int] = []
     for value in values:
         try:

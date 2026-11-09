@@ -245,11 +245,8 @@ def build_interaction_content(text: str, base_style: str) -> list[dict]:
 
 
 def load_tts_settings(user: User) -> dict:
-    try:
-        payload = json.loads(user.tts_settings_json or "{}")
-    except (TypeError, ValueError):
-        payload = {}
-    return normalize_tts_settings(payload if isinstance(payload, dict) else {})
+    from .json_fields import load_json_object
+    return normalize_tts_settings(load_json_object(user.tts_settings_json))
 
 
 def split_long_text(text: str, max_chars: int = 3600) -> list[str]:

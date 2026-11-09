@@ -26,6 +26,7 @@ from slowapi.util import get_remote_address
 from urllib.parse import urlparse
 
 from ..database import async_session, get_db
+from ..json_fields import bounded_int, load_json_object
 from ..models import File, User, WatchProgress, Folder, Playlist, Pack, PackItem, TelegramDestination
 from ..schemas import ActivityResponse, BatchFileUpdate, FileDescriptionUpdate, FileResponse, FileListResponse, FileUpdate, PlayerStateResponse, PlayerStateUpdate, PublicShareCreate, WatchProgressUpdate
 from ..auth import get_current_user, has_vault_access, require_scoped_folder, require_vault_access, workspace_scope
@@ -912,11 +913,9 @@ async def get_offline_manifest(
     current_user: User = Depends(get_current_user),
 ):
     """Return the media the user selected for optional cross-device offline sync."""
-    try:
-        state = json.loads(current_user.offline_manifest_json or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError):
-        state = {}
-    ids = list(dict.fromkeys(int(value) for value in state.get("file_ids", [])[:1000] if str(value).isdigit()))
+    state = load_json_object(current_user.offline_manifest_json)
+    raw_ids = state.get("file_ids") if isinstance(state.get("file_ids"), list) else []
+    ids = list(dict.fromkeys(int(value) for value in raw_ids[:1000] if str(value).isdigit()))
     files = (await db.execute(select(File).where(
         File.user_id == current_user.id,
         File.id.in_(ids),
@@ -927,7 +926,7 @@ async def get_offline_manifest(
     return OfflineManifestResponse(
         file_ids=[item.id for item in ordered],
         files=[FileResponse(**add_urls_to_file(item)) for item in ordered],
-        updated_at=state.get("updated_at"),
+        updated_at=state.get("updated_at") if isinstance(state.get("updated_at"), (str, datetime)) else None,
     )
 
 
@@ -961,24 +960,22 @@ async def get_player_state(
     current_user: User = Depends(get_current_user),
 ):
     """Restore the latest queue and position on another signed-in device."""
-    try:
-        state = json.loads(current_user.player_state_json or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError):
-        state = {}
-    ids = [int(value) for value in state.get("file_ids", [])[:250] if str(value).isdigit()]
+    state = load_json_object(current_user.player_state_json)
+    raw_ids = state.get("file_ids") if isinstance(state.get("file_ids"), list) else []
+    ids = [int(value) for value in raw_ids[:250] if str(value).isdigit()]
     files = (await db.execute(select(File).where(
         File.user_id == current_user.id, File.id.in_(ids),
         File.file_type.in_(("audio", "video")), File.is_hidden.is_(False),
     ).options(selectinload(File.watch_progress)))).scalars().all() if ids else []
     by_id = {item.id: item for item in files}
     ordered = [by_id[file_id] for file_id in ids if file_id in by_id]
-    index = min(max(int(state.get("current_index", -1)), -1), len(ordered) - 1)
+    index = bounded_int(state.get("current_index"), -1, minimum=-1, maximum=len(ordered) - 1)
     return PlayerStateResponse(
         files=[FileResponse(**add_urls_to_file(item)) for item in ordered],
         current_index=index,
         repeat_mode=state.get("repeat_mode") if state.get("repeat_mode") in {"off", "all", "one"} else "off",
-        position=max(0, int(state.get("position", 0) or 0)),
-        updated_at=state.get("updated_at"),
+        position=bounded_int(state.get("position"), 0, minimum=0, maximum=31_536_000),
+        updated_at=state.get("updated_at") if isinstance(state.get("updated_at"), (str, datetime)) else None,
     )
 
 
