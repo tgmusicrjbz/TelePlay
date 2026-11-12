@@ -117,6 +117,16 @@ if (!navigation?.ok || !(await navigation.text()).includes('کمد | درایو 
     throw new Error('Offline navigation did not return the installed application shell.');
 }
 
+let compactLinkIntercepted = false;
+listeners.get('fetch')?.({
+    request: { method: 'GET', mode: 'navigate', destination: 'document', url: `${origin}/l/example-token` },
+    respondWith() { compactLinkIntercepted = true; },
+    waitUntil() {},
+});
+if (compactLinkIntercepted) {
+    throw new Error('Compact media links are being replaced by the cached application shell.');
+}
+
 let bootResponse;
 listeners.get('fetch')?.({
     request: { method: 'GET', mode: 'cors', destination: 'script', url: `${origin}/boot.js` },

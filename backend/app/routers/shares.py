@@ -175,8 +175,7 @@ async def _telegram_message_descriptor(chat_id: int, message_id: int):
     return message, descriptor, public_kind
 
 
-@short_router.get("/l/{token}")
-async def stream_short_link(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+async def _stream_short_link(token: str, request: Request, db: AsyncSession):
     payload = verify_short_link_token(token)
     if not payload:
         raise HTTPException(401, "این پیوند کوتاه منقضی شده یا معتبر نیست.")
@@ -189,6 +188,18 @@ async def stream_short_link(token: str, request: Request, db: AsyncSession = Dep
         return await _stream_record(file, request, bool(payload["download"]))
     message, descriptor, _ = await _telegram_message_descriptor(int(payload["sub"]), int(payload["oid"]))
     return await _stream_message(descriptor, message, request, bool(payload["download"]))
+
+
+@short_router.get("/l/{token}")
+async def stream_short_link(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Keep the compact public download URL working in monolith deployments."""
+    return await _stream_short_link(token, request, db)
+
+
+@router.get("/short-link/{token}")
+async def stream_short_link_api(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Stable API path used by the public player in every deployment layout."""
+    return await _stream_short_link(token, request, db)
 
 
 @router.get("/file-link/{token}")
@@ -223,7 +234,8 @@ async def temporary_link_info(token: str, db: AsyncSession = Depends(get_db)):
             "file_name": file_name, "file_type": file_type, "file_size": file_size,
             "mime_type": mime_type, "password_required": False, "allow_download": True,
             "views_remaining": None, "expires_at": datetime.fromtimestamp(int(short_payload["exp"])).isoformat(),
-            "stream_url": f"/l/{play_token}", "download_url": f"/l/{download_token}",
+            "stream_url": f"/api/shares/short-link/{play_token}",
+            "download_url": f"/l/{download_token}",
         }
     payload = verify_token_payload(token, "private-file-link")
     if payload:

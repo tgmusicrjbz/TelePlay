@@ -126,7 +126,7 @@ def test_short_message_link_info_builds_short_stream_and_download_urls(monkeypat
 
     assert result["file_name"] == "clip.mp4"
     assert result["file_type"] == "video"
-    assert result["stream_url"].startswith("/l/")
+    assert result["stream_url"].startswith("/api/shares/short-link/")
     assert result["download_url"].startswith("/l/")
     assert result["stream_url"] != result["download_url"]
     assert verify_short_link_token(result["stream_url"].rsplit("/", 1)[-1])["download"] is False

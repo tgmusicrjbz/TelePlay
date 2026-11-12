@@ -36,4 +36,15 @@ describe('PublicMediaPlayer', () => {
         fireEvent.click(screen.getByTitle('قفل افقی؛ بعدی عمودی'));
         expect(screen.getByTitle('قفل عمودی؛ بعدی خودکار')).toBeInTheDocument();
     });
+
+    it('shows unclipped speed options and applies double speed to the media element', () => {
+        const {container}=render(<PublicMediaPlayer info={info} streamUrl="/video.mp4"/>);
+        fireEvent.click(screen.getByTitle('سرعت پخش'));
+        const menu=screen.getByRole('menu',{name:'سرعت پخش'});
+        expect(menu).toHaveAttribute('data-speed-menu');
+        expect(menu.closest('[data-player-tools]')).toBeNull();
+        fireEvent.click(screen.getByRole('menuitem',{name:'2×'}));
+        expect((container.querySelector('video') as HTMLVideoElement).playbackRate).toBe(2);
+        expect(screen.getByTitle('سرعت پخش')).toHaveTextContent('2×');
+    });
 });

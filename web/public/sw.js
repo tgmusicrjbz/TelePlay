@@ -130,7 +130,10 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  if (url.pathname.startsWith('/api/')) return;
+  // API and compact media links must always reach the backend. Treating /l/*
+  // as a navigation returned the cached SPA shell instead of the file body in
+  // installed PWA/Android builds, which broke both download and playback.
+  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/l/')) return;
 
   if (request.mode === 'navigate') {
     event.respondWith((async () => {
