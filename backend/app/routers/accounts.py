@@ -121,6 +121,7 @@ async def export_account_data(
     files = (await db.execute(select(File).where(File.user_id == current_user.id).order_by(File.id))).scalars().all()
     playlists = (await db.execute(select(Playlist).where(
         Playlist.user_id == current_user.id,
+        Playlist.group_chat_id.is_(None),
     ).options(selectinload(Playlist.items).selectinload(PlaylistItem.file)).order_by(Playlist.position, Playlist.id))).scalars().all()
     packs = (await db.execute(select(Pack).where(
         Pack.user_id == current_user.id,
@@ -286,7 +287,7 @@ async def import_account_data(
         file.is_hidden = bool(item.get("is_hidden")) and bool(current_user.vault_password_hash)
         restored_files += 1
 
-    playlists = (await db.execute(select(Playlist).where(Playlist.user_id == current_user.id))).scalars().all()
+    playlists = (await db.execute(select(Playlist).where(Playlist.user_id == current_user.id, Playlist.group_chat_id.is_(None)))).scalars().all()
     playlist_by_name = {item.name.casefold(): item for item in playlists}
     playlist_entries: dict[int, list[PlaylistItem]] = {item.id: [] for item in playlists}
     if playlists:

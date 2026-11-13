@@ -54,7 +54,7 @@ def _playlist_response(playlist: Playlist) -> PlaylistResponse:
 async def _owned_playlist(db: AsyncSession, playlist_id: int, user_id: int) -> Playlist:
     playlist = (await db.execute(
         select(Playlist)
-        .where(Playlist.id == playlist_id, Playlist.user_id == user_id)
+        .where(Playlist.id == playlist_id, Playlist.user_id == user_id, Playlist.group_chat_id.is_(None))
         .options(selectinload(Playlist.items).selectinload(PlaylistItem.file).selectinload(File.watch_progress), selectinload(Playlist.cover_file))
         .execution_options(populate_existing=True)
     )).scalar_one_or_none()
@@ -67,7 +67,7 @@ async def _owned_playlist(db: AsyncSession, playlist_id: int, user_id: int) -> P
 async def list_playlists(db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     playlists = (await db.execute(
         select(Playlist)
-        .where(Playlist.user_id == current_user.id)
+        .where(Playlist.user_id == current_user.id, Playlist.group_chat_id.is_(None))
         .options(selectinload(Playlist.items).selectinload(PlaylistItem.file).selectinload(File.watch_progress), selectinload(Playlist.cover_file))
         .order_by(Playlist.position.asc(), Playlist.updated_at.desc(), Playlist.id.desc())
     )).scalars().unique().all()
@@ -79,10 +79,10 @@ async def create_playlist(payload: PlaylistCreate, db: AsyncSession = Depends(ge
     name = payload.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="Playlist name is required")
-    duplicate = (await db.execute(select(Playlist.id).where(Playlist.user_id == current_user.id, func.lower(Playlist.name) == name.lower()))).scalar_one_or_none()
+    duplicate = (await db.execute(select(Playlist.id).where(Playlist.user_id == current_user.id, Playlist.group_chat_id.is_(None), func.lower(Playlist.name) == name.lower()))).scalar_one_or_none()
     if duplicate:
         raise HTTPException(status_code=409, detail="A playlist with this name already exists")
-    last_position = (await db.execute(select(func.coalesce(func.max(Playlist.position), -1)).where(Playlist.user_id == current_user.id))).scalar_one()
+    last_position = (await db.execute(select(func.coalesce(func.max(Playlist.position), -1)).where(Playlist.user_id == current_user.id, Playlist.group_chat_id.is_(None)))).scalar_one()
     playlist = Playlist(user_id=current_user.id, name=name, description=(payload.description or "").strip() or None, position=last_position + 1)
     db.add(playlist)
     await db.commit()
@@ -91,7 +91,7 @@ async def create_playlist(payload: PlaylistCreate, db: AsyncSession = Depends(ge
 
 @router.put("/reorder/catalog", response_model=list[PlaylistSummary])
 async def reorder_playlist_catalog(payload: PlaylistCatalogReorder, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    playlists = (await db.execute(select(Playlist).where(Playlist.user_id == current_user.id))).scalars().all()
+    playlists = (await db.execute(select(Playlist).where(Playlist.user_id == current_user.id, Playlist.group_chat_id.is_(None)))).scalars().all()
     current_ids = {playlist.id for playlist in playlists}
     if len(payload.playlist_ids) != len(set(payload.playlist_ids)) or set(payload.playlist_ids) != current_ids:
         raise HTTPException(status_code=400, detail="ترتیب باید همه پلی‌لیست‌ها را دقیقاً یک بار داشته باشد.")
@@ -116,7 +116,7 @@ async def update_playlist(playlist_id: int, payload: PlaylistUpdate, db: AsyncSe
         name = (changes["name"] or "").strip()
         if not name:
             raise HTTPException(status_code=400, detail="Playlist name is required")
-        duplicate = (await db.execute(select(Playlist.id).where(Playlist.user_id == current_user.id, func.lower(Playlist.name) == name.lower(), Playlist.id != playlist_id))).scalar_one_or_none()
+        duplicate = (await db.execute(select(Playlist.id).where(Playlist.user_id == current_user.id, Playlist.group_chat_id.is_(None), func.lower(Playlist.name) == name.lower(), Playlist.id != playlist_id))).scalar_one_or_none()
         if duplicate:
             raise HTTPException(status_code=409, detail="A playlist with this name already exists")
         playlist.name = name

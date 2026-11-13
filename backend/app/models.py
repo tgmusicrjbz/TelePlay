@@ -491,6 +491,9 @@ class Playlist(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    # A non-null chat id makes this a shared Telegram group playlist. Personal
+    # playlists keep this field null and retain their existing ownership.
+    group_chat_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
     cover_file_id: Mapped[Optional[int]] = mapped_column(ForeignKey("files.id", ondelete="SET NULL"), nullable=True)
@@ -506,6 +509,7 @@ class Playlist(Base):
 
     __table_args__ = (
         UniqueConstraint("user_id", "name", name="uq_playlist_user_name"),
+        UniqueConstraint("group_chat_id", "name", name="uq_playlist_group_name"),
         Index("idx_playlist_user_cover", user_id, cover_file_id),
     )
 
