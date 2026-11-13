@@ -1715,6 +1715,8 @@ class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
             group_labels,
             ["🎙 متن به صدا", "📝 صوت به متن", "🔗 دریافت لینک", "📩 ارسال خصوصی", "🗄️ کمد گروه", "🎧 پلی‌لیست‌های گروه", "💡 راهنما", "⚙️ مدیریت خصوصی"],
         )
+        group_menu_with_chat = group_menu_keyboard(group_chat_id=-10055)
+        self.assertTrue(all(button.web_app is None for row in group_menu_with_chat.inline_keyboard for button in row))
         self.assertIn("/tts", group_tool_help("guide"))
         self.assertIn("/stt", group_tool_help("guide"))
         self.assertIn("/sendto", group_tool_help("guide"))

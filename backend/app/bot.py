@@ -407,9 +407,10 @@ def group_menu_keyboard(management_url: str | None = None, group_chat_id: int | 
          InlineKeyboardButton("🎧 پلی‌لیست‌های گروه", callback_data="grpmenu:playlists")],
         [InlineKeyboardButton("💡 راهنما", callback_data="grpmenu:guide"), management_button],
     ]
-    mini_app = group_mini_app_button(group_chat_id) if group_chat_id is not None else None
-    if mini_app:
-        rows.insert(4, [mini_app])
+    # Telegram rejects WebApp buttons in group messages (they are supported
+    # for private chats). The native cabinet callback remains available in
+    # the group menu; the authenticated mini-app can be opened from private
+    # chat where Telegram supplies WebApp initData.
     return InlineKeyboardMarkup(rows)
 
 
@@ -2425,7 +2426,9 @@ async def handle_pending_group_action(client, message: Message):
 @tg_client.on_message(filters.command(["komod", "group_menu"]) & filters.group)
 @react_to_request("👀")
 async def group_menu_command(client, message: Message):
-    if await require_connected_group(message):
+    if not await require_connected_group(message):
+        return
+    try:
         if message.from_user:
             manager = await get_or_create_user(message.from_user.id, message.from_user.username, message.from_user.first_name, message.from_user.last_name)
             is_manager = await is_group_manager(client, message.chat.id, message.from_user.id)
@@ -2440,6 +2443,9 @@ async def group_menu_command(client, message: Message):
         asyncio.create_task(delete_preview_later(client, menu.chat.id, menu.id, 180))
         with contextlib.suppress(Exception):
             await message.delete()
+    except Exception as error:
+        logger.exception("Could not open group menu chat=%s user=%s: %s", message.chat.id, getattr(message.from_user, "id", None), error)
+        await reply_to_request(message, "❌ منوی گروه باز نشد؛ دوباره `/komod` را بفرست.")
 
 
 @tg_client.on_message(filters.command("group_usage") & filters.group)
