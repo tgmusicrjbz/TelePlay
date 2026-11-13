@@ -2429,17 +2429,21 @@ async def group_menu_command(client, message: Message):
     if not await require_connected_group(message):
         return
     try:
-        if message.from_user:
-            manager = await get_or_create_user(message.from_user.id, message.from_user.username, message.from_user.first_name, message.from_user.last_name)
-            is_manager = await is_group_manager(client, message.chat.id, message.from_user.id)
-            async with async_session() as db:
-                cabinet = await get_or_create_group_cabinet(db, message.chat.id, manager.id, "کمد گروه")
-                await ensure_group_cabinet_member(db, cabinet.id, manager.id, "owner" if is_manager else "viewer")
-                await db.commit()
+        # Keep the top-level group menu independent from the optional shared
+        # cabinet tables. The cabinet is created lazily when its button is
+        # opened, so a delayed/unfinished migration can never make /komod
+        # disappear for the whole group.
         management_url = None
         with contextlib.suppress(Exception):
             management_url = await group_settings_start_url(client, message.chat.id)
-        menu = await reply_to_request(message, group_menu_text(), reply_markup=group_menu_keyboard(management_url, message.chat.id))
+        try:
+            menu = await reply_to_request(message, group_menu_text(), reply_markup=group_menu_keyboard(management_url, message.chat.id))
+        except Exception:
+            # A malformed/unsupported button must not hide the whole menu.
+            # Send the same actions as plain text so the group still gets a
+            # useful response and the failure remains visible in logs.
+            logger.exception("Group menu keyboard delivery failed chat=%s", message.chat.id)
+            menu = await reply_to_request(message, group_menu_text())
         asyncio.create_task(delete_preview_later(client, menu.chat.id, menu.id, 180))
         with contextlib.suppress(Exception):
             await message.delete()
