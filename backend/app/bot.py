@@ -1484,9 +1484,15 @@ async def index_group_playlist_media(message: Message) -> File | None:
         ).order_by(File.id.asc()))).scalars().first()
         if existing is not None:
             return existing
-    async with async_session() as db:
-        group_cabinet = (await db.execute(select(GroupCabinet).where(GroupCabinet.chat_id == message.chat.id))).scalar_one_or_none()
-        group_storage_channel = group_cabinet.storage_channel_id if group_cabinet else None
+    group_storage_channel = None
+    try:
+        async with async_session() as db:
+            group_cabinet = (await db.execute(select(GroupCabinet).where(GroupCabinet.chat_id == message.chat.id))).scalar_one_or_none()
+            group_storage_channel = group_cabinet.storage_channel_id if group_cabinet else None
+    except Exception:
+        # Group playlists remain usable if the optional cabinet migration is
+        # temporarily unavailable; fall back to the user's storage channel.
+        logger.exception("Could not read group cabinet storage for playlist media chat=%s", message.chat.id)
     target_channel = group_storage_channel or user.storage_channel_id or settings.telegram_storage_channel_id
     forwarded = await forward_to_storage_channel(replied, target_channel)
     stored = next((getattr(forwarded, name, None) for name in ("audio", "voice", "video", "video_note", "document") if getattr(forwarded, name, None)), None)
@@ -1509,6 +1515,27 @@ async def index_group_playlist_media(message: Message) -> File | None:
         await db.commit()
         await db.refresh(record)
         return record
+
+
+async def add_group_playlist_media(message: Message, playlist_id: int) -> tuple[File | None, bool, str | None]:
+    """Index one group media message and attach it to a group playlist."""
+    file = await index_group_playlist_media(message)
+    if file is None:
+        return None, False, "یک فایل صوتی یا ویدیویی را ریپلای کن."
+    # A playlist is useful on its own. Cabinet indexing is best effort so a
+    # cabinet quota or migration issue cannot block the playlist operation.
+    with contextlib.suppress(Exception):
+        await add_to_group_cabinet(file.id, message.chat.id, message.from_user.id)
+    async with async_session() as db:
+        playlist = (await db.execute(group_playlist_query(playlist_id, message.chat.id))).scalar_one_or_none()
+        if playlist is None:
+            return file, False, "این پلی‌لیست دیگر وجود ندارد."
+        if file.id in {item.file_id for item in playlist.items}:
+            return file, False, None
+        position = max((item.position for item in playlist.items), default=-1) + 1
+        db.add(PlaylistItem(playlist_id=playlist.id, file_id=file.id, position=position))
+        await db.commit()
+    return file, True, None
 
 
 async def send_group_playlist_media(client, callback: CallbackQuery, playlist_id: int, chat_id: int, index: int) -> None:
@@ -2402,21 +2429,11 @@ async def handle_pending_group_action(client, message: Message):
             await reply_to_request(message, "یک فایل صوتی یا ویدیویی بفرست تا به پلی‌لیست اضافه شود.")
             return
         try:
-            file = await index_group_playlist_media(message)
-            if file is None:
-                await reply_to_request(message, "فایل قابل افزودن پیدا نشد؛ روی صوت یا ویدیو ریپلای کن.")
+            file, added, error = await add_group_playlist_media(message, playlist_id)
+            if error:
+                await reply_to_request(message, error)
                 return
-            await add_to_group_cabinet(file.id, message.chat.id, message.from_user.id)
-            async with async_session() as db:
-                playlist = (await db.execute(group_playlist_query(playlist_id, message.chat.id))).scalar_one_or_none()
-                if playlist is None:
-                    await reply_to_request(message, "این پلی‌لیست دیگر وجود ندارد.")
-                    return
-                if file.id not in {item.file_id for item in playlist.items}:
-                    position = max((item.position for item in playlist.items), default=-1) + 1
-                    db.add(PlaylistItem(playlist_id=playlist.id, file_id=file.id, position=position))
-                    await db.commit()
-            panel = await reply_to_request(message, "✅ فایل به پلی‌لیست گروه اضافه شد.")
+            panel = await reply_to_request(message, "✅ فایل به پلی‌لیست گروه اضافه شد." if added else "ℹ️ این فایل از قبل در پلی‌لیست هست.")
             await render_group_playlist_detail(panel, message.chat.id, playlist_id)
         except Exception:
             logger.exception("Could not add group playlist media chat=%s playlist=%s", message.chat.id, playlist_id)
@@ -2669,6 +2686,25 @@ async def group_playlists_command(client, message: Message):
             playlist = (await db.execute(group_playlist_query(playlist_id, message.chat.id))).scalar_one_or_none()
         if playlist is None:
             await reply_to_request(message, "این پلی‌لیست گروه پیدا نشد.")
+            return
+        replied_media = message.reply_to_message and any(
+            getattr(message.reply_to_message, name, None)
+            for name in ("audio", "voice", "video", "video_note")
+        )
+        if replied_media:
+            try:
+                file, added, error = await add_group_playlist_media(message, playlist_id)
+                if error:
+                    await reply_to_request(message, error)
+                    return
+                panel = await reply_to_request(
+                    message,
+                    "✅ فایل به پلی‌لیست گروه اضافه شد." if added else "ℹ️ این فایل از قبل در پلی‌لیست هست.",
+                )
+                await render_group_playlist_detail(panel, message.chat.id, playlist_id)
+            except Exception:
+                logger.exception("Could not add replied group playlist media chat=%s playlist=%s", message.chat.id, playlist_id)
+                await reply_to_request(message, "❌ افزودن فایل به پلی‌لیست انجام نشد؛ دوباره تلاش کن.")
             return
         pending_group_actions[(message.chat.id, message.from_user.id)] = (
             "gplaylist_add", datetime.now(timezone.utc) + timedelta(minutes=2), playlist_id,
