@@ -9,7 +9,7 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from .. import telegram
 from ..database import get_db
-from ..models import TelegramDestination, TelegramGroupSettings, TelegramGroupUsage, User
+from ..models import GroupCabinet, GroupCabinetItem, TelegramDestination, TelegramGroupSettings, TelegramGroupUsage, User
 from ..group_tools import get_group_voice, set_group_voice
 from ..tts import VOICE_OPTIONS
 from .accounts import require_admin
@@ -142,6 +142,10 @@ async def update_group(chat_id: int, payload: GroupSettingsUpdate, _: User = Dep
 async def reject_group(chat_id: int, _: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
     await db.execute(delete(TelegramDestination).where(TelegramDestination.chat_id == chat_id))
     await db.execute(delete(TelegramGroupUsage).where(TelegramGroupUsage.chat_id == chat_id))
+    cabinet = (await db.execute(select(GroupCabinet).where(GroupCabinet.chat_id == chat_id))).scalar_one_or_none()
+    if cabinet is not None:
+        await db.execute(delete(GroupCabinetItem).where(GroupCabinetItem.cabinet_id == cabinet.id))
+        await db.delete(cabinet)
     await db.execute(delete(TelegramGroupSettings).where(TelegramGroupSettings.chat_id == chat_id))
     await db.commit()
     return {"removed": True}

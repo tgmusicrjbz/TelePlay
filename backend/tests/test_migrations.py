@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
-HEAD_REVISION = "20261103_0018"
+HEAD_REVISION = "20261103_0019"
 
 
 def migration_env(database_path: Path) -> dict[str, str]:

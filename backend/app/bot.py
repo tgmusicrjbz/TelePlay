@@ -26,7 +26,7 @@ from .telegram import tg_client, forward_to_storage_channel, delete_from_storage
 from . import telegram
 from .routers.folders import ensure_default_folder
 from .database import async_session
-from .models import User, File, Folder, LoginCode, Playlist, PlaylistItem, BotUserState, TelegramDestination, TelegramGroupSettings, AppSetting
+from .models import User, File, Folder, LoginCode, Playlist, PlaylistItem, BotUserState, TelegramDestination, TelegramGroupSettings, GroupCabinet, GroupCabinetItem, AppSetting
 from .config import get_settings
 from .auth import create_recipient_delivery_token, create_short_link_token, create_telegram_login_token, verify_recipient_delivery_token
 from .services import escape_like, select_best_thumbnail, telegram_text_with_links, unreferenced_audio_variant_messages, unreferenced_storage_messages
@@ -36,7 +36,7 @@ from .tts import TTSJob, VOICE_OPTIONS, consume_tts_quota, load_tts_settings, ro
 from .stt import STTJob, consume_stt_quota, stt_queue
 from .gemini_keys import decrypt_user_keys
 from .link_captions import render_link_caption
-from .group_tools import consume_file_link_quota, consume_group_quota, get_group_usage, get_group_usage_breakdown, get_or_create_group_settings, get_group_voice, set_group_voice, is_global_admin
+from .group_tools import consume_file_link_quota, consume_group_quota, get_group_usage, get_group_usage_breakdown, get_or_create_group_settings, get_or_create_group_cabinet, get_group_voice, set_group_voice, is_global_admin
 from .bot_messages import bot_message
 from .bot_link_feedback import acknowledge_link_request, acknowledge_request, react_to_request, reply_to_request
 from .instagram_inbox import pair_sender_with_telegram
@@ -395,7 +395,8 @@ def group_menu_keyboard(management_url: str | None = None) -> InlineKeyboardMark
          InlineKeyboardButton("📝 صوت به متن", callback_data="grpmenu:stt")],
         [InlineKeyboardButton("🔗 دریافت لینک", callback_data="grpmenu:link"),
          InlineKeyboardButton("📩 ارسال خصوصی", callback_data="grpmenu:private")],
-        [InlineKeyboardButton("🎧 پلی‌لیست‌های گروه", callback_data="grpmenu:playlists")],
+        [InlineKeyboardButton("🗄️ کمد گروه", callback_data="grpmenu:cabinet"),
+         InlineKeyboardButton("🎧 پلی‌لیست‌های گروه", callback_data="grpmenu:playlists")],
         [InlineKeyboardButton("💡 راهنما", callback_data="grpmenu:guide"), management_button],
     ])
 
@@ -419,6 +420,8 @@ def group_tool_help(action: str) -> str:
         "لینک یوتیوب، اینستاگرام یا پینترست را مستقیم در گروه بفرست.\n\n"
         "🎧 **پلی‌لیست گروه**\n"
         "`/gplaylist` برای فهرست، `/gplaylist new نام` برای ساخت؛ از داخل فهرست با ریپلای فایل اضافه کن.\n\n"
+        "🗄️ **کمد اختصاصی گروه**\n"
+        "از منوی کمد گروه فایل‌ها را برای همهٔ اعضا ثبت کن؛ فایل‌های صوتی و ویدیویی را می‌توانی با ریپلای اضافه کنی.\n\n"
         "📩 **ارسال خصوصی**\n"
         "روی فایل ریپلای کن و `/sendto @username` یا `/privatelink @username` را بفرست."
     )
@@ -1360,6 +1363,48 @@ async def render_group_playlists(message: Message, chat_id: int, page: int = 0) 
     await safe_edit(message, text, reply_markup=InlineKeyboardMarkup(buttons))
 
 
+async def render_group_cabinet(message: Message, chat_id: int, page: int = 0) -> None:
+    """Render the shared group cabinet with Telegram-native controls."""
+    async with async_session() as db:
+        cabinet = await get_or_create_group_cabinet(db, chat_id, title="کمد گروه")
+        await db.commit()
+        items = (await db.execute(
+            select(GroupCabinetItem).where(GroupCabinetItem.cabinet_id == cabinet.id)
+            .options(selectinload(GroupCabinetItem.file))
+            .order_by(GroupCabinetItem.created_at.desc(), GroupCabinetItem.id.desc())
+        )).scalars().all()
+    page = min(max(page, 0), max(0, (len(items) - 1) // PAGE_SIZE))
+    shown = items[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
+    buttons = [[InlineKeyboardButton(
+        f"{FILE_ICONS.get(item.file.file_type, '📎')} {display_filename(item.file.file_name)[:42]}",
+        callback_data=f"gcfile:{item.file_id}:{page}",
+    )] for item in shown]
+    if len(items) > PAGE_SIZE:
+        buttons.append(pagination_row("gpcabinet", page, len(items)))
+    buttons.extend([
+        [InlineKeyboardButton("➕ افزودن با ریپلای", callback_data="gpcabinet_add")],
+        [InlineKeyboardButton("🎧 پلی‌لیست‌های گروه", callback_data="grpmenu:playlists")],
+        [InlineKeyboardButton("↩️ منوی گروه", callback_data="grpmenu:home")],
+    ])
+    text = f"🗄️ **{escape_markdown(cabinet.title)}**\n{to_persian_digits(str(len(items)))} فایل مشترک برای اعضای گروه"
+    if not items:
+        text += "\n\nهنوز فایلی در کمد گروه نیست. روی یک فایل صوتی یا ویدیویی ریپلای کن و افزودن را بزن."
+    await safe_edit(message, text, reply_markup=InlineKeyboardMarkup(buttons))
+
+
+async def add_to_group_cabinet(file_id: int, chat_id: int, user_id: int) -> bool:
+    async with async_session() as db:
+        cabinet = await get_or_create_group_cabinet(db, chat_id, user_id=user_id, title="کمد گروه")
+        existing = (await db.execute(select(GroupCabinetItem.id).where(
+            GroupCabinetItem.cabinet_id == cabinet.id, GroupCabinetItem.file_id == file_id,
+        ))).scalar_one_or_none()
+        if existing is not None:
+            return False
+        db.add(GroupCabinetItem(cabinet_id=cabinet.id, file_id=file_id, added_by_user_id=user_id))
+        await db.commit()
+        return True
+
+
 async def render_group_playlist_detail(message: Message, chat_id: int, playlist_id: int, page: int = 0) -> None:
     async with async_session() as db:
         playlist = (await db.execute(group_playlist_query(playlist_id, chat_id))).scalar_one_or_none()
@@ -2275,6 +2320,21 @@ async def handle_pending_group_action(client, message: Message):
         if prompt_message_id:
             with contextlib.suppress(Exception):
                 await client.edit_message_text(message.chat.id, prompt_message_id, "✅ لینک دریافت شد و در حال ثبت است.", reply_markup=group_menu_keyboard())
+    elif action == "gcabinet_add":
+        if not any(getattr(message, name, None) for name in ("audio", "voice", "video", "video_note")):
+            await reply_to_request(message, "یک فایل صوتی یا ویدیویی بفرست تا به کمد گروه اضافه شود.")
+            return
+        try:
+            file = await index_group_playlist_media(message)
+            if file is None:
+                await reply_to_request(message, "فایل قابل افزودن پیدا نشد؛ روی صوت یا ویدیو ریپلای کن.")
+                return
+            added = await add_to_group_cabinet(file.id, message.chat.id, message.from_user.id)
+            panel = await reply_to_request(message, "✅ فایل به کمد گروه اضافه شد." if added else "ℹ️ این فایل از قبل در کمد گروه هست.")
+            await render_group_cabinet(panel, message.chat.id)
+        except Exception:
+            logger.exception("Could not add group cabinet media chat=%s user=%s", message.chat.id, message.from_user.id)
+            await reply_to_request(message, "❌ افزودن فایل به کمد گروه انجام نشد؛ دوباره تلاش کن.")
     elif action == "gplaylist_add":
         playlist_id = int(prompt_message_id or 0)
         if not any(getattr(message, name, None) for name in ("audio", "voice", "video", "video_note")):
@@ -2285,6 +2345,7 @@ async def handle_pending_group_action(client, message: Message):
             if file is None:
                 await reply_to_request(message, "فایل قابل افزودن پیدا نشد؛ روی صوت یا ویدیو ریپلای کن.")
                 return
+            await add_to_group_cabinet(file.id, message.chat.id, message.from_user.id)
             async with async_session() as db:
                 playlist = (await db.execute(group_playlist_query(playlist_id, message.chat.id))).scalar_one_or_none()
                 if playlist is None:
@@ -3342,7 +3403,7 @@ async def handle_callback(client, callback: CallbackQuery):
         known_user = (await db.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one_or_none()
     group_settings_callback = data.startswith((
         "grpq:", "grpquota:", "grpvoice:", "grpmanage:", "grpmenu:",
-        "gplaylists", "gplaylist", "gpl",
+        "gplaylists", "gplaylist", "gpl", "gpcabinet", "gcfile", "gcplay", "gcremove",
     ))
     if ((known_user is not None and not known_user.is_active) or
             (settings.restrict_users and callback.from_user.id not in settings.bootstrap_users and known_user is None and not group_settings_callback)):
@@ -3512,6 +3573,9 @@ async def handle_callback(client, callback: CallbackQuery):
                 datetime.now(timezone.utc) + timedelta(minutes=2),
             )
             await callback.answer(prompt, show_alert=True)
+        elif action == "cabinet":
+            await render_group_cabinet(callback.message, group_chat_id)
+            await callback.answer()
         elif action == "private":
             await callback.answer(
                 "روی فایل ریپلای کن و /sendto @username یا /privatelink @username را بفرست.",
@@ -3766,6 +3830,88 @@ async def handle_callback(client, callback: CallbackQuery):
         await set_upload_drawer(callback.from_user.id, folder.id)
         await render_storage_target(callback.message, callback.from_user.id, folder.parent_id, 0)
         await callback.answer(f"فایل‌های بعدی داخل «{folder.name[:32]}» ذخیره می‌شن.")
+
+    elif data == "gpcabinet:0" or data.startswith("gpcabinet:"):
+        if "private" in str(getattr(callback.message.chat, "type", "")).lower():
+            await callback.answer("کمد گروه فقط داخل همان گروه در دسترس است.", show_alert=True)
+            return
+        await render_group_cabinet(callback.message, callback.message.chat.id, int(data.split(":")[1]))
+        await callback.answer()
+
+    elif data == "gpcabinet_add":
+        if "private" in str(getattr(callback.message.chat, "type", "")).lower():
+            await callback.answer("افزودن فایل به کمد گروه باید داخل همان گروه انجام شود.", show_alert=True)
+            return
+        pending_group_actions[(callback.message.chat.id, callback.from_user.id)] = (
+            "gcabinet_add", datetime.now(timezone.utc) + timedelta(minutes=2)
+        )
+        await callback.answer("حالا روی صوت یا ویدیو ریپلای کن و بفرست.", show_alert=True)
+
+    elif data.startswith("gcfile:"):
+        try:
+            _, file_id_raw, page_raw = data.split(":")
+            file_id, page = int(file_id_raw), int(page_raw)
+        except (ValueError, TypeError):
+            await callback.answer("این فایل معتبر نیست.", show_alert=True)
+            return
+        async with async_session() as db:
+            item = (await db.execute(select(GroupCabinetItem).join(GroupCabinet).where(
+                GroupCabinet.chat_id == callback.message.chat.id,
+                GroupCabinetItem.file_id == file_id,
+            ).options(selectinload(GroupCabinetItem.file)))).scalar_one_or_none()
+        if item is None:
+            await callback.answer("این فایل دیگر در کمد گروه نیست.", show_alert=True)
+            return
+        await callback.message.edit_text(
+            f"{FILE_ICONS.get(item.file.file_type, '📎')} **{escape_markdown(display_filename(item.file.file_name))}**\n"
+            "این فایل در کمد مشترک گروه قرار دارد.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("▶️ پخش در گروه", callback_data=f"gcplay:{file_id}"),
+                 InlineKeyboardButton("🗑 حذف از کمد", callback_data=f"gcremove:{file_id}:{page}")],
+                [InlineKeyboardButton("↩️ کمد گروه", callback_data=f"gpcabinet:{page}")],
+            ]),
+        )
+        await callback.answer()
+
+    elif data.startswith("gcplay:"):
+        try:
+            file_id = int(data.split(":", 1)[1])
+        except (ValueError, TypeError):
+            await callback.answer("این فایل معتبر نیست.", show_alert=True)
+            return
+        async with async_session() as db:
+            item = (await db.execute(select(GroupCabinetItem).join(GroupCabinet).where(
+                GroupCabinet.chat_id == callback.message.chat.id,
+                GroupCabinetItem.file_id == file_id,
+            ).options(selectinload(GroupCabinetItem.file)))).scalar_one_or_none()
+        if item is None:
+            await callback.answer("این فایل دیگر در کمد گروه نیست.", show_alert=True)
+            return
+        try:
+            preview = await client.copy_message(callback.message.chat.id, item.file.storage_channel_id or settings.telegram_storage_channel_id, item.file.channel_message_id)
+            asyncio.create_task(delete_preview_later(client, preview.chat.id, preview.id))
+            await callback.answer("فایل در گروه ارسال شد.")
+        except Exception:
+            logger.exception("Could not play group cabinet file %s", file_id)
+            await callback.answer("پخش این فایل در گروه ممکن نشد.", show_alert=True)
+
+    elif data.startswith("gcremove:"):
+        try:
+            _, file_id_raw, page_raw = data.split(":")
+            file_id, page = int(file_id_raw), int(page_raw)
+        except (ValueError, TypeError):
+            await callback.answer("این درخواست معتبر نیست.", show_alert=True)
+            return
+        if not await is_group_manager(client, callback.message.chat.id, callback.from_user.id):
+            await callback.answer("حذف از کمد گروه فقط برای مدیرهاست.", show_alert=True)
+            return
+        async with async_session() as db:
+            cabinet = (await db.execute(select(GroupCabinet).where(GroupCabinet.chat_id == callback.message.chat.id))).scalar_one_or_none()
+            if cabinet:
+                await db.execute(delete(GroupCabinetItem).where(GroupCabinetItem.cabinet_id == cabinet.id, GroupCabinetItem.file_id == file_id))
+                await db.commit()
+        await render_group_cabinet(callback.message, callback.message.chat.id, page)
+        await callback.answer("از کمد گروه حذف شد.")
 
     elif data == "gplaylists:0" or data.startswith("gplaylists:"):
         if "private" in str(getattr(callback.message.chat, "type", "")).lower():

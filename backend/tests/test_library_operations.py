@@ -1713,7 +1713,7 @@ class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
         group_labels = [button.text for row in group_menu_keyboard().inline_keyboard for button in row]
         self.assertEqual(
             group_labels,
-            ["🎙 متن به صدا", "📝 صوت به متن", "🔗 دریافت لینک", "📩 ارسال خصوصی", "🎧 پلی‌لیست‌های گروه", "💡 راهنما", "⚙️ مدیریت خصوصی"],
+            ["🎙 متن به صدا", "📝 صوت به متن", "🔗 دریافت لینک", "📩 ارسال خصوصی", "🗄️ کمد گروه", "🎧 پلی‌لیست‌های گروه", "💡 راهنما", "⚙️ مدیریت خصوصی"],
         )
         self.assertIn("/tts", group_tool_help("guide"))
         self.assertIn("/stt", group_tool_help("guide"))

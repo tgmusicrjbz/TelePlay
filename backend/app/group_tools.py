@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import delete, func, select
 
 from .config import get_settings
-from .models import AppSetting, TelegramFileLinkUsage, TelegramGroupSettings, TelegramGroupUsage, TTSUsage, User
+from .models import AppSetting, GroupCabinet, TelegramFileLinkUsage, TelegramGroupSettings, TelegramGroupUsage, TTSUsage, User
 
 
 OPERATIONS = {"tts", "stt", "link"}
@@ -31,6 +31,22 @@ async def get_or_create_group_settings(db, chat_id: int, title: str | None = Non
     elif title and item.title != title[:255]:
         item.title = title[:255]
     return item
+
+
+async def get_or_create_group_cabinet(db, chat_id: int, user_id: int | None = None, title: str | None = None) -> GroupCabinet:
+    """Return the single shared cabinet for a connected group."""
+    cabinet = (await db.execute(select(GroupCabinet).where(GroupCabinet.chat_id == chat_id))).scalar_one_or_none()
+    if cabinet is None:
+        cabinet = GroupCabinet(
+            chat_id=chat_id,
+            title=(title or "کمد گروه")[:255],
+            created_by_user_id=user_id,
+        )
+        db.add(cabinet)
+        await db.flush()
+    elif title and cabinet.title != title[:255]:
+        cabinet.title = title[:255]
+    return cabinet
 
 
 async def consume_group_quota(

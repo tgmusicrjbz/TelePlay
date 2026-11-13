@@ -168,6 +168,44 @@ class TelegramGroupSettings(Base):
     )
 
 
+class GroupCabinet(Base):
+    """A shared media index owned by one connected Telegram group."""
+    __tablename__ = "group_cabinets"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(255), default="کمد گروه", nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    items: Mapped[List["GroupCabinetItem"]] = relationship(
+        back_populates="cabinet", cascade="all, delete-orphan"
+    )
+
+
+class GroupCabinetItem(Base):
+    """A reference to a stored file visible inside a group cabinet."""
+    __tablename__ = "group_cabinet_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    cabinet_id: Mapped[int] = mapped_column(ForeignKey("group_cabinets.id", ondelete="CASCADE"), nullable=False, index=True)
+    file_id: Mapped[int] = mapped_column(ForeignKey("files.id", ondelete="CASCADE"), nullable=False, index=True)
+    added_by_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    cabinet: Mapped["GroupCabinet"] = relationship(back_populates="items")
+    file: Mapped["File"] = relationship()
+
+    __table_args__ = (
+        UniqueConstraint("cabinet_id", "file_id", name="uq_group_cabinet_file"),
+        Index("idx_group_cabinet_items_order", cabinet_id, created_at, id),
+    )
+
+
 class TelegramGroupUsage(Base):
     """Daily group and per-member counters for Telegram group tools."""
     __tablename__ = "telegram_group_usage"
