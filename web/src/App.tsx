@@ -194,12 +194,13 @@ function TelegramWebAppBootstrap({ children }: { children: React.ReactNode }) {
             if (previousInitData !== identity.initData) localStorage.removeItem('komod-manual-account');
             if (currentId === identity.userId && localStorage.getItem('access_token')) {
                 localStorage.setItem('komod-telegram-init-data', identity.initData);
-                try {
-                    const { data } = await api.post<AuthResponse>('/auth/session');
-                    saveAuthenticatedAccount(data);
-                } catch {
-                    // Keep the existing local session when the network is unstable.
-                }
+                // The existing access/refresh pair is already valid for the
+                // current Telegram identity. Refresh it in the background so
+                // a slow auth endpoint can never hold the cabinet splash
+                // screen hostage on every open.
+                void api.post<AuthResponse>('/auth/session', undefined, { timeout: 4500 })
+                    .then(({ data }) => saveAuthenticatedAccount(data))
+                    .catch(() => undefined);
                 if (!cancelled) setReady(true);
                 return;
             }
@@ -660,9 +661,8 @@ function WorkspaceEntry() {
 
 function App() {
     return (
-        <TelegramWebAppBootstrap>
+        <>
             <PwaManager />
-            <OfflineTextSync />
             <Routes>
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/auth" element={<AuthCallback />} />
@@ -672,16 +672,19 @@ function App() {
                 <Route
                     path="/*"
                     element={
-                        <ProtectedRoute>
-                            <DeferredOverlays />
-                            <PlayerCloudSync />
-                            <OfflineDownloadProgressPanel />
-                            <WorkspaceEntry />
-                        </ProtectedRoute>
+                        <TelegramWebAppBootstrap>
+                            <OfflineTextSync />
+                            <ProtectedRoute>
+                                <DeferredOverlays />
+                                <PlayerCloudSync />
+                                <OfflineDownloadProgressPanel />
+                                <WorkspaceEntry />
+                            </ProtectedRoute>
+                        </TelegramWebAppBootstrap>
                     }
                 />
             </Routes>
-        </TelegramWebAppBootstrap>
+        </>
     );
 }
 
