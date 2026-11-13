@@ -72,6 +72,8 @@ group_manager_cache: dict[tuple[int, int], tuple[bool, float]] = {}
 PAGE_SIZE = 8
 PREVIEW_TTL_SECONDS = 300
 TEHRAN_TZ = timezone(timedelta(hours=3, minutes=30))
+MAX_DIRECT_TTS_TEXT_CHARS = 200_000
+DIRECT_TTS_TEXT_EXTENSIONS = {".txt", ".md", ".markdown", ".text"}
 FILE_ICONS = {"video": "🎬", "audio": "🎵", "document": "📄", "image": "🖼", "text": "📝"}
 TYPE_LABELS = {"all": "همه", "video": "فیلم", "audio": "آهنگ", "image": "عکس", "text": "متن", "document": "سند", "folder": "کشو"}
 SORT_LABELS = {"name": "نام", "type": "نوع", "size": "حجم", "duration": "مدت", "created": "تاریخ آپلود", "updated": "تاریخ ویرایش"}
@@ -83,6 +85,29 @@ def web_login_url(code: str) -> str:
     if not base_url.startswith(("http://", "https://")):
         base_url = f"https://{base_url}"
     return f"{base_url}/login?code={quote(code)}"
+
+
+async def read_direct_tts_document(client, message: Message) -> str:
+    """Read a small text document for TTS without indexing or storing it."""
+    document = getattr(message, "document", None)
+    if document is None:
+        return ""
+    file_name = str(getattr(document, "file_name", "") or "").lower()
+    mime_type = str(getattr(document, "mime_type", "") or "").lower()
+    if Path(file_name).suffix not in DIRECT_TTS_TEXT_EXTENSIONS and not mime_type.startswith("text/"):
+        return ""
+    downloaded = await client.download_media(message, in_memory=True)
+    if downloaded is None:
+        return ""
+    raw = downloaded.getvalue() if hasattr(downloaded, "getvalue") else bytes(downloaded)
+    if len(raw) > MAX_DIRECT_TTS_TEXT_CHARS * 4:
+        raise ValueError("فایل متنی برای تبدیل خیلی بزرگ است؛ حجم متن را کمتر از ۲۰۰ هزار نویسه نگه دار.")
+    for encoding in ("utf-8-sig", "utf-16", "cp1256"):
+        try:
+            return raw.decode(encoding).replace("\x00", "").strip()[:MAX_DIRECT_TTS_TEXT_CHARS]
+        except UnicodeDecodeError:
+            continue
+    raise ValueError("فایل متنی با کدگذاری قابل خواندن دریافت نشد؛ فایل را با UTF-8 ذخیره کن.")
 
 
 async def resolve_caption_folder(user_id: int, path: str | None) -> Folder | None:
@@ -1450,7 +1475,7 @@ async def help_command(client, message: Message):
 @tg_client.on_message(filters.command("tts") & filters.private)
 @react_to_request("👀")
 async def tts_command(client, message: Message):
-    """Create a voice from command text or a replied-to text message."""
+    """Create a voice from text, a replied message, or a text document."""
     user = await get_or_create_user(
         message.from_user.id, message.from_user.username,
         message.from_user.first_name, message.from_user.last_name,
@@ -1459,9 +1484,24 @@ async def tts_command(client, message: Message):
     if not tts_queue.available and not personal_keys:
         await reply_to_request(message, await bot_message("tts_unavailable"))
         return
-    direct_text = message.text.split(maxsplit=1)[1].strip() if message.text and len(message.text.split(maxsplit=1)) > 1 else ""
+    command_text = str(message.text or message.caption or "")
+    command_parts = command_text.split(maxsplit=1)
+    direct_text = command_parts[1].strip() if len(command_parts) > 1 else ""
+    temporary_requested = False
+    if direct_text:
+        first, _, remainder = direct_text.partition(" ")
+        if first.casefold() in {"temp", "temporary", "موقت", "send", "telegram"}:
+            temporary_requested = True
+            direct_text = remainder.strip()
     replied = message.reply_to_message
-    source_text = direct_text or ((replied.text or replied.caption or "").strip() if replied else "")
+    source_message = replied or (message if getattr(message, "document", None) else None)
+    source_text = direct_text or ((source_message.text or source_message.caption or "").strip() if source_message else "")
+    if not source_text and source_message is not None and getattr(source_message, "document", None):
+        try:
+            source_text = await read_direct_tts_document(client, source_message)
+        except ValueError as error:
+            await reply_to_request(message, f"❌ {error}")
+            return
     if not source_text:
         await reply_to_request(message, **tts_bot_settings_view(load_tts_settings(user)))
         return
@@ -1478,7 +1518,7 @@ async def tts_command(client, message: Message):
     job = TTSJob(
         user_id=user.id, telegram_id=user.telegram_id, text=source_text,
         title=title_line[:80], folder_id=folder_id,
-        preferences=preferences, output_mode=preferences.get("bot_output_mode", "save"),
+        preferences=preferences, output_mode="telegram" if temporary_requested else preferences.get("bot_output_mode", "save"),
         api_keys=personal_keys,
         request_message_id=message.id,
     )
