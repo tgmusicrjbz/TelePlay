@@ -66,6 +66,7 @@ link_delivery_modes: dict[int, str] = {}
 pending_stt_modes: dict[int, str] = {}
 pending_group_actions: dict[tuple[int, int], tuple[str, datetime] | tuple[str, datetime, int]] = {}
 pending_private_deliveries: dict[int, tuple[str, int, str, str, str, datetime]] = {}
+pending_link_quality: dict[str, dict] = {}
 claimed_stt_messages: set[tuple[int, int]] = set()
 loaded_ui_state_users: set[int] = set()
 group_manager_cache: dict[tuple[int, int], tuple[bool, float]] = {}
@@ -77,6 +78,13 @@ DIRECT_TTS_TEXT_EXTENSIONS = {".txt", ".md", ".markdown", ".text"}
 FILE_ICONS = {"video": "🎬", "audio": "🎵", "document": "📄", "image": "🖼", "text": "📝"}
 TYPE_LABELS = {"all": "همه", "video": "فیلم", "audio": "آهنگ", "image": "عکس", "text": "متن", "document": "سند", "folder": "کشو"}
 SORT_LABELS = {"name": "نام", "type": "نوع", "size": "حجم", "duration": "مدت", "created": "تاریخ آپلود", "updated": "تاریخ ویرایش"}
+YOUTUBE_QUALITY_OPTIONS = (
+    ("🎵 فقط صدا", "audio"),
+    ("📱 ۳۶۰p", "360"),
+    ("⚖️ ۴۸۰p", "480"),
+    ("🎬 ۷۲۰p", "720"),
+    ("✨ ۱۰۸۰p", "1080"),
+)
 
 
 def web_login_url(code: str) -> str:
@@ -85,6 +93,15 @@ def web_login_url(code: str) -> str:
     if not base_url.startswith(("http://", "https://")):
         base_url = f"https://{base_url}"
     return f"{base_url}/login?code={quote(code)}"
+
+
+def youtube_quality_keyboard(token: str) -> InlineKeyboardMarkup:
+    """Keep the YouTube quality choice compact and usable in PV and groups."""
+    buttons = [
+        InlineKeyboardButton(label, callback_data=f"link_quality:{token}:{quality}")
+        for label, quality in YOUTUBE_QUALITY_OPTIONS
+    ]
+    return InlineKeyboardMarkup([buttons[:2], buttons[2:4], buttons[4:]])
 
 
 async def read_direct_tts_document(client, message: Message) -> str:
@@ -2944,6 +2961,28 @@ async def handle_import_link(client, message: Message):
         await reply_to_request(message, await bot_message("link_service_unavailable"))
         message.stop_propagation()
         return
+    youtube_matches = [url for url in matches if "youtu" in url.lower()]
+    if youtube_matches:
+        token = secrets.token_urlsafe(8)
+        pending_link_quality[token] = {
+            "created_at": datetime.now(timezone.utc),
+            "matches": matches,
+            "user_id": user.id,
+            "telegram_id": user.telegram_id,
+            "destination_id": destination_id,
+            "request_message_id": message.id,
+            "chat_id": message.chat.id,
+            "is_group_import": destination_id is not None,
+            "delivery_mode": "telegram" if destination_id is not None else link_delivery_modes.get(message.from_user.id, "both"),
+        }
+        prompt = await reply_to_request(
+            message,
+            "🎬 کیفیت دریافت یوتیوب را انتخاب کن:\nبرای چند لینک یوتیوب، این انتخاب روی همه اعمال می‌شود.",
+            reply_markup=youtube_quality_keyboard(token),
+        )
+        asyncio.create_task(delete_preview_later(client, prompt.chat.id, prompt.id, 120))
+        message.stop_propagation()
+        return
     count = to_persian_digits(str(len(matches)))
     asyncio.create_task(acknowledge_link_request(client, message))
     status_message = await reply_to_request(message, await bot_message("link_queued", count=count, queue_note=""))
@@ -3036,6 +3075,63 @@ async def handle_text_note(client, message: Message):
 async def handle_callback(client, callback: CallbackQuery):
     """Handle inline button callbacks."""
     data = callback.data
+    if data.startswith("link_quality:"):
+        try:
+            _, token, quality = data.split(":", 2)
+        except ValueError:
+            await callback.answer("این انتخاب معتبر نیست.", show_alert=True)
+            return
+        valid_qualities = {value for _, value in YOUTUBE_QUALITY_OPTIONS}
+        pending = pending_link_quality.pop(token, None)
+        if quality not in valid_qualities or pending is None:
+            await callback.answer("این درخواست منقضی شده؛ لینک را دوباره بفرست.", show_alert=True)
+            return
+        if callback.from_user.id != pending["telegram_id"] or callback.message.chat.id != pending["chat_id"]:
+            await callback.answer("این انتخاب برای درخواست شما نیست.", show_alert=True)
+            return
+        if datetime.now(timezone.utc) - pending["created_at"] > timedelta(minutes=2):
+            await callback.answer("زمان انتخاب کیفیت تمام شده؛ لینک را دوباره بفرست.", show_alert=True)
+            return
+        try:
+            await callback.answer("✅ انتخاب شد؛ دریافت لینک شروع شد.")
+            await safe_edit(callback.message, "⏳ لینک دریافت شد و در حال ثبت در صف است…")
+            is_group_import = bool(pending["is_group_import"])
+            if is_group_import:
+                async with async_session() as db:
+                    await consume_group_quota(
+                        db, chat_id=pending["chat_id"], telegram_user_id=callback.from_user.id,
+                        operation="link", amount=len(pending["matches"]),
+                        title=callback.message.chat.title,
+                    )
+            else:
+                await load_user_ui_state(callback.from_user.id)
+            delivery_mode = pending["delivery_mode"]
+            positions: list[int] = []
+            for raw_url in pending["matches"]:
+                url = raw_url.rstrip(".,;!?)]}>'\"")
+                selected_quality = quality if "youtu" in url.lower() else "auto"
+                positions.append(await link_importer.enqueue(ImportJob(
+                    url=url, user_id=pending["user_id"], telegram_id=pending["telegram_id"], folder_id=None,
+                    quality=selected_quality, notify=True,
+                    notification_chat_id=pending["chat_id"] if is_group_import else None,
+                    request_message_id=pending["request_message_id"], visible_to_user=not is_group_import,
+                    default_folder=not is_group_import, save_to_library=delivery_mode != "telegram",
+                    send_to_telegram=delivery_mode != "library",
+                    destination_ids=[pending["destination_id"]] if pending["destination_id"] is not None else [],
+                )))
+            first_position = min(positions) if positions else 1
+            count = to_persian_digits(str(len(pending["matches"])))
+            queue_note = f" · شروع از نوبت {to_persian_digits(str(first_position))}" if first_position > 1 else ""
+            await safe_edit(callback.message, await bot_message("link_queued", count=count, queue_note=queue_note))
+            asyncio.create_task(delete_preview_later(client, callback.message.chat.id, callback.message.id, 30))
+        except ValueError as error:
+            await safe_edit(callback.message, f"⛔ {error}")
+            asyncio.create_task(delete_preview_later(client, callback.message.chat.id, callback.message.id, 30))
+        except Exception:
+            logger.exception("Could not enqueue selected-quality link import")
+            await safe_edit(callback.message, await bot_message("link_enqueue_failed"))
+            asyncio.create_task(delete_preview_later(client, callback.message.chat.id, callback.message.id, 30))
+        return
     async with async_session() as db:
         known_user = (await db.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one_or_none()
     group_settings_callback = data.startswith(("grpq:", "grpquota:", "grpvoice:", "grpmanage:", "grpmenu:"))
