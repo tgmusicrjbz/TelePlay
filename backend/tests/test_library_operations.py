@@ -1651,7 +1651,7 @@ class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("search", [command.command for command in group_commands])
         self.assertEqual(
             {command.command for command in group_commands},
-            {"komod", "tts", "stt", "link", "gplaylist", "sendto", "privatelink", "group_usage", "group_settings", "connect_here"},
+            {"komod", "tts", "stt", "link", "gplaylist", "group_storage", "sendto", "privatelink", "group_usage", "group_settings", "connect_here"},
         )
         self.assertTrue(all(command.description for commands in command_sets for command in commands))
         client.set_bot_name.assert_awaited_once_with("🗂 کمد | درایو ابری تلگرام")

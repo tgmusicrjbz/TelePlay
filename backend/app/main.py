@@ -32,7 +32,7 @@ from .stt import stt_queue
 from .monitoring import source_monitor_service, telegram_monitor_pool
 from .media_studio import media_studio
 from .security_headers import browser_security_headers
-from .routers import files_router, folders_router, streaming_router, auth_router, tv_router, playlists_router, accounts_router, tts_router, stt_router, packs_router, bot_messages_router, admin_groups_router, instagram_router, rooms_router, shares_router, shares_short_router
+from .routers import files_router, folders_router, streaming_router, auth_router, tv_router, playlists_router, accounts_router, tts_router, stt_router, packs_router, bot_messages_router, admin_groups_router, instagram_router, rooms_router, shares_router, shares_short_router, group_cabinets_router
 from .routers.delivery import router as delivery_router
 from .routers.media_studio import router as media_studio_router
 
@@ -260,6 +260,7 @@ app.include_router(instagram_router, prefix="/api")
 app.include_router(rooms_router, prefix="/api")
 app.include_router(shares_router, prefix="/api")
 app.include_router(shares_short_router)
+app.include_router(group_cabinets_router, prefix="/api")
 app.include_router(media_studio_router, prefix="/api")
 
 

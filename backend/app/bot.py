@@ -36,7 +36,7 @@ from .tts import TTSJob, VOICE_OPTIONS, consume_tts_quota, load_tts_settings, ro
 from .stt import STTJob, consume_stt_quota, stt_queue
 from .gemini_keys import decrypt_user_keys
 from .link_captions import render_link_caption
-from .group_tools import consume_file_link_quota, consume_group_quota, get_group_usage, get_group_usage_breakdown, get_or_create_group_settings, get_or_create_group_cabinet, get_group_voice, set_group_voice, is_global_admin
+from .group_tools import consume_file_link_quota, consume_group_quota, ensure_group_cabinet_member, get_group_usage, get_group_usage_breakdown, get_or_create_group_settings, get_or_create_group_cabinet, get_group_voice, set_group_voice, is_global_admin
 from .bot_messages import bot_message
 from .bot_link_feedback import acknowledge_link_request, acknowledge_request, react_to_request, reply_to_request
 from .instagram_inbox import pair_sender_with_telegram
@@ -385,12 +385,20 @@ def _quota_text(used: int, limit: int) -> str:
     return f"{to_persian_digits(used)} از {to_persian_digits(limit)}" if limit else f"{to_persian_digits(used)} از نامحدود"
 
 
-def group_menu_keyboard(management_url: str | None = None) -> InlineKeyboardMarkup:
+def group_mini_app_button(chat_id: int) -> InlineKeyboardButton | None:
+    """Open the group cabinet with Telegram WebApp initData authentication."""
+    base_url = settings.web_base_url.strip().rstrip('/')
+    if base_url.startswith('http://') or not base_url.startswith(('http://', 'https://')):
+        return None
+    return InlineKeyboardButton("🌐 کمد گروه در مینی‌اپ", web_app=WebAppInfo(url=f"{base_url}/?group_cabinet={chat_id}"))
+
+
+def group_menu_keyboard(management_url: str | None = None, group_chat_id: int | None = None) -> InlineKeyboardMarkup:
     management_button = (
         InlineKeyboardButton("⚙️ مدیریت خصوصی", url=management_url)
         if management_url else InlineKeyboardButton("⚙️ مدیریت خصوصی", callback_data="grpmenu:settings")
     )
-    return InlineKeyboardMarkup([
+    rows = [
         [InlineKeyboardButton("🎙 متن به صدا", callback_data="grpmenu:tts"),
          InlineKeyboardButton("📝 صوت به متن", callback_data="grpmenu:stt")],
         [InlineKeyboardButton("🔗 دریافت لینک", callback_data="grpmenu:link"),
@@ -398,7 +406,11 @@ def group_menu_keyboard(management_url: str | None = None) -> InlineKeyboardMark
         [InlineKeyboardButton("🗄️ کمد گروه", callback_data="grpmenu:cabinet"),
          InlineKeyboardButton("🎧 پلی‌لیست‌های گروه", callback_data="grpmenu:playlists")],
         [InlineKeyboardButton("💡 راهنما", callback_data="grpmenu:guide"), management_button],
-    ])
+    ]
+    mini_app = group_mini_app_button(group_chat_id) if group_chat_id is not None else None
+    if mini_app:
+        rows.insert(4, [mini_app])
+    return InlineKeyboardMarkup(rows)
 
 
 def group_menu_text() -> str:
@@ -604,7 +616,7 @@ async def group_usage_view(chat_id: int) -> dict:
     async with async_session() as db:
         group, total, members = await get_group_usage_breakdown(db, chat_id)
     if group is None:
-        return {"text": "اطلاعات این گروه پیدا نشد.", "reply_markup": group_menu_keyboard()}
+        return {"text": "اطلاعات این گروه پیدا نشد.", "reply_markup": group_menu_keyboard(group_chat_id=chat_id)}
     operations = (("tts", "🎙 متن به صدا"), ("stt", "📝 صوت به متن"), ("link", "🔗 لینک"))
     lines = [f"📊 مصرف امروز {group.title}", ""]
     for operation, label in operations:
@@ -1367,6 +1379,12 @@ async def render_group_cabinet(message: Message, chat_id: int, page: int = 0) ->
     """Render the shared group cabinet with Telegram-native controls."""
     async with async_session() as db:
         cabinet = await get_or_create_group_cabinet(db, chat_id, title="کمد گروه")
+        if getattr(message, "from_user", None):
+            user = await get_or_create_user(
+                message.from_user.id, message.from_user.username,
+                message.from_user.first_name, message.from_user.last_name,
+            )
+            await ensure_group_cabinet_member(db, cabinet.id, user.id)
         await db.commit()
         items = (await db.execute(
             select(GroupCabinetItem).where(GroupCabinetItem.cabinet_id == cabinet.id)
@@ -1400,6 +1418,22 @@ async def add_to_group_cabinet(file_id: int, chat_id: int, user_id: int) -> bool
         ))).scalar_one_or_none()
         if existing is not None:
             return False
+        day_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        if cabinet.member_daily_add_limit:
+            member_count = (await db.execute(select(func.count(GroupCabinetItem.id)).where(
+                GroupCabinetItem.cabinet_id == cabinet.id,
+                GroupCabinetItem.added_by_user_id == user_id,
+                GroupCabinetItem.created_at >= day_start,
+            ))).scalar_one()
+            if member_count >= cabinet.member_daily_add_limit:
+                raise ValueError("سهمیهٔ روزانهٔ افزودن فایل به کمد گروه برای شما تمام شده است.")
+        if cabinet.max_storage_bytes:
+            used = (await db.execute(select(func.coalesce(func.sum(File.file_size), 0)).join(
+                GroupCabinetItem, GroupCabinetItem.file_id == File.id,
+            ).where(GroupCabinetItem.cabinet_id == cabinet.id))).scalar_one() or 0
+            file_size = (await db.execute(select(File.file_size).where(File.id == file_id))).scalar_one_or_none() or 0
+            if used + file_size > cabinet.max_storage_bytes:
+                raise ValueError("فضای کمد گروه پر شده است.")
         db.add(GroupCabinetItem(cabinet_id=cabinet.id, file_id=file_id, added_by_user_id=user_id))
         await db.commit()
         return True
@@ -1449,7 +1483,10 @@ async def index_group_playlist_media(message: Message) -> File | None:
         ).order_by(File.id.asc()))).scalars().first()
         if existing is not None:
             return existing
-    target_channel = user.storage_channel_id or settings.telegram_storage_channel_id
+    async with async_session() as db:
+        group_cabinet = (await db.execute(select(GroupCabinet).where(GroupCabinet.chat_id == message.chat.id))).scalar_one_or_none()
+        group_storage_channel = group_cabinet.storage_channel_id if group_cabinet else None
+    target_channel = group_storage_channel or user.storage_channel_id or settings.telegram_storage_channel_id
     forwarded = await forward_to_storage_channel(replied, target_channel)
     stored = next((getattr(forwarded, name, None) for name in ("audio", "voice", "video", "video_note", "document") if getattr(forwarded, name, None)), None)
     if stored is None:
@@ -2291,7 +2328,7 @@ async def handle_pending_group_action(client, message: Message):
             await group_tts_command(client, message, message)
             if prompt_message_id:
                 with contextlib.suppress(Exception):
-                    await client.edit_message_text(message.chat.id, prompt_message_id, "✅ متن دریافت شد و تبدیل در صف قرار گرفت.", reply_markup=group_menu_keyboard())
+                    await client.edit_message_text(message.chat.id, prompt_message_id, "✅ متن دریافت شد و تبدیل در صف قرار گرفت.", reply_markup=group_menu_keyboard(group_chat_id=message.chat.id))
         except Exception as error:
             logger.exception("Pending group TTS failed chat=%s user=%s: %s", message.chat.id, message.from_user.id, error)
             await reply_to_request(message, "❌ ثبت تبدیل متن به صدا انجام نشد؛ دوباره تلاش کن.")
@@ -2308,7 +2345,7 @@ async def handle_pending_group_action(client, message: Message):
             await group_stt_command(client, message, message)
             if prompt_message_id:
                 with contextlib.suppress(Exception):
-                    await client.edit_message_text(message.chat.id, prompt_message_id, "✅ فایل دریافت شد و استخراج متن در صف قرار گرفت.", reply_markup=group_menu_keyboard())
+                    await client.edit_message_text(message.chat.id, prompt_message_id, "✅ فایل دریافت شد و استخراج متن در صف قرار گرفت.", reply_markup=group_menu_keyboard(group_chat_id=message.chat.id))
         except Exception as error:
             logger.exception("Pending group STT failed chat=%s user=%s: %s", message.chat.id, message.from_user.id, error)
             await reply_to_request(message, "❌ ثبت تبدیل صوت به متن انجام نشد؛ دوباره تلاش کن.")
@@ -2319,7 +2356,7 @@ async def handle_pending_group_action(client, message: Message):
             return
         if prompt_message_id:
             with contextlib.suppress(Exception):
-                await client.edit_message_text(message.chat.id, prompt_message_id, "✅ لینک دریافت شد و در حال ثبت است.", reply_markup=group_menu_keyboard())
+                await client.edit_message_text(message.chat.id, prompt_message_id, "✅ لینک دریافت شد و در حال ثبت است.", reply_markup=group_menu_keyboard(group_chat_id=message.chat.id))
     elif action == "gcabinet_add":
         if not any(getattr(message, name, None) for name in ("audio", "voice", "video", "video_note")):
             await reply_to_request(message, "یک فایل صوتی یا ویدیویی بفرست تا به کمد گروه اضافه شود.")
@@ -2366,10 +2403,17 @@ async def handle_pending_group_action(client, message: Message):
 @react_to_request("👀")
 async def group_menu_command(client, message: Message):
     if await require_connected_group(message):
+        if message.from_user:
+            manager = await get_or_create_user(message.from_user.id, message.from_user.username, message.from_user.first_name, message.from_user.last_name)
+            is_manager = await is_group_manager(client, message.chat.id, message.from_user.id)
+            async with async_session() as db:
+                cabinet = await get_or_create_group_cabinet(db, message.chat.id, manager.id, "کمد گروه")
+                await ensure_group_cabinet_member(db, cabinet.id, manager.id, "owner" if is_manager else "viewer")
+                await db.commit()
         management_url = None
         with contextlib.suppress(Exception):
             management_url = await group_settings_start_url(client, message.chat.id)
-        menu = await reply_to_request(message, group_menu_text(), reply_markup=group_menu_keyboard(management_url))
+        menu = await reply_to_request(message, group_menu_text(), reply_markup=group_menu_keyboard(management_url, message.chat.id))
         asyncio.create_task(delete_preview_later(client, menu.chat.id, menu.id, 180))
         with contextlib.suppress(Exception):
             await message.delete()
@@ -2599,6 +2643,36 @@ async def group_playlists_command(client, message: Message):
         await reply_to_request(message, "حالا روی یک فایل صوتی یا ویدیویی ریپلای کن و همان پیام را بفرست.")
         return
     await reply_to_request(message, "دستورهای قابل استفاده: `/gplaylist`، `/gplaylist new نام` و `/gplaylist add شناسه`.")
+
+
+@tg_client.on_message(filters.command(["group_storage", "gstorage"]) & filters.group)
+@react_to_request("🗄️")
+async def group_storage_command(client, message: Message):
+    """Configure the optional dedicated Telegram storage channel for a group."""
+    if not message.from_user or not await require_connected_group(message):
+        return
+    if not await is_group_manager(client, message.chat.id, message.from_user.id):
+        await reply_to_request(message, "فقط مدیرهای گروه می‌توانند فضای ذخیره‌سازی گروه را تنظیم کنند.")
+        return
+    value = str((message.command or [None, ""])[1] or "").strip().lower()
+    if value in {"", "none", "off", "خاموش"}:
+        channel_id = None
+    else:
+        try:
+            channel_id = int(value)
+            if channel_id >= 0:
+                raise ValueError
+        except ValueError:
+            await reply_to_request(message, "آیدی عددی کانال خصوصی را بفرست؛ مثلاً `/group_storage -1001234567890` یا برای برگشت به فضای قبلی `/group_storage off`.")
+            return
+    user = await get_or_create_user(message.from_user.id, message.from_user.username, message.from_user.first_name, message.from_user.last_name)
+    async with async_session() as db:
+        cabinet = await get_or_create_group_cabinet(db, message.chat.id, user.id, "کمد گروه")
+        cabinet.storage_channel_id = channel_id
+        await ensure_group_cabinet_member(db, cabinet.id, user.id, "owner")
+        await db.commit()
+    label = "فضای ذخیره‌سازی پیش‌فرض کاربر" if channel_id is None else str(channel_id)
+    await reply_to_request(message, f"✅ فضای ذخیره‌سازی کمد گروه روی {label} تنظیم شد.\nربات باید در کانال انتخاب‌شده اجازهٔ ارسال پیام داشته باشد.")
 
 
 @tg_client.on_message(filters.command("newfolder") & filters.private)
@@ -3193,7 +3267,7 @@ async def connect_current_chat(client, message: Message):
         await db.commit()
     await reply_to_request(message,
         await bot_message("group_connected" if approved else "group_approval_pending"),
-        reply_markup=group_menu_keyboard() if approved else None,
+        reply_markup=group_menu_keyboard(group_chat_id=message.chat.id) if approved else None,
     )
 
 
@@ -3557,7 +3631,7 @@ async def handle_callback(client, callback: CallbackQuery):
             return
         if action == "home":
             pending_group_actions.pop((group_chat_id, callback.from_user.id), None)
-            await callback.message.edit_text(group_menu_text(), reply_markup=group_menu_keyboard())
+            await callback.message.edit_text(group_menu_text(), reply_markup=group_menu_keyboard(group_chat_id=group_chat_id))
             await callback.answer()
         elif action == "cancel":
             pending_group_actions.pop((group_chat_id, callback.from_user.id), None)

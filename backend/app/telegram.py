@@ -107,6 +107,7 @@ async def configure_main_client(c) -> None:
             BotCommand("stt", "تبدیل صوت یا ویدیوی ریپلای‌شده به متن"),
             BotCommand("link", "لینک فایل ریپلای‌شده"),
             BotCommand("gplaylist", "مدیریت پلی‌لیست‌های گروه"),
+            BotCommand("group_storage", "تنظیم کانال ذخیره‌سازی گروه"),
             BotCommand("sendto", "ارسال خصوصی فایل برای یک عضو"),
             BotCommand("privatelink", "ارسال خصوصی لینک برای یک عضو"),
             BotCommand("group_usage", "نمایش مصرف امروز گروه"),

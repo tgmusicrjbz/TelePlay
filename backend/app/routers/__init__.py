@@ -16,6 +16,7 @@ from .admin_groups import router as admin_groups_router
 from .instagram import router as instagram_router
 from .rooms import router as rooms_router
 from .shares import router as shares_router, short_router as shares_short_router
+from .group_cabinets import router as group_cabinets_router
 
-__all__ = ["files_router", "folders_router", "streaming_router", "auth_router", "tv_router", "playlists_router", "accounts_router", "tts_router", "stt_router", "packs_router", "bot_messages_router", "admin_groups_router", "instagram_router", "rooms_router", "shares_router", "shares_short_router"]
+__all__ = ["files_router", "folders_router", "streaming_router", "auth_router", "tv_router", "playlists_router", "accounts_router", "tts_router", "stt_router", "packs_router", "bot_messages_router", "admin_groups_router", "instagram_router", "rooms_router", "shares_router", "shares_short_router", "group_cabinets_router"]
 

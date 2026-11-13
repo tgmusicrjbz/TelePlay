@@ -10,7 +10,7 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from .. import telegram
 from ..database import get_db
 from ..models import GroupCabinet, GroupCabinetItem, TelegramDestination, TelegramGroupSettings, TelegramGroupUsage, User
-from ..group_tools import get_group_voice, set_group_voice
+from ..group_tools import get_group_voice, get_or_create_group_cabinet, set_group_voice
 from ..tts import VOICE_OPTIONS
 from .accounts import require_admin
 
@@ -30,6 +30,8 @@ class GroupSettingsUpdate(BaseModel):
     member_stt_daily_limit: int | None = None
     member_link_daily_limit: int | None = None
     voice_name: str | None = None
+    group_cabinet_max_bytes: int | None = None
+    group_cabinet_member_daily_limit: int | None = None
 
 
 async def _serialize_groups(db: AsyncSession) -> list[dict]:
@@ -77,6 +79,7 @@ async def _serialize_groups(db: AsyncSession) -> list[dict]:
             "thirty": {f"{operation}_count": 0 for operation in OPERATIONS},
             "members": set(),
         })
+        cabinet = await get_or_create_group_cabinet(db, group.chat_id, title="کمد گروه")
         result.append({
             "chat_id": group.chat_id, "title": group.title,
             "approved": bool(group.approved), "chat_type": destination.chat_type,
@@ -91,6 +94,9 @@ async def _serialize_groups(db: AsyncSession) -> list[dict]:
                 "active_members": len(periods["members"]),
             },
             "voice_name": await get_group_voice(db, group.chat_id),
+            "group_cabinet_max_bytes": int(cabinet.max_storage_bytes or 0),
+            "group_cabinet_member_daily_limit": int(cabinet.member_daily_add_limit or 0),
+            "group_cabinet_storage_channel_id": cabinet.storage_channel_id,
         })
     return result
 
@@ -109,6 +115,12 @@ async def update_group(chat_id: int, payload: GroupSettingsUpdate, _: User = Dep
     values = payload.model_dump(exclude_unset=True)
     approved = values.pop("approved", None)
     voice_name = values.pop("voice_name", None)
+    cabinet_max_bytes = values.pop("group_cabinet_max_bytes", None)
+    cabinet_member_limit = values.pop("group_cabinet_member_daily_limit", None)
+    if cabinet_max_bytes is not None and not 0 <= int(cabinet_max_bytes) <= 1_000_000_000_000:
+        raise HTTPException(status_code=422, detail="سقف فضای کمد گروه معتبر نیست.")
+    if cabinet_member_limit is not None and not 0 <= int(cabinet_member_limit) <= 100_000:
+        raise HTTPException(status_code=422, detail="سقف افزودن روزانهٔ عضو معتبر نیست.")
     if voice_name is not None and voice_name not in {item["value"] for item in VOICE_OPTIONS}:
         raise HTTPException(status_code=422, detail="گوینده انتخاب‌شده معتبر نیست.")
     for key, value in values.items():
@@ -119,6 +131,12 @@ async def update_group(chat_id: int, payload: GroupSettingsUpdate, _: User = Dep
         group.approved = approved
         for destination in destinations:
             destination.enabled = approved
+    if cabinet_max_bytes is not None or cabinet_member_limit is not None:
+        cabinet = await get_or_create_group_cabinet(db, chat_id, title="کمد گروه")
+        if cabinet_max_bytes is not None:
+            cabinet.max_storage_bytes = int(cabinet_max_bytes)
+        if cabinet_member_limit is not None:
+            cabinet.member_daily_add_limit = int(cabinet_member_limit)
     await db.commit()
     if voice_name is not None:
         await set_group_voice(db, chat_id, voice_name)

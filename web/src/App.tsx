@@ -41,6 +41,7 @@ const FileDetailsSheet = lazyWithRecovery(() => import('./components/FileDetails
 const FileAIToolsModal = lazyWithRecovery(() => import('./components/FileAIToolsModal'),'file-ai-tools');
 const PublicSharePage = lazyWithRecovery(() => import('./components/PublicSharePage'),'public-share');
 const FileBrowser = lazyWithRecovery(() => import('./components/FileBrowser'),'file-browser');
+const GroupCabinetPage = lazy(() => import('./components/GroupCabinetPage'));
 
 function LazyFallback(){return <div dir="rtl" className="fixed inset-x-0 bottom-5 z-[400] mx-auto flex w-fit items-center gap-2 rounded-2xl border border-white/10 bg-dark-900/95 px-4 py-3 text-xs text-dark-200 shadow-2xl"><span className="h-4 w-4 animate-spin rounded-full border-2 border-primary-300 border-t-transparent"/>در حال آماده‌سازی…</div>}
 
@@ -647,6 +648,16 @@ function StorageChannelOnboarding({visible}:{visible:boolean}){
     return <div dir="rtl" className="fixed inset-0 z-[260] flex items-end justify-center bg-black/75 p-0 backdrop-blur-sm sm:items-center sm:p-4"><section className="w-full max-w-md rounded-t-3xl border border-white/10 bg-dark-900 p-5 shadow-2xl sm:rounded-3xl"><div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary-500/15 text-2xl">☁️</div><h2 className="mt-4 text-lg font-black">فضای شخصی خودت را وصل کن</h2><p className="mt-2 text-sm leading-7 text-dark-300">یک کانال خصوصی بساز و ربات کمد را مدیرش کن. از آن به بعد فایل‌های تازه داخل کانال خودت نگهداری می‌شوند و خیالت از فضای شخصی راحت است.</p><ol className="mt-4 space-y-2 text-xs leading-6 text-dark-400"><li className="rounded-xl bg-white/[.04] px-3 py-2">۱. در تلگرام یک کانال خصوصی بساز.</li><li className="rounded-xl bg-white/[.04] px-3 py-2">۲. ربات کمد را با اجازه ارسال و حذف پیام مدیر کن.</li><li className="rounded-xl bg-white/[.04] px-3 py-2">۳. آیدی عددی کانال را در تنظیمات فضای ذخیره‌سازی وارد کن.</li></ol><button onClick={openSettings} className="btn-primary mt-5 min-h-12 w-full">وصل کردن کانال شخصی</button><button onClick={()=>{sessionStorage.setItem('komod-storage-onboarding-dismissed','1');setDismissed(true)}} className="mt-2 min-h-10 w-full text-xs text-dark-500">فعلاً بعداً</button></section></div>;
 }
 
+function WorkspaceEntry() {
+    const [params] = useSearchParams();
+    const raw = params.get('group_cabinet');
+    const chatId = raw ? Number(raw) : NaN;
+    if (Number.isSafeInteger(chatId) && chatId < 0) {
+        return <Suspense fallback={<LazyFallback/>}><GroupCabinetPage chatId={chatId}/></Suspense>;
+    }
+    return <Suspense fallback={<LazyFallback/>}><FileBrowser /></Suspense>;
+}
+
 function App() {
     return (
         <TelegramWebAppBootstrap>
@@ -665,7 +676,7 @@ function App() {
                             <DeferredOverlays />
                             <PlayerCloudSync />
                             <OfflineDownloadProgressPanel />
-                            <Suspense fallback={<LazyFallback/>}><FileBrowser /></Suspense>
+                            <WorkspaceEntry />
                         </ProtectedRoute>
                     }
                 />

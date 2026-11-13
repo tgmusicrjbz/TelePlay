@@ -176,6 +176,9 @@ class GroupCabinet(Base):
     chat_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(255), default="کمد گروه", nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    storage_channel_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    max_storage_bytes: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    member_daily_add_limit: Mapped[int] = mapped_column(Integer, default=50, nullable=False)
     created_by_user_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
@@ -184,6 +187,26 @@ class GroupCabinet(Base):
 
     items: Mapped[List["GroupCabinetItem"]] = relationship(
         back_populates="cabinet", cascade="all, delete-orphan"
+    )
+    members: Mapped[List["GroupCabinetMember"]] = relationship(
+        back_populates="cabinet", cascade="all, delete-orphan"
+    )
+
+
+class GroupCabinetMember(Base):
+    """Cached group-cabinet membership and editor role."""
+    __tablename__ = "group_cabinet_members"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    cabinet_id: Mapped[int] = mapped_column(ForeignKey("group_cabinets.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(16), default="viewer", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    cabinet: Mapped["GroupCabinet"] = relationship(back_populates="members")
+
+    __table_args__ = (
+        UniqueConstraint("cabinet_id", "user_id", name="uq_group_cabinet_member"),
     )
 
 
