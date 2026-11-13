@@ -1858,6 +1858,29 @@ async def stt_command(client, message: Message):
 @tg_client.on_message(filters.command(["link", "playlink", "downloadlink"]) & (filters.private | filters.group))
 @react_to_request("👀")
 async def replied_file_link_command(client, message: Message):
+    """Handle a link command either as a reply or in the media caption.
+
+    A media message with ``/link`` in its caption is an ephemeral request. It
+    must not fall through to the regular Telegram upload handler and create a
+    library item just because the user asked for a link.
+    """
+    if not message.from_user:
+        return
+    direct_media = next((
+        getattr(message, name, None)
+        for name in ("audio", "voice", "video", "video_note", "animation", "document", "photo")
+        if getattr(message, name, None)
+    ), None)
+    if direct_media is not None and message.reply_to_message is None:
+        asyncio.create_task(_process_replied_file_link(client, message))
+        # The ordinary media handler runs after command handlers. Stop it so
+        # this one-shot link request never stores the source in the cabinet.
+        message.stop_propagation()
+        return
+    await _process_replied_file_link(client, message)
+
+
+async def _process_replied_file_link(client, message: Message):
     """Return signed 24-hour play/download links for a replied stored file."""
     if not message.from_user:
         return
