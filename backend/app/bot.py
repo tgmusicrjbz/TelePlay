@@ -1459,7 +1459,7 @@ async def render_group_playlist_detail(message: Message, chat_id: int, playlist_
         buttons.append(pagination_row(f"gplaylist:{playlist.id}", page, len(items)))
     buttons.extend([
         [InlineKeyboardButton("▶️ پخش از اول", callback_data=f"gplplay:{playlist.id}:0"), InlineKeyboardButton("🔀 شافل", callback_data=f"gplshuffle:{playlist.id}")],
-        [InlineKeyboardButton("➕ افزودن با ریپلای", callback_data=f"gpladd:{playlist.id}"), InlineKeyboardButton("🗑 حذف پلی‌لیست", callback_data=f"gpldelete:{playlist.id}", style=enums.ButtonStyle.DANGER)],
+        [InlineKeyboardButton("➕ افزودن فایل", callback_data=f"gpladd:{playlist.id}"), InlineKeyboardButton("🗑 حذف پلی‌لیست", callback_data=f"gpldelete:{playlist.id}", style=enums.ButtonStyle.DANGER)],
         [InlineKeyboardButton("↩️ پلی‌لیست‌های گروه", callback_data="gplaylists:0")],
     ])
     text = f"🎼 **{escape_markdown(playlist.name)}**\n{to_persian_digits(str(len(items)))} مورد"
@@ -1468,15 +1468,61 @@ async def render_group_playlist_detail(message: Message, chat_id: int, playlist_
     await safe_edit(message, text, reply_markup=InlineKeyboardMarkup(buttons))
 
 
-async def index_group_playlist_media(message: Message) -> File | None:
+def group_playlist_media_type(message: Message | object) -> str | None:
+    """Return the playable media type, including audio/video sent as a document."""
+    if getattr(message, "video", None) or getattr(message, "video_note", None):
+        return "video"
+    if getattr(message, "audio", None) or getattr(message, "voice", None):
+        return "audio"
+    document = getattr(message, "document", None)
+    mime_type = str(getattr(document, "mime_type", "") or "").casefold()
+    if mime_type.startswith("video/"):
+        return "video"
+    if mime_type.startswith("audio/"):
+        return "audio"
+    return None
+
+
+async def group_playlist_picker(message: Message, chat_id: int, source_message_id: int) -> None:
+    """Let a member pick a destination playlist after replying to one media message."""
+    async with async_session() as db:
+        playlists = (await db.execute(
+            select(Playlist).where(Playlist.group_chat_id == chat_id)
+            .order_by(Playlist.position, Playlist.id)
+        )).scalars().all()
+    if not playlists:
+        await reply_to_request(message, "هنوز پلی‌لیستی در گروه نیست؛ اول با `/gplaylist new نام` یکی بساز.")
+        return
+    buttons = [[InlineKeyboardButton(
+        f"🎧 {playlist.name[:38]}",
+        callback_data=f"gplpick:{playlist.id}:{source_message_id}",
+    )] for playlist in playlists[:20]]
+    buttons.append([InlineKeyboardButton("✕ انصراف", callback_data="gplaylists:0")])
+    await reply_to_request(
+        message,
+        "این فایل به کدام پلی‌لیست اضافه شود؟",
+        reply_markup=InlineKeyboardMarkup(buttons),
+    )
+
+
+async def index_group_playlist_media(
+    message: Message,
+    *,
+    source_message: Message | None = None,
+    actor: object | None = None,
+    chat_id: int | None = None,
+) -> File | None:
     """Forward one group media item to storage and return its library record."""
-    replied = message.reply_to_message or message
+    replied = source_message or message.reply_to_message or message
+    actor = actor or message.from_user
+    chat_id = chat_id if chat_id is not None else message.chat.id
     media = next((getattr(replied, name, None) for name in ("audio", "voice", "video", "video_note", "document") if getattr(replied, name, None)), None)
-    if media is None or not (replied.audio or replied.voice or replied.video or replied.video_note):
+    file_type = group_playlist_media_type(replied)
+    if media is None or file_type is None:
         return None
     user = await get_or_create_user(
-        message.from_user.id, message.from_user.username,
-        message.from_user.first_name, message.from_user.last_name,
+        actor.id, getattr(actor, "username", None),
+        getattr(actor, "first_name", None), getattr(actor, "last_name", None),
     )
     async with async_session() as db:
         existing = (await db.execute(select(File).where(
@@ -1487,18 +1533,17 @@ async def index_group_playlist_media(message: Message) -> File | None:
     group_storage_channel = None
     try:
         async with async_session() as db:
-            group_cabinet = (await db.execute(select(GroupCabinet).where(GroupCabinet.chat_id == message.chat.id))).scalar_one_or_none()
+            group_cabinet = (await db.execute(select(GroupCabinet).where(GroupCabinet.chat_id == chat_id))).scalar_one_or_none()
             group_storage_channel = group_cabinet.storage_channel_id if group_cabinet else None
     except Exception:
         # Group playlists remain usable if the optional cabinet migration is
         # temporarily unavailable; fall back to the user's storage channel.
-        logger.exception("Could not read group cabinet storage for playlist media chat=%s", message.chat.id)
+        logger.exception("Could not read group cabinet storage for playlist media chat=%s", chat_id)
     target_channel = group_storage_channel or user.storage_channel_id or settings.telegram_storage_channel_id
     forwarded = await forward_to_storage_channel(replied, target_channel)
     stored = next((getattr(forwarded, name, None) for name in ("audio", "voice", "video", "video_note", "document") if getattr(forwarded, name, None)), None)
     if stored is None:
         return None
-    file_type = "video" if replied.video or replied.video_note else "audio"
     raw_name = getattr(media, "file_name", None) or (f"video_{replied.id}.mp4" if file_type == "video" else f"audio_{replied.id}.ogg")
     async with async_session() as db:
         folder = await ensure_default_folder(db, user.id)
@@ -1517,17 +1562,28 @@ async def index_group_playlist_media(message: Message) -> File | None:
         return record
 
 
-async def add_group_playlist_media(message: Message, playlist_id: int) -> tuple[File | None, bool, str | None]:
+async def add_group_playlist_media(
+    message: Message,
+    playlist_id: int,
+    *,
+    source_message: Message | None = None,
+    actor: object | None = None,
+    chat_id: int | None = None,
+) -> tuple[File | None, bool, str | None]:
     """Index one group media message and attach it to a group playlist."""
-    file = await index_group_playlist_media(message)
+    actor = actor or message.from_user
+    chat_id = chat_id if chat_id is not None else message.chat.id
+    file = await index_group_playlist_media(
+        message, source_message=source_message, actor=actor, chat_id=chat_id,
+    )
     if file is None:
         return None, False, "یک فایل صوتی یا ویدیویی را ریپلای کن."
     # A playlist is useful on its own. Cabinet indexing is best effort so a
     # cabinet quota or migration issue cannot block the playlist operation.
     with contextlib.suppress(Exception):
-        await add_to_group_cabinet(file.id, message.chat.id, message.from_user.id)
+        await add_to_group_cabinet(file.id, chat_id, actor.id)
     async with async_session() as db:
-        playlist = (await db.execute(group_playlist_query(playlist_id, message.chat.id))).scalar_one_or_none()
+        playlist = (await db.execute(group_playlist_query(playlist_id, chat_id))).scalar_one_or_none()
         if playlist is None:
             return file, False, "این پلی‌لیست دیگر وجود ندارد."
         if file.id in {item.file_id for item in playlist.items}:
@@ -2409,7 +2465,7 @@ async def handle_pending_group_action(client, message: Message):
             with contextlib.suppress(Exception):
                 await client.edit_message_text(message.chat.id, prompt_message_id, "✅ لینک دریافت شد و در حال ثبت است.", reply_markup=group_menu_keyboard(group_chat_id=message.chat.id))
     elif action == "gcabinet_add":
-        if not any(getattr(message, name, None) for name in ("audio", "voice", "video", "video_note")):
+        if group_playlist_media_type(message) is None:
             await reply_to_request(message, "یک فایل صوتی یا ویدیویی بفرست تا به کمد گروه اضافه شود.")
             return
         try:
@@ -2425,7 +2481,7 @@ async def handle_pending_group_action(client, message: Message):
             await reply_to_request(message, "❌ افزودن فایل به کمد گروه انجام نشد؛ دوباره تلاش کن.")
     elif action == "gplaylist_add":
         playlist_id = int(prompt_message_id or 0)
-        if not any(getattr(message, name, None) for name in ("audio", "voice", "video", "video_note")):
+        if group_playlist_media_type(message) is None:
             await reply_to_request(message, "یک فایل صوتی یا ویدیویی بفرست تا به پلی‌لیست اضافه شود.")
             return
         try:
@@ -2678,8 +2734,15 @@ async def group_playlists_command(client, message: Message):
         await render_group_playlist_detail(panel, message.chat.id, playlist.id)
         return
     if action == "add":
-        if len(parts) < 3 or not str(parts[2]).isdigit():
-            await reply_to_request(message, "برای افزودن، روی فایل ریپلای کن و بنویس `/gplaylist add شناسه`؛ شناسه را از فهرست پلی‌لیست ببین.")
+        replied = message.reply_to_message
+        if len(parts) < 3:
+            if replied is None or group_playlist_media_type(replied) is None:
+                await reply_to_request(message, "روی یک فایل صوتی یا ویدیویی ریپلای کن و فقط `/gplaylist add` را بفرست.")
+                return
+            await group_playlist_picker(message, message.chat.id, replied.id)
+            return
+        if not str(parts[2]).isdigit():
+            await reply_to_request(message, "شناسهٔ پلی‌لیست معتبر نیست. روی فایل ریپلای کن و فقط `/gplaylist add` را بفرست تا از فهرست انتخاب کنی.")
             return
         playlist_id = int(parts[2])
         async with async_session() as db:
@@ -2687,10 +2750,7 @@ async def group_playlists_command(client, message: Message):
         if playlist is None:
             await reply_to_request(message, "این پلی‌لیست گروه پیدا نشد.")
             return
-        replied_media = message.reply_to_message and any(
-            getattr(message.reply_to_message, name, None)
-            for name in ("audio", "voice", "video", "video_note")
-        )
+        replied_media = message.reply_to_message and group_playlist_media_type(message.reply_to_message) is not None
         if replied_media:
             try:
                 file, added, error = await add_group_playlist_media(message, playlist_id)
@@ -2711,7 +2771,7 @@ async def group_playlists_command(client, message: Message):
         )
         await reply_to_request(message, "حالا روی یک فایل صوتی یا ویدیویی ریپلای کن و همان پیام را بفرست.")
         return
-    await reply_to_request(message, "دستورهای قابل استفاده: `/gplaylist`، `/gplaylist new نام` و `/gplaylist add شناسه`.")
+    await reply_to_request(message, "دستورهای قابل استفاده: `/gplaylist`، `/gplaylist new نام` و ریپلای `/gplaylist add` روی فایل.")
 
 
 @tg_client.on_message(filters.command(["group_storage", "gstorage"]) & filters.group)
@@ -4127,6 +4187,47 @@ async def handle_callback(client, callback: CallbackQuery):
         await render_group_playlist_detail(callback.message, callback.message.chat.id, playlist_id)
         await callback.answer("ترتیب پلی‌لیست تصادفی شد.")
 
+    elif data.startswith("gplpick:"):
+        try:
+            _, playlist_id_raw, source_message_id_raw = data.split(":")
+            playlist_id, source_message_id = int(playlist_id_raw), int(source_message_id_raw)
+        except (TypeError, ValueError):
+            await callback.answer("این درخواست معتبر نیست.", show_alert=True)
+            return
+        if "private" in str(getattr(callback.message.chat, "type", "")).lower():
+            await callback.answer("این عملیات باید داخل همان گروه انجام شود.", show_alert=True)
+            return
+        async with async_session() as db:
+            playlist = (await db.execute(select(Playlist.id).where(
+                Playlist.id == playlist_id, Playlist.group_chat_id == callback.message.chat.id,
+            ))).scalar_one_or_none()
+        if playlist is None:
+            await callback.answer("این پلی‌لیست دیگر وجود ندارد.", show_alert=True)
+            return
+        try:
+            source_message = await client.get_messages(callback.message.chat.id, source_message_id)
+            if source_message is None or group_playlist_media_type(source_message) is None:
+                await callback.answer("فایل اصلی حذف شده یا قابل دسترسی نیست.", show_alert=True)
+                return
+            file, added, error = await add_group_playlist_media(
+                callback.message,
+                playlist_id,
+                source_message=source_message,
+                actor=callback.from_user,
+                chat_id=callback.message.chat.id,
+            )
+            if error:
+                await callback.answer(error, show_alert=True)
+                return
+            await render_group_playlist_detail(callback.message, callback.message.chat.id, playlist_id)
+            await callback.answer("به پلی‌لیست اضافه شد." if added else "این فایل از قبل در پلی‌لیست بود.")
+        except Exception:
+            logger.exception(
+                "Could not add picked group playlist media chat=%s playlist=%s source=%s",
+                callback.message.chat.id, playlist_id, source_message_id,
+            )
+            await callback.answer("افزودن فایل انجام نشد؛ دوباره تلاش کن.", show_alert=True)
+
     elif data.startswith("gpladd:"):
         playlist_id = int(data.split(":")[1])
         if "private" in str(getattr(callback.message.chat, "type", "")).lower():
@@ -4142,7 +4243,7 @@ async def handle_callback(client, callback: CallbackQuery):
         pending_group_actions[(callback.message.chat.id, callback.from_user.id)] = (
             "gplaylist_add", datetime.now(timezone.utc) + timedelta(minutes=2), playlist_id,
         )
-        await callback.answer("حالا یک پیام صوتی یا ویدیویی بفرست تا اضافه شود.", show_alert=True)
+        await callback.answer("فایل را بفرست؛ یا روی آن ریپلای کن و `/gplaylist add` را بزن.", show_alert=True)
 
     elif data.startswith("gplitem:"):
         _, playlist_id, file_id, page = data.split(":")

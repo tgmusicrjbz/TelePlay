@@ -1578,6 +1578,50 @@ class TelegramStartupTests(unittest.IsolatedAsyncioTestCase):
         queue_tts.assert_awaited_once_with(None, message, message)
         self.assertNotIn((-10055, 111), pending_group_actions)
 
+    async def test_group_playlist_accepts_playable_documents(self):
+        from app.telegram import build_clients
+        build_clients()
+        from app.bot import group_playlist_media_type
+
+        audio_document = SimpleNamespace(
+            audio=None, voice=None, video=None, video_note=None,
+            document=SimpleNamespace(mime_type="audio/mpeg"),
+        )
+        video_document = SimpleNamespace(
+            audio=None, voice=None, video=None, video_note=None,
+            document=SimpleNamespace(mime_type="video/mp4"),
+        )
+        regular_document = SimpleNamespace(
+            audio=None, voice=None, video=None, video_note=None,
+            document=SimpleNamespace(mime_type="application/pdf"),
+        )
+
+        self.assertEqual(group_playlist_media_type(audio_document), "audio")
+        self.assertEqual(group_playlist_media_type(video_document), "video")
+        self.assertIsNone(group_playlist_media_type(regular_document))
+
+    async def test_group_playlist_add_reply_opens_playlist_picker_without_id(self):
+        from app.telegram import build_clients
+        build_clients()
+        from app.bot import group_playlists_command
+
+        replied = SimpleNamespace(
+            id=807, audio=SimpleNamespace(), voice=None, video=None, video_note=None, document=None,
+        )
+        message = SimpleNamespace(
+            command=["gplaylist", "add"],
+            chat=SimpleNamespace(id=-10055),
+            from_user=SimpleNamespace(id=111, username="member", first_name="عضو", last_name=None),
+            reply_to_message=replied,
+            reply=AsyncMock(),
+        )
+        with patch("app.bot.require_connected_group", new_callable=AsyncMock, return_value=True), patch(
+            "app.bot.group_playlist_picker", new_callable=AsyncMock
+        ) as picker:
+            await group_playlists_command(SimpleNamespace(), message)
+
+        picker.assert_awaited_once_with(message, -10055, 807)
+
     async def test_optional_telegram_setup_does_not_block_web_startup(self):
         main_client = SimpleNamespace()
         helper_client = SimpleNamespace()
