@@ -391,6 +391,44 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             "client": ("127.0.0.1", 1234),
         })
 
+    async def test_group_cabinet_playlist_management_and_member_stream_access(self):
+        from app.models import GroupCabinet, GroupCabinetItem, GroupCabinetMember
+        from app.routers.group_cabinets import (
+            GroupPlaylistCreate, GroupPlaylistItemsUpdate,
+            add_group_playlist_items, create_group_playlist, get_group_cabinet,
+        )
+        from app.routers.streaming import accessible_media_file
+
+        async with async_session() as db:
+            owner = await db.get(User, self.user_id)
+            member = User(telegram_id=222)
+            db.add(member)
+            await db.flush()
+            cabinet = GroupCabinet(
+                chat_id=-10055, title="کمد آزمایش", created_by_user_id=owner.id,
+            )
+            db.add(cabinet)
+            await db.flush()
+            db.add_all([
+                GroupCabinetMember(cabinet_id=cabinet.id, user_id=owner.id, role="owner"),
+                GroupCabinetMember(cabinet_id=cabinet.id, user_id=member.id, role="viewer"),
+                GroupCabinetItem(cabinet_id=cabinet.id, file_id=self.direct_file_id, added_by_user_id=owner.id),
+            ])
+            await db.commit()
+
+            playlist = await create_group_playlist(
+                -10055, GroupPlaylistCreate(name="موسیقی گروه"), db, owner,
+            )
+            result = await add_group_playlist_items(
+                -10055, playlist["id"], GroupPlaylistItemsUpdate(file_ids=[self.direct_file_id]), db, owner,
+            )
+            self.assertEqual(result["added"], 1)
+            cabinet_payload = await get_group_cabinet(-10055, "", db, owner)
+            self.assertEqual(cabinet_payload["playlists"][0]["file_ids"], [self.direct_file_id])
+            shared = await accessible_media_file(db, self.direct_file_id, member)
+            self.assertIsNotNone(shared)
+            self.assertEqual(shared.id, self.direct_file_id)
+
     async def test_admin_health_reports_connected_bot_and_stuck_jobs(self):
         async with async_session() as db:
             user = await db.get(User, self.user_id)

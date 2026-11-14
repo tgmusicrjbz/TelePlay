@@ -18,7 +18,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from ..database import async_session, get_db
-from ..models import File, SecurityEvent, User
+from ..models import File, GroupCabinet, GroupCabinetItem, GroupCabinetMember, Playlist, PlaylistItem, SecurityEvent, User
 from ..auth import create_public_share_token, get_current_user, require_vault_access, verify_public_share_token
 from ..schemas import PublicShareUnlock
 from ..audit import add_security_event, request_ip
@@ -41,6 +41,41 @@ _audio_variant_locks: dict[int, asyncio.Lock] = {}
 _compatible_video_tasks: dict[int, asyncio.Task] = {}
 _compatible_video_status: dict[int, dict] = {}
 share_password_context = CryptContext(schemes=["pbkdf2_sha256"], pbkdf2_sha256__default_rounds=310_000, deprecated="auto")
+
+
+async def accessible_media_file(db: AsyncSession, file_id: int, user: User) -> File | None:
+    """Resolve owned media or media shared through an enabled group cabinet."""
+    file = (await db.execute(select(File).where(File.id == file_id))).scalar_one_or_none()
+    if file is None:
+        return None
+    if file.user_id == user.id:
+        return file
+    if file.is_hidden:
+        return None
+    cabinet_access = (await db.execute(
+        select(GroupCabinetMember.id)
+        .join(GroupCabinet, GroupCabinet.id == GroupCabinetMember.cabinet_id)
+        .join(GroupCabinetItem, GroupCabinetItem.cabinet_id == GroupCabinet.id)
+        .where(
+            GroupCabinetMember.user_id == user.id,
+            GroupCabinet.enabled.is_(True),
+            GroupCabinetItem.file_id == file_id,
+        ).limit(1)
+    )).scalar_one_or_none()
+    if cabinet_access is not None:
+        return file
+    playlist_access = (await db.execute(
+        select(GroupCabinetMember.id)
+        .join(GroupCabinet, GroupCabinet.id == GroupCabinetMember.cabinet_id)
+        .join(Playlist, Playlist.group_chat_id == GroupCabinet.chat_id)
+        .join(PlaylistItem, PlaylistItem.playlist_id == Playlist.id)
+        .where(
+            GroupCabinetMember.user_id == user.id,
+            GroupCabinet.enabled.is_(True),
+            PlaylistItem.file_id == file_id,
+        ).limit(1)
+    )).scalar_one_or_none()
+    return file if playlist_access is not None else None
 
 
 def media_type_for(file: File) -> str:
@@ -369,10 +404,7 @@ async def stream_file(
 ):
     """Stream file from Telegram with range request support for seeking."""
     # Get file from database
-    result = await db.execute(
-        select(File).where(File.id == file_id, File.user_id == current_user.id)
-    )
-    file = result.scalar_one_or_none()
+    file = await accessible_media_file(db, file_id, current_user)
     
     if not file:
         raise HTTPException(status_code=404, detail="فایل پیدا نشد.")
@@ -442,10 +474,7 @@ async def get_thumbnail(
 ):
     """Get file thumbnail."""
     # Get file from database
-    result = await db.execute(
-        select(File).where(File.id == file_id, File.user_id == current_user.id)
-    )
-    file = result.scalar_one_or_none()
+    file = await accessible_media_file(db, file_id, current_user)
     
     if not file or not file.thumbnail_file_id:
         raise HTTPException(status_code=404, detail="Thumbnail not found")

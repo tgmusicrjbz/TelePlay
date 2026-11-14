@@ -1356,34 +1356,39 @@ async def render_group_playlists(message: Message, chat_id: int, page: int = 0) 
     async with async_session() as db:
         playlists = (await db.execute(
             select(Playlist).where(Playlist.group_chat_id == chat_id).options(selectinload(Playlist.items))
-            .order_by(Playlist.position, Playlist.id)
+            .order_by(Playlist.updated_at.desc(), Playlist.id.desc())
         )).scalars().all()
     page = min(max(page, 0), max(0, (len(playlists) - 1) // PAGE_SIZE))
     shown = playlists[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
     buttons = [[InlineKeyboardButton(
-        f"🎧 {playlist.name[:32]} · {to_persian_digits(str(len(playlist.items)))} مورد",
+        f"🎧 {playlist.name[:30]}  ·  {to_persian_digits(str(len(playlist.items)))}",
         callback_data=f"gplaylist:{playlist.id}:0",
     )] for playlist in shown]
     if len(playlists) > PAGE_SIZE:
         buttons.append(pagination_row("gplaylists", page, len(playlists)))
     buttons.extend([
-        [InlineKeyboardButton("➕ ساخت پلی‌لیست گروه", callback_data="gplaylist_new")],
+        [InlineKeyboardButton("＋ پلی‌لیست تازه", callback_data="gplaylist_new")],
         [InlineKeyboardButton("↩️ منوی گروه", callback_data="grpmenu:home")],
     ])
-    text = "🎧 **پلی‌لیست‌های گروه**\n\nپخش و مدیریت فایل‌های صوتی و ویدیویی گروه از همین‌جا."
+    item_count = sum(len(playlist.items) for playlist in playlists)
+    text = (
+        "🎧 **پلی‌لیست‌های گروه**\n"
+        f"{to_persian_digits(str(len(playlists)))} پلی‌لیست · {to_persian_digits(str(item_count))} فایل"
+    )
     if not playlists:
-        text += "\n\nهنوز پلی‌لیستی ساخته نشده است."
+        text += "\n\nبرای شروع یک پلی‌لیست بساز؛ بعد روی هر صوت یا ویدیو ریپلای کن و `/gplaylist add` را بفرست."
     await safe_edit(message, text, reply_markup=InlineKeyboardMarkup(buttons))
 
 
-async def render_group_cabinet(message: Message, chat_id: int, page: int = 0) -> None:
+async def render_group_cabinet(message: Message, chat_id: int, page: int = 0, actor: object | None = None) -> None:
     """Render the shared group cabinet with Telegram-native controls."""
     async with async_session() as db:
         cabinet = await get_or_create_group_cabinet(db, chat_id, title="کمد گروه")
-        if getattr(message, "from_user", None):
+        actor = actor or getattr(message, "from_user", None)
+        if actor and not getattr(actor, "is_bot", False):
             user = await get_or_create_user(
-                message.from_user.id, message.from_user.username,
-                message.from_user.first_name, message.from_user.last_name,
+                actor.id, getattr(actor, "username", None),
+                getattr(actor, "first_name", None), getattr(actor, "last_name", None),
             )
             await ensure_group_cabinet_member(db, cabinet.id, user.id)
         await db.commit()
@@ -1452,19 +1457,23 @@ async def render_group_playlist_detail(message: Message, chat_id: int, playlist_
     page = min(max(page, 0), max(0, (len(items) - 1) // PAGE_SIZE))
     shown = items[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
     buttons = [[InlineKeyboardButton(
-        f"{to_persian_digits(str(page * PAGE_SIZE + index + 1))}. {display_filename(item.file.file_name)[:46]}",
+        f"{'🎬' if item.file.file_type == 'video' else '🎵'}  {to_persian_digits(str(page * PAGE_SIZE + index + 1))}. {display_filename(item.file.file_name)[:38]}",
         callback_data=f"gplitem:{playlist.id}:{item.file_id}:{page}",
     )] for index, item in enumerate(shown)]
     if len(items) > PAGE_SIZE:
         buttons.append(pagination_row(f"gplaylist:{playlist.id}", page, len(items)))
     buttons.extend([
-        [InlineKeyboardButton("▶️ پخش از اول", callback_data=f"gplplay:{playlist.id}:0"), InlineKeyboardButton("🔀 شافل", callback_data=f"gplshuffle:{playlist.id}")],
-        [InlineKeyboardButton("➕ افزودن فایل", callback_data=f"gpladd:{playlist.id}"), InlineKeyboardButton("🗑 حذف پلی‌لیست", callback_data=f"gpldelete:{playlist.id}", style=enums.ButtonStyle.DANGER)],
+        [InlineKeyboardButton("▶️ پخش مورد اول", callback_data=f"gplplay:{playlist.id}:0"), InlineKeyboardButton("🎲 پخش تصادفی", callback_data=f"gplshuffle:{playlist.id}")],
+        [InlineKeyboardButton("＋ افزودن فایل", callback_data=f"gpladd:{playlist.id}"), InlineKeyboardButton("🗑 حذف پلی‌لیست", callback_data=f"gpldelete:{playlist.id}", style=enums.ButtonStyle.DANGER)],
         [InlineKeyboardButton("↩️ پلی‌لیست‌های گروه", callback_data="gplaylists:0")],
     ])
-    text = f"🎼 **{escape_markdown(playlist.name)}**\n{to_persian_digits(str(len(items)))} مورد"
+    total_duration = sum(item.file.duration or 0 for item in items)
+    stats = f"{to_persian_digits(str(len(items)))} مورد"
+    if total_duration:
+        stats += f" · {format_duration(total_duration)}"
+    text = f"🎼 **{escape_markdown(playlist.name)}**\n{stats}"
     if not items:
-        text += "\n\nبرای افزودن، روی پیام صوتی یا ویدیویی ریپلای کن و دکمهٔ افزودن را بزن."
+        text += "\n\nروی صوت یا ویدیو ریپلای کن و `/gplaylist add` را بفرست."
     await safe_edit(message, text, reply_markup=InlineKeyboardMarkup(buttons))
 
 
@@ -1606,13 +1615,20 @@ async def send_group_playlist_media(client, callback: CallbackQuery, playlist_id
     previous_index = (index - 1) % len(items)
     next_index = (index + 1) % len(items)
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("⏮ قبلی", callback_data=f"gplplay:{playlist_id}:{previous_index}"), InlineKeyboardButton("⏭ بعدی", callback_data=f"gplplay:{playlist_id}:{next_index}")],
-        [InlineKeyboardButton("↩️ فهرست پلی‌لیست", callback_data=f"gplaylist:{playlist_id}:0")],
+        [InlineKeyboardButton("⏭ بعدی", callback_data=f"gplplay:{playlist_id}:{next_index}"),
+         InlineKeyboardButton(f"{to_persian_digits(str(index + 1))} / {to_persian_digits(str(len(items)))}", callback_data="noop"),
+         InlineKeyboardButton("قبلی ⏮", callback_data=f"gplplay:{playlist_id}:{previous_index}")],
+        [InlineKeyboardButton("↩️ فهرست", callback_data=f"gplaylist:{playlist_id}:{index // PAGE_SIZE}"),
+         InlineKeyboardButton("✕ بستن", callback_data="gplclose")],
     ])
     try:
         preview = await client.copy_message(callback.message.chat.id, item.file.storage_channel_id or settings.telegram_storage_channel_id, item.file.channel_message_id)
         await safe_edit_reply_markup(preview, keyboard)
-        asyncio.create_task(delete_preview_later(client, preview.chat.id, preview.id))
+        # Keep long media alive while it is playing, but clean stale controls
+        # later so group chats are not filled with abandoned player messages.
+        asyncio.create_task(delete_preview_later(client, preview.chat.id, preview.id, 3600))
+        if any(getattr(callback.message, name, None) for name in ("audio", "voice", "video", "video_note", "document")):
+            await safe_delete(callback.message)
         await callback.answer(f"در حال پخش: {display_filename(item.file.file_name)[:40]}")
     except Exception:
         logger.exception("Could not preview group playlist item %s", item.file.id)
@@ -2475,7 +2491,7 @@ async def handle_pending_group_action(client, message: Message):
                 return
             added = await add_to_group_cabinet(file.id, message.chat.id, message.from_user.id)
             panel = await reply_to_request(message, "✅ فایل به کمد گروه اضافه شد." if added else "ℹ️ این فایل از قبل در کمد گروه هست.")
-            await render_group_cabinet(panel, message.chat.id)
+            await render_group_cabinet(panel, message.chat.id, actor=message.from_user)
         except Exception:
             logger.exception("Could not add group cabinet media chat=%s user=%s", message.chat.id, message.from_user.id)
             await reply_to_request(message, "❌ افزودن فایل به کمد گروه انجام نشد؛ دوباره تلاش کن.")
@@ -3777,7 +3793,7 @@ async def handle_callback(client, callback: CallbackQuery):
             )
             await callback.answer(prompt, show_alert=True)
         elif action == "cabinet":
-            await render_group_cabinet(callback.message, group_chat_id)
+            await render_group_cabinet(callback.message, group_chat_id, actor=callback.from_user)
             await callback.answer()
         elif action == "private":
             await callback.answer(
@@ -4038,7 +4054,9 @@ async def handle_callback(client, callback: CallbackQuery):
         if "private" in str(getattr(callback.message.chat, "type", "")).lower():
             await callback.answer("کمد گروه فقط داخل همان گروه در دسترس است.", show_alert=True)
             return
-        await render_group_cabinet(callback.message, callback.message.chat.id, int(data.split(":")[1]))
+        await render_group_cabinet(
+            callback.message, callback.message.chat.id, int(data.split(":")[1]), actor=callback.from_user,
+        )
         await callback.answer()
 
     elif data == "gpcabinet_add":
@@ -4113,7 +4131,7 @@ async def handle_callback(client, callback: CallbackQuery):
             if cabinet:
                 await db.execute(delete(GroupCabinetItem).where(GroupCabinetItem.cabinet_id == cabinet.id, GroupCabinetItem.file_id == file_id))
                 await db.commit()
-        await render_group_cabinet(callback.message, callback.message.chat.id, page)
+        await render_group_cabinet(callback.message, callback.message.chat.id, page, actor=callback.from_user)
         await callback.answer("از کمد گروه حذف شد.")
 
     elif data == "gplaylists:0" or data.startswith("gplaylists:"):
@@ -4176,16 +4194,19 @@ async def handle_callback(client, callback: CallbackQuery):
         playlist_id = int(data.split(":")[1])
         async with async_session() as db:
             playlist = (await db.execute(group_playlist_query(playlist_id, callback.message.chat.id))).scalar_one_or_none()
-            if playlist is None:
-                await callback.answer("پلی‌لیست پیدا نشد.", show_alert=True)
+            item_count = len(playlist.items) if playlist else 0
+            if not item_count:
+                await callback.answer("پلی‌لیست خالی است یا پیدا نشد.", show_alert=True)
                 return
-            items = list(playlist.items)
-            random.shuffle(items)
-            for position, item in enumerate(items):
-                item.position = position
-            await db.commit()
-        await render_group_playlist_detail(callback.message, callback.message.chat.id, playlist_id)
-        await callback.answer("ترتیب پلی‌لیست تصادفی شد.")
+        # Random playback must never rewrite the members' carefully arranged
+        # playlist order. Pick one item and keep next/previous deterministic.
+        await send_group_playlist_media(
+            client, callback, playlist_id, callback.message.chat.id, random.randrange(item_count),
+        )
+
+    elif data == "gplclose":
+        await safe_delete(callback.message)
+        await callback.answer("پخش بسته شد.")
 
     elif data.startswith("gplpick:"):
         try:
@@ -4284,15 +4305,20 @@ async def handle_callback(client, callback: CallbackQuery):
 
     elif data.startswith("gplremove:"):
         _, playlist_id, file_id, page = data.split(":")
+        playlist_id, file_id, page = int(playlist_id), int(file_id), int(page)
         async with async_session() as db:
-            playlist = (await db.execute(group_playlist_query(int(playlist_id), callback.message.chat.id))).scalar_one_or_none()
+            playlist = (await db.execute(group_playlist_query(playlist_id, callback.message.chat.id))).scalar_one_or_none()
             if playlist:
-                await db.execute(delete(PlaylistItem).where(PlaylistItem.playlist_id == playlist.id, PlaylistItem.file_id == int(file_id)))
-                remaining = sorted(playlist.items, key=lambda item: (item.position, item.id))
+                await db.execute(delete(PlaylistItem).where(PlaylistItem.playlist_id == playlist.id, PlaylistItem.file_id == file_id))
+                await db.flush()
+                remaining = (await db.execute(
+                    select(PlaylistItem).where(PlaylistItem.playlist_id == playlist.id)
+                    .order_by(PlaylistItem.position, PlaylistItem.id)
+                )).scalars().all()
                 for position, item in enumerate(remaining):
                     item.position = position
                 await db.commit()
-        await render_group_playlist_detail(callback.message, callback.message.chat.id, int(playlist_id), int(page))
+        await render_group_playlist_detail(callback.message, callback.message.chat.id, playlist_id, page)
         await callback.answer("از پلی‌لیست گروه حذف شد.")
 
     elif data.startswith("gpldelete:"):
