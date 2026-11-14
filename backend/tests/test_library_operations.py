@@ -109,13 +109,16 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("مدیریت «گروه آزمایش»", view["text"])
         rows = view["reply_markup"].inline_keyboard
-        self.assertEqual([len(row) for row in rows], [2, 1, 1, 1, 1])
+        self.assertEqual([len(row) for row in rows], [2, 1, 1, 1, 1, 1])
+        cabinet_url = rows[-2][0].web_app.url
+        self.assertIn("/auth?token=", cabinet_url)
+        self.assertIn("next=%2F%3Fgroup_cabinet%3D-1006", cabinet_url)
         self.assertTrue(all(
             len((button.callback_data or "").encode("utf-8")) <= 64
             for row in rows for button in row
         ))
         raw_markup = await view["reply_markup"].write(SimpleNamespace())
-        self.assertEqual(len(raw_markup.rows), 5)
+        self.assertEqual(len(raw_markup.rows), 6)
         quota_view = await group_quota_view(-1006, "tts")
         self.assertIn("کل گروه در روز: ۲۰", quota_view["text"])
 

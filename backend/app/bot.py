@@ -496,7 +496,8 @@ async def group_settings_view(
     voice_label=next((item["label"] for item in VOICE_OPTIONS if item["value"]==voice),voice)
     lines.extend(("", f"🎤 گوینده پیش‌فرض: {voice_label}"))
     rows = [toggle_buttons[:2], toggle_buttons[2:], [InlineKeyboardButton("🎚 تنظیم سهمیه‌ها", callback_data=f"grpquota:{chat_id}:menu")],
-            [InlineKeyboardButton(f"🎤 {voice_label.split(' · ')[0]}",callback_data=f"grpvoice:{chat_id}:menu")]]
+            [InlineKeyboardButton(f"🎤 {voice_label.split(' · ')[0]}",callback_data=f"grpvoice:{chat_id}:menu")],
+            [group_cabinet_web_button(telegram_user_id, chat_id)]]
     if back_to_group_menu:
         rows.append([InlineKeyboardButton("↩️ بازگشت به منوی گروه", callback_data="grpmenu:home")])
     return {"text": "\n".join(lines), "reply_markup": InlineKeyboardMarkup(rows), "parse_mode": enums.ParseMode.DISABLED}
@@ -756,6 +757,19 @@ def get_web_app_button(telegram_id: int, text: str = "🌐 Open Web") -> InlineK
         base_url = f"https://{base_url}"
     web_url = f"{base_url}/auth?token={encoded_token}"
     return InlineKeyboardButton(text, web_app=WebAppInfo(url=web_url))
+
+
+def group_cabinet_web_button(telegram_id: int, chat_id: int) -> InlineKeyboardButton:
+    """Open one group cabinet with a user-bound, one-time login token."""
+    token = quote(create_telegram_login_token(telegram_id), safe="")
+    target = quote(f"/?group_cabinet={chat_id}", safe="")
+    base_url = settings.web_base_url.strip().rstrip("/")
+    if not base_url.startswith(("http://", "https://")):
+        base_url = f"https://{base_url}"
+    return InlineKeyboardButton(
+        "🗄️ مدیریت کمد مشترک",
+        web_app=WebAppInfo(url=f"{base_url}/auth?token={token}&next={target}"),
+    )
 
 
 def local_web_instructions() -> str:
@@ -1418,9 +1432,11 @@ async def render_group_cabinet(message: Message, chat_id: int, page: int = 0, ac
         buttons.append([InlineKeyboardButton("➕ افزودن با ریپلای", callback_data="gpcabinet_add")])
     buttons.extend([
         [InlineKeyboardButton("🎧 پلی‌لیست‌های گروه", callback_data="grpmenu:playlists")],
-        [InlineKeyboardButton("⚙️ اعضا و کانال ذخیره‌سازی", url=f"{settings.web_base_url.rstrip('/')}?group_cabinet={chat_id}")],
         [InlineKeyboardButton("↩️ منوی گروه", callback_data="grpmenu:home")],
     ])
+    if actor_is_manager:
+        management_url = await group_settings_start_url(tg_client, chat_id)
+        buttons.insert(-1, [InlineKeyboardButton("⚙️ اعضا و کانال ذخیره‌سازی", url=management_url)])
     text = f"🗄️ **{escape_markdown(cabinet.title)}**\n{to_persian_digits(str(len(items)))} فایل مشترک برای اعضای گروه"
     if not items:
         text += "\n\nهنوز فایلی در کمد گروه نیست. روی یک فایل صوتی یا ویدیویی ریپلای کن و افزودن را بزن."

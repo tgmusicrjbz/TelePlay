@@ -108,6 +108,8 @@ function AuthCallback() {
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
     const token = searchParams.get('token');
+    const requestedNext = searchParams.get('next') || '/';
+    const nextPath = requestedNext.startsWith('/') && !requestedNext.startsWith('//') ? requestedNext : '/';
     const [status, setStatus] = useState('در حال ورود به کمد…');
     const [saved, setSaved] = useState(false);
     const [otpRequired,setOtpRequired]=useState(false);
@@ -122,7 +124,7 @@ function AuthCallback() {
             saveAuthenticatedAccount(data);
             setStatus('✅ ورود انجام شد؛ در حال باز کردن کمد…');
             setSaved(true);
-            setTimeout(()=>navigate('/',{replace:true}),500);
+            setTimeout(()=>navigate(nextPath,{replace:true}),500);
         }catch(error:any){
             const detail=String(error?.response?.data?.detail||'ورود انجام نشد. دوباره از ربات وارد شو.');
             if(isTwoFactorChallenge(error)){setOtpRequired(true);setStatus('کد برنامهٔ تأیید را وارد کن.');}
@@ -140,11 +142,11 @@ function AuthCallback() {
     useEffect(() => {
         if (saved) {
             const timer = setTimeout(() => {
-                window.location.href = '/';
+                window.location.href = nextPath;
             }, 1500);
             return () => clearTimeout(timer);
         }
-    }, [saved]);
+    }, [saved, nextPath]);
 
     return (
         <div dir="rtl" className="min-h-screen flex items-center justify-center bg-dark-950 p-4">
