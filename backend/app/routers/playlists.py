@@ -47,7 +47,7 @@ def _playlist_response(playlist: Playlist) -> PlaylistResponse:
         position=playlist.position,
         created_at=playlist.created_at,
         updated_at=playlist.updated_at,
-        items=[PlaylistItemResponse(id=item.id, position=index, added_at=item.added_at, file=_file_response(item.file)) for index, item in enumerate(ordered)],
+        items=[PlaylistItemResponse(id=item.id, position=index, added_at=item.added_at, display_name=item.display_name, file=_file_response(item.file)) for index, item in enumerate(ordered)],
     )
 
 

@@ -582,6 +582,9 @@ class PlaylistItem(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     playlist_id: Mapped[int] = mapped_column(ForeignKey("playlists.id", ondelete="CASCADE"), nullable=False)
     file_id: Mapped[int] = mapped_column(ForeignKey("files.id", ondelete="CASCADE"), nullable=False)
+    # Optional playlist-local label. Renaming an entry must not rename the
+    # original file in its owner's cabinet or in other shared playlists.
+    display_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     added_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

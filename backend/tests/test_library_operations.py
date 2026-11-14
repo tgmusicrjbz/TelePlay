@@ -397,8 +397,9 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
     async def test_group_cabinet_playlist_management_and_member_stream_access(self):
         from app.models import GroupCabinet, GroupCabinetItem, GroupCabinetMember
         from app.routers.group_cabinets import (
-            GroupPlaylistCreate, GroupPlaylistItemsUpdate,
+            GroupPlaylistCreate, GroupPlaylistItemUpdate, GroupPlaylistItemsUpdate,
             add_group_playlist_items, create_group_playlist, get_group_cabinet,
+            rename_group_playlist_item,
         )
         from app.routers.streaming import accessible_media_file
 
@@ -426,11 +427,36 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
                 -10055, playlist["id"], GroupPlaylistItemsUpdate(file_ids=[self.direct_file_id]), db, owner,
             )
             self.assertEqual(result["added"], 1)
+            renamed = await rename_group_playlist_item(
+                -10055, playlist["id"], self.direct_file_id,
+                GroupPlaylistItemUpdate(display_name="نام داخل پلی‌لیست"), db, owner,
+            )
+            self.assertEqual(renamed["display_name"], "نام داخل پلی‌لیست")
             cabinet_payload = await get_group_cabinet(-10055, "", db, owner)
             self.assertEqual(cabinet_payload["playlists"][0]["file_ids"], [self.direct_file_id])
+            self.assertEqual(cabinet_payload["playlists"][0]["items"][0]["display_name"], "نام داخل پلی‌لیست")
+            self.assertEqual(cabinet_payload["files"][0]["file_name"], cabinet_payload["files"][0]["name"])
+            self.assertNotEqual(cabinet_payload["files"][0]["name"], "نام داخل پلی‌لیست")
             shared = await accessible_media_file(db, self.direct_file_id, member)
             self.assertIsNotNone(shared)
             self.assertEqual(shared.id, self.direct_file_id)
+
+    async def test_group_cabinet_native_open_and_playlist_navigation_are_reliable(self):
+        from app.telegram import build_clients
+        build_clients()
+        from app.bot import group_playlist_player_keyboard, render_group_cabinet
+
+        message = SimpleNamespace(edit=AsyncMock(), from_user=SimpleNamespace(id=111))
+        actor = SimpleNamespace(id=111, username="owner", first_name="مالک", last_name=None, is_bot=False)
+        with patch("app.bot.is_group_manager", new_callable=AsyncMock, return_value=True):
+            await render_group_cabinet(message, -10077, actor=actor)
+
+        message.edit.assert_awaited_once()
+        self.assertIn("کمد گروه", message.edit.await_args.args[0])
+        keyboard = group_playlist_player_keyboard(12, 1, 3).inline_keyboard
+        self.assertEqual(keyboard[0][0].callback_data, "gplplay:12:0")
+        self.assertEqual(keyboard[0][2].callback_data, "gplplay:12:2")
+        self.assertEqual(keyboard[1][1].callback_data, "gplclose")
 
     async def test_group_cabinet_member_roles_and_verified_storage_channel(self):
         from app import telegram

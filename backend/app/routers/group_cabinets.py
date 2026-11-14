@@ -47,6 +47,10 @@ class GroupPlaylistReorder(BaseModel):
     file_ids: list[int] = Field(max_length=500)
 
 
+class GroupPlaylistItemUpdate(BaseModel):
+    display_name: str = Field(min_length=1, max_length=255)
+
+
 async def _access(db: AsyncSession, chat_id: int, user: User) -> tuple[GroupCabinet, GroupCabinetMember]:
     cabinet = (await db.execute(select(GroupCabinet).where(GroupCabinet.chat_id == chat_id))).scalar_one_or_none()
     if cabinet is None or not cabinet.enabled:
@@ -104,6 +108,7 @@ def _file_payload(file: File, *, in_cabinet: bool = True) -> dict:
         "user_id": file.user_id,
         "folder_id": file.folder_id,
         "name": file.file_name,
+        "file_name": file.file_name,
         "file_id": file.file_id,
         "file_unique_id": file.file_unique_id,
         "description": file.description,
@@ -166,6 +171,10 @@ async def get_group_cabinet(
             "name": playlist.name,
             "item_count": len(playlist.items),
             "file_ids": [item.file_id for item in sorted(playlist.items, key=lambda row: (row.position, row.id))],
+            "items": [{
+                "file_id": item.file_id,
+                "display_name": item.display_name,
+            } for item in sorted(playlist.items, key=lambda row: (row.position, row.id))],
         } for playlist in playlists],
     }
 
@@ -313,6 +322,26 @@ async def remove_group_playlist_item(
         item.position = position
     await db.commit()
     return {"removed": True}
+
+
+@router.patch("/{chat_id}/playlists/{playlist_id}/items/{file_id}")
+async def rename_group_playlist_item(
+    chat_id: int,
+    playlist_id: int,
+    file_id: int,
+    payload: GroupPlaylistItemUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _, member = await _access(db, chat_id, current_user)
+    _require_editor(member)
+    playlist = await _group_playlist(db, chat_id, playlist_id)
+    item = next((row for row in playlist.items if row.file_id == file_id), None)
+    if item is None:
+        raise HTTPException(status_code=404, detail="این فایل در پلی‌لیست پیدا نشد.")
+    item.display_name = payload.display_name.strip()
+    await db.commit()
+    return {"file_id": file_id, "display_name": item.display_name}
 
 
 @router.delete("/{chat_id}/playlists/{playlist_id}")

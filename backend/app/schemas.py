@@ -291,6 +291,7 @@ class PlaylistItemResponse(BaseModel):
     id: int
     position: int
     added_at: datetime
+    display_name: Optional[str] = None
     file: FileResponse
 
 
