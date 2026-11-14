@@ -26,7 +26,7 @@ from .telegram import tg_client, forward_to_storage_channel, delete_from_storage
 from . import telegram
 from .routers.folders import ensure_default_folder
 from .database import async_session
-from .models import User, File, Folder, LoginCode, Playlist, PlaylistItem, BotUserState, TelegramDestination, TelegramGroupSettings, GroupCabinet, GroupCabinetItem, AppSetting
+from .models import User, File, Folder, LoginCode, Playlist, PlaylistItem, BotUserState, TelegramDestination, TelegramGroupSettings, GroupCabinet, GroupCabinetItem, GroupCabinetMember, AppSetting
 from .config import get_settings
 from .auth import create_recipient_delivery_token, create_short_link_token, create_telegram_login_token, verify_recipient_delivery_token
 from .services import escape_like, select_best_thumbnail, telegram_text_with_links, unreferenced_audio_variant_messages, unreferenced_storage_messages
@@ -36,7 +36,7 @@ from .tts import TTSJob, VOICE_OPTIONS, consume_tts_quota, load_tts_settings, ro
 from .stt import STTJob, consume_stt_quota, stt_queue
 from .gemini_keys import decrypt_user_keys
 from .link_captions import render_link_caption
-from .group_tools import consume_file_link_quota, consume_group_quota, ensure_group_cabinet_member, get_group_usage, get_group_usage_breakdown, get_or_create_group_settings, get_or_create_group_cabinet, get_group_voice, set_group_voice, is_global_admin
+from .group_tools import consume_file_link_quota, consume_group_quota, ensure_group_cabinet_member, get_group_usage, get_group_usage_breakdown, get_or_create_group_settings, get_or_create_group_cabinet, get_group_voice, set_group_voice, is_global_admin, resolve_group_storage_channel
 from .bot_messages import bot_message
 from .bot_link_feedback import acknowledge_link_request, acknowledge_request, react_to_request, reply_to_request
 from .instagram_inbox import pair_sender_with_telegram
@@ -1382,15 +1382,24 @@ async def render_group_playlists(message: Message, chat_id: int, page: int = 0) 
 
 async def render_group_cabinet(message: Message, chat_id: int, page: int = 0, actor: object | None = None) -> None:
     """Render the shared group cabinet with Telegram-native controls."""
+    actor = actor or getattr(message, "from_user", None)
+    actor_is_manager = bool(
+        actor and not getattr(actor, "is_bot", False)
+        and await is_group_manager(tg_client, chat_id, actor.id)
+    )
+    can_edit = False
     async with async_session() as db:
         cabinet = await get_or_create_group_cabinet(db, chat_id, title="کمد گروه")
-        actor = actor or getattr(message, "from_user", None)
         if actor and not getattr(actor, "is_bot", False):
             user = await get_or_create_user(
                 actor.id, getattr(actor, "username", None),
                 getattr(actor, "first_name", None), getattr(actor, "last_name", None),
             )
-            await ensure_group_cabinet_member(db, cabinet.id, user.id)
+            role = "owner" if actor_is_manager else "viewer"
+            cabinet_member = await ensure_group_cabinet_member(db, cabinet.id, user.id, role)
+            can_edit = cabinet_member.role in {"owner", "editor"}
+            if actor_is_manager and cabinet.created_by_user_id is None:
+                cabinet.created_by_user_id = user.id
         await db.commit()
         items = (await db.execute(
             select(GroupCabinetItem).where(GroupCabinetItem.cabinet_id == cabinet.id)
@@ -1405,9 +1414,11 @@ async def render_group_cabinet(message: Message, chat_id: int, page: int = 0, ac
     )] for item in shown]
     if len(items) > PAGE_SIZE:
         buttons.append(pagination_row("gpcabinet", page, len(items)))
+    if can_edit:
+        buttons.append([InlineKeyboardButton("➕ افزودن با ریپلای", callback_data="gpcabinet_add")])
     buttons.extend([
-        [InlineKeyboardButton("➕ افزودن با ریپلای", callback_data="gpcabinet_add")],
         [InlineKeyboardButton("🎧 پلی‌لیست‌های گروه", callback_data="grpmenu:playlists")],
+        [InlineKeyboardButton("⚙️ اعضا و کانال ذخیره‌سازی", url=f"{settings.web_base_url.rstrip('/')}?group_cabinet={chat_id}")],
         [InlineKeyboardButton("↩️ منوی گروه", callback_data="grpmenu:home")],
     ])
     text = f"🗄️ **{escape_markdown(cabinet.title)}**\n{to_persian_digits(str(len(items)))} فایل مشترک برای اعضای گروه"
@@ -1416,9 +1427,18 @@ async def render_group_cabinet(message: Message, chat_id: int, page: int = 0, ac
     await safe_edit(message, text, reply_markup=InlineKeyboardMarkup(buttons))
 
 
-async def add_to_group_cabinet(file_id: int, chat_id: int, user_id: int) -> bool:
+async def add_to_group_cabinet(file_id: int, chat_id: int, telegram_user_id: int) -> bool:
     async with async_session() as db:
-        cabinet = await get_or_create_group_cabinet(db, chat_id, user_id=user_id, title="کمد گروه")
+        user = (await db.execute(select(User).where(User.telegram_id == telegram_user_id))).scalar_one_or_none()
+        if user is None:
+            raise ValueError("حساب تلگرام برای کمد گروه پیدا نشد.")
+        cabinet = await get_or_create_group_cabinet(db, chat_id, user_id=user.id, title="کمد گروه")
+        member = (await db.execute(select(GroupCabinetMember).where(
+            GroupCabinetMember.cabinet_id == cabinet.id,
+            GroupCabinetMember.user_id == user.id,
+        ))).scalar_one_or_none()
+        if member is None or member.role not in {"owner", "editor"}:
+            raise ValueError("برای افزودن فایل، دسترسی ویرایش کمد گروه لازم است.")
         existing = (await db.execute(select(GroupCabinetItem.id).where(
             GroupCabinetItem.cabinet_id == cabinet.id, GroupCabinetItem.file_id == file_id,
         ))).scalar_one_or_none()
@@ -1428,7 +1448,7 @@ async def add_to_group_cabinet(file_id: int, chat_id: int, user_id: int) -> bool
         if cabinet.member_daily_add_limit:
             member_count = (await db.execute(select(func.count(GroupCabinetItem.id)).where(
                 GroupCabinetItem.cabinet_id == cabinet.id,
-                GroupCabinetItem.added_by_user_id == user_id,
+                GroupCabinetItem.added_by_user_id == user.id,
                 GroupCabinetItem.created_at >= day_start,
             ))).scalar_one()
             if member_count >= cabinet.member_daily_add_limit:
@@ -1440,7 +1460,7 @@ async def add_to_group_cabinet(file_id: int, chat_id: int, user_id: int) -> bool
             file_size = (await db.execute(select(File.file_size).where(File.id == file_id))).scalar_one_or_none() or 0
             if used + file_size > cabinet.max_storage_bytes:
                 raise ValueError("فضای کمد گروه پر شده است.")
-        db.add(GroupCabinetItem(cabinet_id=cabinet.id, file_id=file_id, added_by_user_id=user_id))
+        db.add(GroupCabinetItem(cabinet_id=cabinet.id, file_id=file_id, added_by_user_id=user.id))
         await db.commit()
         return True
 
@@ -2799,16 +2819,15 @@ async def group_storage_command(client, message: Message):
     if not await is_group_manager(client, message.chat.id, message.from_user.id):
         await reply_to_request(message, "فقط مدیرهای گروه می‌توانند فضای ذخیره‌سازی گروه را تنظیم کنند.")
         return
-    value = str((message.command or [None, ""])[1] or "").strip().lower()
-    if value in {"", "none", "off", "خاموش"}:
+    value = str((message.command or [None, ""])[1] or "").strip()
+    if value.casefold() in {"", "none", "off", "خاموش"}:
         channel_id = None
+        channel_title = None
     else:
         try:
-            channel_id = int(value)
-            if channel_id >= 0:
-                raise ValueError
-        except ValueError:
-            await reply_to_request(message, "آیدی عددی کانال خصوصی را بفرست؛ مثلاً `/group_storage -1001234567890` یا برای برگشت به فضای قبلی `/group_storage off`.")
+            channel_id, channel_title = await resolve_group_storage_channel(client, value)
+        except ValueError as error:
+            await reply_to_request(message, f"❌ {error}\n\nنمونه: `/group_storage @my_channel` یا `/group_storage -1001234567890`")
             return
     user = await get_or_create_user(message.from_user.id, message.from_user.username, message.from_user.first_name, message.from_user.last_name)
     async with async_session() as db:
@@ -2816,8 +2835,8 @@ async def group_storage_command(client, message: Message):
         cabinet.storage_channel_id = channel_id
         await ensure_group_cabinet_member(db, cabinet.id, user.id, "owner")
         await db.commit()
-    label = "فضای ذخیره‌سازی پیش‌فرض کاربر" if channel_id is None else str(channel_id)
-    await reply_to_request(message, f"✅ فضای ذخیره‌سازی کمد گروه روی {label} تنظیم شد.\nربات باید در کانال انتخاب‌شده اجازهٔ ارسال پیام داشته باشد.")
+    label = "فضای ذخیره‌سازی پیش‌فرض" if channel_id is None else f"«{channel_title}» (`{channel_id}`)"
+    await reply_to_request(message, f"✅ کانال ذخیره‌سازی کمد گروه روی {label} تنظیم شد.")
 
 
 @tg_client.on_message(filters.command("newfolder") & filters.private)
@@ -4062,6 +4081,23 @@ async def handle_callback(client, callback: CallbackQuery):
     elif data == "gpcabinet_add":
         if "private" in str(getattr(callback.message.chat, "type", "")).lower():
             await callback.answer("افزودن فایل به کمد گروه باید داخل همان گروه انجام شود.", show_alert=True)
+            return
+        manager = await is_group_manager(client, callback.message.chat.id, callback.from_user.id)
+        actor = await get_or_create_user(
+            callback.from_user.id, callback.from_user.username,
+            callback.from_user.first_name, callback.from_user.last_name,
+        )
+        async with async_session() as db:
+            cabinet = await get_or_create_group_cabinet(db, callback.message.chat.id, actor.id, "کمد گروه")
+            cabinet_member = await ensure_group_cabinet_member(
+                db, cabinet.id, actor.id, "owner" if manager else "viewer",
+            )
+            if manager and cabinet.created_by_user_id is None:
+                cabinet.created_by_user_id = actor.id
+            await db.commit()
+            can_edit = cabinet_member.role in {"owner", "editor"}
+        if not can_edit:
+            await callback.answer("برای افزودن فایل، مالک کمد باید دسترسی ویرایش به شما بدهد.", show_alert=True)
             return
         pending_group_actions[(callback.message.chat.id, callback.from_user.id)] = (
             "gcabinet_add", datetime.now(timezone.utc) + timedelta(minutes=2)

@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronUp, ListMusic, Pencil, Play, Plus, Search, Shuffle, Trash2, Users, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, HardDrive, ListMusic, Pencil, Play, Plus, Search, Settings, Shuffle, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { api, TelegramFile } from '../lib/api';
 import { useAppStore } from '../lib/store';
 
 type GroupFile = TelegramFile & { name?: string; size?: number; in_cabinet?: boolean };
 type GroupPlaylist = { id: number; name: string; item_count: number; file_ids: number[] };
-type GroupCabinet = { title: string; role: 'owner' | 'editor' | 'viewer'; can_edit: boolean; can_contribute: boolean; files: GroupFile[]; playlists: GroupPlaylist[] };
+type GroupMember = { user_id: number; telegram_id: number; username?: string | null; name: string; role: 'owner' | 'editor' | 'viewer' };
+type GroupCabinet = { title: string; role: 'owner' | 'editor' | 'viewer'; can_edit: boolean; can_contribute: boolean; storage_channel_id?: number | null; files: GroupFile[]; playlists: GroupPlaylist[] };
 
 const playable = (file: TelegramFile) => file.file_type === 'audio' || file.file_type === 'video';
 const mediaLabel = (file: TelegramFile) => file.file_type === 'video' ? 'ویدیو' : file.file_type === 'audio' ? 'صوت' : 'فایل';
@@ -27,6 +28,12 @@ export default function GroupCabinetPage({ chatId }: { chatId: number }) {
     const [addOpen, setAddOpen] = useState(false);
     const [selectedFiles, setSelectedFiles] = useState<Set<number>>(new Set());
     const [deletePlaylist, setDeletePlaylist] = useState(false);
+    const [manageOpen, setManageOpen] = useState(false);
+    const [members, setMembers] = useState<GroupMember[]>([]);
+    const [memberIdentifier, setMemberIdentifier] = useState('');
+    const [memberRole, setMemberRole] = useState<'viewer' | 'editor'>('viewer');
+    const [storageChannel, setStorageChannel] = useState('');
+    const [cabinetTitle, setCabinetTitle] = useState('');
     const startQueue = useAppStore(state => state.startQueue);
     const addToast = useAppStore(state => state.addToast);
 
@@ -75,11 +82,36 @@ export default function GroupCabinetPage({ chatId }: { chatId: number }) {
         [order[index], order[target]] = [order[target], order[index]];
         void mutate(() => api.put(`/group-cabinets/${chatId}/playlists/${currentPlaylist.id}/order`, { file_ids: order }), 'ترتیب پلی‌لیست به‌روز شد.');
     };
+    const refreshMembers = async () => setMembers((await api.get<GroupMember[]>(`/group-cabinets/${chatId}/members`)).data);
+    const openManagement = async () => {
+        if (!data) return;
+        setCabinetTitle(data.title);
+        setStorageChannel(data.storage_channel_id ? String(data.storage_channel_id) : '');
+        setManageOpen(true);
+        try { await refreshMembers(); }
+        catch (reason: any) { addToast(reason?.response?.data?.detail || 'دریافت اعضای کمد ممکن نشد.', 'error'); }
+    };
+    const saveMember = async () => {
+        const identifier = memberIdentifier.trim();
+        if (!identifier || busy) return;
+        setBusy(true);
+        try { await api.patch(`/group-cabinets/${chatId}/members`, { identifier, role: memberRole }); setMemberIdentifier(''); await refreshMembers(); addToast('دسترسی عضو ذخیره شد.'); }
+        catch (reason: any) { addToast(reason?.response?.data?.detail || 'ثبت دسترسی ممکن نشد.', 'error'); }
+        finally { setBusy(false); }
+    };
+    const saveCabinetSettings = async (channel = storageChannel) => {
+        if (busy || !cabinetTitle.trim()) return;
+        setBusy(true);
+        try { await api.patch(`/group-cabinets/${chatId}`, { title: cabinetTitle.trim(), storage_channel: channel.trim() }); setStorageChannel(channel === 'off' ? '' : channel); await load(query, true); addToast('تنظیمات کمد گروه ذخیره شد.'); }
+        catch (reason: any) { addToast(reason?.response?.data?.detail || 'ذخیره تنظیمات ممکن نشد.', 'error'); }
+        finally { setBusy(false); }
+    };
 
     return <main dir="rtl" className="min-h-screen bg-dark-950 px-3 pb-10 pt-4 text-white sm:px-6">
         <header className="mx-auto flex max-w-4xl items-center gap-3 rounded-3xl border border-primary-400/15 bg-gradient-to-l from-primary-500/15 to-dark-900/90 p-3.5 shadow-xl sm:p-4">
             <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary-500/20 text-primary-200"><Users className="h-5 w-5" /></span>
             <div className="min-w-0 flex-1"><h1 className="truncate text-base font-black sm:text-lg">{data?.title || 'کمد گروه'}</h1><p className="mt-0.5 text-[11px] text-dark-400">{(data?.playlists.length || 0).toLocaleString('fa-IR')} پلی‌لیست · {files.length.toLocaleString('fa-IR')} فایل</p></div>
+            {data?.can_edit && <button className="btn-icon" onClick={() => void openManagement()} aria-label="مدیریت کمد"><Settings className="h-5 w-5" /></button>}
             <button className="btn-icon" onClick={() => window.close()} aria-label="بستن"><X className="h-5 w-5" /></button>
         </header>
 
@@ -95,6 +127,12 @@ export default function GroupCabinetPage({ chatId }: { chatId: number }) {
                 <div className="mt-4 space-y-2">{(currentPlaylist ? playlistFiles : files).map((file, index) => <article key={file.id} className="flex min-w-0 items-center gap-2.5 rounded-2xl border border-white/[.06] bg-black/15 p-2.5"><button onClick={() => playFiles(currentPlaylist ? playlistFiles : files, file.id)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-500/15 text-primary-200" aria-label="پخش"><Play className="h-4 w-4"/></button><div className="min-w-0 flex-1"><strong dir="auto" className="block truncate text-sm">{file.file_name}</strong><span className="mt-1 block text-[10px] text-dark-500">{mediaLabel(file)} · {durationLabel(file.duration)}</span></div>{currentPlaylist && data.can_contribute && <div className="flex shrink-0 items-center"><button disabled={busy || index === 0} onClick={() => move(file.id, -1)} className="btn-icon h-8 w-8 disabled:opacity-25" aria-label="بالاتر"><ChevronUp className="h-4 w-4"/></button><button disabled={busy || index === playlistFiles.length - 1} onClick={() => move(file.id, 1)} className="btn-icon h-8 w-8 disabled:opacity-25" aria-label="پایین‌تر"><ChevronDown className="h-4 w-4"/></button><button disabled={busy} onClick={() => void mutate(() => api.delete(`/group-cabinets/${chatId}/playlists/${currentPlaylist.id}/items/${file.id}`), 'از پلی‌لیست حذف شد.')} className="btn-icon h-8 w-8 text-red-300" aria-label="حذف"><Trash2 className="h-4 w-4"/></button></div>}{!currentPlaylist && data.can_edit && file.in_cabinet && <button disabled={busy} onClick={() => void mutate(() => api.delete(`/group-cabinets/${chatId}/items/${file.id}`), 'فایل از کمد گروه حذف شد.')} className="btn-icon h-8 w-8 shrink-0 text-red-300" aria-label="حذف از کمد گروه"><Trash2 className="h-4 w-4"/></button>}</article>)}{!(currentPlaylist ? playlistFiles : files).length && <p className="p-10 text-center text-sm text-dark-500">{currentPlaylist ? 'این پلی‌لیست هنوز خالی است.' : 'فایلی برای نمایش وجود ندارد.'}</p>}</div>
             </>}
         </section>
+
+
+        {manageOpen && data && <div className="fixed inset-0 z-[240] flex items-end justify-center bg-black/75 p-3 backdrop-blur-sm sm:items-center" onClick={() => setManageOpen(false)}><section onClick={event => event.stopPropagation()} className="flex max-h-[88vh] w-full max-w-lg flex-col overflow-hidden rounded-3xl border border-white/10 bg-dark-900 shadow-2xl"><header className="flex items-center gap-3 border-b border-white/[.07] p-4"><Settings className="h-5 w-5 text-primary-200"/><div className="min-w-0 flex-1"><h2 className="font-black">مدیریت کمد گروه</h2><p className="mt-1 text-[11px] text-dark-400">اعضا، نقش‌ها و محل ذخیره فایل‌ها</p></div><button className="btn-icon" onClick={() => setManageOpen(false)}><X className="h-4 w-4"/></button></header><div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+            <div className="rounded-2xl border border-white/[.07] bg-black/15 p-3"><div className="flex items-center gap-2 text-sm font-bold"><HardDrive className="h-4 w-4 text-primary-200"/>کانال ذخیره‌سازی</div><p className="mt-2 text-[11px] leading-5 text-dark-400">ربات را مدیر کانال کن، سپس نام کاربری یا شناسه عددی کانال را وارد کن. فایل‌های تازه گروه در همین کانال نگهداری می‌شوند.</p><input disabled={data.role !== 'owner'} value={cabinetTitle} onChange={event => setCabinetTitle(event.target.value)} className="input mt-3 w-full" placeholder="نام کمد گروه"/><input disabled={data.role !== 'owner'} dir="ltr" value={storageChannel} onChange={event => setStorageChannel(event.target.value)} className="input mt-2 w-full text-left" placeholder="@channel یا -100…"/><div className="mt-2 flex gap-2"><button disabled={busy || data.role !== 'owner'} onClick={() => void saveCabinetSettings()} className="btn-primary min-w-0 flex-1 text-xs">بررسی و ذخیره</button><button disabled={busy || data.role !== 'owner' || !data.storage_channel_id} onClick={() => void saveCabinetSettings('off')} className="btn-secondary px-3 text-xs">غیرفعال</button></div></div>
+            <div className="rounded-2xl border border-white/[.07] bg-black/15 p-3"><div className="flex items-center gap-2 text-sm font-bold"><UserPlus className="h-4 w-4 text-primary-200"/>دسترسی اعضا</div>{data.role === 'owner' && <div className="mt-3 grid grid-cols-[1fr_auto] gap-2"><input dir="ltr" value={memberIdentifier} onChange={event => setMemberIdentifier(event.target.value)} className="input min-w-0 text-left" placeholder="@username یا شناسه تلگرام"/><select value={memberRole} onChange={event => setMemberRole(event.target.value as 'viewer' | 'editor')} className="input"><option value="viewer">مشاهده</option><option value="editor">ویرایش</option></select><button disabled={busy || !memberIdentifier.trim()} onClick={() => void saveMember()} className="btn-primary col-span-2 text-xs">افزودن یا تغییر دسترسی</button></div>}<div className="mt-3 space-y-2">{members.map(member => <article key={member.user_id} className="flex min-w-0 items-center gap-2 rounded-xl bg-white/[.04] p-2.5"><div className="min-w-0 flex-1"><strong className="block truncate text-xs">{member.name}</strong><span dir="ltr" className="mt-1 block truncate text-[10px] text-dark-500">{member.username ? `@${member.username}` : member.telegram_id}</span></div><span className="rounded-lg bg-primary-500/10 px-2 py-1 text-[10px] text-primary-200">{member.role === 'owner' ? 'مالک' : member.role === 'editor' ? 'ویرایشگر' : 'مشاهده'}</span>{data.role === 'owner' && member.role !== 'owner' && <button disabled={busy} onClick={() => void mutate(() => api.delete(`/group-cabinets/${chatId}/members/${member.user_id}`), 'دسترسی عضو حذف شد.', () => void refreshMembers())} className="btn-icon h-8 w-8 text-red-300"><Trash2 className="h-3.5 w-3.5"/></button>}</article>)}</div></div>
+        </div></section></div>}
 
         {nameDialog && <div className="fixed inset-0 z-[220] flex items-end justify-center bg-black/70 p-3 backdrop-blur-sm sm:items-center" onClick={() => setNameDialog(null)}><form onSubmit={event => { event.preventDefault(); const name = newName.trim(); if (!name) return; if (nameDialog === 'rename' && currentPlaylist) void mutate(() => api.patch(`/group-cabinets/${chatId}/playlists/${currentPlaylist.id}`, { name }), 'نام پلی‌لیست عوض شد.', () => setNameDialog(null)); else void mutate(() => api.post(`/group-cabinets/${chatId}/playlists`, { name }), 'پلی‌لیست ساخته شد.', () => setNameDialog(null)); }} onClick={event => event.stopPropagation()} className="w-full max-w-sm rounded-3xl border border-white/10 bg-dark-900 p-5"><h2 className="font-bold">{nameDialog === 'rename' ? 'تغییر نام پلی‌لیست' : 'پلی‌لیست تازه'}</h2><input autoFocus value={newName} maxLength={80} onChange={event => setNewName(event.target.value)} className="input mt-4 w-full" placeholder="نام پلی‌لیست"/><div className="mt-4 grid grid-cols-2 gap-2"><button disabled={busy || !newName.trim()} className="btn-primary">ذخیره</button><button type="button" className="btn-secondary" onClick={() => setNameDialog(null)}>انصراف</button></div></form></div>}
 

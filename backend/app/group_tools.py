@@ -58,9 +58,45 @@ async def ensure_group_cabinet_member(db, cabinet_id: int, user_id: int, role: s
         member = GroupCabinetMember(cabinet_id=cabinet_id, user_id=user_id, role=role)
         db.add(member)
         await db.flush()
-    elif role in {"owner", "editor"} and member.role == "viewer":
-        member.role = role
+    else:
+        # Opening the cabinet must never accidentally demote an owner or an
+        # editor back to viewer.  This helper is used by both Telegram and the
+        # Mini App, so upgrades need one consistent precedence rule.
+        rank = {"viewer": 0, "editor": 1, "owner": 2}
+        if rank.get(role, 0) > rank.get(member.role, 0):
+            member.role = role
     return member
+
+
+async def resolve_group_storage_channel(client, value: str | int) -> tuple[int, str]:
+    """Resolve a channel and prove that the bot can store messages there."""
+    raw: str | int = value
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            raise ValueError("شناسه یا نام کاربری کانال را وارد کن.")
+        if str(raw).lstrip("-").isdigit():
+            raw = int(raw)
+    try:
+        chat = await client.get_chat(raw)
+    except Exception as error:
+        raise ValueError("کانال پیدا نشد؛ ربات را مدیر کانال کن و شناسه را دوباره بررسی کن.") from error
+    chat_type = str(getattr(chat, "type", "")).lower()
+    if "channel" not in chat_type:
+        raise ValueError("فضای ذخیره‌سازی باید یک کانال تلگرام باشد.")
+    try:
+        me = await client.get_me()
+        membership = await client.get_chat_member(chat.id, me.id)
+    except Exception as error:
+        raise ValueError("ربات به کانال دسترسی ندارد؛ ابتدا آن را مدیر کانال کن.") from error
+    status = str(getattr(membership, "status", "")).lower()
+    if not any(label in status for label in ("administrator", "owner", "creator")):
+        raise ValueError("ربات باید مدیر کانال باشد تا فایل‌ها را در آن ذخیره کند.")
+    privileges = getattr(membership, "privileges", None)
+    if privileges is not None and getattr(privileges, "can_post_messages", True) is False:
+        raise ValueError("اجازهٔ ارسال پیام در کانال برای ربات فعال نیست.")
+    title = str(getattr(chat, "title", "") or getattr(chat, "username", "") or chat.id)
+    return int(chat.id), title
 
 
 async def consume_group_quota(

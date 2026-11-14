@@ -11,6 +11,8 @@ from sqlalchemy.orm import selectinload
 from ..database import get_db
 from ..models import File, GroupCabinet, GroupCabinetItem, GroupCabinetMember, Playlist, PlaylistItem, User
 from ..auth import get_current_user
+from .. import telegram
+from ..group_tools import resolve_group_storage_channel
 
 router = APIRouter(prefix="/group-cabinets", tags=["Group cabinets"])
 
@@ -20,8 +22,13 @@ class GroupCabinetItemsCreate(BaseModel):
 
 
 class GroupCabinetMemberUpdate(BaseModel):
-    user_id: int
+    identifier: str = Field(min_length=1, max_length=255)
     role: str = Field(pattern="^(viewer|editor)$")
+
+
+class GroupCabinetSettingsUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    storage_channel: str | None = Field(default=None, max_length=255)
 
 
 class GroupPlaylistCreate(BaseModel):
@@ -56,6 +63,30 @@ async def _access(db: AsyncSession, chat_id: int, user: User) -> tuple[GroupCabi
 def _require_editor(member: GroupCabinetMember) -> None:
     if member.role not in {"owner", "editor"}:
         raise HTTPException(status_code=403, detail="برای تغییر پلی‌لیست، نقش ویرایشگر لازم است.")
+
+
+def _member_payload(cabinet_member: GroupCabinetMember, user: User) -> dict:
+    name = user.display_name or " ".join(part for part in (user.first_name, user.last_name) if part) or (f"@{user.username}" if user.username else str(user.telegram_id))
+    return {"user_id": user.id, "telegram_id": user.telegram_id, "username": user.username, "name": name, "role": cabinet_member.role}
+
+
+async def _telegram_group_user(chat_id: int, identifier: str) -> object:
+    client = telegram.tg_client
+    if client is None:
+        raise HTTPException(status_code=503, detail="ارتباط ربات با تلگرام آماده نیست.")
+    raw: str | int = identifier.strip()
+    if str(raw).lstrip("-").isdigit():
+        raw = int(raw)
+    elif not str(raw).startswith("@"):
+        raw = f"@{raw}"
+    try:
+        membership = await client.get_chat_member(chat_id, raw)
+    except Exception as error:
+        raise HTTPException(status_code=404, detail="این کاربر در گروه پیدا نشد؛ نام کاربری یا شناسه تلگرام را بررسی کن.") from error
+    status = str(getattr(membership, "status", "")).lower()
+    if any(label in status for label in ("left", "banned", "kicked")):
+        raise HTTPException(status_code=422, detail="این کاربر دیگر عضو گروه نیست.")
+    return membership.user
 
 
 async def _group_playlist(db: AsyncSession, chat_id: int, playlist_id: int) -> Playlist:
@@ -127,7 +158,8 @@ async def get_group_cabinet(
         "title": cabinet.title,
         "role": member.role,
         "can_edit": member.role in {"owner", "editor"},
-        "can_contribute": True,
+        "can_contribute": member.role in {"owner", "editor"},
+        "storage_channel_id": cabinet.storage_channel_id,
         "files": [_file_payload(file, in_cabinet=file.id in cabinet_file_ids) for file in visible_files],
         "playlists": [{
             "id": playlist.id,
@@ -138,6 +170,35 @@ async def get_group_cabinet(
     }
 
 
+@router.patch("/{chat_id}")
+async def update_group_cabinet(
+    chat_id: int,
+    payload: GroupCabinetSettingsUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cabinet, member = await _access(db, chat_id, current_user)
+    if member.role != "owner":
+        raise HTTPException(status_code=403, detail="فقط صاحب کمد گروه می‌تواند تنظیمات را تغییر دهد.")
+    if payload.title is not None:
+        cabinet.title = payload.title.strip()
+    channel_title = None
+    if payload.storage_channel is not None:
+        value = payload.storage_channel.strip()
+        if not value or value.casefold() in {"off", "none", "خاموش"}:
+            cabinet.storage_channel_id = None
+        else:
+            client = telegram.tg_client
+            if client is None:
+                raise HTTPException(status_code=503, detail="ارتباط ربات با تلگرام آماده نیست.")
+            try:
+                cabinet.storage_channel_id, channel_title = await resolve_group_storage_channel(client, value)
+            except ValueError as error:
+                raise HTTPException(status_code=422, detail=str(error)) from error
+    await db.commit()
+    return {"title": cabinet.title, "storage_channel_id": cabinet.storage_channel_id, "storage_channel_title": channel_title}
+
+
 @router.post("/{chat_id}/playlists")
 async def create_group_playlist(
     chat_id: int,
@@ -145,7 +206,8 @@ async def create_group_playlist(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    await _access(db, chat_id, current_user)
+    _, member = await _access(db, chat_id, current_user)
+    _require_editor(member)
     name = payload.name.strip()
     if not name:
         raise HTTPException(status_code=422, detail="نام پلی‌لیست خالی است.")
@@ -191,7 +253,8 @@ async def add_group_playlist_items(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cabinet, _ = await _access(db, chat_id, current_user)
+    cabinet, member = await _access(db, chat_id, current_user)
+    _require_editor(member)
     playlist = await _group_playlist(db, chat_id, playlist_id)
     allowed = set((await db.execute(select(GroupCabinetItem.file_id).where(
         GroupCabinetItem.cabinet_id == cabinet.id, GroupCabinetItem.file_id.in_(set(payload.file_ids)),
@@ -216,7 +279,8 @@ async def reorder_group_playlist(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    await _access(db, chat_id, current_user)
+    _, member = await _access(db, chat_id, current_user)
+    _require_editor(member)
     playlist = await _group_playlist(db, chat_id, playlist_id)
     current = {item.file_id: item for item in playlist.items}
     if set(payload.file_ids) != set(current) or len(payload.file_ids) != len(current):
@@ -235,7 +299,8 @@ async def remove_group_playlist_item(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    await _access(db, chat_id, current_user)
+    _, member = await _access(db, chat_id, current_user)
+    _require_editor(member)
     playlist = await _group_playlist(db, chat_id, playlist_id)
     await db.execute(delete(PlaylistItem).where(
         PlaylistItem.playlist_id == playlist.id, PlaylistItem.file_id == file_id,
@@ -313,9 +378,15 @@ async def update_group_cabinet_member(
     cabinet, member = await _access(db, chat_id, current_user)
     if member.role != "owner":
         raise HTTPException(status_code=403, detail="فقط صاحب کمد گروه می‌تواند نقش‌ها را تغییر دهد.")
-    target_user = (await db.execute(select(User).where(User.id == payload.user_id))).scalar_one_or_none()
+    telegram_user = await _telegram_group_user(chat_id, payload.identifier)
+    target_user = (await db.execute(select(User).where(User.telegram_id == telegram_user.id))).scalar_one_or_none()
     if target_user is None:
-        raise HTTPException(status_code=404, detail="کاربر پیدا نشد.")
+        target_user = User(telegram_id=telegram_user.id)
+        db.add(target_user)
+        await db.flush()
+    target_user.username = getattr(telegram_user, "username", None)
+    target_user.first_name = getattr(telegram_user, "first_name", None)
+    target_user.last_name = getattr(telegram_user, "last_name", None)
     target = (await db.execute(select(GroupCabinetMember).where(
         GroupCabinetMember.cabinet_id == cabinet.id,
         GroupCabinetMember.user_id == target_user.id,
@@ -326,7 +397,29 @@ async def update_group_cabinet_member(
     else:
         target.role = payload.role
     await db.commit()
-    return {"user_id": target_user.id, "role": target.role}
+    return _member_payload(target, target_user)
+
+
+@router.delete("/{chat_id}/members/{user_id}")
+async def remove_group_cabinet_member(
+    chat_id: int,
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cabinet, member = await _access(db, chat_id, current_user)
+    if member.role != "owner":
+        raise HTTPException(status_code=403, detail="فقط صاحب کمد گروه می‌تواند دسترسی اعضا را حذف کند.")
+    target = (await db.execute(select(GroupCabinetMember).where(
+        GroupCabinetMember.cabinet_id == cabinet.id, GroupCabinetMember.user_id == user_id,
+    ))).scalar_one_or_none()
+    if target is None:
+        raise HTTPException(status_code=404, detail="عضو کمد پیدا نشد.")
+    if target.role == "owner":
+        raise HTTPException(status_code=422, detail="دسترسی صاحب کمد را نمی‌توان حذف کرد.")
+    await db.delete(target)
+    await db.commit()
+    return {"removed": True}
 
 
 @router.get("/{chat_id}/members")
@@ -341,9 +434,4 @@ async def list_group_cabinet_members(
     rows = (await db.execute(select(GroupCabinetMember, User).join(User, User.id == GroupCabinetMember.user_id).where(
         GroupCabinetMember.cabinet_id == cabinet.id,
     ).order_by(GroupCabinetMember.role, User.display_name, User.id))).all()
-    return [{
-        "user_id": cabinet_member.user_id,
-        "telegram_id": user.telegram_id,
-        "name": user.display_name or " ".join(part for part in (user.first_name, user.last_name) if part) or str(user.telegram_id),
-        "role": cabinet_member.role,
-    } for cabinet_member, user in rows]
+    return [_member_payload(cabinet_member, user) for cabinet_member, user in rows]

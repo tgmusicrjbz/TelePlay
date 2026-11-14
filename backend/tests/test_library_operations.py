@@ -429,6 +429,59 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(shared)
             self.assertEqual(shared.id, self.direct_file_id)
 
+    async def test_group_cabinet_member_roles_and_verified_storage_channel(self):
+        from app import telegram
+        from app.group_tools import ensure_group_cabinet_member
+        from app.models import GroupCabinet, GroupCabinetMember
+        from app.routers.group_cabinets import (
+            GroupCabinetMemberUpdate, GroupCabinetSettingsUpdate,
+            list_group_cabinet_members, remove_group_cabinet_member,
+            update_group_cabinet, update_group_cabinet_member,
+        )
+
+        async with async_session() as db:
+            owner = await db.get(User, self.user_id)
+            cabinet = GroupCabinet(chat_id=-10056, title="کمد گروه", created_by_user_id=owner.id)
+            db.add(cabinet)
+            await db.flush()
+            membership = await ensure_group_cabinet_member(db, cabinet.id, owner.id, "owner")
+            # A later ordinary cabinet open must not demote the owner.
+            membership = await ensure_group_cabinet_member(db, cabinet.id, owner.id, "viewer")
+            self.assertEqual(membership.role, "owner")
+            await db.commit()
+
+            telegram_user = SimpleNamespace(id=333, username="group_member", first_name="عضو", last_name="گروه")
+            group_client = SimpleNamespace(get_chat_member=AsyncMock(return_value=SimpleNamespace(status="member", user=telegram_user)))
+            with patch.object(telegram, "tg_client", group_client):
+                added = await update_group_cabinet_member(
+                    -10056, GroupCabinetMemberUpdate(identifier="@group_member", role="editor"), db, owner,
+                )
+            self.assertEqual(added["telegram_id"], 333)
+            self.assertEqual(added["role"], "editor")
+            members = await list_group_cabinet_members(-10056, db, owner)
+            self.assertEqual({item["role"] for item in members}, {"owner", "editor"})
+
+            channel_client = SimpleNamespace(
+                get_chat=AsyncMock(return_value=SimpleNamespace(id=-100777, type="channel", title="آرشیو گروه")),
+                get_me=AsyncMock(return_value=SimpleNamespace(id=99)),
+                get_chat_member=AsyncMock(return_value=SimpleNamespace(
+                    status="administrator", privileges=SimpleNamespace(can_post_messages=True),
+                )),
+            )
+            with patch.object(telegram, "tg_client", channel_client):
+                settings_result = await update_group_cabinet(
+                    -10056, GroupCabinetSettingsUpdate(title="آرشیو مشترک", storage_channel="@archive"), db, owner,
+                )
+            self.assertEqual(settings_result["storage_channel_id"], -100777)
+            self.assertEqual(settings_result["storage_channel_title"], "آرشیو گروه")
+
+            target = (await db.execute(select(GroupCabinetMember).where(
+                GroupCabinetMember.cabinet_id == cabinet.id,
+                GroupCabinetMember.user_id == added["user_id"],
+            ))).scalar_one()
+            self.assertEqual(target.role, "editor")
+            self.assertTrue((await remove_group_cabinet_member(-10056, target.user_id, db, owner))["removed"])
+
     async def test_admin_health_reports_connected_bot_and_stuck_jobs(self):
         async with async_session() as db:
             user = await db.get(User, self.user_id)
