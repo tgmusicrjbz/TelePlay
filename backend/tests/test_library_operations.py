@@ -110,9 +110,8 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("مدیریت «گروه آزمایش»", view["text"])
         rows = view["reply_markup"].inline_keyboard
         self.assertEqual([len(row) for row in rows], [2, 1, 1, 1, 1, 1])
-        cabinet_url = rows[-2][0].web_app.url
-        self.assertIn("/auth?token=", cabinet_url)
-        self.assertIn("next=%2F%3Fgroup_cabinet%3D-1006", cabinet_url)
+        self.assertEqual(rows[-2][0].callback_data, "gccfg:-1006:home")
+        self.assertIsNone(rows[-2][0].web_app)
         self.assertTrue(all(
             len((button.callback_data or "").encode("utf-8")) <= 64
             for row in rows for button in row
@@ -444,7 +443,7 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
     async def test_group_cabinet_native_open_and_playlist_navigation_are_reliable(self):
         from app.telegram import build_clients
         build_clients()
-        from app.bot import group_playlist_player_keyboard, render_group_cabinet
+        from app.bot import group_menu_keyboard, group_playlist_player_keyboard, render_group_cabinet
 
         message = SimpleNamespace(edit=AsyncMock(), from_user=SimpleNamespace(id=111))
         actor = SimpleNamespace(id=111, username="owner", first_name="مالک", last_name=None, is_bot=False)
@@ -453,10 +452,123 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
 
         message.edit.assert_awaited_once()
         self.assertIn("کمد گروه", message.edit.await_args.args[0])
+        cabinet_markup = message.edit.await_args.kwargs["reply_markup"]
+        cabinet_buttons = [button for row in cabinet_markup.inline_keyboard for button in row]
+        self.assertIn("grpmenu:cabinet_settings", [button.callback_data for button in cabinet_buttons])
+        management_button = next(
+            button
+            for row in group_menu_keyboard(management_url="https://t.me/bot?start=fragile").inline_keyboard
+            for button in row
+            if button.text == "⚙️ مدیریت خصوصی"
+        )
+        self.assertEqual(management_button.callback_data, "grpmenu:settings")
+        self.assertIsNone(management_button.url)
         keyboard = group_playlist_player_keyboard(12, 1, 3).inline_keyboard
         self.assertEqual(keyboard[0][0].callback_data, "gplplay:12:0")
         self.assertEqual(keyboard[0][2].callback_data, "gplplay:12:2")
         self.assertEqual(keyboard[1][1].callback_data, "gplclose")
+
+    async def test_native_group_cabinet_settings_keep_title_and_accept_forwarded_channel(self):
+        from app.telegram import build_clients
+        build_clients()
+        from app.bot import group_cabinet_settings_view, group_storage_identifier
+        from app.models import GroupCabinet
+
+        actor = SimpleNamespace(id=111, username="owner", first_name="مالک", last_name=None)
+        first_view = await group_cabinet_settings_view(-10078, actor)
+        callbacks = [
+            button.callback_data
+            for row in first_view["reply_markup"].inline_keyboard for button in row
+            if button.callback_data
+        ]
+        self.assertIn("gccfg:-10078:channel", callbacks)
+        self.assertIn("gcmembers:-10078:0", callbacks)
+        async with async_session() as db:
+            cabinet = (await db.execute(select(GroupCabinet).where(GroupCabinet.chat_id == -10078))).scalar_one()
+            cabinet.title = "آرشیو اختصاصی گروه"
+            await db.commit()
+
+        reopened = await group_cabinet_settings_view(-10078, actor)
+        self.assertIn("آرشیو اختصاصی گروه", reopened["text"])
+        forwarded = SimpleNamespace(
+            text=None, caption="این کپشن پست کانال است",
+            forward_from_chat=SimpleNamespace(id=-1008899),
+            forward_origin=None, sender_chat=None,
+        )
+        self.assertEqual(group_storage_identifier(forwarded), -1008899)
+
+    async def test_native_group_cabinet_member_access_validates_group_membership(self):
+        from app.telegram import build_clients
+        build_clients()
+        from app.bot import group_member_identifier, set_native_group_cabinet_member
+        from app.models import GroupCabinet, GroupCabinetMember
+
+        telegram_user = SimpleNamespace(id=444, username="member", first_name="عضو", last_name="گروه")
+        client = SimpleNamespace(get_chat_member=AsyncMock(return_value=SimpleNamespace(
+            status="member", user=telegram_user,
+        )))
+        display_name = await set_native_group_cabinet_member(client, -10079, "@member", "editor")
+        self.assertIn("عضو", display_name)
+        async with async_session() as db:
+            cabinet = (await db.execute(select(GroupCabinet).where(GroupCabinet.chat_id == -10079))).scalar_one()
+            member = (await db.execute(select(GroupCabinetMember).where(
+                GroupCabinetMember.cabinet_id == cabinet.id,
+            ))).scalar_one()
+            self.assertEqual(member.role, "editor")
+        forwarded = SimpleNamespace(
+            text=None, caption=None, forward_from=None,
+            forward_origin=SimpleNamespace(sender_user=telegram_user),
+        )
+        self.assertEqual(group_member_identifier(forwarded), 444)
+        client.get_chat_member.return_value = SimpleNamespace(status="left", user=telegram_user)
+        with self.assertRaisesRegex(ValueError, "عضو فعال"):
+            await set_native_group_cabinet_member(client, -10079, 444, "viewer")
+
+    async def test_group_cabinet_settings_button_sends_native_private_panel(self):
+        from app.telegram import build_clients
+        build_clients()
+        from app.bot import handle_callback
+
+        actor = SimpleNamespace(id=111, username="owner", first_name="مالک", last_name=None)
+        callback = SimpleNamespace(
+            data="grpmenu:cabinet_settings", from_user=actor,
+            message=SimpleNamespace(chat=SimpleNamespace(id=-10080, title="گروه", type="supergroup")),
+            answer=AsyncMock(),
+        )
+        client = SimpleNamespace(send_message=AsyncMock(return_value=SimpleNamespace(id=8)))
+        view = {"text": "تنظیمات بومی کمد", "reply_markup": SimpleNamespace()}
+        with patch("app.bot.is_connected_group", new_callable=AsyncMock, return_value=True), patch(
+            "app.bot.is_group_manager", new_callable=AsyncMock, return_value=True,
+        ), patch("app.bot.group_cabinet_settings_view", new_callable=AsyncMock, return_value=view):
+            await handle_callback(client, callback)
+
+        client.send_message.assert_awaited_once_with(111, **view)
+        self.assertEqual(callback.answer.await_args.args[0], "در حال فرستادن تنظیمات کمد…")
+
+    async def test_group_storage_command_persists_verified_channel(self):
+        from app.telegram import build_clients
+        build_clients()
+        from app.bot import group_storage_command
+        from app.models import GroupCabinet
+
+        message = SimpleNamespace(
+            command=["group_storage", "@archive"], reply_to_message=None,
+            from_user=SimpleNamespace(id=111, username="owner", first_name="مالک", last_name=None),
+            chat=SimpleNamespace(id=-10081, title="گروه", type="supergroup"),
+        )
+        client = SimpleNamespace()
+        with patch("app.bot.require_connected_group", new_callable=AsyncMock, return_value=True), patch(
+            "app.bot.is_group_manager", new_callable=AsyncMock, return_value=True,
+        ), patch(
+            "app.bot.resolve_group_storage_channel", new_callable=AsyncMock,
+            return_value=(-1009911, "آرشیو گروه"),
+        ), patch("app.bot.reply_to_request", new_callable=AsyncMock) as reply:
+            await group_storage_command(client, message)
+
+        async with async_session() as db:
+            cabinet = (await db.execute(select(GroupCabinet).where(GroupCabinet.chat_id == -10081))).scalar_one()
+            self.assertEqual(cabinet.storage_channel_id, -1009911)
+        self.assertIn("آرشیو گروه", reply.await_args.args[1])
 
     async def test_group_cabinet_member_roles_and_verified_storage_channel(self):
         from app import telegram

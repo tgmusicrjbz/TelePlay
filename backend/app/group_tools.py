@@ -44,8 +44,9 @@ async def get_or_create_group_cabinet(db, chat_id: int, user_id: int | None = No
         )
         db.add(cabinet)
         await db.flush()
-    elif title and cabinet.title != title[:255]:
-        cabinet.title = title[:255]
+    # Callers frequently pass the default label while merely opening the
+    # cabinet. Updating here would silently erase a manager's custom title.
+    # Explicit title changes are handled by the settings endpoints/panel.
     return cabinet
 
 

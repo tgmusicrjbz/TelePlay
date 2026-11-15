@@ -394,10 +394,11 @@ def group_mini_app_button(chat_id: int) -> InlineKeyboardButton | None:
 
 
 def group_menu_keyboard(management_url: str | None = None, group_chat_id: int | None = None) -> InlineKeyboardMarkup:
-    management_button = (
-        InlineKeyboardButton("⚙️ مدیریت خصوصی", url=management_url)
-        if management_url else InlineKeyboardButton("⚙️ مدیریت خصوصی", callback_data="grpmenu:settings")
-    )
+    # Keep this as a real callback. Direct t.me deep links are unreliable in
+    # several Telegram clients and give no callback acknowledgement when they
+    # fail to open. The callback sends a private native panel and only uses a
+    # deep link as the final fallback for users who have never started the bot.
+    management_button = InlineKeyboardButton("⚙️ مدیریت خصوصی", callback_data="grpmenu:settings")
     rows = [
         [InlineKeyboardButton("🎙 متن به صدا", callback_data="grpmenu:tts"),
          InlineKeyboardButton("📝 صوت به متن", callback_data="grpmenu:stt")],
@@ -497,7 +498,7 @@ async def group_settings_view(
     lines.extend(("", f"🎤 گوینده پیش‌فرض: {voice_label}"))
     rows = [toggle_buttons[:2], toggle_buttons[2:], [InlineKeyboardButton("🎚 تنظیم سهمیه‌ها", callback_data=f"grpquota:{chat_id}:menu")],
             [InlineKeyboardButton(f"🎤 {voice_label.split(' · ')[0]}",callback_data=f"grpvoice:{chat_id}:menu")],
-            [group_cabinet_web_button(telegram_user_id, chat_id)]]
+            [InlineKeyboardButton("🗄️ کمد، اعضا و کانال", callback_data=f"gccfg:{chat_id}:home")]]
     if back_to_group_menu:
         rows.append([InlineKeyboardButton("↩️ بازگشت به منوی گروه", callback_data="grpmenu:home")])
     return {"text": "\n".join(lines), "reply_markup": InlineKeyboardMarkup(rows), "parse_mode": enums.ParseMode.DISABLED}
@@ -518,6 +519,210 @@ async def send_group_settings_panel(
         back_to_group_menu=False,
     )
     return await client.send_message(telegram_user_id, **view)
+
+
+async def send_group_cabinet_settings_panel(
+    client,
+    chat_id: int,
+    actor: object,
+) -> Message:
+    """Send the native cabinet controls to a verified manager's private chat."""
+    return await client.send_message(
+        actor.id,
+        **(await group_cabinet_settings_view(chat_id, actor)),
+    )
+
+
+async def ensure_group_cabinet_owner(chat_id: int, actor: object, title: str = "کمد گروه") -> tuple[GroupCabinet, User]:
+    """Create the native group cabinet settings scope for a verified manager."""
+    user = await get_or_create_user(
+        actor.id, getattr(actor, "username", None),
+        getattr(actor, "first_name", None), getattr(actor, "last_name", None),
+    )
+    async with async_session() as db:
+        cabinet = await get_or_create_group_cabinet(db, chat_id, user.id, title)
+        await ensure_group_cabinet_member(db, cabinet.id, user.id, "owner")
+        if cabinet.created_by_user_id is None:
+            cabinet.created_by_user_id = user.id
+        await db.commit()
+        await db.refresh(cabinet)
+    return cabinet, user
+
+
+async def group_cabinet_settings_view(chat_id: int, actor: object, notice: str | None = None) -> dict:
+    """Telegram-native cabinet settings; works without the Mini App."""
+    cabinet, _ = await ensure_group_cabinet_owner(chat_id, actor)
+    async with async_session() as db:
+        role_counts = dict((await db.execute(
+            select(GroupCabinetMember.role, func.count(GroupCabinetMember.id))
+            .where(GroupCabinetMember.cabinet_id == cabinet.id)
+            .group_by(GroupCabinetMember.role)
+        )).all())
+        item_count = (await db.execute(select(func.count(GroupCabinetItem.id)).where(
+            GroupCabinetItem.cabinet_id == cabinet.id,
+        ))).scalar_one()
+    channel_text = f"`{cabinet.storage_channel_id}`" if cabinet.storage_channel_id else "تنظیم نشده"
+    editor_count = int(role_counts.get("owner", 0)) + int(role_counts.get("editor", 0))
+    viewer_count = int(role_counts.get("viewer", 0))
+    lines = [
+        f"🗄️ **{escape_markdown(cabinet.title)}**",
+        "",
+        f"📣 کانال ذخیره‌سازی: {channel_text}",
+        f"📁 فایل‌های مشترک: {to_persian_digits(str(item_count))}",
+        f"✏️ مدیر و ویرایشگر: {to_persian_digits(str(editor_count))}",
+        f"👁 مشاهده‌گر: {to_persian_digits(str(viewer_count))}",
+    ]
+    if notice:
+        lines.extend(("", notice))
+    rows = [
+        [InlineKeyboardButton("✏️ تغییر نام کمد", callback_data=f"gccfg:{chat_id}:title"),
+         InlineKeyboardButton("📣 تنظیم کانال", callback_data=f"gccfg:{chat_id}:channel")],
+        [InlineKeyboardButton("👥 اعضا و دسترسی‌ها", callback_data=f"gcmembers:{chat_id}:0")],
+    ]
+    if cabinet.storage_channel_id:
+        rows.append([InlineKeyboardButton(
+            "قطع اتصال کانال", callback_data=f"gccfg:{chat_id}:disconnect_confirm",
+            style=enums.ButtonStyle.DANGER,
+        )])
+    if settings.web_base_url.strip().lower().startswith("https://"):
+        rows.append([group_cabinet_web_button(actor.id, chat_id)])
+    rows.append([InlineKeyboardButton("↩️ تنظیمات ابزارهای گروه", callback_data=f"grpmanage:{chat_id}")])
+    return {"text": "\n".join(lines), "reply_markup": InlineKeyboardMarkup(rows)}
+
+
+async def group_cabinet_members_view(chat_id: int, actor: object, page: int = 0) -> dict:
+    cabinet, _ = await ensure_group_cabinet_owner(chat_id, actor)
+    async with async_session() as db:
+        rows = (await db.execute(
+            select(GroupCabinetMember, User)
+            .join(User, User.id == GroupCabinetMember.user_id)
+            .where(GroupCabinetMember.cabinet_id == cabinet.id)
+            .order_by(GroupCabinetMember.role.desc(), User.display_name, User.id)
+        )).all()
+    page = min(max(page, 0), max(0, (len(rows) - 1) // PAGE_SIZE))
+    shown = rows[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
+    role_icons = {"owner": "👑", "editor": "✏️", "viewer": "👁"}
+    buttons = []
+    for membership, user in shown:
+        name = user.display_name or " ".join(part for part in (user.first_name, user.last_name) if part) or (f"@{user.username}" if user.username else str(user.telegram_id))
+        buttons.append([InlineKeyboardButton(
+            f"{role_icons.get(membership.role, '👤')} {name[:34]}",
+            callback_data=f"gcmember:{chat_id}:open:{user.id}:{page}",
+        )])
+    if len(rows) > PAGE_SIZE:
+        buttons.append(pagination_row(f"gcmembers:{chat_id}", page, len(rows)))
+    buttons.extend([
+        [InlineKeyboardButton("＋ افزودن ویرایشگر", callback_data=f"gcmember:{chat_id}:add:editor:{page}"),
+         InlineKeyboardButton("＋ افزودن مشاهده‌گر", callback_data=f"gcmember:{chat_id}:add:viewer:{page}")],
+        [InlineKeyboardButton("↩️ تنظیمات کمد گروه", callback_data=f"gccfg:{chat_id}:home")],
+    ])
+    return {
+        "text": f"👥 **اعضای کمد گروه**\n{to_persian_digits(str(len(rows)))} عضو با دسترسی ثبت‌شده",
+        "reply_markup": InlineKeyboardMarkup(buttons),
+    }
+
+
+async def group_cabinet_member_view(chat_id: int, actor: object, user_id: int, page: int = 0) -> dict:
+    cabinet, _ = await ensure_group_cabinet_owner(chat_id, actor)
+    async with async_session() as db:
+        row = (await db.execute(
+            select(GroupCabinetMember, User)
+            .join(User, User.id == GroupCabinetMember.user_id)
+            .where(GroupCabinetMember.cabinet_id == cabinet.id, GroupCabinetMember.user_id == user_id)
+        )).first()
+    if row is None:
+        return await group_cabinet_members_view(chat_id, actor, page)
+    membership, user = row
+    name = user.display_name or " ".join(part for part in (user.first_name, user.last_name) if part) or (f"@{user.username}" if user.username else str(user.telegram_id))
+    role_label = {"owner": "مالک", "editor": "ویرایشگر", "viewer": "مشاهده‌گر"}.get(membership.role, membership.role)
+    buttons = []
+    if membership.role != "owner":
+        buttons.append([
+            InlineKeyboardButton(
+                f"{'✓ ' if membership.role == 'editor' else ''}ویرایشگر",
+                callback_data=f"gcmember:{chat_id}:role_editor:{user_id}:{page}",
+            ),
+            InlineKeyboardButton(
+                f"{'✓ ' if membership.role == 'viewer' else ''}مشاهده‌گر",
+                callback_data=f"gcmember:{chat_id}:role_viewer:{user_id}:{page}",
+            ),
+        ])
+        buttons.append([InlineKeyboardButton(
+            "حذف دسترسی", callback_data=f"gcmember:{chat_id}:remove_confirm:{user_id}:{page}",
+            style=enums.ButtonStyle.DANGER,
+        )])
+    buttons.append([InlineKeyboardButton("↩️ اعضای کمد", callback_data=f"gcmembers:{chat_id}:{page}")])
+    return {
+        "text": (
+            f"👤 **{escape_markdown(name)}**\n"
+            f"نقش: {role_label}\n"
+            f"شناسه تلگرام: `{user.telegram_id}`"
+        ),
+        "reply_markup": InlineKeyboardMarkup(buttons),
+    }
+
+
+def group_storage_identifier(message: Message | object) -> str | int | None:
+    """Read @username/id text or the source chat of a forwarded channel post."""
+    # Forwarded channel posts often have their own text/caption. Prefer the
+    # forwarding metadata, otherwise that content is mistaken for a username.
+    forwarded_chat = getattr(message, "forward_from_chat", None)
+    if forwarded_chat is not None and getattr(forwarded_chat, "id", None):
+        return int(forwarded_chat.id)
+    origin = getattr(message, "forward_origin", None)
+    for candidate in (
+        getattr(origin, "chat", None), getattr(origin, "sender_chat", None),
+        getattr(message, "sender_chat", None),
+    ):
+        if candidate is not None and getattr(candidate, "id", None):
+            return int(candidate.id)
+    text_value = str(getattr(message, "text", None) or getattr(message, "caption", None) or "").strip()
+    if text_value:
+        return text_value
+    return None
+
+
+def group_member_identifier(message: Message | object) -> str | int | None:
+    """Read a member username/id or the sender of a forwarded private message."""
+    forwarded_user = getattr(message, "forward_from", None)
+    if forwarded_user is not None and getattr(forwarded_user, "id", None):
+        return int(forwarded_user.id)
+    origin = getattr(message, "forward_origin", None)
+    sender_user = getattr(origin, "sender_user", None)
+    if sender_user is not None and getattr(sender_user, "id", None):
+        return int(sender_user.id)
+    text_value = str(getattr(message, "text", None) or getattr(message, "caption", None) or "").strip()
+    return text_value or None
+
+
+async def set_native_group_cabinet_member(client, chat_id: int, identifier: str | int, role: str) -> str:
+    """Validate Telegram membership and save a viewer/editor role."""
+    value: str | int = identifier.strip() if isinstance(identifier, str) else identifier
+    if value in (None, ""):
+        raise ValueError("نام کاربری یا شناسه تلگرام را وارد کن.")
+    if str(value).lstrip("-").isdigit():
+        value = int(value)
+    elif not str(value).startswith("@"):
+        value = f"@{value}"
+    try:
+        telegram_member = await client.get_chat_member(chat_id, value)
+    except Exception as error:
+        raise ValueError("این کاربر در گروه پیدا نشد؛ @username یا شناسه عددی را بررسی کن.") from error
+    status = str(getattr(telegram_member, "status", "")).lower()
+    if any(label in status for label in ("left", "banned", "kicked")):
+        raise ValueError("این کاربر عضو فعال گروه نیست.")
+    telegram_user = telegram_member.user
+    member_user = await get_or_create_user(
+        telegram_user.id, getattr(telegram_user, "username", None),
+        getattr(telegram_user, "first_name", None), getattr(telegram_user, "last_name", None),
+    )
+    async with async_session() as db:
+        cabinet = await get_or_create_group_cabinet(db, chat_id, title="کمد گروه")
+        membership = await ensure_group_cabinet_member(db, cabinet.id, member_user.id, role)
+        if membership.role != "owner":
+            membership.role = role
+        await db.commit()
+    return member_user.display_name or " ".join(part for part in (member_user.first_name, member_user.last_name) if part) or (f"@{member_user.username}" if member_user.username else str(member_user.telegram_id))
 
 
 async def send_group_settings_fallback(client, source_message: Message, chat_id: int) -> Message:
@@ -1445,13 +1650,9 @@ async def render_group_cabinet(message: Message, chat_id: int, page: int = 0, ac
         [InlineKeyboardButton("↩️ منوی گروه", callback_data="grpmenu:home")],
     ])
     if actor_is_manager:
-        # The native cabinet itself must stay available if Telegram cannot
-        # resolve the bot username for the optional private management link.
-        try:
-            management_url = await group_settings_start_url(tg_client, chat_id)
-            buttons.insert(-1, [InlineKeyboardButton("⚙️ اعضا و کانال ذخیره‌سازی", url=management_url)])
-        except Exception as error:
-            logger.warning("Could not build group cabinet management link chat=%s: %s", chat_id, error)
+        buttons.insert(-1, [InlineKeyboardButton(
+            "⚙️ اعضا و کانال ذخیره‌سازی", callback_data="grpmenu:cabinet_settings",
+        )])
     text = f"🗄️ **{escape_markdown(cabinet.title)}**\n{to_persian_digits(str(len(items)))} فایل مشترک برای اعضای گروه"
     if not items:
         text += "\n\nهنوز فایلی در کمد گروه نیست. روی یک فایل صوتی یا ویدیویی ریپلای کن و افزودن را بزن."
@@ -2586,11 +2787,8 @@ async def group_menu_command(client, message: Message):
         # cabinet tables. The cabinet is created lazily when its button is
         # opened, so a delayed/unfinished migration can never make /komod
         # disappear for the whole group.
-        management_url = None
-        with contextlib.suppress(Exception):
-            management_url = await group_settings_start_url(client, message.chat.id)
         try:
-            menu = await reply_to_request(message, group_menu_text(), reply_markup=group_menu_keyboard(management_url, message.chat.id))
+            menu = await reply_to_request(message, group_menu_text(), reply_markup=group_menu_keyboard(group_chat_id=message.chat.id))
         except Exception:
             # A malformed/unsupported button must not hide the whole menu.
             # Send the same actions as plain text so the group still gets a
@@ -2863,8 +3061,34 @@ async def group_storage_command(client, message: Message):
     if not await is_group_manager(client, message.chat.id, message.from_user.id):
         await reply_to_request(message, "فقط مدیرهای گروه می‌توانند فضای ذخیره‌سازی گروه را تنظیم کنند.")
         return
-    value = str((message.command or [None, ""])[1] or "").strip()
-    if value.casefold() in {"", "none", "off", "خاموش"}:
+    value: str | int = " ".join(str(part) for part in (message.command or [])[1:]).strip()
+    # A manager can reply to a forwarded channel post with /group_storage. This
+    # path works even before the bot has permission to open their private chat.
+    if not value and getattr(message, "reply_to_message", None) is not None:
+        forwarded_identifier = group_storage_identifier(message.reply_to_message)
+        if isinstance(forwarded_identifier, int):
+            value = forwarded_identifier
+    if not value:
+        try:
+            await client.send_message(
+                message.from_user.id,
+                **(await group_cabinet_settings_view(message.chat.id, message.from_user)),
+            )
+            await temporary_group_notice(client, message, "✅ تنظیم کانال در پیوی فرستاده شد.", delay=8)
+        except Exception as error:
+            logger.exception("Could not open native group storage settings chat=%s: %s", message.chat.id, error)
+            try:
+                fallback = await send_group_settings_fallback(client, message, message.chat.id)
+                asyncio.create_task(delete_preview_later(client, fallback.chat.id, fallback.id, 30))
+            except Exception as fallback_error:
+                logger.exception("Could not send group storage fallback chat=%s: %s", message.chat.id, fallback_error)
+                await reply_to_request(
+                    message,
+                    "تنظیم خصوصی باز نشد. ربات را در پیوی Start کن یا همین‌جا "
+                    "`/group_storage @channel` را بفرست.",
+                )
+        return
+    if isinstance(value, str) and value.casefold() in {"none", "off", "خاموش"}:
         channel_id = None
         channel_title = None
     else:
@@ -3685,6 +3909,7 @@ async def handle_callback(client, callback: CallbackQuery):
         known_user = (await db.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one_or_none()
     group_settings_callback = data.startswith((
         "grpq:", "grpquota:", "grpvoice:", "grpmanage:", "grpmenu:",
+        "gccfg:", "gcmembers:", "gcmember:",
         "gplaylists", "gplaylist", "gpl", "gpcabinet", "gcfile", "gcplay", "gcremove",
     ))
     if ((known_user is not None and not known_user.is_active) or
@@ -3696,7 +3921,7 @@ async def handle_callback(client, callback: CallbackQuery):
     # Old bot versions rendered management controls inside the group. If one of
     # those stale buttons is pressed, move the manager to a private panel before
     # reading or changing any sensitive setting.
-    if data.startswith(("grpq:", "grpquota:", "grpvoice:", "grpmanage:")):
+    if data.startswith(("grpq:", "grpquota:", "grpvoice:", "grpmanage:", "gccfg:", "gcmembers:", "gcmember:")):
         callback_chat_type = str(getattr(callback.message.chat, "type", "")).lower()
         if "private" not in callback_chat_type:
             try:
@@ -3710,13 +3935,16 @@ async def handle_callback(client, callback: CallbackQuery):
                 await callback.answer("این بخش فقط برای مدیرهای همان گروه است.", show_alert=True)
                 return
             try:
-                await send_group_settings_panel(
-                    client,
-                    callback.message,
-                    group_chat_id,
-                    callback.from_user.id,
-                    callback.message.chat.title,
-                )
+                if data.startswith(("gccfg:", "gcmembers:", "gcmember:")):
+                    await send_group_cabinet_settings_panel(client, group_chat_id, callback.from_user)
+                else:
+                    await send_group_settings_panel(
+                        client,
+                        callback.message,
+                        group_chat_id,
+                        callback.from_user.id,
+                        callback.message.chat.title,
+                    )
                 with contextlib.suppress(Exception):
                     await callback.message.delete()
                 await callback.answer("مدیریت در پیوی فرستاده شد.", show_alert=True)
@@ -3831,6 +4059,211 @@ async def handle_callback(client, callback: CallbackQuery):
         )))
         await callback.answer()
 
+    elif data.startswith("gccfg:"):
+        try:
+            _, chat_id_raw, action = data.split(":", 2)
+            group_chat_id = int(chat_id_raw)
+        except (TypeError, ValueError):
+            await callback.answer("این درخواست معتبر نیست.", show_alert=True)
+            return
+        if not await is_connected_group(group_chat_id):
+            await callback.answer("اتصال این گروه فعال نیست.", show_alert=True)
+            return
+        if not await is_group_manager(client, group_chat_id, callback.from_user.id):
+            await callback.answer("این بخش فقط برای مدیرهای همان گروه است.", show_alert=True)
+            return
+        if action == "home":
+            await callback.message.edit_text(**(await group_cabinet_settings_view(group_chat_id, callback.from_user)))
+            await callback.answer()
+            return
+        if action == "disconnect_confirm":
+            await callback.message.edit_text(
+                "📣 اتصال کانال ذخیره‌سازی قطع شود؟\nفایل‌های قبلی پاک نمی‌شوند؛ فایل‌های تازه از فضای پیش‌فرض استفاده می‌کنند.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton(
+                        "قطع اتصال", callback_data=f"gccfg:{group_chat_id}:disconnect",
+                        style=enums.ButtonStyle.DANGER,
+                    )],
+                    [InlineKeyboardButton("↩️ انصراف", callback_data=f"gccfg:{group_chat_id}:home")],
+                ]),
+            )
+            await callback.answer()
+            return
+        if action == "disconnect":
+            async with async_session() as db:
+                cabinet = await get_or_create_group_cabinet(db, group_chat_id, title="کمد گروه")
+                cabinet.storage_channel_id = None
+                await db.commit()
+            await callback.message.edit_text(**(await group_cabinet_settings_view(
+                group_chat_id, callback.from_user, "✅ اتصال کانال قطع شد.",
+            )))
+            await callback.answer("ذخیره شد.")
+            return
+        if action == "web_unavailable":
+            await callback.answer("نسخه وب روی این سرویس با HTTPS تنظیم نشده؛ تنظیمات بومی ربات فعال است.", show_alert=True)
+            return
+        if action not in {"title", "channel"}:
+            await callback.answer("این گزینه معتبر نیست.", show_alert=True)
+            return
+        pending_input_chats.add(callback.message.chat.id)
+        prompt_text = (
+            "✏️ نام تازه کمد گروه را بفرست."
+            if action == "title" else
+            "📣 یک پیام از کانال مقصد فوروارد کن، یا @username / شناسه عددی کانال را بفرست.\n\n"
+            "ربات باید در آن کانال مدیر و دارای اجازه ارسال پیام باشد."
+        )
+        prompt = await callback.message.reply(prompt_text, reply_markup=input_keyboard())
+        await callback.answer("منتظر ورودی شما هستم.")
+        reply = None
+        notice = None
+        try:
+            reply, input_action = await wait_for_input(client, callback.message.chat.id)
+            if input_action == "cancel" or reply is None:
+                return
+            if action == "title":
+                value = str(getattr(reply, "text", None) or getattr(reply, "caption", None) or "").strip()[:255]
+                if not value:
+                    notice = "❌ نام کمد نمی‌تواند خالی باشد."
+                else:
+                    async with async_session() as db:
+                        cabinet = await get_or_create_group_cabinet(db, group_chat_id, title=value)
+                        cabinet.title = value
+                        await db.commit()
+                    notice = "✅ نام کمد گروه ذخیره شد."
+            else:
+                identifier = group_storage_identifier(reply)
+                if identifier is None:
+                    notice = "❌ کانال از این پیام تشخیص داده نشد؛ @username، شناسه عددی یا یک پیام فورواردشده بفرست."
+                else:
+                    try:
+                        channel_id, channel_title = await resolve_group_storage_channel(client, identifier)
+                        async with async_session() as db:
+                            cabinet = await get_or_create_group_cabinet(db, group_chat_id, title="کمد گروه")
+                            cabinet.storage_channel_id = channel_id
+                            await db.commit()
+                        notice = f"✅ کانال «{channel_title}» برای ذخیره فایل‌های تازه متصل شد."
+                    except ValueError as error:
+                        notice = f"❌ {error}"
+        finally:
+            pending_input_chats.discard(callback.message.chat.id)
+            await safe_delete(prompt)
+            await safe_delete(reply)
+            await callback.message.edit_text(**(await group_cabinet_settings_view(
+                group_chat_id, callback.from_user, notice,
+            )))
+
+    elif data.startswith("gcmembers:"):
+        try:
+            _, chat_id_raw, page_raw = data.split(":", 2)
+            group_chat_id, page = int(chat_id_raw), int(page_raw)
+        except (TypeError, ValueError):
+            await callback.answer("این درخواست معتبر نیست.", show_alert=True)
+            return
+        if not await is_connected_group(group_chat_id) or not await is_group_manager(client, group_chat_id, callback.from_user.id):
+            await callback.answer("این بخش فقط برای مدیرهای همان گروه است.", show_alert=True)
+            return
+        await callback.message.edit_text(**(await group_cabinet_members_view(group_chat_id, callback.from_user, page)))
+        await callback.answer()
+
+    elif data.startswith("gcmember:"):
+        try:
+            _, chat_id_raw, action, target_raw, page_raw = data.split(":", 4)
+            group_chat_id, page = int(chat_id_raw), int(page_raw)
+        except (TypeError, ValueError):
+            await callback.answer("این درخواست معتبر نیست.", show_alert=True)
+            return
+        if not await is_connected_group(group_chat_id) or not await is_group_manager(client, group_chat_id, callback.from_user.id):
+            await callback.answer("این بخش فقط برای مدیرهای همان گروه است.", show_alert=True)
+            return
+        if action == "add":
+            role = target_raw
+            if role not in {"editor", "viewer"}:
+                await callback.answer("این نقش معتبر نیست.", show_alert=True)
+                return
+            pending_input_chats.add(callback.message.chat.id)
+            prompt = await callback.message.reply(
+                "👤 @username، شناسه عددی یا یک پیام فورواردشده از عضو همین گروه را بفرست.",
+                reply_markup=input_keyboard(),
+            )
+            await callback.answer("منتظر مشخصات عضو هستم.")
+            reply = None
+            try:
+                reply, input_action = await wait_for_input(client, callback.message.chat.id)
+                if input_action == "cancel" or reply is None:
+                    return
+                identifier = group_member_identifier(reply)
+                try:
+                    if identifier is None:
+                        raise ValueError("عضو از این پیام تشخیص داده نشد.")
+                    name = await set_native_group_cabinet_member(client, group_chat_id, identifier, role)
+                    await callback.message.reply(f"✅ دسترسی {name} ذخیره شد.")
+                except ValueError as error:
+                    await callback.message.reply(f"❌ {error}")
+            finally:
+                pending_input_chats.discard(callback.message.chat.id)
+                await safe_delete(prompt)
+                await safe_delete(reply)
+                await callback.message.edit_text(**(await group_cabinet_members_view(group_chat_id, callback.from_user, page)))
+            return
+        try:
+            target_user_id = int(target_raw)
+        except ValueError:
+            await callback.answer("عضو انتخاب‌شده معتبر نیست.", show_alert=True)
+            return
+        if action == "open":
+            await callback.message.edit_text(**(await group_cabinet_member_view(
+                group_chat_id, callback.from_user, target_user_id, page,
+            )))
+            await callback.answer()
+            return
+        if action in {"role_editor", "role_viewer"}:
+            role = action.removeprefix("role_")
+            async with async_session() as db:
+                cabinet = await get_or_create_group_cabinet(db, group_chat_id, title="کمد گروه")
+                membership = (await db.execute(select(GroupCabinetMember).where(
+                    GroupCabinetMember.cabinet_id == cabinet.id,
+                    GroupCabinetMember.user_id == target_user_id,
+                ))).scalar_one_or_none()
+                if membership is None or membership.role == "owner":
+                    await callback.answer("این دسترسی قابل تغییر نیست.", show_alert=True)
+                    return
+                membership.role = role
+                await db.commit()
+            await callback.message.edit_text(**(await group_cabinet_member_view(
+                group_chat_id, callback.from_user, target_user_id, page,
+            )))
+            await callback.answer("نقش عضو ذخیره شد.")
+            return
+        if action == "remove_confirm":
+            await callback.message.edit_text(
+                "دسترسی این عضو به کمد گروه حذف شود؟",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton(
+                        "حذف دسترسی", callback_data=f"gcmember:{group_chat_id}:remove:{target_user_id}:{page}",
+                        style=enums.ButtonStyle.DANGER,
+                    )],
+                    [InlineKeyboardButton("↩️ انصراف", callback_data=f"gcmember:{group_chat_id}:open:{target_user_id}:{page}")],
+                ]),
+            )
+            await callback.answer()
+            return
+        if action == "remove":
+            async with async_session() as db:
+                cabinet = await get_or_create_group_cabinet(db, group_chat_id, title="کمد گروه")
+                membership = (await db.execute(select(GroupCabinetMember).where(
+                    GroupCabinetMember.cabinet_id == cabinet.id,
+                    GroupCabinetMember.user_id == target_user_id,
+                ))).scalar_one_or_none()
+                if membership is None or membership.role == "owner":
+                    await callback.answer("این دسترسی قابل حذف نیست.", show_alert=True)
+                    return
+                await db.delete(membership)
+                await db.commit()
+            await callback.message.edit_text(**(await group_cabinet_members_view(group_chat_id, callback.from_user, page)))
+            await callback.answer("دسترسی حذف شد.")
+            return
+        await callback.answer("این عملیات معتبر نیست.", show_alert=True)
+
     elif data.startswith("grpmenu:"):
         action = data.split(":", 1)[1]
         group_chat_id = callback.message.chat.id
@@ -3856,27 +4289,52 @@ async def handle_callback(client, callback: CallbackQuery):
             )
             await callback.answer(prompt, show_alert=True)
         elif action == "cabinet":
+            await callback.answer("در حال بازکردن کمد گروه…")
             try:
                 await render_group_cabinet(callback.message, group_chat_id, actor=callback.from_user)
-                await callback.answer()
             except Exception as error:
                 tracking_code = secrets.token_hex(4)
                 logger.exception(
                     "Could not open group cabinet code=%s chat=%s user=%s: %s",
                     tracking_code, group_chat_id, callback.from_user.id, error,
                 )
-                await callback.answer(
-                    f"کمد گروه باز نشد. دوباره تلاش کن. کد پیگیری: {tracking_code}",
-                    show_alert=True,
+                await temporary_group_notice(
+                    client, callback.message,
+                    f"کمد گروه باز نشد. دوباره تلاش کن. کد پیگیری: `{tracking_code}`",
                 )
+        elif action == "cabinet_settings":
+            if not await is_group_manager(client, group_chat_id, callback.from_user.id):
+                await callback.answer("این بخش فقط برای مدیرهای گروه است.", show_alert=True)
+                return
+            await callback.answer("در حال فرستادن تنظیمات کمد…")
+            try:
+                await send_group_cabinet_settings_panel(client, group_chat_id, callback.from_user)
+            except Exception as error:
+                logger.exception(
+                    "Could not render native cabinet settings chat=%s user=%s: %s",
+                    group_chat_id, callback.from_user.id, error,
+                )
+                try:
+                    fallback = await send_group_settings_fallback(client, callback.message, group_chat_id)
+                    asyncio.create_task(delete_preview_later(client, fallback.chat.id, fallback.id, 20))
+                except Exception as fallback_error:
+                    tracking_code = secrets.token_hex(4)
+                    logger.exception(
+                        "Cabinet settings callback fallback failed code=%s chat=%s user=%s: %s",
+                        tracking_code, group_chat_id, callback.from_user.id, fallback_error,
+                    )
+                    await temporary_group_notice(
+                        client, callback.message,
+                        f"تنظیمات کمد باز نشد. کد پیگیری: `{tracking_code}`",
+                    )
         elif action == "private":
             await callback.answer(
                 "روی فایل ریپلای کن و /sendto @username یا /privatelink @username را بفرست.",
                 show_alert=True,
             )
         elif action == "playlists":
+            await callback.answer("در حال بازکردن پلی‌لیست‌ها…")
             await render_group_playlists(callback.message, group_chat_id)
-            await callback.answer()
         elif action == "guide":
             pending_group_actions.pop((group_chat_id, callback.from_user.id), None)
             await callback.answer(
@@ -3896,6 +4354,7 @@ async def handle_callback(client, callback: CallbackQuery):
             if not await is_group_manager(client, group_chat_id, callback.from_user.id):
                 await callback.answer("این بخش فقط برای مدیرهای گروه است.", show_alert=True)
                 return
+            await callback.answer("در حال فرستادن پنل خصوصی…")
             try:
                 await send_group_settings_panel(
                     client,
@@ -3904,13 +4363,11 @@ async def handle_callback(client, callback: CallbackQuery):
                     callback.from_user.id,
                     callback.message.chat.title,
                 )
-                await callback.answer("پنل مدیریت در پیوی فرستاده شد.", show_alert=True)
             except Exception as error:
                 logger.exception("Could not render group settings chat=%s user=%s: %s", group_chat_id, callback.from_user.id, error)
                 try:
                     fallback = await send_group_settings_fallback(client, callback.message, group_chat_id)
                     asyncio.create_task(delete_preview_later(client, fallback.chat.id, fallback.id, 20))
-                    await callback.answer("برای مدیریت، دکمه خصوصی ارسال‌شده را بزن.", show_alert=True)
                 except Exception as fallback_error:
                     tracking_code = secrets.token_hex(4)
                     logger.exception(
@@ -3920,7 +4377,10 @@ async def handle_callback(client, callback: CallbackQuery):
                         callback.from_user.id,
                         fallback_error,
                     )
-                    await callback.answer(f"مدیریت باز نشد. کد پیگیری: {tracking_code}", show_alert=True)
+                    await temporary_group_notice(
+                        client, callback.message,
+                        f"مدیریت باز نشد. کد پیگیری: `{tracking_code}`",
+                    )
         else:
             await callback.answer()
 
