@@ -5,6 +5,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { ArrowDownUp, Check, ChevronDown, ChevronRight, Clock3, DownloadCloud, Film, GripVertical, Grid3X3, Headphones, Image, LayoutGrid, List, ListMusic, MoreVertical, Music, Pencil, Play, Plus, Save, Search, Share2, Shuffle, Trash2, Upload, UsersRound, X } from 'lucide-react';
 import { api, formatDuration, formatFileSize, Playlist, PlaylistItem, PlaylistSummary, useAddPlaylistItems, useCreatePlaylist, useDeletePlaylist, useFiles, useFolders, usePlaylist, usePlaylists, useRemovePlaylistItem, useReorderPlaylist, useReorderPlaylistCatalog, useUpdatePlaylist, useUploadFile } from '../lib/api';
 import { useAppStore } from '../lib/store';
+import { shuffleItems } from '../lib/playerQueue';
 import CustomSelect from './CustomSelect';
 import { estimateOfflineStorage, saveFileOffline, savePlaylistOffline } from '../lib/offline';
 import { EmptyState, LoadingState } from './StatePanel';
@@ -182,8 +183,7 @@ function PlaylistDetail({ id, onBack }: { id: number; onBack: () => void }) {
     if (isLoading || !playlist) return <div className="m-6 h-52 animate-pulse rounded-3xl bg-dark-800"/>;
     const play = (index = 0) => startQueue(orderedItems.map(x => x.file), index);
     const playShuffled = () => {
-        const files=orderedItems.map(item=>item.file);
-        for(let index=files.length-1;index>0;index--){const target=Math.floor(Math.random()*(index+1));[files[index],files[target]]=[files[target],files[index]]}
+        const files=shuffleItems(orderedItems.map(item=>item.file));
         if(files.length)startQueue(files,0);
     };
     const toggleSelected = (itemId: number) => setSelected(previous => { const next = new Set(previous); next.has(itemId) ? next.delete(itemId) : next.add(itemId); return next; });

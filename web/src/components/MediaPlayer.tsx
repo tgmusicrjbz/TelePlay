@@ -111,8 +111,6 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
     const [playbackSource,setPlaybackSource]=useState<{key:string;offlineUrl:string|null;ready:boolean}>(()=>({key:playbackSourceKey,offlineUrl:null,ready:file.stream_url.startsWith('blob:')}));
     const playbackSourceReady=playbackSource.key===playbackSourceKey&&playbackSource.ready;
     const offlineStreamUrl=playbackSource.key===playbackSourceKey?playbackSource.offlineUrl:null;
-    const [stopAfterCurrent,setStopAfterCurrent]=useState(()=>localStorage.getItem('komod-stop-after-current')==='1');
-    useEffect(()=>{if(stopAfterCurrent)localStorage.setItem('komod-stop-after-current','1');else localStorage.removeItem('komod-stop-after-current')},[stopAfterCurrent]);
     const queueDropTargetRef = useRef<string | null>(null);
     const queueSensors = useSensors(
         useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
@@ -156,6 +154,12 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
 
     const isVideo = file.file_type === 'video';
     const hasQueue = playQueue.length > 0;
+    const canShuffle = playQueue.length > 1;
+    const shuffleAndContinue = () => {
+        if (playQueue.length < 2) return;
+        shuffleQueue();
+        addToast(playQueue.length > 2 ? 'ادامهٔ صف تصادفی شد و پخش پیوسته روشن است.' : 'پخش پیوسته برای مورد بعدی روشن شد.', 'info');
+    };
     const toggleAudioOnly = async () => {
         if (preparingAudio) return;
         setShowVideoMoreMenu(false);
@@ -427,7 +431,6 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
         if (event.currentTarget !== videoRef.current || endedEntryRef.current === playbackEntryKey) return;
         endedEntryRef.current = playbackEntryKey;
         saveProgress();
-        if(stopAfterCurrent){setIsPlaying(false);return}
         if (sleepMode === 'track') {
             setIsPlaying(false);
             setSleepMode('off');
@@ -790,7 +793,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
             onPause={handlePause}
             onError={handleError}
             onEnded={handleEnded}
-            loop={repeatMode === 'one' && !stopAfterCurrent && sleepMode !== 'track'}
+            loop={repeatMode === 'one' && sleepMode !== 'track'}
             controls={false}
             playsInline
             preload={playbackSourceReady ? 'auto' : 'none'}
@@ -807,7 +810,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
             onPause={handlePause}
             onError={handleError}
             onEnded={handleEnded}
-            loop={repeatMode === 'one' && !stopAfterCurrent && sleepMode !== 'track'}
+            loop={repeatMode === 'one' && sleepMode !== 'track'}
             preload={playbackSourceReady ? 'auto' : 'none'}
         />
     );
@@ -938,7 +941,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
                     </div>
 
                     <div className="flex items-center gap-1 sm:gap-3">
-                        <button disabled={!hasQueue} onClick={(e) => { e.stopPropagation(); shuffleQueue(); }} className="hidden p-2 text-dark-300 hover:text-white disabled:opacity-30 sm:block" title="شافل صف پخش"><Shuffle className="h-5 w-5"/></button>
+                        <button disabled={!canShuffle} onClick={(e) => { e.stopPropagation(); shuffleAndContinue(); }} className="hidden p-2 text-dark-300 hover:text-white disabled:opacity-30 sm:block" title="تصادفی کردن ادامه صف"><Shuffle className="h-5 w-5"/></button>
                         <button disabled={!hasQueue} onClick={(e) => { e.stopPropagation(); playPrevious(); }} className="p-2 text-dark-300 hover:text-white disabled:opacity-30" title="ترک قبلی">
                             <SkipBack className="w-5 h-5" />
                         </button>
@@ -1091,7 +1094,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
 
                         {/* Control buttons */}
                         {!isVideo && <div dir="ltr" className="flex items-center justify-between gap-3">
-                            {!isVideo ? <div className="flex items-center gap-1"><button disabled={!hasQueue} onClick={shuffleQueue} className="rounded-full p-2 text-white/75 hover:bg-white/10 disabled:opacity-30" title="شافل"><Shuffle className="h-5 w-5"/></button><button disabled={!hasQueue} onClick={() => setAutoAdvance(!autoAdvance)} className={`rounded-full p-2 disabled:opacity-30 ${autoAdvance ? 'bg-primary-500/25 text-primary-200' : 'text-white/75 hover:bg-white/10'}`} title={`پخش پیوسته ${autoAdvance?'روشن':'خاموش'}`}><ListEnd className="h-5 w-5"/></button><button onClick={() => setRepeatMode(repeatMode === 'off' ? 'all' : repeatMode === 'all' ? 'one' : 'off')} className={`rounded-full p-2 ${repeatMode !== 'off' ? 'bg-primary-500/25 text-primary-200' : 'text-white/75 hover:bg-white/10'}`} title="تکرار"><Repeat2 className="h-5 w-5"/></button></div> : <div />}
+                            {!isVideo ? <div className="flex items-center gap-1"><button disabled={!canShuffle} onClick={shuffleAndContinue} className="rounded-full p-2 text-white/75 hover:bg-white/10 disabled:opacity-30" title="تصادفی کردن ادامه صف"><Shuffle className="h-5 w-5"/></button><button disabled={!hasQueue} onClick={() => setAutoAdvance(!autoAdvance)} className={`rounded-full p-2 disabled:opacity-30 ${autoAdvance ? 'bg-primary-500/25 text-primary-200' : 'text-white/75 hover:bg-white/10'}`} title={`پخش پیوسته ${autoAdvance?'روشن':'خاموش'}`}><ListEnd className="h-5 w-5"/></button><button onClick={() => setRepeatMode(repeatMode === 'off' ? 'all' : repeatMode === 'all' ? 'one' : 'off')} className={`rounded-full p-2 ${repeatMode !== 'off' ? 'bg-primary-500/25 text-primary-200' : 'text-white/75 hover:bg-white/10'}`} title="تکرار"><Repeat2 className="h-5 w-5"/></button></div> : <div />}
                             <div className="flex items-center gap-3">
                             <div className="relative">
                                 <button
@@ -1119,7 +1122,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
                             </div>
 
                             <div className="hidden">
-                                {hasQueue && <button onClick={shuffleQueue} className="p-2 rounded-lg hover:bg-white/10 text-white/80 hover:text-white" title="شافل صف پخش"><Shuffle className="h-5 w-5" /></button>}
+                                {hasQueue && <button disabled={!canShuffle} onClick={shuffleAndContinue} className="p-2 rounded-lg hover:bg-white/10 text-white/80 hover:text-white disabled:opacity-30" title="تصادفی کردن ادامه صف"><Shuffle className="h-5 w-5" /></button>}
                                 {hasQueue && <button onClick={() => setRepeatMode(repeatMode === 'off' ? 'all' : repeatMode === 'all' ? 'one' : 'off')} className={`relative p-2 rounded-lg transition-colors ${repeatMode !== 'off' ? 'bg-primary-500/20 text-primary-300' : 'hover:bg-white/10 text-white/80'}`} title={repeatMode === 'off' ? 'تکرار خاموش' : repeatMode === 'all' ? 'تکرار همه' : 'تکرار همین مورد'}><Repeat2 className="h-5 w-5" />{repeatMode === 'one' && <span className="absolute -left-0.5 -top-0.5 text-[9px] font-bold">۱</span>}</button>}
                                 {/* Speed */}
                                 <div className="relative">
@@ -1194,7 +1197,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
             {!isMinimized && showQueue && (
                 <div className="absolute inset-0 z-[100] flex items-end justify-center bg-black/55 backdrop-blur-sm sm:items-center sm:p-5" onPointerUp={event=>event.stopPropagation()} onClick={() => setShowQueue(false)}>
                     <section dir="rtl" className="flex max-h-[78dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-[2rem] border border-white/10 bg-dark-900/98 shadow-2xl sm:rounded-3xl" onClick={event => event.stopPropagation()}>
-                        <header className="flex items-center gap-1.5 border-b border-white/[.07] px-3 py-3"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary-500/12 text-primary-200"><ListMusic className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h2 className="font-bold">{showHistory?'تاریخچه پخش':showRecommendations?'پیشنهاد بعدی':'صف پخش'}</h2><p className="mt-0.5 text-[11px] text-dark-400">{showHistory?`${historyItems.length.toLocaleString('fa-IR')} مورد اخیر`:showRecommendations?`${recommendations.length.toLocaleString('fa-IR')} پیشنهاد`:`${Math.max(0, playQueue.length-queueIndex-1).toLocaleString('fa-IR')} مورد در ادامه`}</p></div>{!showHistory&&!showRecommendations&&<><button className={`btn-icon ${stopAfterCurrent?'bg-primary-500/15 text-primary-200':''}`} onClick={()=>setStopAfterCurrent(value=>!value)} title={stopAfterCurrent?'پخش خودکار فایل بعدی':'بعد از همین فایل متوقف شو'}><StopCircle className="h-4 w-4"/></button><button className="btn-icon" onClick={reverseQueue} title="برعکس کردن ترتیب صف"><ArrowUpDown className="h-4 w-4"/></button></>}<button className={`btn-icon ${showRecommendations?'text-primary-300':''}`} onClick={()=>{setShowHistory(false);void loadRecommendations()}} title="پیشنهادها"><ListPlus className="h-4 w-4"/></button><button className={`btn-icon ${showHistory?'text-primary-300':''}`} onClick={()=>{setShowRecommendations(false);void loadHistory()}} title="تاریخچه"><History className="h-4 w-4"/></button><button className="btn-icon" onClick={()=>setShowQueueSave(value=>!value)} title="ذخیره صف"><Save className="h-4 w-4"/></button><button className="btn-icon" onClick={() => setShowQueue(false)} aria-label="بستن صف"><X className="h-5 w-5"/></button></header>
+                        <header className="flex items-center gap-1.5 border-b border-white/[.07] px-3 py-3"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary-500/12 text-primary-200"><ListMusic className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h2 className="font-bold">{showHistory?'تاریخچه پخش':showRecommendations?'پیشنهاد بعدی':'صف پخش'}</h2><p className="mt-0.5 text-[11px] text-dark-400">{showHistory?`${historyItems.length.toLocaleString('fa-IR')} مورد اخیر`:showRecommendations?`${recommendations.length.toLocaleString('fa-IR')} پیشنهاد`:`${Math.max(0, playQueue.length-queueIndex-1).toLocaleString('fa-IR')} مورد در ادامه`}</p></div>{!showHistory&&!showRecommendations&&<><button className={`btn-icon ${!autoAdvance?'bg-primary-500/15 text-primary-200':''}`} onClick={()=>setAutoAdvance(!autoAdvance)} title={autoAdvance?'بعد از همین فایل متوقف شو':'پخش خودکار فایل بعدی'}><StopCircle className="h-4 w-4"/></button><button className="btn-icon" onClick={reverseQueue} title="برعکس کردن ترتیب صف"><ArrowUpDown className="h-4 w-4"/></button></>}<button className={`btn-icon ${showRecommendations?'text-primary-300':''}`} onClick={()=>{setShowHistory(false);void loadRecommendations()}} title="پیشنهادها"><ListPlus className="h-4 w-4"/></button><button className={`btn-icon ${showHistory?'text-primary-300':''}`} onClick={()=>{setShowRecommendations(false);void loadHistory()}} title="تاریخچه"><History className="h-4 w-4"/></button><button className="btn-icon" onClick={()=>setShowQueueSave(value=>!value)} title="ذخیره صف"><Save className="h-4 w-4"/></button><button className="btn-icon" onClick={() => setShowQueue(false)} aria-label="بستن صف"><X className="h-5 w-5"/></button></header>
                         {showQueueSave&&<div className="flex gap-2 border-b border-white/[.07] p-3"><input autoFocus value={queueName} onChange={event=>setQueueName(event.target.value)} onKeyDown={event=>{if(event.key==='Enter')void saveNamedQueue()}} className="input min-w-0 flex-1 text-sm" placeholder="نام این صف"/><button disabled={!queueName.trim()||createPlaylist.isPending||addPlaylistItems.isPending} onClick={()=>void saveNamedQueue()} className="btn-primary shrink-0 px-4 text-xs disabled:opacity-40">ذخیره</button></div>}
                         {showHistory?<div className="min-h-0 overflow-y-auto p-3">{historyItems.map((item,index)=><button key={item.id} onClick={()=>{useAppStore.getState().startQueue(historyItems,index);setShowHistory(false)}} className="mb-1.5 flex w-full items-center gap-3 rounded-2xl bg-white/[.025] p-3 text-right hover:bg-white/[.06]"><History className="h-4 w-4 shrink-0 text-dark-500"/><span dir="auto" className="min-w-0 flex-1 truncate text-sm">{item.file_name.replace(/\.[^.]+$/,'')}</span><span className="text-[10px] text-dark-500">{item.last_pos?`${Math.floor(item.last_pos/60).toLocaleString('fa-IR')} دقیقه`:''}</span></button>)}</div>:showRecommendations?<div className="min-h-0 overflow-y-auto p-3">{recommendations.map(item=><div key={item.id} className="mb-1.5 flex items-center gap-2 rounded-2xl bg-white/[.025] p-2"><button onClick={()=>useAppStore.getState().startQueue([item],0)} dir="auto" className="min-w-0 flex-1 truncate p-1 text-right text-sm">{item.file_name.replace(/\.[^.]+$/,'')}</button><button onClick={()=>{appendQueueItems([item]);setRecommendations(items=>items.filter(value=>value.id!==item.id))}} className="btn-icon h-9 w-9" title="افزودن به صف"><ListPlus className="h-4 w-4"/></button></div>)}</div>:<DndContext sensors={queueSensors} collisionDetection={closestCenter} onDragStart={({active})=>{const id=String(active.id);setActiveQueueId(id);queueDropTargetRef.current=id}} onDragCancel={()=>{setActiveQueueId(null);queueDropTargetRef.current=null}} onDragEnd={({active,over}:DragEndEvent)=>{if(over&&active.id!==over.id){const from=queueRows.findIndex(row=>row.id===String(active.id));const to=queueRows.findIndex(row=>row.id===String(over.id));if(from>=0&&to>=0)moveQueueItem(from,to)}setActiveQueueId(null);queueDropTargetRef.current=null}}>
                             <SortableContext items={queueRows.map(row=>row.id)} strategy={verticalListSortingStrategy}>

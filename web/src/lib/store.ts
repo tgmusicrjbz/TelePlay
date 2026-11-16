@@ -3,7 +3,7 @@
  */
 import { create } from 'zustand';
 import { TelegramFile, Folder } from './api';
-import { moveQueueEntry, nextQueueIndex, previousQueueIndex } from './playerQueue';
+import { moveQueueEntry, nextQueueIndex, previousQueueIndex, shuffleRemainingQueue } from './playerQueue';
 
 type QueueFile = TelegramFile & { _queueEntryId?: string };
 
@@ -304,10 +304,10 @@ export const useAppStore = create<AppState>((set) => ({
     queueIndex: restoredPlayer.queueIndex,
     repeatMode: restoredPlayer.repeatMode,
     autoAdvance: restoredPlayer.autoAdvance,
-    startQueue: (files, index = 0) => set(() => {
+    startQueue: (files, index = 0) => set((state) => {
         const queue = normalizeQueueEntries(files);
         const safeIndex = queue.length ? Math.min(Math.max(index, 0), queue.length - 1) : -1;
-        return { playQueue: queue, queueIndex: safeIndex, previewFile: queue[safeIndex] || null, isPlayerMinimized: false };
+        return { playQueue: queue, queueIndex: safeIndex, previewFile: queue[safeIndex] || null, isPlayerMinimized: false, autoAdvance: queue.length > 1 ? true : state.autoAdvance };
     }),
     playQueueItem: (index) => set((state) => {
         if (index < 0 || index >= state.playQueue.length) return state;
@@ -335,13 +335,8 @@ export const useAppStore = create<AppState>((set) => ({
     },
     shuffleQueue: () => set((state) => {
         if (state.playQueue.length < 2) return state;
-        const current = state.playQueue[state.queueIndex];
-        const rest = state.playQueue.filter((_, index) => index !== state.queueIndex);
-        for (let index = rest.length - 1; index > 0; index--) {
-            const randomIndex = Math.floor(Math.random() * (index + 1));
-            [rest[index], rest[randomIndex]] = [rest[randomIndex], rest[index]];
-        }
-        return { playQueue: [current, ...rest], queueIndex: 0, previewFile: current || state.previewFile };
+        const result = shuffleRemainingQueue(state.playQueue, state.queueIndex);
+        return { playQueue: result.queue, queueIndex: result.currentIndex, previewFile: result.queue[result.currentIndex] || state.previewFile, autoAdvance: true };
     }),
     reverseQueue: () => set((state) => {
         if (state.playQueue.length < 2) return state;

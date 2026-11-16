@@ -1,5 +1,27 @@
 export type PlayerRepeatMode = 'off' | 'all' | 'one';
 
+export function shuffleItems<T>(items: T[], random: () => number = Math.random): T[] {
+    const shuffled = [...items];
+    for (let index = shuffled.length - 1; index > 0; index--) {
+        const target = Math.floor(random() * (index + 1));
+        [shuffled[index], shuffled[target]] = [shuffled[target], shuffled[index]];
+    }
+    // A valid Fisher-Yates shuffle can occasionally return the same order. For
+    // a UI action that looks broken, so make one harmless rotation in that case.
+    if (shuffled.length > 1 && shuffled.every((item, index) => item === items[index])) {
+        shuffled.push(shuffled.shift() as T);
+    }
+    return shuffled;
+}
+
+export function shuffleRemainingQueue<T>(queue: T[], currentIndex: number, random: () => number = Math.random): { queue: T[]; currentIndex: number } {
+    if (!queue.length) return { queue: [], currentIndex: -1 };
+    const safeIndex = Math.min(Math.max(currentIndex, 0), queue.length - 1);
+    const current = queue[safeIndex];
+    const remaining = queue.filter((_, index) => index !== safeIndex);
+    return { queue: [current, ...shuffleItems(remaining, random)], currentIndex: 0 };
+}
+
 export function nextQueueIndex(length: number, currentIndex: number, repeatMode: PlayerRepeatMode): number | null {
     if (length <= 0) return null;
     const next = currentIndex + 1;

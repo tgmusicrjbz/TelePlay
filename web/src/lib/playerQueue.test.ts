@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { moveQueueEntry, nextQueueIndex, previousQueueIndex } from './playerQueue';
+import { moveQueueEntry, nextQueueIndex, previousQueueIndex, shuffleItems, shuffleRemainingQueue } from './playerQueue';
 
 describe('player queue', () => {
     it('respects repeat mode at queue boundaries', () => {
@@ -12,5 +12,16 @@ describe('player queue', () => {
     it('keeps the active item selected when the queue is reordered', () => {
         expect(moveQueueEntry(['a', 'b', 'c'], 1, 2, 1)).toEqual({ queue: ['a', 'c', 'b'], currentIndex: 2 });
         expect(moveQueueEntry(['a', 'b', 'c', 'd'], 0, 3, 2)).toEqual({ queue: ['b', 'c', 'd', 'a'], currentIndex: 1 });
+    });
+
+    it('makes shuffle visibly change an unchanged random result', () => {
+        expect(shuffleItems(['a', 'b', 'c'], () => .999)).toEqual(['b', 'c', 'a']);
+    });
+
+    it('keeps the current item playing and shuffles only what remains', () => {
+        expect(shuffleRemainingQueue(['a', 'b', 'c', 'd'], 1, () => .999)).toEqual({
+            queue: ['b', 'c', 'd', 'a'],
+            currentIndex: 0,
+        });
     });
 });
