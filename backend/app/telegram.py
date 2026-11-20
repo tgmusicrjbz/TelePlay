@@ -28,6 +28,7 @@ tg_client: Client | None = None
 _background_tasks: set[asyncio.Task] = set()
 _send_index = 0
 _managed_storage_messages: set[tuple[int, int]] = set()
+_managed_storage_deletions: set[tuple[int, int]] = set()
 
 
 def mark_managed_storage_message(chat_id: int, message_id: int) -> None:
@@ -42,6 +43,21 @@ def consume_managed_storage_message(chat_id: int, message_id: int) -> bool:
     if key not in _managed_storage_messages:
         return False
     _managed_storage_messages.discard(key)
+    return True
+
+
+def mark_managed_storage_deletions(chat_id: int, message_ids: list[int]) -> None:
+    """Ignore delete updates caused by Komod's own database-first cleanup."""
+    while len(_managed_storage_deletions) + len(message_ids) >= 5000 and _managed_storage_deletions:
+        _managed_storage_deletions.pop()
+    _managed_storage_deletions.update((int(chat_id), int(message_id)) for message_id in message_ids)
+
+
+def consume_managed_storage_deletion(chat_id: int, message_id: int) -> bool:
+    key = (int(chat_id), int(message_id))
+    if key not in _managed_storage_deletions:
+        return False
+    _managed_storage_deletions.discard(key)
     return True
 
 
@@ -207,12 +223,13 @@ def storage_channel(channel_id: int | None = None) -> int:
     return channel_id or settings.telegram_storage_channel_id
 
 
-async def get_message_from_channel(message_id: int, channel_id: int | None = None) -> Message:
+async def get_message_from_channel(message_id: int, channel_id: int | None = None) -> Message | None:
     """Get a message from the storage channel by ID."""
-    return await tg_client.get_messages(
-        storage_channel(channel_id),
-        message_id,
-    )
+    try:
+        message = await tg_client.get_messages(storage_channel(channel_id), message_id)
+    except MessageIdInvalid:
+        return None
+    return None if getattr(message, "empty", False) else message
 
 
 async def forward_to_storage_channel(message: Message, channel_id: int | None = None) -> Message:
@@ -263,9 +280,11 @@ async def delete_from_storage_channel(message_ids: int | list[int], channel_id: 
     ids = message_ids if isinstance(message_ids, list) else [message_ids]
     if not ids:
         return True
+    target_channel = storage_channel(channel_id)
+    mark_managed_storage_deletions(target_channel, ids)
     try:
         await tg_client.delete_messages(
-            storage_channel(channel_id),
+            target_channel,
             ids if isinstance(message_ids, list) else ids[0],
         )
         return True
@@ -274,15 +293,19 @@ async def delete_from_storage_channel(message_ids: int | list[int], channel_id: 
         # an already removed message is considered a successful delete.
         pass
     except Exception as error:
+        for message_id in ids:
+            consume_managed_storage_deletion(target_channel, message_id)
         logger.warning("Batch delete failed for %d storage message(s): %s", len(ids), error)
 
     failed = []
     for message_id in ids:
+        mark_managed_storage_deletions(target_channel, [message_id])
         try:
-            await tg_client.delete_messages(storage_channel(channel_id), message_id)
+            await tg_client.delete_messages(target_channel, message_id)
         except MessageIdInvalid:
             continue
         except Exception as error:
+            consume_managed_storage_deletion(target_channel, message_id)
             logger.error("Could not delete storage message %s: %s", message_id, error)
             failed.append(message_id)
     return not failed

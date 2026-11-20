@@ -10,7 +10,7 @@ import BlurredPreview from './BlurredPreview';
 
 interface FolderCardProps {
     folder: Folder;
-    viewMode: 'grid' | 'dense' | 'list';
+    viewMode: 'grid' | 'dense' | 'compact' | 'list';
     selected?: boolean;
     selectionMode?: boolean;
     onSelect?: (multi: boolean) => void;
@@ -160,10 +160,12 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
 
     // Grid view
     const dense = viewMode === 'dense';
+    const compact = viewMode === 'compact';
+    const tight = dense || compact;
     return (
         <div
             style={folderCardStyle}
-            className={`library-card ${dense ? 'p-2.5' : 'p-4'} rounded-2xl cursor-pointer group relative select-none
+            className={`library-card min-w-0 max-w-full overflow-hidden ${compact ? 'p-1.5' : dense ? 'p-2.5' : 'p-4'} rounded-2xl cursor-pointer group relative select-none
                 ${dropStyles} ${selectedStyles}`}
             data-selected={Boolean(selected)}
             onClick={handleClick}
@@ -178,10 +180,10 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
             data-folder-id={folder.id}
         >
             <BlurredPreview active={Boolean(folder.is_blurred)} card />
-            <div className={`flex items-start justify-between ${dense ? 'mb-2' : 'mb-3'}`}>
+            <div className={`flex min-w-0 items-start justify-between ${compact?'mb-1':dense ? 'mb-2' : 'mb-3'}`}>
                 <div
                     style={folderColor && !coverUrl ? { backgroundColor: `${folderColor}22`, borderColor: `${folderColor}66` } : undefined}
-                    className={`relative w-10 h-10 rounded-lg flex items-center justify-center overflow-hidden border group-hover:scale-110 transition-all duration-300
+                    className={`relative ${compact?'h-8 w-8':'h-10 w-10'} shrink-0 rounded-lg flex items-center justify-center overflow-hidden border group-hover:scale-105 transition-all duration-300
                         ${selected 
                             ? 'bg-gradient-to-br from-primary-500/20 to-primary-500/10 border-primary-500/40' 
                             : 'bg-gradient-to-br from-primary-500/10 to-primary-500/5 border-primary-500/20 group-hover:border-primary-500/30'}`}
@@ -201,20 +203,20 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
                             setActiveContextMenu({ type: 'folder', item: folder, x: rect.right, y: rect.bottom });
                         }
                     }}
-                    className={`p-1.5 rounded-lg transition-colors ${showMenu ? 'bg-white/10 text-white' : 'hover:bg-white/[0.08] text-dark-300'}`}
+                    className={`${compact?'p-1':'p-1.5'} rounded-lg transition-colors ${showMenu ? 'bg-white/10 text-white' : 'hover:bg-white/[0.08] text-dark-300'}`}
                 >
                     <MoreVertical className="w-4 h-4" />
                 </button>}
                 </div>
             </div>
 
-            <p className={`flex items-center gap-1.5 font-medium text-sm truncate transition-all ${selected ? 'text-primary-300' : 'text-white group-hover:text-primary-300'}`} title={folder.name}>
+            <p className={`flex min-w-0 items-center gap-1.5 truncate font-medium transition-all ${compact?'text-[10px]':dense?'text-xs':'text-sm'} ${selected ? 'text-primary-300' : 'text-white group-hover:text-primary-300'}`} title={folder.name}>
                 <span className="truncate">{folder.name}</span>
             </p>
-            {cardDisplay.folderCount&&<p className="text-xs text-dark-500 mt-1">
+            {!tight&&cardDisplay.folderCount&&<p className="mt-1 truncate text-xs text-dark-500">
                 {folder.file_count.toLocaleString('fa-IR')} فایل
             </p>}
-            {!dense&&cardDisplay.folderDescription&&folder.description && <p dir="auto" className="text-xs text-dark-400 truncate mt-1" title={folder.description}>{folder.description}</p>}
+            {!tight&&cardDisplay.folderDescription&&folder.description && <p dir="auto" className="mt-1 truncate text-xs text-dark-400" title={folder.description}>{folder.description}</p>}
         </div>
     );
 }

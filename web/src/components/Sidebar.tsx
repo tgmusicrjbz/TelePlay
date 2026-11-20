@@ -24,10 +24,14 @@ export default function Sidebar() {
     const selectSection = (section: NavSection) => {
         if (section === 'speech') {
             localStorage.setItem('komod-settings-target', 'tts');
+            const url=new URL(window.location.href);
+            url.pathname='/';
+            url.searchParams.set('settings','tts');
+            url.searchParams.delete('section');
+            window.history.pushState({}, '', `${url.pathname}${url.search}${url.hash}`);
             setActiveSection('settings');
-            if (window.location.pathname !== '/') window.history.pushState({}, '', '/');
             window.dispatchEvent(new PopStateEvent('popstate'));
-            window.dispatchEvent(new Event('komod-open-tts'));
+            window.setTimeout(()=>window.dispatchEvent(new Event('komod-open-tts')),0);
             return;
         }
         if (section === 'settings') localStorage.setItem('komod-settings-target', 'home');

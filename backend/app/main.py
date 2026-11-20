@@ -45,6 +45,56 @@ limiter = Limiter(key_func=get_remote_address)
 logger = logging.getLogger(__name__)
 
 
+async def run_startup_maintenance() -> None:
+    """Run non-critical migrations after the API has become available.
+
+    Caption tag backfill used to scan every untagged file synchronously on every
+    process start. Libraries naturally contain many captions without tags, so
+    that query grew forever and delayed the health endpoint and web boot. The
+    marker makes the migration one-shot while keeping it safe for upgrades.
+    """
+    await asyncio.sleep(2)
+    try:
+        from .caption_metadata import extract_tags_from_caption
+        from .models import AppSetting, File, User
+        from .database import async_session
+        from sqlalchemy import select
+        import json
+        marker_key = "caption_tag_backfill_v1"
+        async with async_session() as db:
+            marker = await db.get(AppSetting, marker_key)
+            if marker is None:
+                rows = (await db.execute(
+                    select(File, User).join(User, User.id == File.user_id).where(File.description.isnot(None))
+                )).all()
+                changed = 0
+                for file, owner in rows:
+                    if file.tags_json not in (None, "", "[]"):
+                        continue
+                    try:
+                        exclusions = json.loads(owner.tag_exclusions_json or "[]")
+                    except (TypeError, ValueError):
+                        exclusions = []
+                    tags = extract_tags_from_caption(file.description, exclusions)
+                    if tags:
+                        file.tags_json = json.dumps(tags, ensure_ascii=False)
+                        changed += 1
+                db.add(AppSetting(key=marker_key, value="done"))
+                await db.commit()
+                logger.info("Caption tag backfill finished once: updated=%s", changed)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.warning("Background caption tag backfill failed", exc_info=True)
+
+    if not settings.local_dev_mode:
+        try:
+            from .instagram_inbox import refresh_instagram_connection_health
+            await refresh_instagram_connection_health()
+        except Exception:
+            logger.warning("Instagram connection health check failed", exc_info=True)
+
+
 async def persist_error_log(request_id: str, method: str, path: str, message: str, trace: str | None = None):
     """Best-effort persistence that must never hide the original response."""
     try:
@@ -98,40 +148,6 @@ async def lifespan(app: FastAPI):
             logger.info("Persistent secret rotation finished: rotated=%s unreadable=%s", rotated, unreadable)
     except Exception:
         logger.exception("Persistent secret rotation failed; startup will continue with the configured key ring")
-    if not settings.local_dev_mode:
-        try:
-            from .instagram_inbox import refresh_instagram_connection_health
-            await refresh_instagram_connection_health()
-        except Exception:
-            logger.warning("Instagram connection health check failed", exc_info=True)
-    try:
-        from .caption_metadata import extract_tags_from_caption
-        from .models import File, User
-        from .database import async_session
-        from sqlalchemy import select, or_
-        import json
-        async with async_session() as db:
-            files_to_sync = (await db.execute(
-                select(File, User).join(User, User.id == File.user_id).where(
-                    File.description.isnot(None),
-                    or_(File.tags_json.is_(None), File.tags_json == "[]", File.tags_json == ""),
-                )
-            )).all()
-            changed = False
-            for f, owner in files_to_sync:
-                try:
-                    exclusions = json.loads(owner.tag_exclusions_json or "[]")
-                except (TypeError, ValueError):
-                    exclusions = []
-                tags = extract_tags_from_caption(f.description, exclusions)
-                if tags:
-                    f.tags_json = json.dumps(tags, ensure_ascii=False)
-                    changed = True
-            if changed:
-                await db.commit()
-                logger.info("Backfilled caption tags for existing files.")
-    except Exception as e:
-        logger.warning(f"Could not backfill caption tags: {e}")
     if settings.local_dev_mode:
         logger.warning("Local development mode is active: external Telegram, Drive and monitor workers are disabled")
     else:
@@ -155,10 +171,13 @@ async def lifespan(app: FastAPI):
             except Exception:
                 logger.exception("Telegram monitor accounts could not start; non-Telegram monitors remain available")
         await source_monitor_service.start()
-    
+    maintenance_task = asyncio.create_task(run_startup_maintenance(), name="startup-maintenance")
+
     yield
-    
+
     logger.info("Shutting down...")
+    maintenance_task.cancel()
+    await asyncio.gather(maintenance_task, return_exceptions=True)
     if not settings.local_dev_mode:
         await source_monitor_service.stop()
         await telegram_monitor_pool.stop()

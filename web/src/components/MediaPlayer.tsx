@@ -11,6 +11,8 @@ import { CSS } from '@dnd-kit/utilities';
 import { getOfflineMedia } from '../lib/offline';
 import { useShallow } from 'zustand/react/shallow';
 import { withoutFileExtension } from '../lib/fileNames';
+import { useQueryClient } from '@tanstack/react-query';
+import { downloadFileToDevice } from '../lib/deviceDownload';
 
 const PLAYBACK_SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4] as const;
 const playbackSpeedLabel = (speed: number) => `${speed === 1 ? '1.0' : speed}x`;
@@ -42,11 +44,15 @@ export function InlineMediaPlayer({ file, expanded = false }: { file: TelegramFi
 }
 
 function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline = false, inlineExpanded = false }: MediaPlayerContentProps) {
+    const queryClient = useQueryClient();
     const { playQueue, queueIndex, repeatMode, autoAdvance, playNext, playPrevious, shuffleQueue, reverseQueue, removeQueueItem, moveQueueItem, appendQueueItems, setRepeatMode, setAutoAdvance, setPlaylistFile, addToast } = useAppStore(useShallow(state=>({playQueue:state.playQueue,queueIndex:state.queueIndex,repeatMode:state.repeatMode,autoAdvance:state.autoAdvance,playNext:state.playNext,playPrevious:state.playPrevious,shuffleQueue:state.shuffleQueue,reverseQueue:state.reverseQueue,removeQueueItem:state.removeQueueItem,moveQueueItem:state.moveQueueItem,appendQueueItems:state.appendQueueItems,setRepeatMode:state.setRepeatMode,setAutoAdvance:state.setAutoAdvance,setPlaylistFile:state.setPlaylistFile,addToast:state.addToast})));
     const videoRef = useRef<HTMLVideoElement>(null);
     const playbackEntryKey = (file as TelegramFile & { _queueEntryId?: string })._queueEntryId || `file-${file.id}`;
     const playbackSourceKey = `${file.id}:${file.stream_url}`;
+    const playbackCheckpointKey = `komod-playback-position:${localStorage.getItem('komod-current-account') || 'guest'}:${file.id}`;
     const endedEntryRef = useRef<string | null>(null);
+    const sourceResumePosition = useRef(0);
+    const lastCheckpointWrite = useRef(0);
     const containerRef = useRef<HTMLDivElement>(null);
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
@@ -63,6 +69,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
     const [isPiP, setIsPiP] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [missingFromStorage, setMissingFromStorage] = useState(false);
     const [streamRetry, setStreamRetry] = useState(0);
     // Every queue occurrence receives a persistent id in the store. Deriving the
     // dnd id from its array index made dnd-kit see a new item after every move,
@@ -125,6 +132,24 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
         return hours > 0 ? `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}` : `${minutes}:${secs.toString().padStart(2, '0')}`;
     };
     const formatPersianMetaTime = (seconds: number) => formatPlayerTime(seconds).replace(/\d/g, digit => '۰۱۲۳۴۵۶۷۸۹'[Number(digit)]);
+
+    const readPlaybackCheckpoint = useCallback(() => {
+        try {
+            const saved = JSON.parse(localStorage.getItem(playbackCheckpointKey) || 'null') as {position?:number;updatedAt?:number}|null;
+            if (!saved || !Number.isFinite(saved.position) || Number(saved.position) <= 0) return 0;
+            // A very old checkpoint is less reliable than server progress and
+            // should not unexpectedly seek a file months later.
+            if (Date.now() - Number(saved.updatedAt || 0) > 30 * 24 * 60 * 60 * 1000) return 0;
+            return Number(saved.position);
+        } catch { return 0; }
+    }, [playbackCheckpointKey]);
+    const writePlaybackCheckpoint = useCallback((position:number, force=false) => {
+        if (!Number.isFinite(position) || position < 1) return;
+        const now=Date.now();
+        if (!force && now-lastCheckpointWrite.current<2000) return;
+        lastCheckpointWrite.current=now;
+        try { localStorage.setItem(playbackCheckpointKey, JSON.stringify({position,updatedAt:now})); } catch { /* storage may be unavailable */ }
+    },[playbackCheckpointKey]);
 
     useEffect(() => setThumbnailFailed(false), [file.id]);
     useEffect(() => {
@@ -231,15 +256,20 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
         setPublicUrl(fileData.public_stream_url ? getAbsoluteUrl(fileData.public_stream_url) : null);
     }, [file.id, extendedFile]);
 
-    // Restore progress
+    // Restore progress. Prefer the device checkpoint because it is written
+    // during playback and survives a WebView/service-worker reload; server
+    // progress is intentionally less frequent.
     useEffect(() => {
-        if (videoRef.current && extendedFile?.last_pos && !currentTime) {
-            if (extendedFile.last_pos < (extendedFile.duration || 0) * 0.95) {
-                videoRef.current.currentTime = extendedFile.last_pos;
-                setCurrentTime(extendedFile.last_pos);
-            }
+        const media=videoRef.current;
+        if (!media || media.currentTime >= 1 || currentTime >= 1) return;
+        const checkpoint=readPlaybackCheckpoint();
+        const resumeAt=Math.max(checkpoint,Number(extendedFile?.last_pos||0));
+        const knownDuration=Number(extendedFile?.duration||media.duration||0);
+        if (resumeAt>0 && (!knownDuration || resumeAt<knownDuration*.95)) {
+            media.currentTime=resumeAt;
+            setCurrentTime(resumeAt);
         }
-    }, [extendedFile]);
+    }, [extendedFile,currentTime,readPlaybackCheckpoint]);
 
     // Save progress periodically
     useEffect(() => {
@@ -259,13 +289,14 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
     // Save on close/pause
     const saveProgress = useCallback(() => {
         if (videoRef.current && !error) {
+            writePlaybackCheckpoint(videoRef.current.currentTime,true);
             updateProgress({
                 fileId: file.id,
                 position: Math.floor(videoRef.current.currentTime),
                 duration: videoRef.current.duration
             });
         }
-    }, [file.id, error, updateProgress]);
+    }, [file.id, error, updateProgress,writePlaybackCheckpoint]);
 
     // Save on unmount
     useEffect(() => {
@@ -386,7 +417,16 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
             const mediaDuration = Number.isFinite(videoRef.current.duration) ? videoRef.current.duration : 0;
             const nextTime = Math.max(0, videoRef.current.currentTime || 0);
             setCurrentTime(mediaDuration > 0 ? Math.min(nextTime, mediaDuration) : nextTime);
+            writePlaybackCheckpoint(nextTime);
         }
+    };
+
+    const downloadCurrentFile = () => {
+        addToast('دانلود شروع شد؛ پیشرفت در مرکز انتقال‌ها نمایش داده می‌شود.','info');
+        void downloadFileToDevice(file).then(
+            mode=>addToast(mode==='browser'?'دانلود به مرورگر سپرده شد.':'دانلود کامل شد.'),
+            reason=>{if(reason?.code!=='ERR_CANCELED')addToast(reason?.response?.data?.detail||'دانلود انجام نشد.','error')},
+        );
     };
 
     const handleLoadedMetadata = (event: React.SyntheticEvent<HTMLMediaElement>) => {
@@ -410,6 +450,17 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
                 setCurrentTime(videoRef.current.currentTime);
                 audioSwitchPosition.current = null;
             }
+            if (sourceResumePosition.current > 0) {
+                videoRef.current.currentTime = nextDuration > 0 ? Math.min(sourceResumePosition.current, Math.max(0, nextDuration - .1)) : sourceResumePosition.current;
+                setCurrentTime(videoRef.current.currentTime);
+                sourceResumePosition.current = 0;
+            } else if (videoRef.current.currentTime < 1) {
+                const checkpoint=readPlaybackCheckpoint();
+                if (checkpoint>0 && (!nextDuration || checkpoint<nextDuration*.95)) {
+                    videoRef.current.currentTime=checkpoint;
+                    setCurrentTime(checkpoint);
+                }
+            }
             setIsLoading(false);
         }
     };
@@ -430,6 +481,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
     const handleEnded = (event: React.SyntheticEvent<HTMLMediaElement>) => {
         if (event.currentTarget !== videoRef.current || endedEntryRef.current === playbackEntryKey) return;
         endedEntryRef.current = playbackEntryKey;
+        try { localStorage.removeItem(playbackCheckpointKey); } catch { /* storage may be unavailable */ }
         saveProgress();
         if (sleepMode === 'track') {
             setIsPlaying(false);
@@ -460,21 +512,42 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
 
     const handleError = () => {
         if (videoRef.current?.error) {
+            sourceResumePosition.current=Math.max(sourceResumePosition.current,videoRef.current.currentTime||currentTime||readPlaybackCheckpoint());
             const code = videoRef.current.error.code;
-            if (code === 2) {
-                setError('ارتباط با فایل قطع شد یا اینترنت پایدار نیست.');
-            } else if (code === 3) {
-                if (isVideo && !compatibleVideoUrl && !offlineStreamUrl) { void prepareCompatibleVideo(); return; }
-                setError(`فایل دریافت شد، اما مرورگر نتوانست ${isVideo ? 'تصویر ویدیو' : 'صدای آن'} را رمزگشایی کند.`);
-            } else if (code === 4) {
-                if (isVideo && !compatibleVideoUrl && !offlineStreamUrl) { void prepareCompatibleVideo(); return; }
-                setError(isVideo
-                    ? 'مرورگر نتوانست این ویدیو را شروع کند. پسوند MP4 به‌تنهایی سازگاری را تضمین نمی‌کند و ممکن است کُدک تصویر یا صدا پشتیبانی نشود؛ یک‌بار تلاش دوباره یا دانلود فایل را امتحان کن.'
-                    : 'مرورگر نتوانست این فایل صدا را شروع کند. ممکن است کُدک داخلی فایل پشتیبانی نشود؛ یک‌بار تلاش دوباره یا دانلود فایل را امتحان کن.');
-            } else {
-                setError('پخش فایل متوقف شد؛ ممکن است اتصال یا دسترسی فایل موقتاً مشکل داشته باشد.');
-            }
             setIsLoading(false);
+            void (async()=>{
+                if (!offlineStreamUrl) {
+                    try {
+                        await api.get(`/files/${file.id}`);
+                    } catch (requestError:any) {
+                        if ([404,410].includes(requestError?.response?.status)) {
+                            setMissingFromStorage(true);
+                            setError('این فایل از کانال ذخیره‌سازی حذف شده و اکنون از فهرست کمد هم کنار گذاشته شد.');
+                            queryClient.removeQueries({queryKey:['file',file.id]});
+                            await Promise.all([
+                                queryClient.invalidateQueries({queryKey:['files']}),
+                                queryClient.invalidateQueries({queryKey:['all-files-picker']}),
+                                queryClient.invalidateQueries({queryKey:['folders']}),
+                                queryClient.invalidateQueries({queryKey:['folderTree']}),
+                            ]);
+                            return;
+                        }
+                    }
+                }
+                if (code === 2) {
+                    setError('ارتباط با فایل قطع شد یا اینترنت پایدار نیست.');
+                } else if (code === 3) {
+                    if (isVideo && !compatibleVideoUrl && !offlineStreamUrl) { void prepareCompatibleVideo(); return; }
+                    setError(`فایل دریافت شد، اما مرورگر نتوانست ${isVideo ? 'تصویر ویدیو' : 'صدای آن'} را رمزگشایی کند.`);
+                } else if (code === 4) {
+                    if (isVideo && !compatibleVideoUrl && !offlineStreamUrl) { void prepareCompatibleVideo(); return; }
+                    setError(isVideo
+                        ? 'مرورگر نتوانست این ویدیو را شروع کند. پسوند MP4 به‌تنهایی سازگاری را تضمین نمی‌کند و ممکن است کُدک تصویر یا صدا پشتیبانی نشود؛ یک‌بار تلاش دوباره یا دانلود فایل را امتحان کن.'
+                        : 'مرورگر نتوانست این فایل صدا را شروع کند. ممکن است کُدک داخلی فایل پشتیبانی نشود؛ یک‌بار تلاش دوباره یا دانلود فایل را امتحان کن.');
+                } else {
+                    setError('پخش فایل متوقف شد؛ ممکن است اتصال یا دسترسی فایل موقتاً مشکل داشته باشد.');
+                }
+            })();
         }
     };
 
@@ -683,6 +756,8 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
         setIsLoading(true);
         endedEntryRef.current = null;
         setPublicUrl(null);
+        sourceResumePosition.current=readPlaybackCheckpoint();
+        lastCheckpointWrite.current=0;
     }, [playbackEntryKey]);
 
     useEffect(() => {
@@ -850,7 +925,10 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
                         <p className="text-dark-300 mb-6">{error}</p>
 
                         <div className="flex flex-col gap-3">
-                            <button onClick={() => { setError(null); setIsLoading(true); setStreamRetry(Date.now()); window.setTimeout(() => void videoRef.current?.play().catch(() => undefined), 120); }} className="btn-primary flex items-center justify-center gap-2"><RotateCw className="h-4 w-4"/> تلاش دوباره</button>
+                            {missingFromStorage ? (
+                                !inline && <button onClick={onClose} className="btn-primary flex items-center justify-center gap-2"><X className="h-4 w-4"/> بستن پخش‌کننده</button>
+                            ) : <>
+                            <button onClick={() => { sourceResumePosition.current=Math.max(sourceResumePosition.current,videoRef.current?.currentTime||currentTime||readPlaybackCheckpoint()); setError(null); setIsLoading(true); setStreamRetry(Date.now()); window.setTimeout(() => void videoRef.current?.play().catch(() => undefined), 120); }} className="btn-primary flex items-center justify-center gap-2"><RotateCw className="h-4 w-4"/> تلاش دوباره</button>
                             <div className="flex gap-3">
                                 <Button
                                     onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(externalUrl); }}
@@ -859,16 +937,16 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
                                     <Copy className="w-4 h-4" />
                                     کپی پیوند
                                 </Button>
-                                <a
-                                    href={externalUrl}
-                                    download={file.file_name}
+                                <button
+                                    type="button"
                                     className="flex-1 btn-secondary flex items-center justify-center gap-2"
-                                    onClick={(e) => e.stopPropagation()}
+                                    onClick={(e) => {e.stopPropagation();downloadCurrentFile()}}
                                 >
                                     <Download className="w-4 h-4" />
                                     دانلود
-                                </a>
+                                </button>
                             </div>
+                            </>}
                         </div>
                         {!inline && <button
                             onClick={onClose}
@@ -910,7 +988,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
                         {isLoading && !error && !isMinimized && (
                             <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 pointer-events-none z-20 bg-black/20">
                                 <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-primary-500"></div>
-                                {compatibilityMessage&&<div dir="rtl" className="w-[min(17rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-white/10 bg-dark-950/85 px-4 py-3 text-center shadow-2xl backdrop-blur-xl"><p className="truncate text-xs font-medium text-dark-100">{compatibilityMessage}</p><div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-gradient-to-l from-primary-300 via-primary-500 to-fuchsia-500 transition-[width] duration-500 ease-out" style={{width:`${compatibilityProgress}%`}}/></div></div>}
+                                <div dir="rtl" className="w-[min(17rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-white/10 bg-dark-950/85 px-4 py-3 text-center shadow-2xl backdrop-blur-xl"><p className="truncate text-xs font-medium text-dark-100">{compatibilityMessage||'در حال اتصال و آماده‌سازی پخش…'}</p>{compatibilityMessage&&<div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-gradient-to-l from-primary-300 via-primary-500 to-fuchsia-500 transition-[width] duration-500 ease-out" style={{width:`${compatibilityProgress}%`}}/></div>}</div>
                             </div>
                         )}
                         {skipFeedback && !isMinimized && (

@@ -946,6 +946,34 @@ class LibraryOperationsTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         await engine.dispose()
 
+    async def test_deleted_storage_message_purges_source_but_only_clears_variants(self):
+        from app.storage_sync import purge_deleted_storage_messages
+
+        channel_id = -100987654321
+        async with async_session() as db:
+            direct = await db.get(File, self.direct_file_id)
+            nested = await db.get(File, self.nested_file_id)
+            folder = await db.get(Folder, self.folder_id)
+            direct.storage_channel_id = channel_id
+            nested.audio_variant_storage_channel_id = channel_id
+            nested.audio_variant_message_id = 900
+            nested.audio_variant_file_id = "variant-file"
+            nested.audio_variant_unique_id = "variant-unique"
+            nested.audio_variant_size = 123
+            folder.cover_file_id = direct.id
+            await db.commit()
+
+            removed = await purge_deleted_storage_messages(db, channel_id, [101, 900])
+
+            self.assertEqual(removed, [self.direct_file_id])
+            self.assertIsNone(await db.get(File, self.direct_file_id))
+            surviving = await db.get(File, self.nested_file_id)
+            self.assertIsNotNone(surviving)
+            self.assertIsNone(surviving.audio_variant_message_id)
+            self.assertIsNone(surviving.audio_variant_file_id)
+            await db.refresh(folder)
+            self.assertIsNone(folder.cover_file_id)
+
     @staticmethod
     def make_file(user_id: int, folder_id: int | None, message_id: int) -> File:
         return File(

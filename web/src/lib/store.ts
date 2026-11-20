@@ -83,8 +83,8 @@ interface AppState {
     selectAll: (fileIds: number[], folderIds?: number[]) => void;
 
     // View mode
-    viewMode: 'grid' | 'dense' | 'list';
-    setViewMode: (mode: 'grid' | 'dense' | 'list') => void;
+    viewMode: 'grid' | 'dense' | 'compact' | 'list';
+    setViewMode: (mode: 'grid' | 'dense' | 'compact' | 'list') => void;
 
     // Modals
     previewFile: TelegramFile | null;

@@ -26,6 +26,7 @@ from .. import telegram
 from ..telegram import get_message_from_channel
 from ..streaming import stream_file as stream_file_generator
 from ..services import select_best_thumbnail, telegram_text_with_links
+from ..storage_sync import purge_deleted_storage_messages
 from ..media_metadata import extract_embedded_cover
 from ..config import get_settings
 
@@ -414,7 +415,15 @@ async def stream_file(
     # Get message from channel
     message = await get_message_from_channel(file.channel_message_id, file.storage_channel_id)
     if not message:
-        raise HTTPException(status_code=404, detail="فایل در فضای ذخیره‌سازی پیدا نشد.")
+        channel_id = file.storage_channel_id or settings.telegram_storage_channel_id
+        removed = await purge_deleted_storage_messages(
+            db,
+            channel_id,
+            [file.channel_message_id],
+            include_unassigned=file.storage_channel_id is None,
+        )
+        logger.info("Purged stale cabinet records %s for missing Telegram message %s/%s", removed, channel_id, file.channel_message_id)
+        raise HTTPException(status_code=410, detail="این فایل از کانال ذخیره‌سازی حذف شده و از کمد نیز پاک شد.")
     if file.file_type == "text" or message.photo:
         return await stored_message_response(file, message, request.headers.get("range"), download)
 

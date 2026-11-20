@@ -679,19 +679,29 @@ const removeFilesFromCachedPack = (pack: Pack | undefined, ids: Set<number>) => 
 export const useAllFiles = (fileType?: string, search?: string, sort = 'created:desc', enabled = true) => useQuery({
     queryKey: ['all-files-picker', fileType, search, sort],
     queryFn: async ({signal}) => {
-        const files: TelegramFile[] = [];
-        let page = 1;
-        let total = 0;
-        do {
-            const {data} = await api.get<FileListResponse>('/files', {params:{
-                file_type:fileType || undefined, search:search || undefined, sort,
-                page, per_page:100, all_levels:true,
-            },signal});
-            if (!data.files.length) break;
-            files.push(...data.files);
-            total = data.total;
-            page += 1;
-        } while (files.length < total);
+        const params={file_type:fileType || undefined, search:search || undefined, sort, per_page:100, all_levels:true};
+        const {data:first} = await api.get<FileListResponse>('/files', {params:{
+            ...params,page:1,
+        },signal});
+        const files=[...first.files];
+        const total=first.total;
+        const pageCount=Math.ceil(total/100);
+        // Large cabinets used to load one page after another. Fetch the
+        // remaining pages with a small worker pool so pickers become usable
+        // quickly without flooding the API on very large libraries.
+        let nextPage=2;
+        const pages=new Map<number,TelegramFile[]>();
+        await Promise.all(Array.from({length:Math.min(4,Math.max(0,pageCount-1))},async()=>{
+            while(nextPage<=pageCount){
+                const page=nextPage++;
+                const {data}=await api.get<FileListResponse>('/files', {params:{
+                    ...params,
+                    page,
+                },signal});
+                pages.set(page,data.files);
+            }
+        }));
+        [...pages.entries()].sort(([left],[right])=>left-right).forEach(([,items])=>files.push(...items));
         return {files,total,page:1,per_page:files.length,search_mode:'exact' as const,suggestions:[]};
     },
     enabled,
@@ -1815,14 +1825,26 @@ export const useDismissTTSJob = () => {
     const queryClient = useQueryClient();
     return useMutation({
         mutationFn: async (id:string) => api.delete(`/tts/jobs/${id}`),
-        onSuccess: () => queryClient.invalidateQueries({queryKey:['tts-jobs']}),
+        onMutate: async (id) => {
+            await queryClient.cancelQueries({queryKey:['tts-jobs']});
+            const previous=queryClient.getQueryData<TTSJobStatus[]>(['tts-jobs']);
+            queryClient.setQueryData<TTSJobStatus[]>(['tts-jobs'],items=>items?.filter(item=>item.id!==id));
+            return {previous};
+        },
+        onError: (_error,_id,context) => queryClient.setQueryData(['tts-jobs'],context?.previous),
     });
 };
 export const useClearFinishedTTSJobs = () => {
     const queryClient = useQueryClient();
     return useMutation({
         mutationFn: async () => (await api.delete<{removed:number}>('/tts/jobs')).data,
-        onSuccess: () => queryClient.invalidateQueries({queryKey:['tts-jobs']}),
+        onMutate: async () => {
+            await queryClient.cancelQueries({queryKey:['tts-jobs']});
+            const previous=queryClient.getQueryData<TTSJobStatus[]>(['tts-jobs']);
+            queryClient.setQueryData<TTSJobStatus[]>(['tts-jobs'],items=>items?.filter(item=>!['done','error','cancelled'].includes(item.state)));
+            return {previous};
+        },
+        onError: (_error,_variables,context) => queryClient.setQueryData(['tts-jobs'],context?.previous),
     });
 };
 
@@ -1840,11 +1862,14 @@ export const useCancelSTTJob = () => { const queryClient=useQueryClient(); retur
     onSuccess:()=>queryClient.invalidateQueries({queryKey:['stt-jobs']}),
 }); };
 export const useDismissSTTJob = () => { const queryClient=useQueryClient(); return useMutation({
-    mutationFn:async(id:string)=>api.delete(`/stt/jobs/${id}`), onSuccess:()=>queryClient.invalidateQueries({queryKey:['stt-jobs']}),
+    mutationFn:async(id:string)=>api.delete(`/stt/jobs/${id}`),
+    onMutate:async(id)=>{await queryClient.cancelQueries({queryKey:['stt-jobs']});const previous=queryClient.getQueryData<STTJobStatus[]>(['stt-jobs']);queryClient.setQueryData<STTJobStatus[]>(['stt-jobs'],items=>items?.filter(item=>item.id!==id));return{previous}},
+    onError:(_error,_id,context)=>queryClient.setQueryData(['stt-jobs'],context?.previous),
 }); };
 export const useClearFinishedSTTJobs = () => { const queryClient=useQueryClient(); return useMutation({
     mutationFn:async()=>(await api.delete<{removed:number}>('/stt/jobs')).data,
-    onSuccess:()=>queryClient.invalidateQueries({queryKey:['stt-jobs']}),
+    onMutate:async()=>{await queryClient.cancelQueries({queryKey:['stt-jobs']});const previous=queryClient.getQueryData<STTJobStatus[]>(['stt-jobs']);queryClient.setQueryData<STTJobStatus[]>(['stt-jobs'],items=>items?.filter(item=>!['done','error','cancelled'].includes(item.state)));return{previous}},
+    onError:(_error,_variables,context)=>queryClient.setQueryData(['stt-jobs'],context?.previous),
 }); };
 export const useRefineSTTText = () => useMutation({
     mutationFn: async ({content,prompt,onStatus}:{content:string;prompt:string;onStatus?:(message:string,progress:number)=>void}) => {

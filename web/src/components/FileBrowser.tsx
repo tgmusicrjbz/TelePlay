@@ -3,7 +3,7 @@
  */
 import { lazy, Suspense, useEffect, useCallback, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Folder as FolderIcon, Grid, LayoutGrid, List, Search, ChevronRight, Home, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, StickyNote, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ArrowDownUp, Plus, CheckSquare, Square, ListChecks, ListPlus, Upload, Star, RefreshCw, Link2, DownloadCloud, Download, Send, Eye, EyeOff, Minus, Play, Tags, Cloud, CloudOff, FileAudio, Sparkles, BookmarkPlus, Combine, MoreHorizontal } from 'lucide-react';
+import { Folder as FolderIcon, Grid, Grid3X3, LayoutGrid, List, Search, ChevronRight, Home, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, StickyNote, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ArrowDownUp, Plus, CheckSquare, Square, ListChecks, ListPlus, Upload, Star, RefreshCw, Link2, DownloadCloud, Download, Send, Eye, EyeOff, Minus, Play, Tags, Cloud, CloudOff, FileAudio, Sparkles, BookmarkPlus, Combine, MoreHorizontal } from 'lucide-react';
 import { api, useFiles, useFolders, useFolderTree, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, Pack, useActivityFeed, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile, useImportLink, useTagSettings, useUnlockVault, useWorkspaces, sendFilesToTelegram, useTTSJobs, useSTTJobs, SavedFilter, useSavedFilters, useUpdateSavedFilters, usePacks, useExpandSmartSearch, formatFileSize, LibraryChangeDetail, useDeletePack, useUpdatePack } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { cacheAllTextNotes, queueOfflineText, saveFileOffline, savePackOffline } from '../lib/offline';
@@ -29,6 +29,7 @@ import ImportQueuePanel, { type ImportPanelMode } from './ImportQueuePanel';
 import UploadProgressPanel, { type UploadPanelMode, type UploadProgress } from './UploadProgressPanel';
 import YouTubeQualityPicker from './YouTubeQualityPicker';
 import AddToolsMenu from './AddToolsMenu';
+import { downloadFileToDevice } from '../lib/deviceDownload';
 
 // Heavy sections are downloaded only when the user opens them. Vite still
 // precaches the resulting chunks in the service worker, so they remain
@@ -936,26 +937,20 @@ export default function FileBrowser() {
         } else if (file.file_type === 'video' || file.file_type === 'audio') {
             const queue = (displayFiles || []).filter(item => item.file_type === 'video' || item.file_type === 'audio');
             const index = queue.findIndex(item => item.id === file.id);
-            startQueue(queue.length ? queue : [file], Math.max(0, index));
+            startQueue(index >= 0 ? queue : [file], index >= 0 ? index : 0);
         } else if (file.file_type === 'image' || file.file_type === 'document' || canPreviewText(file)) {
             setContentPreviewFile(file);
         }
     };
 
     const downloadSelectedFiles = async () => {
-        addToast('دارم لینک‌های دانلود رو آماده می‌کنم…', 'info');
+        addToast('دانلود شروع شد؛ پیشرفت در مرکز انتقال‌ها نمایش داده می‌شود.', 'info');
         for (const file of selectedFilesForActions) {
             try {
-                const token=localStorage.getItem('access_token')||'';
-                const raw=file.stream_url||`/api/stream/${file.id}`;
-                const stream=raw.startsWith('http')?raw:`${window.location.origin}${raw.startsWith('/')?'':'/'}${raw}`;
-                const anchor=document.createElement('a');
-                anchor.href=`${stream}${stream.includes('?')?'&':'?'}token=${encodeURIComponent(token)}&download=1`;
-                anchor.download=file.file_name; document.body.appendChild(anchor); anchor.click(); anchor.remove();
-                await new Promise(resolve=>setTimeout(resolve,250));
-            } catch { /* continue with the remaining selected files */ }
+                await downloadFileToDevice(file);
+            } catch (error:any) { if(error?.code!=='ERR_CANCELED')addToast(`دانلود «${file.file_name}» انجام نشد.`,'error'); }
         }
-        addToast('دانلود فایل‌های انتخاب‌شده شروع شد.');
+        addToast('پردازش دانلود فایل‌های انتخاب‌شده تمام شد.');
     };
 
     const openImportLink = () => {
@@ -1725,6 +1720,7 @@ export default function FileBrowser() {
                                     <div className="flex shrink-0 items-center rounded-xl border border-white/[.07] bg-dark-950/60 p-1">
                                     <button title="نمای کارتی بزرگ" aria-label="نمای کارتی بزرگ" onClick={() => setViewMode('grid')} className={`flex h-8 w-8 items-center justify-center rounded-lg ${viewMode === 'grid' ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:text-white'}`}><Grid className="h-4 w-4" /></button>
                                     <button title="نمای کاشی متراکم" aria-label="نمای کاشی متراکم" onClick={() => setViewMode('dense')} className={`flex h-8 w-8 items-center justify-center rounded-lg ${viewMode === 'dense' ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:text-white'}`}><LayoutGrid className="h-4 w-4" /></button>
+                                    <button title="نمای خیلی کوچک" aria-label="نمای خیلی کوچک" onClick={() => setViewMode('compact')} className={`flex h-8 w-8 items-center justify-center rounded-lg ${viewMode === 'compact' ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:text-white'}`}><Grid3X3 className="h-4 w-4" /></button>
                                     <button title="نمای لیستی" aria-label="نمای لیستی" onClick={() => setViewMode('list')} className={`flex h-8 w-8 items-center justify-center rounded-lg ${viewMode === 'list' ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:text-white'}`}><List className="h-4 w-4" /></button>
                                     </div>
                                 </div>
@@ -1775,6 +1771,7 @@ export default function FileBrowser() {
                             <div className="flex items-center gap-1 rounded-xl border border-white/[0.06] bg-dark-900/50 p-1" aria-label="تغییر نمای فعالیت">
                                 <button title="نمای کارتی بزرگ" aria-label="نمای کارتی بزرگ" onClick={() => setViewMode('grid')} className={`flex h-9 w-9 items-center justify-center rounded-full ${viewMode === 'grid' ? 'bg-primary-600 text-white' : 'text-dark-400 hover:bg-white/[0.05] hover:text-white'}`}><Grid className="h-4 w-4" /></button>
                                 <button title="نمای کاشی متراکم" aria-label="نمای کاشی متراکم" onClick={() => setViewMode('dense')} className={`flex h-9 w-9 items-center justify-center rounded-full ${viewMode === 'dense' ? 'bg-primary-600 text-white' : 'text-dark-400 hover:bg-white/[0.05] hover:text-white'}`}><LayoutGrid className="h-4 w-4" /></button>
+                                <button title="نمای خیلی کوچک" aria-label="نمای خیلی کوچک" onClick={() => setViewMode('compact')} className={`flex h-9 w-9 items-center justify-center rounded-full ${viewMode === 'compact' ? 'bg-primary-600 text-white' : 'text-dark-400 hover:bg-white/[0.05] hover:text-white'}`}><Grid3X3 className="h-4 w-4" /></button>
                                 <button title="نمای لیستی" aria-label="نمای لیستی" onClick={() => setViewMode('list')} className={`flex h-9 w-9 items-center justify-center rounded-full ${viewMode === 'list' ? 'bg-primary-600 text-white' : 'text-dark-400 hover:bg-white/[0.05] hover:text-white'}`}><List className="h-4 w-4" /></button>
                             </div>
                         </div>
@@ -1806,7 +1803,7 @@ export default function FileBrowser() {
                                                 <div><h2 className="text-lg font-bold text-white">▶️ ادامه پخش</h2><p className="mt-1 text-xs text-dark-400">از همان جایی که رها کردی ادامه بده</p></div>
                                                 <span className="text-xs text-dark-500">{continueWatchingFiles.length.toLocaleString('fa-IR')} مورد</span>
                                             </div>
-                                            <div className={viewMode === 'list' ? 'flex flex-col gap-2' : viewMode === 'dense' ? 'grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8' : 'grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5'}>
+                                            <div className={viewMode === 'list' ? 'flex flex-col gap-2' : viewMode === 'compact' ? 'grid grid-cols-4 gap-1.5 sm:grid-cols-6 lg:grid-cols-9 xl:grid-cols-12' : viewMode === 'dense' ? 'grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8' : 'grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5'}>
                                                 {continueWatchingFiles.map(file => <FileCard key={file.id} file={file} viewMode={viewMode} selected={false} selectionMode={false} onSelect={() => undefined} onPlay={() => handleFileOpen(file)} />)}
                                             </div>
                                         </section>
@@ -1817,7 +1814,7 @@ export default function FileBrowser() {
                                                 <div><h2 className="text-lg font-bold text-white">✨ تازه‌های کمد</h2><p className="mt-1 text-xs text-dark-400">فایل‌هایی که به‌تازگی اضافه شده‌اند</p></div>
                                                 <span className="text-xs text-dark-500">{recentlyAddedFiles.length.toLocaleString('fa-IR')} مورد</span>
                                             </div>
-                                            <div className={viewMode === 'list' ? 'flex flex-col gap-2' : viewMode === 'dense' ? 'grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8' : 'grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5'}>
+                                            <div className={viewMode === 'list' ? 'flex flex-col gap-2' : viewMode === 'compact' ? 'grid grid-cols-4 gap-1.5 sm:grid-cols-6 lg:grid-cols-9 xl:grid-cols-12' : viewMode === 'dense' ? 'grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8' : 'grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5'}>
                                                 {recentlyAddedFiles.map(file => <FileCard key={file.id} file={file} viewMode={viewMode} selected={false} selectionMode={false} onSelect={() => undefined} onPlay={() => handleFileOpen(file)} />)}
                                             </div>
                                         </section>
@@ -1835,7 +1832,7 @@ export default function FileBrowser() {
                         <>
                              {/* Unified View */}
                              {shownFolderCount + shownPackCount + shownFileCount > 0 ? (
-                                <div className={viewMode === 'list' ? 'max-w-7xl mx-auto flex flex-col gap-2 pb-20' : viewMode === 'dense' ? 'max-w-7xl mx-auto grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2 pb-20' : 'max-w-7xl mx-auto grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4 pb-20'}>
+                                <div className={viewMode === 'list' ? 'max-w-7xl mx-auto flex flex-col gap-2 pb-20' : viewMode === 'compact' ? 'max-w-7xl mx-auto grid grid-cols-4 gap-1.5 sm:grid-cols-6 lg:grid-cols-9 xl:grid-cols-12 pb-20' : viewMode === 'dense' ? 'max-w-7xl mx-auto grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2 pb-20' : 'max-w-7xl mx-auto grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4 pb-20'}>
                                     {/* Folders */}
                                     {showFolders && visibleFolders?.map((folder) => (
                                         <FolderCard

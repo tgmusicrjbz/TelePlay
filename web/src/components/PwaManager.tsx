@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Download, PlusSquare, RefreshCw, Share, WifiOff, X } from 'lucide-react';
 import { useConnectivity } from '../lib/connectivity';
 import { isNativeApp } from '../lib/runtime';
@@ -20,6 +20,7 @@ export default function PwaManager() {
     const [waitingWorker, setWaitingWorker] = useState<ServiceWorker | null>(null);
     const [showInstallHelp, setShowInstallHelp] = useState(false);
     const [showNudge, setShowNudge] = useState(() => Number(localStorage.getItem('komod-install-nudge-until') || 0) < Date.now());
+    const updateRequested = useRef(false);
     const isIos = useMemo(() => /iphone|ipad|ipod/i.test(navigator.userAgent)
         || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1), []);
 
@@ -83,6 +84,9 @@ export default function PwaManager() {
         let cleanup: (() => void) | undefined;
         register().then(result => { cleanup = result; });
         const controllerChanged = () => {
+            // The first worker can claim this page while media is playing. A
+            // reload is only appropriate after the user accepted an update.
+            if (!updateRequested.current) return;
             if (refreshing) return;
             refreshing = true;
             window.location.reload();
@@ -118,7 +122,11 @@ export default function PwaManager() {
         setShowNudge(false);
     };
 
-    const applyUpdate = () => waitingWorker?.postMessage({ type: 'SKIP_WAITING' });
+    const applyUpdate = () => {
+        if (!waitingWorker) return;
+        updateRequested.current = true;
+        waitingWorker.postMessage({ type: 'SKIP_WAITING' });
+    };
     const showInstall = !nativeApp && !installed && (Boolean(installPrompt) || isIos);
 
     return <>

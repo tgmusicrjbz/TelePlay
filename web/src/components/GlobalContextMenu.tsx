@@ -4,6 +4,7 @@ import { TelegramFile, Folder, api, canPreviewText, sendFilesToTelegram, useText
 import { Play, Download, DownloadCloud, Link, Edit, FolderInput, Trash2, Globe, ShieldOff, HardDriveDownload, Eye, EyeOff, AlignLeft, ListPlus, Heart, Info, Pin, Tags, ChevronDown, ChevronUp, X, AudioLines, Send, Palette, Image as ImageIcon, Boxes, BookOpen, Sparkles } from 'lucide-react';
 import { saveFileOffline } from '../lib/offline';
 import { useQueryClient } from '@tanstack/react-query';
+import { downloadFileToDevice } from '../lib/deviceDownload';
 
 export default function GlobalContextMenu() {
     const { activeContextMenu, setActiveContextMenu, setPreviewFile, setContentPreviewFile, setDetailsFile, setAIToolsFile, setMoveItems, setMoveFiles, setDeleteConfirm, setRenameFile, setRenameFolder, setDescriptionItem, selectedFileIds, selectedFiles, setPlaylistFile, setActiveSection, addToast } = useAppStore();
@@ -151,19 +152,13 @@ export default function GlobalContextMenu() {
     const revokeCollection=async(kind:'folder',id:number)=>{try{const {data}=await api.delete<{revoked:boolean}>(`/shares/${kind}/${id}`);setActiveContextMenu(null);addToast(data.revoked?'پیوند عمومی لغو شد.':'پیوند فعالی برای این پوشه نبود.','info')}catch(error:any){addToast(error?.response?.data?.detail||'لغو پیوند انجام نشد.','error')}};
 
     const handleDownload = async (file: TelegramFile) => {
+        setActiveContextMenu(null);
+        addToast('دانلود شروع شد؛ پیشرفت در مرکز انتقال‌ها نمایش داده می‌شود.', 'info');
         try {
-            const url = privateFileLink(file);
-            const downloadUrl = url + (url.includes('?') ? '&' : '?') + 'download=1';
-            const a = document.createElement('a');
-            a.href = downloadUrl;
-            a.download = file.file_name;
-            a.target = '_blank';
-            a.rel = 'noopener noreferrer';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-        } catch (err) {
-            console.error('Failed to download:', err);
+            const mode=await downloadFileToDevice(file);
+            addToast(mode==='browser'?'دانلود به مرورگر سپرده شد.':'دانلود کامل شد.');
+        } catch (error:any) {
+            if(error?.code!=='ERR_CANCELED')addToast(error?.response?.data?.detail||'دانلود انجام نشد.','error');
         }
     };
 

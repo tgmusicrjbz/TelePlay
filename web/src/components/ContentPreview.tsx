@@ -8,6 +8,7 @@ import MarkdownContent, { MarkdownInline } from './MarkdownContent';
 import InternalFileLinkPicker from './InternalFileLinkPicker';
 import ZoomableImage from './ZoomableImage';
 import { getMarkdownReaderLayout, getMarkdownSettings, getMarkdownThemeOptions, markdownFonts, MarkdownSettings, saveMarkdownReaderLayout } from '../lib/markdownSettings';
+import { downloadFileToDevice } from '../lib/deviceDownload';
 
 const readerFonts=markdownFonts;
 
@@ -161,14 +162,7 @@ export default function ContentPreview() {
     const url = imageRetry && !isBlob ? `${authorizedUrl}&retry=${imageRetry}` : authorizedUrl;
     const thumbnailUrl=file.thumbnail_url?(file.thumbnail_url.startsWith('blob:')?file.thumbnail_url:`${file.thumbnail_url}${file.thumbnail_url.includes('?')?'&':'?'}token=${encodeURIComponent(token||'')}`):'';
     const selectedImageUrl=imageQuality==='original'||!thumbnailUrl?url:thumbnailUrl;
-    const downloadExternalFile=()=>{
-        const anchor=document.createElement('a');
-        anchor.href=`${authorizedUrl}${authorizedUrl.includes('?')?'&':'?'}download=1`;
-        anchor.download=file.file_name;
-        anchor.target='_blank';
-        anchor.rel='noopener noreferrer';
-        document.body.appendChild(anchor);anchor.click();anchor.remove();
-    };
+    const downloadExternalFile=()=>{addToast('دانلود شروع شد؛ پیشرفت در مرکز انتقال‌ها نمایش داده می‌شود.','info');void downloadFileToDevice(file).then(mode=>addToast(mode==='browser'?'دانلود به مرورگر سپرده شد.':'دانلود کامل شد.'),error=>{if(error?.code!=='ERR_CANCELED')addToast(error?.response?.data?.detail||'دانلود انجام نشد.','error')})};
     const browserFileUrl=new URL(`${authorizedUrl}${authorizedUrl.includes('?')?'&':'?'}inline=1`,window.location.origin).toString();
     const extension=file.file_name.split('.').pop()?.toLowerCase()||'';
     const inferredMime:Record<string,string>={pdf:'application/pdf',doc:'application/msword',docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',xls:'application/vnd.ms-excel',xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',ppt:'application/vnd.ms-powerpoint',pptx:'application/vnd.openxmlformats-officedocument.presentationml.presentation',epub:'application/epub+zip',zip:'application/zip'};

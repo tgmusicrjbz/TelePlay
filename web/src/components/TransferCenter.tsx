@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, AudioLines, Check, DownloadCloud, FileAudio, Link2, Pause, Play, RefreshCw, Square, Trash2, Upload, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, AudioLines, Check, Download, DownloadCloud, FileAudio, Link2, Pause, Play, RefreshCw, Square, Trash2, Upload, X } from 'lucide-react';
 import { api } from '../lib/api';
 import { cancelOfflineJob, moveQueuedOfflineJob, toggleOfflineJobPause } from '../lib/offline';
 import { clearFinishedLocalTransfers, listLocalTransfers, LocalTransfer, TRANSFERS_CHANGED_EVENT } from '../lib/transfers';
 import { clearResolvedOfflineMutations, listOfflineMutations, OFFLINE_MUTATIONS_CHANGED, syncOfflineMutations } from '../lib/offlineMutations';
 import { isEffectivelyOnline } from '../lib/connectivity';
+import { cancelAllDeviceDownloads, cancelDeviceDownload } from '../lib/deviceDownload';
 
 type VisibleState='queued'|'downloading'|'saving'|'paused'|'cancelled'|'done'|'error';
 type LinkJob={id:string;url:string;title?:string;source?:'link'|'drive';state:string;message:string;saved:number;progress?:number;quality?:string};
 type SpeechJob={id:string;title?:string;state:string;message:string;progress?:number};
-type Row={id:string;kind:'offline'|'upload'|'link'|'drive'|'sync'|'tts'|'stt';title:string;state:VisibleState;detail:string;percent:number};
-type Filter='all'|'offline'|'upload'|'link'|'speech';
+type Row={id:string;kind:'offline'|'upload'|'download'|'link'|'drive'|'sync'|'tts'|'stt';title:string;state:VisibleState;detail:string;percent:number};
+type Filter='all'|'offline'|'upload'|'download'|'link'|'speech';
 
 const visibleState=(state:string):VisibleState=>{
  if(state==='synthesizing'||state==='transcribing')return'downloading';
@@ -49,11 +50,11 @@ export default function TransferCenter(){
  ].filter(item=>filter==='all'||item.kind===filter||(filter==='link'&&item.kind==='drive')||(filter==='speech'&&(item.kind==='tts'||item.kind==='stt'))),[local,links,speech,mutations,filter]);
  const controlLink=async(id:string,action:'cancel'|'retry',kind:'link'|'drive'='link')=>{await api.post(kind==='drive'?`/files/import-drive/status/${id}/${action}`:`/files/import-link/status/${id}/${action}`);await loadServerJobs()};
  const controlSpeech=async(row:Row,action:'pause'|'cancel')=>{if(row.kind==='tts')await api.post(`/tts/jobs/${row.id}/${action}`);else if(row.kind==='stt'&&action==='cancel')await api.post(`/stt/jobs/${row.id}/cancel`);await loadServerJobs()};
- const cancelAll=async()=>{local.filter(item=>!['done','error','cancelled'].includes(item.state)).forEach(item=>item.kind==='upload'?window.dispatchEvent(new Event('komod-cancel-upload')):cancelOfflineJob(item.id));await Promise.allSettled([api.post('/files/import-link/cancel-all'),api.post('/files/import-drive/cancel-all'),api.post('/tts/jobs/cancel-all'),api.post('/stt/jobs/cancel-all')]);await loadServerJobs();loadLocal()};
+ const cancelAll=async()=>{cancelAllDeviceDownloads();local.filter(item=>!['done','error','cancelled'].includes(item.state)).forEach(item=>item.kind==='upload'?window.dispatchEvent(new Event('komod-cancel-upload')):item.kind==='download'?cancelDeviceDownload(item.id):cancelOfflineJob(item.id));await Promise.allSettled([api.post('/files/import-link/cancel-all'),api.post('/files/import-drive/cancel-all'),api.post('/tts/jobs/cancel-all'),api.post('/stt/jobs/cancel-all')]);await loadServerJobs();loadLocal()};
  const clearFinished=async()=>{clearFinishedLocalTransfers();clearResolvedOfflineMutations();await Promise.allSettled([api.delete('/files/import-link/status'),api.delete('/files/import-drive/status'),api.delete('/tts/jobs'),api.delete('/stt/jobs')]);await loadServerJobs();loadLocal()};
- const cancelRow=(row:Row)=>{if(row.kind==='link'||row.kind==='drive')void controlLink(row.id,'cancel',row.kind);else if(row.kind==='tts'||row.kind==='stt')void controlSpeech(row,'cancel');else if(row.kind==='upload')window.dispatchEvent(new Event('komod-cancel-upload'));else if(row.kind==='offline')cancelOfflineJob(row.id)};
+ const cancelRow=(row:Row)=>{if(row.kind==='link'||row.kind==='drive')void controlLink(row.id,'cancel',row.kind);else if(row.kind==='tts'||row.kind==='stt')void controlSpeech(row,'cancel');else if(row.kind==='upload')window.dispatchEvent(new Event('komod-cancel-upload'));else if(row.kind==='download')cancelDeviceDownload(row.id);else if(row.kind==='offline')cancelOfflineJob(row.id)};
  return <div className="space-y-4">
-  <div className="flex gap-1 overflow-x-auto rounded-2xl border border-white/[.08] bg-dark-900/80 p-1.5 shadow-lg shadow-black/10">{([['all','همه'],['offline','آفلاین'],['upload','آپلود'],['link','لینک و درایو'],['speech','متن و صدا']] as const).map(([value,label])=><button key={value} onClick={()=>setFilter(value)} className={`min-h-10 shrink-0 rounded-xl px-3 text-xs font-semibold transition ${filter===value?'bg-primary-500 text-white shadow-md shadow-primary-950/25':'text-dark-400 hover:bg-white/[.05] hover:text-white'}`}>{label}</button>)}</div>
+  <div className="flex gap-1 overflow-x-auto rounded-2xl border border-white/[.08] bg-dark-900/80 p-1.5 shadow-lg shadow-black/10">{([['all','همه'],['download','دانلود دستگاه'],['offline','آفلاین'],['upload','آپلود'],['link','لینک و درایو'],['speech','متن و صدا']] as const).map(([value,label])=><button key={value} onClick={()=>setFilter(value)} className={`min-h-10 shrink-0 rounded-xl px-3 text-xs font-semibold transition ${filter===value?'bg-primary-500 text-white shadow-md shadow-primary-950/25':'text-dark-400 hover:bg-white/[.05] hover:text-white'}`}>{label}</button>)}</div>
   <div className="flex items-center justify-between gap-2"><p className="text-xs text-dark-400">همه پردازش‌های این حساب و دستگاه، یک‌جا</p><div className="flex"><button className="btn-icon text-red-300" title="لغو همه کارهای فعال" onClick={()=>void cancelAll()}><Square className="h-4 w-4"/></button><button className="btn-icon" title="همگام‌سازی و تازه‌سازی" onClick={()=>{void loadServerJobs();void syncOfflineMutations(config=>api.request(config))}}><RefreshCw className="h-4 w-4"/></button><button className="btn-icon text-red-300" title="پاک‌کردن موارد تمام‌شده" onClick={()=>void clearFinished()}><Trash2 className="h-4 w-4"/></button></div></div>
   <div className="space-y-2">{rows.map(row=><TransferRow key={`${row.kind}-${row.id}`} row={row} onPause={()=>row.kind==='tts'?void controlSpeech(row,'pause'):toggleOfflineJobPause(row.id)} onCancel={()=>cancelRow(row)} onRetry={()=>{if(row.kind==='link'||row.kind==='drive')void controlLink(row.id,'retry',row.kind)}} onMove={direction=>moveQueuedOfflineJob(row.id,direction)}/>)}{!rows.length&&<div className="rounded-2xl border border-dashed border-white/10 py-12 text-center text-sm text-dark-500">پردازشی برای نمایش وجود ندارد.</div>}</div>
  </div>
@@ -61,7 +62,7 @@ export default function TransferCenter(){
 
 function TransferRow({row,onPause,onCancel,onRetry,onMove}:{row:Row;onPause:()=>void;onCancel:()=>void;onRetry:()=>void;onMove:(direction:-1|1)=>void}){
  const active=row.kind!=='sync'&&['queued','downloading','saving','paused'].includes(row.state);
- const Icon=row.kind==='sync'?RefreshCw:row.kind==='link'?Link2:row.kind==='drive'?DownloadCloud:row.kind==='upload'?Upload:row.kind==='tts'?AudioLines:row.kind==='stt'?FileAudio:DownloadCloud;
+ const Icon=row.kind==='sync'?RefreshCw:row.kind==='link'?Link2:row.kind==='drive'?DownloadCloud:row.kind==='upload'?Upload:row.kind==='download'?Download:row.kind==='tts'?AudioLines:row.kind==='stt'?FileAudio:DownloadCloud;
  const canPause=(row.kind==='tts'||(row.kind==='offline'&&row.id.startsWith('playlist-')))&&active;
  const tone=row.state==='done'?'border-emerald-400/15 bg-emerald-500/[.04]':row.state==='error'||row.state==='cancelled'?'border-red-400/15 bg-red-500/[.04]':row.state==='paused'?'border-amber-300/15 bg-amber-400/[.04]':'border-white/[.07] bg-dark-800/45';
  const iconTone=row.state==='done'?'bg-emerald-500/12 text-emerald-300':row.state==='error'||row.state==='cancelled'?'bg-red-500/12 text-red-300':row.state==='paused'?'bg-amber-400/10 text-amber-200':'bg-primary-500/10 text-primary-300';

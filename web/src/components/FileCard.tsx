@@ -11,7 +11,7 @@ import BlurredPreview from './BlurredPreview';
 
 interface FileCardProps {
     file: TelegramFile;
-    viewMode: 'grid' | 'dense' | 'list';
+    viewMode: 'grid' | 'dense' | 'compact' | 'list';
     selected: boolean;
     selectionMode?: boolean;
     onSelect: (multi: boolean) => void;
@@ -131,7 +131,7 @@ export default function FileCard({
                     {cardDisplay.fileDescription&&file.description && <p dir="auto" className="text-xs text-dark-400 line-clamp-2 mt-0.5" title={file.description}>{file.description}</p>}
                     {cardDisplay.fileTags&&<TagChips tags={file.tags} compact/>}
                     <div className="flex items-center gap-3 text-xs text-dark-400 mt-1">
-                        {file.is_shortcut && <span className="flex items-center gap-1 text-primary-300" title="میانبر فایل موجود"><Link2 className="h-3 w-3"/> میانبر</span>}
+                        {file.is_shortcut && <span className="flex items-center gap-1 text-primary-300" title="این فایل تکراری است و بدون مصرف دوباره فضای کانال به نسخه اصلی وصل شده"><Link2 className="h-3 w-3"/> بدون مصرف فضای اضافه</span>}
                         {cardDisplay.fileType&&<span className="flex items-center gap-1">
                             {getSmallIcon()}
                             <span>{typeLabel}</span>
@@ -176,9 +176,11 @@ export default function FileCard({
 
     // Grid view
     const dense = viewMode === 'dense';
+    const compact = viewMode === 'compact';
+    const tight = dense || compact;
     return (
         <div
-            className={`library-card ${dense ? 'p-2' : 'p-3'} rounded-2xl cursor-pointer group relative select-none
+            className={`library-card min-w-0 max-w-full overflow-hidden ${compact ? 'p-1' : dense ? 'p-2' : 'p-3'} rounded-2xl cursor-pointer group relative select-none
                 ${selected
                     ? 'text-primary-100'
                     : ''
@@ -194,10 +196,10 @@ export default function FileCard({
         >
             <BlurredPreview active={Boolean(file.is_blurred)} card />
             {selectionMode && <div className="absolute left-0 top-0 z-30 flex h-11 w-11 items-center justify-center"><div className={`flex h-6 w-6 items-center justify-center rounded-md border ${selected ? 'border-primary-400 bg-primary-500 text-white' : 'border-white/30 bg-dark-900/90'}`}>{selected && <Check className="h-4 w-4" />}</div></div>}
-            {cardDisplay.statusBadges&&file.is_pinned && <span className="absolute left-10 top-2 z-20 rounded-full bg-dark-950/75 p-1.5 text-primary-300" title="پین‌شده"><Pin className="h-3.5 w-3.5 fill-current"/></span>}
-            {cardDisplay.statusBadges&&file.is_shortcut && <span className="absolute bottom-14 right-3 z-20 flex items-center gap-1 rounded-full border border-white/10 bg-dark-950/80 px-2 py-1 text-[10px] text-primary-200" title="میانبر فایل موجود"><Link2 className="h-3 w-3"/> میانبر</span>}
+            {!tight&&cardDisplay.statusBadges&&file.is_pinned && <span className="absolute left-10 top-2 z-20 rounded-full bg-dark-950/75 p-1.5 text-primary-300" title="پین‌شده"><Pin className="h-3.5 w-3.5 fill-current"/></span>}
+            {!tight&&cardDisplay.statusBadges&&file.is_shortcut && <span className="absolute bottom-14 right-3 z-20 flex max-w-[calc(100%-1.5rem)] items-center gap-1 truncate rounded-full border border-white/10 bg-dark-950/80 px-2 py-1 text-[10px] text-primary-200" title="نسخه تکراری؛ به فایل اصلی وصل است و فضای کانال را دوباره مصرف نمی‌کند"><Link2 className="h-3 w-3 shrink-0"/> بدون فضای اضافه</span>}
             <button onClick={toggleFavorite} disabled={updateFile.isPending} className={`absolute right-2 top-2 z-20 flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-dark-950/75 backdrop-blur ${file.is_favorite ? 'text-amber-300' : 'text-white/65 opacity-0 group-hover:opacity-100'}`} title={file.is_favorite ? 'برداشتن نشان' : 'نشان کردن'}><Star className={`h-4 w-4 ${file.is_favorite ? 'fill-current' : ''}`}/></button>
-            <div className={`aspect-video rounded-lg ${dense ? 'mb-2' : 'mb-3'} overflow-hidden relative border ${selected ? 'border-primary-500/20' : 'border-white/[0.05]'} bg-dark-900/50`}>
+            <div className={`${compact?'aspect-square':'aspect-video'} rounded-lg ${compact?'mb-1':dense ? 'mb-2' : 'mb-3'} overflow-hidden relative border ${selected ? 'border-primary-500/20' : 'border-white/[0.05]'} bg-dark-900/50`}>
                 <div className="absolute inset-0 transition duration-300">
                     {authorizedThumbnailUrl && !thumbnailFailed ? (
                         <>
@@ -219,7 +221,7 @@ export default function FileCard({
                 )}
 
                 {/* Duration badge */}
-                {!textFirst&&cardDisplay.fileDuration&&file.duration && (
+                {!compact&&!textFirst&&cardDisplay.fileDuration&&file.duration && (
                     <div className="absolute bottom-1.5 right-1.5 bg-black/60 backdrop-blur-md px-1.5 py-0.5 rounded text-[10px] font-medium text-white shadow-sm">
                         {formatDuration(file.duration)}
                     </div>
@@ -227,22 +229,22 @@ export default function FileCard({
 
                 {/* Play overlay for video/audio */}
                 {!textFirst&&(file.file_type === 'video' || file.file_type === 'audio') && (
-                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300">
-                        <div className="w-10 h-10 rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center shadow-lg border border-white/20 hover:scale-110 transition-transform">
+                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300">
+                        <button type="button" aria-label={`پخش ${file.file_name}`} onClick={event=>{event.stopPropagation();onPlay()}} className="pointer-events-auto w-10 h-10 rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center shadow-lg border border-white/20 hover:scale-110 transition-transform">
                             <Play className="w-4 h-4 text-white ml-0.5" fill="currentColor" />
-                        </div>
+                        </button>
                     </div>
                 )}
             </div>
 
-            <div className="flex items-start justify-between gap-2">
+            <div className="flex min-w-0 items-start justify-between gap-1">
                 <div className="min-w-0 flex-1">
-                    <p className={`font-medium text-sm truncate transition-colors ${selected ? 'text-primary-200' : 'text-white group-hover:text-primary-300'}`} title={file.file_name}>
+                    <p className={`truncate font-medium transition-colors ${compact?'px-0.5 text-[10px]':dense?'text-xs':'text-sm'} ${selected ? 'text-primary-200' : 'text-white group-hover:text-primary-300'}`} title={file.file_name}>
                         {file.file_name}
                     </p>
-                    {!dense&&cardDisplay.fileDescription&&file.description && <p dir="auto" className="text-xs text-dark-400 line-clamp-2 mt-0.5" title={file.description}>{file.description}</p>}
-                    {!dense&&cardDisplay.fileTags&&<TagChips tags={file.tags} compact/>}
-                    <div className="flex items-center gap-2 mt-1">
+                    {!tight&&cardDisplay.fileDescription&&file.description && <p dir="auto" className="mt-0.5 line-clamp-2 break-words text-xs text-dark-400" title={file.description}>{file.description}</p>}
+                    {!tight&&cardDisplay.fileTags&&<TagChips tags={file.tags} compact/>}
+                    {!tight&&<div className="mt-1 flex min-w-0 items-center gap-2 overflow-hidden">
                         {cardDisplay.fileType&&<span className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md border ${
                             selected
                             ? 'bg-primary-500/20 border-primary-500/20 text-primary-300'
@@ -254,10 +256,10 @@ export default function FileCard({
                         {cardDisplay.fileSize&&<p className="text-[10px] text-dark-500">
                             {formatFileSize(file.file_size)}
                         </p>}
-                    </div>
+                    </div>}
                 </div>
 
-                <div className="relative z-30 transition-opacity">
+                <div className={`z-30 shrink-0 transition-opacity ${compact?'absolute left-1 top-1':'relative'}`}>
                    <button
                         onClick={(e) => {
                             e.stopPropagation();
@@ -268,9 +270,9 @@ export default function FileCard({
                                 setActiveContextMenu({ type: 'file', item: file, x: rect.right, y: rect.bottom });
                             }
                         }}
-                        className={`p-1.5 rounded-lg transition-colors ${showMenu ? 'bg-white/10 text-white' : 'hover:bg-white/[0.08] text-dark-300'}`}
+                        className={`${compact?'border border-white/10 bg-dark-950/70 p-1':'p-1.5'} rounded-lg transition-colors ${showMenu ? 'bg-white/10 text-white' : 'hover:bg-white/[0.08] text-dark-300'}`}
                     >
-                        <MoreVertical className="w-4 h-4" />
+                        <MoreVertical className={compact?'h-3 w-3':'h-4 w-4'} />
                     </button>
                 </div>
             </div>

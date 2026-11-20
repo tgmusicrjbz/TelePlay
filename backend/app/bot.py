@@ -30,6 +30,7 @@ from .models import User, File, Folder, LoginCode, Playlist, PlaylistItem, BotUs
 from .config import get_settings
 from .auth import create_recipient_delivery_token, create_short_link_token, create_telegram_login_token, verify_recipient_delivery_token
 from .services import escape_like, select_best_thumbnail, telegram_text_with_links, unreferenced_audio_variant_messages, unreferenced_storage_messages
+from .storage_sync import purge_deleted_storage_messages
 from .caption_metadata import extract_tags_from_caption, parse_file_caption
 from .downloader import ImportJob, link_importer
 from .tts import TTSJob, VOICE_OPTIONS, consume_tts_quota, load_tts_settings, route_ai_model, tts_queue
@@ -3657,6 +3658,35 @@ async def handle_personal_channel_post(client, message: Message):
     if getattr(message, "outgoing", False) or getattr(getattr(message, "from_user", None), "is_self", False):
         return
     asyncio.create_task(import_personal_channel_post(message))
+
+
+@tg_client.on_deleted_messages(group=5)
+async def handle_deleted_storage_messages(client, messages):
+    """Remove cabinet records when their source posts are deleted in Telegram."""
+    grouped: dict[int, list[int]] = {}
+    for message in messages or []:
+        chat_id = getattr(getattr(message, "chat", None), "id", None)
+        message_id = getattr(message, "id", None)
+        if chat_id is None or message_id is None:
+            continue
+        if telegram.consume_managed_storage_deletion(chat_id, message_id):
+            continue
+        grouped.setdefault(int(chat_id), []).append(int(message_id))
+    if not grouped:
+        return
+    async with async_session() as db:
+        for channel_id, message_ids in grouped.items():
+            removed = await purge_deleted_storage_messages(
+                db,
+                channel_id,
+                message_ids,
+                include_unassigned=channel_id == settings.telegram_storage_channel_id,
+            )
+            if removed:
+                logger.info(
+                    "Removed %d cabinet record(s) after Telegram deletion channel=%s messages=%s",
+                    len(removed), channel_id, message_ids,
+                )
 
 
 @tg_client.on_message(filters.command("connect_here") & ~filters.private)

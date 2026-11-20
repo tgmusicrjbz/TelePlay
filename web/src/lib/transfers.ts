@@ -1,5 +1,5 @@
 export type TransferState = 'queued'|'downloading'|'paused'|'cancelled'|'done'|'error';
-export type TransferKind = 'offline'|'upload';
+export type TransferKind = 'offline'|'upload'|'download';
 export interface LocalTransfer {
     id:string; kind:TransferKind; title:string; state:TransferState;
     percent:number; detail?:string; updatedAt:string;

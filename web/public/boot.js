@@ -45,17 +45,12 @@
   const recovery = document.getElementById('komod-recovery');
   let ready = false;
   let recovering = false;
-  const autoRecoveryKey = 'komod-auto-boot-recovery';
   const showIfBlank = () => {
     const root = document.getElementById('root');
     if (!ready && (!root?.childElementCount || root.querySelector('[data-komod-boot]')) && recovery) recovery.style.display = 'flex';
   };
-  const recoverApplication = async (automatic = false) => {
+  const recoverApplication = async () => {
     if (recovering || ready) return;
-    if (automatic) {
-      if (!navigator.onLine || sessionStorage.getItem(autoRecoveryKey) === '1') return;
-      sessionStorage.setItem(autoRecoveryKey, '1');
-    }
     recovering = true;
     if (recovery) recovery.style.display = 'flex';
     recovery.disabled = true;
@@ -83,15 +78,15 @@
     target.searchParams.set('recover', String(Date.now()));
     location.replace(target.toString());
   };
-  setTimeout(() => {
-    showIfBlank();
-    const root = document.getElementById('root');
-    if (!ready && (!root?.childElementCount || root.querySelector('[data-komod-boot]'))) void recoverApplication(true);
-  }, 5000);
-  recovery?.addEventListener('click', () => void recoverApplication(false));
+  // A cold server or a slow mobile connection can legitimately need more than
+  // five seconds to download and evaluate the entry bundle. Automatically
+  // clearing caches and reloading at that point interrupted the very request
+  // that would have completed startup, creating a recovery loop. Recovery is
+  // therefore offered as a manual fallback and never races normal boot.
+  setTimeout(showIfBlank, 8000);
+  recovery?.addEventListener('click', () => void recoverApplication());
   window.addEventListener('komod-app-ready', () => {
     ready = true;
-    sessionStorage.removeItem(autoRecoveryKey);
     if (recovery) recovery.style.display = 'none';
   });
 })();
