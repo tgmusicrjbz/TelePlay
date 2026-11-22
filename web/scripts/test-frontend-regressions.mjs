@@ -42,12 +42,14 @@ try {
     assert.equal(playlistSource.includes('const railClearance = window.innerWidth >= 768 ? 112 : edge'), true, 'desktop playlist menus must stay clear of the right navigation rail');
     assert.equal(playlistSource.includes('style={{zIndex:2147483000}}'), true, 'playlist menus must render above the persistent navigation rail');
     assert.equal(playlistSource.includes('menu && createPortal('), true, 'the playlist-detail three-dot menu must escape the page stacking context');
+    assert.equal(playlistSource.includes('data-playlist-detail-desktop-menu'), true, 'the playlist-detail menu must open beside its trigger on desktop');
     assert.equal(browserSource.includes('aria-label="انتخاب نوع محتوا"'), false, 'the cabinet must not use the redundant files/folders segmented bar');
     assert.equal(browserSource.includes('cabinet-command-bar'), true, 'the cabinet must expose the consolidated command bar');
     assert.equal(browserSource.includes('cabinet-command-bar flex w-full items-center'), true, 'the cabinet command bar must fill its row and keep controls aligned');
-    assert.equal(browserSource.includes("value={viewMode} onChange={setViewMode}"), true, 'cabinet view selection must be a dropdown in the command row');
+    assert.equal(browserSource.includes('select aria-label="انتخاب نما"'), true, 'mobile cabinet view selection must use a compact icon control');
+    assert.equal(browserSource.includes('sm:flex" aria-label="انتخاب نما"'), true, 'desktop cabinet view icons must remain side by side');
     assert.equal(browserSource.includes('فایل‌ها و کشوها، کنار هم و آمادهٔ دسترسی'), false, 'the redundant cabinet subtitle must stay removed');
-    assert.equal(browserSource.includes('کارهای انتخاب‌شده‌ها'), true, 'mobile multi-selection must open a populated action menu');
+    assert.equal(browserSource.includes('data-selection-action-menu'), true, 'mobile multi-selection must open a unified icon action row');
     assert.equal(browserSource.includes('showSelectionMore&&createPortal'), true, 'mobile selection actions must escape the cabinet stacking context');
     assert.equal(browserSource.includes('selectionMoreButtonRef.current?.getBoundingClientRect()'), true, 'mobile selection actions must stay anchored below the three-dot button');
     assert.equal(browserSource.includes('flex items-end bg-black/60 p-3'), false, 'mobile selection actions must not fall back to a bottom sheet');
