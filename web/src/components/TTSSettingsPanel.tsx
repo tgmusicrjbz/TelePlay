@@ -270,7 +270,11 @@ export default function TTSSettingsPanel(){
         setMessage(null);
         setSttSubmitting(true);
         let succeeded=0,failed=0,lastError:any=null;
-        for(const payload of payloads){try{await api.post('/stt/jobs',payload);succeeded+=1;if(succeeded===1)setSttPanel('history')}catch(error){failed+=1;lastError=error}}
+        setSttPanel('history');
+        for(let start=0;start<payloads.length;start+=6){
+            const results=await Promise.allSettled(payloads.slice(start,start+6).map(payload=>api.post('/stt/jobs',payload)));
+            results.forEach(result=>{if(result.status==='fulfilled')succeeded+=1;else{failed+=1;lastError=result.reason}});
+        }
         setSttSubmitting(false);
         if(!succeeded){setMessage({kind:'error',text:lastError?.response?.data?.detail||'تبدیل صدا به متن شروع نشد.'});return}
         setMessage({kind:failed?'error':'ok',text:failed?`${succeeded.toLocaleString('fa-IR')} تبدیل جداگانه شروع شد و ${failed.toLocaleString('fa-IR')} مورد خطا داشت.`:`${succeeded.toLocaleString('fa-IR')} تبدیل مستقل به صف اضافه شد.`});

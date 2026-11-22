@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 import wave
+import asyncio
 from pathlib import Path
 
 _temp = tempfile.TemporaryDirectory()
@@ -20,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.database import Base, async_session, engine
 from app.models import AppSetting, TTSUsage, User
 from app.routers.tts import AI_MODEL_CATALOG_KEY, _clean_model_ids, load_model_catalog
-from app.tts import DIRECTOR_NOTES_SYSTEM_INSTRUCTION, GeminiRequestError, GeminiTTSProvider, TTSJob, TTSQueue, build_interaction_content, consume_tts_quota, extract_interaction_audio, merge_wav, normalize_director_notes, normalize_tts_settings, route_ai_model, split_long_text
+from app.tts import DIRECTOR_NOTES_SYSTEM_INSTRUCTION, GeminiRequestError, GeminiTTSProvider, TTSJob, TTSQueue, build_interaction_content, consume_tts_quota, extract_interaction_audio, merge_wav, merge_wav_files, normalize_director_notes, normalize_tts_settings, route_ai_model, speech_parallelism, split_long_text
 
 
 def wav_with_frames(frames: bytes, rate: int = 24000) -> bytes:
@@ -50,6 +51,22 @@ class TTSHelpersTests(unittest.IsolatedAsyncioTestCase):
         with wave.open(io.BytesIO(merged), "rb") as result:
             self.assertEqual(result.getframerate(), 24000)
             self.assertEqual(result.readframes(result.getnframes()), first + second)
+
+    def test_wav_files_are_streamed_to_disk_in_order(self):
+        first = b"\x01\x00" * 10
+        second = b"\x02\x00" * 12
+        with tempfile.TemporaryDirectory() as directory:
+            paths = [Path(directory) / "first.wav", Path(directory) / "second.wav"]
+            paths[0].write_bytes(wav_with_frames(first))
+            paths[1].write_bytes(wav_with_frames(second))
+            output = merge_wav_files(paths, Path(directory) / "merged.wav")
+            with wave.open(str(output), "rb") as result:
+                self.assertEqual(result.readframes(result.getnframes()), first + second)
+
+    def test_parallelism_speeds_up_single_key_without_bursting(self):
+        self.assertEqual(speech_parallelism(1, 6), 2)
+        self.assertEqual(speech_parallelism(3, 6), 3)
+        self.assertEqual(speech_parallelism(8, 1), 1)
 
     def test_preferences_are_bounded_and_unknown_voice_is_replaced(self):
         preferences = normalize_tts_settings({"voice": "unknown", "speed": 9, "style": " آرام ", "folder_id": "42", "use_case": "podcast"})
@@ -144,6 +161,33 @@ class TTSHelpersTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(queue.statuses[job.id]["state"], "done")
         self.assertEqual(queue.statuses[job.id]["stream_url"], "/api/tts/jobs/preview-job/audio")
         self.assertTrue(queue.audio_outputs[job.id].startswith(b"RIFF"))
+
+    async def test_long_tts_chunks_are_synthesized_concurrently(self):
+        class Provider:
+            api_keys = ["test"]
+
+            def __init__(self):
+                self.active = 0
+                self.max_active = 0
+
+            async def synthesize(self, _text, _preferences):
+                self.active += 1
+                self.max_active = max(self.max_active, self.active)
+                await asyncio.sleep(.03)
+                self.active -= 1
+                return wav_with_frames(b"\x01\x00" * 4)
+
+        provider = Provider()
+        queue = TTSQueue(provider)
+        job = TTSJob(
+            user_id=1, telegram_id=2, text="کلمه " * 1500, title="بلند", folder_id=None,
+            preferences=normalize_tts_settings({}), output_mode="preview", id="parallel-job",
+        )
+        queue.statuses[job.id] = {"id": job.id, "user_id": 1, "state": "queued", "created_at": "2026-01-01T00:00:00"}
+        queue.controls[job.id] = {"paused": False, "cancelled": False}
+        await queue._process(job)
+        self.assertGreater(provider.max_active, 1)
+        self.assertEqual(queue.statuses[job.id]["state"], "done")
 
     async def test_gemini_38_uses_interactions_and_keeps_transcript_verbatim(self):
         provider = GeminiTTSProvider(["key"])

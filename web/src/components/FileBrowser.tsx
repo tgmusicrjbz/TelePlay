@@ -1267,18 +1267,9 @@ export default function FileBrowser() {
     const shownFolderCount = showFolders ? visibleFolders?.length || 0 : 0;
     const shownPackCount = showPacks ? visiblePacks.length : 0;
     const shownFileCount = showFiles ? displayFiles?.length || 0 : 0;
-    const selectScope = (scope: 'all' | 'files' | 'folders') => {
-        setActiveSavedFilterId(null);
-        setContentScope(scope);
-        if (scope === 'folders') setFileTypeFilter(null);
-        const allowed:SortField[]=scope==='files'?['name','type','size','duration','created','updated']:scope==='folders'?['name','count','created','updated']:['name','created','updated'];
-        if(!allowed.includes(sortCriteria[0]?.field))setSortCriteria([{field:'created',direction:'desc'}]);
-        clearSelection();
-        setSelectedPackIds(new Set());
-    };
     const toggleFileType = (type: string | null) => {
         setActiveSavedFilterId(null);
-        if (type !== null) setContentScope(type === 'pack' ? 'all' : 'files');
+        setContentScope(type === null || type === 'pack' ? 'all' : 'files');
         setFileTypeFilter(type);
         clearSelection();
         setSelectedPackIds(new Set());
@@ -1646,10 +1637,14 @@ export default function FileBrowser() {
                         </div>
                     )}
                     {activeSection === 'playlists' ? <Suspense fallback={<SectionFallback/>}><PlaylistBrowser /></Suspense> : activeSection === 'rooms' ? <Suspense fallback={<SectionFallback/>}><RoomsPage /></Suspense> : activeSection === 'settings' ? <Suspense fallback={<SectionFallback/>}><SettingsPage /></Suspense> : activeSection === 'downloads' ? <Suspense fallback={<SectionFallback/>}><DownloadsPage /></Suspense> : <>
-                    <div className="max-w-7xl mx-auto mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="flex min-w-0 items-center gap-3">
-                            <h1 className="truncate text-2xl font-bold tracking-tight text-white sm:text-3xl">{sectionTitle}</h1>
-                            {activeSection !== 'activity' && <span className="shrink-0 rounded-full border border-white/[0.07] bg-dark-800/70 px-2.5 py-1 text-xs text-dark-300">{(shownFolderCount + shownPackCount + shownFileCount).toLocaleString('fa-IR')} مورد</span>}
+                    <div className="mx-auto mb-4 flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className={`flex min-w-0 items-center gap-3 ${activeSection==='files'?'rounded-[1.4rem] border border-white/[.065] bg-gradient-to-l from-primary-500/[.08] via-dark-900/55 to-transparent px-3 py-3 sm:px-4':''}`}>
+                            {activeSection==='files'&&<span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-primary-300/15 bg-primary-500/15 text-primary-200 shadow-lg shadow-primary-950/10">{breadcrumbs.length>1?<FolderIcon className="h-5 w-5"/>:<Home className="h-5 w-5"/>}</span>}
+                            <div className="min-w-0 flex-1">
+                                <h1 className="truncate text-2xl font-black tracking-tight text-white sm:text-3xl">{sectionTitle}</h1>
+                                {activeSection==='files'&&<p className="mt-0.5 truncate text-xs text-dark-400">{breadcrumbs.length>1?'فایل‌ها، جعبه‌ها و کشوهای این بخش':'فایل‌ها و کشوها، کنار هم و آمادهٔ دسترسی'}</p>}
+                            </div>
+                            {activeSection === 'files' && <div className="hidden shrink-0 items-center gap-1.5 sm:flex"><span className="rounded-xl bg-white/[.045] px-2.5 py-1.5 text-xs text-dark-300"><b className="ml-1 text-dark-100">{shownFolderCount.toLocaleString('fa-IR')}</b>کشو</span><span className="rounded-xl bg-white/[.045] px-2.5 py-1.5 text-xs text-dark-300"><b className="ml-1 text-dark-100">{(shownPackCount+shownFileCount).toLocaleString('fa-IR')}</b>مورد</span></div>}
                         </div>
                         {selectedItemCount > 0 ? (
                             <div className="fixed left-6 right-6 top-20 z-40 mx-auto hidden max-w-4xl flex-nowrap items-center gap-1.5 overflow-x-auto rounded-2xl border border-primary-500/20 bg-dark-900/95 p-1.5 shadow-2xl backdrop-blur-xl sm:flex md:right-32 lg:left-8 [&_.btn-secondary]:flex [&_.btn-secondary]:h-10 [&_.btn-secondary]:w-10 [&_.btn-secondary]:shrink-0 [&_.btn-secondary]:items-center [&_.btn-secondary]:justify-center [&_.btn-secondary]:p-0 [&_.btn-secondary]:text-[0] [&_.btn-secondary>svg]:h-[18px] [&_.btn-secondary>svg]:w-[18px]">
@@ -1675,20 +1670,8 @@ export default function FileBrowser() {
                     {activeSection === 'files' && activeSharedWorkspace && <div className="mx-auto mb-3 flex max-w-7xl items-center gap-3 rounded-2xl border border-primary-400/20 bg-primary-500/[.07] px-3 py-2.5"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary-500/15">🤝</span><div className="min-w-0 flex-1"><strong dir="auto" className="block truncate text-sm text-primary-100">فضای {activeSharedWorkspace.name}</strong><p className="text-xs text-primary-100/60">{activeSharedWorkspace.permission==='write'?'اجازهٔ مشاهده و ذخیره داری':'این فضا فقط قابل مشاهده است'}</p></div><button className="rounded-xl bg-white/[.06] px-3 py-2 text-xs" onClick={()=>{localStorage.removeItem('komod-active-workspace');localStorage.removeItem('komod-active-workspace-permission');window.location.reload()}}>کمد من</button></div>}
                     {activeSection === 'files' && hiddenOnly && <div className="mx-auto mb-4 flex max-w-7xl items-center gap-3 rounded-2xl border border-amber-400/20 bg-amber-500/[.07] p-3 shadow-lg shadow-black/5"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-400/10 text-amber-200"><EyeOff className="h-5 w-5"/></span><div className="min-w-0 flex-1"><strong className="block text-sm text-amber-100">فقط موارد مخفی</strong><p className="mt-0.5 truncate text-xs text-amber-100/60">{shownFolderCount+shownFileCount ? `${(shownFolderCount+shownFileCount).toLocaleString('fa-IR')} مورد پیدا شد` : 'مورد مخفی‌ای در این بخش نیست'}</p></div><button onClick={closeVaultItems} className="flex min-h-10 shrink-0 items-center gap-2 rounded-xl bg-white/[.07] px-3 text-xs text-white transition hover:bg-white/[.12]"><ChevronRight className="h-4 w-4"/> بازگشت به کمد</button></div>}
                     {activeSection === 'files' && (
-                        <div className="max-w-7xl mx-auto mb-4">
-                            <div className="flex flex-col gap-2">
-                                <div className="grid grid-cols-3 gap-1 rounded-xl bg-dark-900/70 p-1" aria-label="انتخاب نوع محتوا">
-                                    {([
-                                        ['all', 'همه', Boxes],
-                                        ['files', 'فایل‌ها', FileText],
-                                        ['folders', 'کشوها', FolderIcon],
-                                    ] as const).map(([scope, label, Icon]) => (
-                                        <button key={scope} onClick={() => selectScope(scope)} className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm transition-all ${contentScope === scope ? 'bg-primary-600 text-white shadow-md' : 'text-dark-400 hover:bg-white/[0.05] hover:text-white'}`}>
-                                            <Icon className="h-4 w-4" />
-                                            {label}
-                                        </button>
-                                    ))}
-                                </div>
+                        <div className="mx-auto mb-5 max-w-7xl">
+                            <div className="flex flex-col gap-2.5">
                                 {savedFilters.length>0&&<div className="rounded-2xl border border-white/[.06] bg-dark-900/45 p-2">
                                     <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
                                         {savedFilters.map(filter=><div key={filter.id} className={`flex shrink-0 items-center rounded-xl border transition ${activeSavedFilterId===filter.id?'border-primary-400/35 bg-primary-500/15 text-primary-100':'border-white/[.07] bg-white/[.025] text-dark-300'}`}>
@@ -1697,19 +1680,22 @@ export default function FileBrowser() {
                                         </div>)}
                                     </div>
                                 </div>}
-                                <div className="flex items-center justify-between gap-2 rounded-2xl border border-white/[0.06] bg-dark-900/55 p-1.5 shadow-sm">
-                                    <div className="flex min-w-0 flex-wrap items-center gap-1 rounded-xl border border-white/[.07] bg-dark-950/60 p-1">
-                                    <button title="تازه‌سازی" aria-label="تازه‌سازی" onClick={handleRefresh} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-dark-400 hover:text-white"><RefreshCw className={`h-4 w-4 ${filesFetching ? 'animate-spin' : ''}`}/></button>
-                                    <button title="فیلتر نوع فایل" aria-label="فیلتر نوع فایل" onClick={() => { setShowFilters(value => !value); setShowSort(false); }} disabled={contentScope === 'folders'} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${fileTypeFilter.length || showFilters ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:text-white'}`}>
+                                <div className="cabinet-command-bar flex flex-col items-stretch justify-between gap-2 rounded-[1.35rem] border border-white/[0.075] bg-dark-900/65 p-2 shadow-lg shadow-black/[.06] backdrop-blur-xl sm:flex-row sm:items-center">
+                                    <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto rounded-2xl bg-dark-950/35 p-1">
+                                    <button title="تازه‌سازی" aria-label="تازه‌سازی" onClick={handleRefresh} className="flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl px-2.5 text-dark-400 transition hover:bg-white/[.05] hover:text-white sm:px-3"><RefreshCw className={`h-4 w-4 ${filesFetching ? 'animate-spin' : ''}`}/><span className="hidden text-xs font-semibold lg:inline">تازه‌سازی</span></button>
+                                    <button title="فیلتر نوع فایل" aria-label="فیلتر نوع فایل" onClick={() => { setShowFilters(value => !value); setShowSort(false); }} className={`flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl px-2.5 text-xs font-semibold transition-colors sm:px-3 ${fileTypeFilter.length || showFilters ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:bg-white/[.05] hover:text-white'}`}>
                                         <SlidersHorizontal className="h-4 w-4" />
+                                        <span className="hidden sm:inline">فیلتر</span>
                                         {fileTypeFilter.length > 0 && <span className="rounded-full bg-primary-500 px-1.5 text-[10px] text-white">{fileTypeFilter.length.toLocaleString('fa-IR')}</span>}
                                     </button>
-                                    <button title="مرتب‌سازی" aria-label="مرتب‌سازی" onClick={() => { setShowSort(value => !value); setShowFilters(false); }} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs transition-colors ${showSort ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:text-white'}`}>
+                                    <button title="مرتب‌سازی" aria-label="مرتب‌سازی" onClick={() => { setShowSort(value => !value); setShowFilters(false); }} className={`flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl px-2.5 text-xs font-semibold transition-colors sm:px-3 ${showSort ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:bg-white/[.05] hover:text-white'}`}>
                                         <ArrowDown className="h-4 w-4" />
+                                        <span className="hidden sm:inline">مرتب‌سازی</span>
                                     </button>
-                                    <button title="فقط نشان‌شده‌ها؛ نگه‌داشتن برای موارد مخفی" aria-label="فقط نشان‌شده‌ها" onPointerDown={beginHiddenPress} onPointerUp={endHiddenPress} onPointerCancel={endHiddenPress} onPointerLeave={endHiddenPress} onClick={toggleFavorites} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs transition-colors ${showHidden?'ring-1 ring-primary-400/50':favoriteOnly?'bg-amber-400/15 text-amber-200':'text-dark-400 hover:text-white'}`}><Star className={`h-4 w-4 ${favoriteOnly ? 'fill-current' : ''}`}/></button>
-                                    {!readOnlyWorkspace && <button title="انتخاب گروهی" aria-label="انتخاب گروهی" onClick={toggleSelectionMode} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs transition-colors ${selectionMode ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:text-white'}`}>
+                                    <button title="فقط نشان‌شده‌ها؛ نگه‌داشتن برای موارد مخفی" aria-label="فقط نشان‌شده‌ها" onPointerDown={beginHiddenPress} onPointerUp={endHiddenPress} onPointerCancel={endHiddenPress} onPointerLeave={endHiddenPress} onClick={toggleFavorites} className={`flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl px-2.5 text-xs font-semibold transition-colors sm:px-3 ${showHidden?'ring-1 ring-primary-400/50':favoriteOnly?'bg-amber-400/15 text-amber-200':'text-dark-400 hover:bg-white/[.05] hover:text-white'}`}><Star className={`h-4 w-4 ${favoriteOnly ? 'fill-current' : ''}`}/><span className="hidden lg:inline">نشان‌شده‌ها</span></button>
+                                    {!readOnlyWorkspace && <button title="انتخاب گروهی" aria-label="انتخاب گروهی" onClick={toggleSelectionMode} className={`flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl px-2.5 text-xs font-semibold transition-colors sm:px-3 ${selectionMode ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:bg-white/[.05] hover:text-white'}`}>
                                         <ListChecks className="h-4 w-4" />
+                                        <span className="hidden lg:inline">انتخاب</span>
                                     </button>}
                                     {!readOnlyWorkspace && (selectionMode || selectedItemCount > 0) && (
                                         <button onClick={toggleSelectAll} disabled={visibleItemCount === 0} title={allVisibleSelected ? 'لغو انتخاب همه' : someVisibleSelected ? 'انتخاب دوبارهٔ همه' : 'انتخاب همه'} aria-label={allVisibleSelected ? 'لغو انتخاب همه' : someVisibleSelected ? 'بخشی انتخاب شده' : 'انتخاب همه'} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs transition-colors disabled:opacity-40 ${allVisibleSelected || someVisibleSelected ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:text-white'}`}>
@@ -1717,16 +1703,16 @@ export default function FileBrowser() {
                                         </button>
                                     )}
                                     </div>
-                                    <div className="flex shrink-0 items-center rounded-xl border border-white/[.07] bg-dark-950/60 p-1">
-                                    <button title="نمای کارتی بزرگ" aria-label="نمای کارتی بزرگ" onClick={() => setViewMode('grid')} className={`flex h-8 w-8 items-center justify-center rounded-lg ${viewMode === 'grid' ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:text-white'}`}><Grid className="h-4 w-4" /></button>
-                                    <button title="نمای کاشی متراکم" aria-label="نمای کاشی متراکم" onClick={() => setViewMode('dense')} className={`flex h-8 w-8 items-center justify-center rounded-lg ${viewMode === 'dense' ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:text-white'}`}><LayoutGrid className="h-4 w-4" /></button>
-                                    <button title="نمای خیلی کوچک" aria-label="نمای خیلی کوچک" onClick={() => setViewMode('compact')} className={`flex h-8 w-8 items-center justify-center rounded-lg ${viewMode === 'compact' ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:text-white'}`}><Grid3X3 className="h-4 w-4" /></button>
-                                    <button title="نمای لیستی" aria-label="نمای لیستی" onClick={() => setViewMode('list')} className={`flex h-8 w-8 items-center justify-center rounded-lg ${viewMode === 'list' ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:text-white'}`}><List className="h-4 w-4" /></button>
+                                    <div className="flex w-full shrink-0 items-center rounded-2xl border border-white/[.07] bg-dark-950/55 p-1 sm:w-auto" aria-label="انتخاب نما">
+                                    <button title="نمای کارتی بزرگ" aria-label="نمای کارتی بزرگ" onClick={() => setViewMode('grid')} className={`flex h-10 flex-1 items-center justify-center rounded-xl transition sm:w-10 sm:flex-none ${viewMode === 'grid' ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:bg-white/[.05] hover:text-white'}`}><Grid className="h-4 w-4" /></button>
+                                    <button title="نمای کاشی متراکم" aria-label="نمای کاشی متراکم" onClick={() => setViewMode('dense')} className={`flex h-10 flex-1 items-center justify-center rounded-xl transition sm:w-10 sm:flex-none ${viewMode === 'dense' ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:bg-white/[.05] hover:text-white'}`}><LayoutGrid className="h-4 w-4" /></button>
+                                    <button title="نمای خیلی کوچک" aria-label="نمای خیلی کوچک" onClick={() => setViewMode('compact')} className={`flex h-10 flex-1 items-center justify-center rounded-xl transition sm:w-10 sm:flex-none ${viewMode === 'compact' ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:bg-white/[.05] hover:text-white'}`}><Grid3X3 className="h-4 w-4" /></button>
+                                    <button title="نمای لیستی" aria-label="نمای لیستی" onClick={() => setViewMode('list')} className={`flex h-10 flex-1 items-center justify-center rounded-xl transition sm:w-10 sm:flex-none ${viewMode === 'list' ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:bg-white/[.05] hover:text-white'}`}><List className="h-4 w-4" /></button>
                                     </div>
                                 </div>
                             </div>
                             {showFilters && contentScope !== 'folders' && (
-                                <div className="mt-3 border-t border-white/[0.06] pt-3">
+                                <div className="mt-3 rounded-2xl border border-white/[.07] bg-dark-900/55 p-3 shadow-lg shadow-black/[.04]">
                                     <div className="grid grid-cols-6 overflow-hidden rounded-xl border border-white/[.07] bg-dark-950/60 p-1">
                                         {([
                                             ['ویدیو', 'video', Film], ['موسیقی و صدا', 'audio', Music],
@@ -1743,7 +1729,7 @@ export default function FileBrowser() {
                                 </div>
                             )}
                             {showSort && (
-                                <div className="mt-3 border-t border-white/[0.06] pt-3">
+                                <div className="mt-3 rounded-2xl border border-white/[.07] bg-dark-900/55 p-3 shadow-lg shadow-black/[.04]">
                                     <div className="mb-3 flex items-center justify-between gap-3">
                                         <p className="text-sm font-medium text-white">مرتب‌سازی</p>
                                         <button onClick={() => {setActiveSavedFilterId(null);setSortCriteria([{ field: 'created', direction: 'desc' }])}} className="shrink-0 text-xs text-dark-400 hover:text-white">حالت پیش‌فرض</button>

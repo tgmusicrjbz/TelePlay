@@ -29,13 +29,13 @@ from .models import File, Folder, TTSUsage, User
 from .gemini_keys import decrypt_user_keys
 from .processing_jobs import create_job, load_jobs, update_job
 from .services import sanitize_filename
-from .tts import GeminiRequestError
+from .tts import GeminiRequestError, speech_parallelism
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 TERMINAL_STATES = {"done", "error", "cancelled"}
-STT_SEGMENT_SECONDS = 20 * 60
-STT_SEGMENT_THRESHOLD_SECONDS = 40 * 60
+STT_SEGMENT_SECONDS = 10 * 60
+STT_SEGMENT_THRESHOLD_SECONDS = 18 * 60
 
 
 def format_segment_time(seconds: int) -> str:
@@ -418,6 +418,7 @@ class STTQueue:
         self.task: asyncio.Task | None = None
         self.tasks: list[asyncio.Task] = []
         self.durable_job_ids: set[str] = set()
+        self.request_semaphore = asyncio.Semaphore(6)
         self._recovered = False
 
     @property
@@ -619,25 +620,30 @@ class STTQueue:
             user = await db.get(User, job.user_id)
             if source is None or user is None:
                 raise RuntimeError("فایل صوتی پیدا نشد.")
-            channel_id = source.storage_channel_id or user.storage_channel_id or settings.telegram_storage_channel_id
-            message = await telegram.tg_client.get_messages(channel_id, source.channel_message_id)
+            has_audio_variant = source.file_type == "video" and bool(source.audio_variant_message_id)
+            channel_id = (
+                source.audio_variant_storage_channel_id or source.storage_channel_id or user.storage_channel_id or settings.telegram_storage_channel_id
+                if has_audio_variant else source.storage_channel_id or user.storage_channel_id or settings.telegram_storage_channel_id
+            )
+            message_id = source.audio_variant_message_id if has_audio_variant else source.channel_message_id
+            message = await telegram.tg_client.get_messages(channel_id, message_id)
             if not message:
                 raise RuntimeError("نسخه اصلی فایل در دسترس نیست.")
             with tempfile.TemporaryDirectory(prefix="komod-stt-") as directory:
-                suffix = Path(source.file_name).suffix or mimetypes.guess_extension(source.mime_type or "") or ".bin"
+                suffix = ".m4a" if has_audio_variant else Path(source.file_name).suffix or mimetypes.guess_extension(source.mime_type or "") or ".bin"
                 input_path = Path(directory) / f"source{suffix}"
-                self.statuses[job.id].update(state="downloading", message="دریافت فایل", progress=10)
+                self.statuses[job.id].update(state="downloading", message="دریافت نسخه کم‌حجم صدا" if has_audio_variant else "دریافت فایل", progress=10)
                 await self._persist_status(job.id)
                 downloaded = await telegram.tg_client.download_media(message, file_name=str(input_path))
                 if not downloaded:
                     raise RuntimeError("دریافت فایل از فضای ذخیره‌سازی انجام نشد.")
                 media_path = Path(downloaded)
-                mime_type = source.mime_type or mimetypes.guess_type(media_path.name)[0] or "audio/ogg"
+                mime_type = "audio/mp4" if has_audio_variant else source.mime_type or mimetypes.guess_type(media_path.name)[0] or "audio/ogg"
                 source_duration = int(source.duration or 0)
                 if source_duration <= 0:
                     source_duration = await asyncio.to_thread(probe_media_duration, media_path)
                 segments = await asyncio.to_thread(split_long_media, media_path, Path(directory), source_duration)
-                if not segments and shutil.which("ffmpeg") and (source.file_type == "video" or media_path.stat().st_size > 18 * 1024 * 1024):
+                if not segments and shutil.which("ffmpeg") and ((source.file_type == "video" and not has_audio_variant) or media_path.stat().st_size > 18 * 1024 * 1024):
                     compressed = Path(directory) / "speech.mp3"
                     command = ["ffmpeg", "-y", "-loglevel", "error", "-i", str(media_path), "-vn", "-ac", "1", "-ar", "16000", "-b:a", "48k", str(compressed)]
                     await asyncio.to_thread(subprocess.run, command, check=True, capture_output=True)
@@ -645,27 +651,36 @@ class STTQueue:
                 if self.controls.get(job.id):
                     return
                 if segments:
-                    chunks: list[str] = []
                     total_segments = len(segments)
-                    for index, segment in enumerate(segments):
+                    chunks = [""] * total_segments
+                    parallelism = speech_parallelism(len(provider.api_keys), total_segments)
+                    for batch_start in range(0, total_segments, parallelism):
                         if self.controls.get(job.id):
                             return
-                        progress = 35 + int((index / total_segments) * 42)
+                        batch_end = min(total_segments, batch_start + parallelism)
+                        progress = 35 + int((batch_start / total_segments) * 42)
                         self.statuses[job.id].update(
                             state="transcribing",
-                            message=f"تبدیل بخش {index + 1} از {total_segments}",
+                            message=f"تبدیل هم‌زمان بخش‌های {batch_start + 1} تا {batch_end} از {total_segments}",
                             progress=progress,
                         )
                         await self._persist_status(job.id)
-                        start = index * STT_SEGMENT_SECONDS
-                        end = min(source_duration, (index + 1) * STT_SEGMENT_SECONDS)
-                        segment_prompt = (
-                            f"{job.prompt.strip()}\n\n" if job.prompt.strip() else ""
-                        ) + f"این بخش {index + 1} از {total_segments} فایل است. متن همین بخش را کامل و بدون خلاصه‌سازی بنویس."
-                        content = await provider.transcribe(segment, "audio/mpeg", segment_prompt)
-                        chunks.append(
-                            f"## بخش {index + 1} · {format_segment_time(start)} تا {format_segment_time(end)}\n\n{content.strip()}"
-                        )
+
+                        async def transcribe_segment(index: int) -> tuple[int, str]:
+                            start = index * STT_SEGMENT_SECONDS
+                            end = min(source_duration, (index + 1) * STT_SEGMENT_SECONDS)
+                            segment_prompt = (
+                                f"{job.prompt.strip()}\n\n" if job.prompt.strip() else ""
+                            ) + f"این بخش {index + 1} از {total_segments} فایل است. متن همین بخش را کامل و بدون خلاصه‌سازی بنویس."
+                            async with self.request_semaphore:
+                                content = await provider.transcribe(segments[index], "audio/mpeg", segment_prompt)
+                            return index, f"## بخش {index + 1} · {format_segment_time(start)} تا {format_segment_time(end)}\n\n{content.strip()}"
+
+                        results = await asyncio.gather(*(transcribe_segment(index) for index in range(batch_start, batch_end)))
+                        for index, content in results:
+                            chunks[index] = content
+                        self.statuses[job.id].update(progress=35 + int((batch_end / total_segments) * 42))
+                        await self._persist_status(job.id)
                     markdown = "\n\n---\n\n".join(chunks)
                 else:
                     self.statuses[job.id].update(state="transcribing", message="در حال تبدیل", progress=45)

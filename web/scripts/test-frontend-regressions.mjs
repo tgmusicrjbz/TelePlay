@@ -38,6 +38,9 @@ try {
     assert.equal(browserSource.includes("setViewMode('compact')"), true, 'the cabinet must offer the extra-small card view');
     assert.equal(playlistSource.includes('جست‌وجو در این پلی‌لیست…'), true, 'playlist details must include track search');
     assert.equal(playlistSource.includes('reorderedVisible'), true, 'filtered playlist reordering must preserve hidden track positions');
+    assert.equal(playlistSource.includes('maxHeight: window.innerHeight - edge * 2'), true, 'playlist menus must stay inside the desktop viewport');
+    assert.equal(browserSource.includes('aria-label="انتخاب نوع محتوا"'), false, 'the cabinet must not use the redundant files/folders segmented bar');
+    assert.equal(browserSource.includes('cabinet-command-bar'), true, 'the cabinet must expose the consolidated command bar');
     assert.equal(speechSource.includes("window.confirm('همه موارد پایان‌یافته"), false, 'clearing speech history must not open a browser confirmation popup');
     assert.equal(apiSource.includes("queryClient.setQueryData<TTSJobStatus[]>(['tts-jobs'],items=>items?.filter"), true, 'TTS history deletion must update the UI optimistically');
     assert.equal(speechSource.includes("localStorage.getItem('komod-stt-picker-view')"), true, 'the STT cabinet picker must persist its selected view');

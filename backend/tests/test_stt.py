@@ -28,14 +28,14 @@ class STTQueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(extract_interaction_text({"output_text": "  سلام  "}), "سلام")
         self.assertEqual(extract_interaction_text({"steps": [{"type": "model_output", "content": [{"type": "text", "text": "متن"}]}]}), "متن")
 
-    def test_long_media_is_split_into_ordered_twenty_minute_chunks(self):
+    def test_long_media_is_split_into_ordered_ten_minute_chunks(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = root / "source.mp4"
             source.write_bytes(b"video")
 
             def fake_run(command, **_kwargs):
-                self.assertIn("1200", command)
+                self.assertIn("600", command)
                 (root / "speech-001.mp3").write_bytes(b"second")
                 (root / "speech-000.mp3").write_bytes(b"first")
 

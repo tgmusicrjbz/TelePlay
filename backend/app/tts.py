@@ -375,6 +375,34 @@ def merge_wav(parts: list[bytes]) -> bytes:
     return output.getvalue()
 
 
+def merge_wav_files(parts: list[Path], output: Path) -> Path:
+    """Merge generated WAV chunks without retaining the full result in RAM."""
+    if not parts:
+        raise ValueError("No audio chunks were generated")
+    expected: tuple[int, int, int] | None = None
+    with wave.open(str(output), "wb") as target:
+        for index, path in enumerate(parts):
+            with wave.open(str(path), "rb") as source:
+                current = (source.getnchannels(), source.getsampwidth(), source.getframerate())
+                if expected is None:
+                    expected = current
+                    target.setnchannels(current[0])
+                    target.setsampwidth(current[1])
+                    target.setframerate(current[2])
+                    target.setcomptype("NONE", "not compressed")
+                elif current != expected:
+                    raise ValueError("Generated audio chunks use incompatible formats")
+                while frames := source.readframes(64 * 1024):
+                    target.writeframesraw(frames)
+    return output
+
+
+def speech_parallelism(key_count: int, item_count: int) -> int:
+    """Bound parallel model calls to keep latency low without causing rate-limit bursts."""
+    request_budget = 2 if key_count <= 1 else 3
+    return min(request_budget, max(1, item_count))
+
+
 class GeminiTTSProvider:
     def __init__(self, api_keys: list[str]) -> None:
         self.api_keys = api_keys
@@ -562,6 +590,7 @@ class TTSQueue:
         self.tasks: list[asyncio.Task] = []
         self.active_job_ids: set[str] = set()
         self.durable_job_ids: set[str] = set()
+        self.request_semaphore = asyncio.Semaphore(6)
         self._recovered = False
 
     @property
@@ -776,58 +805,76 @@ class TTSQueue:
     async def _process(self, job: TTSJob) -> None:
         provider = GeminiTTSProvider(list(dict.fromkeys((job.api_keys or []) + self.provider.api_keys))) if job.api_keys else self.provider
         chunks = split_long_text(job.text)
-        parts: list[bytes] = []
-        for index, chunk in enumerate(chunks, 1):
+        if not chunks:
+            raise RuntimeError("متنی برای ساخت صدا وجود ندارد.")
+        parallelism = speech_parallelism(len(provider.api_keys), len(chunks))
+        with tempfile.TemporaryDirectory(prefix="komod-tts-build-") as build_dir:
+            build_path = Path(build_dir)
+            part_paths = [build_path / f"part-{index:04d}.wav" for index in range(len(chunks))]
+            completed = 0
+            for batch_start in range(0, len(chunks), parallelism):
+                if not await self._checkpoint(job):
+                    return
+                batch_end = min(len(chunks), batch_start + parallelism)
+                self.statuses[job.id].update(
+                    state="synthesizing",
+                    message=f"ساخت هم‌زمان بخش‌های {to_persian_digits(batch_start + 1)} تا {to_persian_digits(batch_end)} از {to_persian_digits(len(chunks))}",
+                )
+                await self._persist_status(job.id)
+
+                async def synthesize_part(index: int) -> None:
+                    async with self.request_semaphore:
+                        payload = await provider.synthesize(chunks[index], job.preferences)
+                    await asyncio.to_thread(part_paths[index].write_bytes, payload)
+
+                await asyncio.gather(*(synthesize_part(index) for index in range(batch_start, batch_end)))
+                completed = batch_end
+                self.statuses[job.id].update(chunks_done=completed, progress=round(completed / len(chunks) * 80))
+                await self._persist_status(job.id)
             if not await self._checkpoint(job):
                 return
-            self.statuses[job.id].update(state="synthesizing", message=f"بخش {to_persian_digits(index)} از {to_persian_digits(len(chunks))}")
+            self.statuses[job.id].update(state="merging", message="آماده‌سازی نهایی", progress=85)
             await self._persist_status(job.id)
-            parts.append(await provider.synthesize(chunk, job.preferences))
-            self.statuses[job.id].update(chunks_done=index, progress=round(index / len(chunks) * 80))
-            await self._persist_status(job.id)
-        if not await self._checkpoint(job):
-            return
-        self.statuses[job.id].update(state="merging", message="آماده‌سازی نهایی", progress=85)
-        await self._persist_status(job.id)
-        wav_data = await asyncio.to_thread(merge_wav, parts)
-        if job.output_mode == "preview":
-            self.audio_outputs[job.id] = wav_data
+            merged_path = await asyncio.to_thread(merge_wav_files, part_paths, build_path / "merged.wav")
+            if job.output_mode == "preview":
+                self.audio_outputs[job.id] = await asyncio.to_thread(merged_path.read_bytes)
+                self.statuses[job.id].update(
+                    state="done", message="آمادهٔ پخش", progress=100,
+                    stream_url=f"/api/tts/jobs/{job.id}/audio", finished_at=datetime.utcnow().isoformat(),
+                )
+                await self._persist_status(job.id)
+                return
+            if job.output_mode == "telegram":
+                await self._send_only(job, merged_path)
+                self.statuses[job.id].update(
+                    state="done", message="در تلگرام فرستاده شد", progress=100,
+                    finished_at=datetime.utcnow().isoformat(),
+                )
+                await self._persist_status(job.id)
+                return
+            stored = await self._store(job, merged_path)
             self.statuses[job.id].update(
-                state="done", message="آمادهٔ پخش", progress=100,
-                stream_url=f"/api/tts/jobs/{job.id}/audio", finished_at=datetime.utcnow().isoformat(),
+                state="done", message="صدا آماده شد", progress=100, file_id=stored.id,
+                stream_url=f"/api/stream/{stored.id}?workspace={stored.user_id}", finished_at=datetime.utcnow().isoformat(),
             )
             await self._persist_status(job.id)
-            return
-        if job.output_mode == "telegram":
-            await self._send_only(job, wav_data)
-            self.statuses[job.id].update(
-                state="done", message="در تلگرام فرستاده شد", progress=100,
-                finished_at=datetime.utcnow().isoformat(),
-            )
-            await self._persist_status(job.id)
-            return
-        stored = await self._store(job, wav_data)
-        self.statuses[job.id].update(
-            state="done", message="صدا آماده شد", progress=100, file_id=stored.id,
-            stream_url=f"/api/stream/{stored.id}?workspace={stored.user_id}", finished_at=datetime.utcnow().isoformat(),
-        )
-        await self._persist_status(job.id)
 
-    async def _send_only(self, job: TTSJob, wav_data: bytes) -> None:
+    async def _send_only(self, job: TTSJob, wav_source: Path) -> None:
         with tempfile.TemporaryDirectory(prefix="komod-tts-send-") as temporary_dir:
             safe_title = sanitize_filename(job.title or "صدای ساخته‌شده")
             wav_path = Path(temporary_dir) / f"{safe_title}.wav"
             ogg_path = Path(temporary_dir) / f"{safe_title}.ogg"
-            wav_path.write_bytes(wav_data)
             output_path = wav_path
             if shutil.which("ffmpeg"):
-                command = ["ffmpeg", "-y", "-loglevel", "error", "-i", str(wav_path)]
+                command = ["ffmpeg", "-y", "-loglevel", "error", "-i", str(wav_source)]
                 speed = float(job.preferences.get("speed", 1))
                 if abs(speed - 1) > .01:
                     command.extend(["-filter:a", f"atempo={speed:.2f}"])
                 command.extend(["-c:a", "libopus", "-b:a", "48k", str(ogg_path)])
                 await asyncio.to_thread(subprocess.run, command, check=True, capture_output=True)
                 output_path = ogg_path
+            else:
+                await asyncio.to_thread(shutil.copyfile, wav_source, wav_path)
             self.statuses[job.id].update(state="uploading", message="ارسال به تلگرام", progress=90)
             await self._persist_status(job.id)
             if output_path.suffix == ".ogg":
@@ -845,22 +892,23 @@ class TTSQueue:
                     reply_to_message_id=job.request_message_id,
                 )
 
-    async def _store(self, job: TTSJob, wav_data: bytes) -> File:
+    async def _store(self, job: TTSJob, wav_source: Path) -> File:
         with tempfile.TemporaryDirectory(prefix="komod-tts-") as temporary_dir:
             safe_title = sanitize_filename(job.title or "صدای ساخته‌شده")
             wav_path = Path(temporary_dir) / f"{safe_title}.wav"
             ogg_path = Path(temporary_dir) / f"{safe_title}.ogg"
-            wav_path.write_bytes(wav_data)
             output_path = wav_path
             is_voice = False
             if shutil.which("ffmpeg"):
-                command = ["ffmpeg", "-y", "-loglevel", "error", "-i", str(wav_path)]
+                command = ["ffmpeg", "-y", "-loglevel", "error", "-i", str(wav_source)]
                 speed = float(job.preferences.get("speed", 1))
                 if abs(speed - 1) > .01:
                     command.extend(["-filter:a", f"atempo={speed:.2f}"])
                 command.extend(["-c:a", "libopus", "-b:a", "48k", str(ogg_path)])
                 await asyncio.to_thread(subprocess.run, command, check=True, capture_output=True)
                 output_path, is_voice = ogg_path, True
+            else:
+                await asyncio.to_thread(shutil.copyfile, wav_source, wav_path)
 
             async with async_session() as db:
                 user = await db.get(User, job.user_id)
