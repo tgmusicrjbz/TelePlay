@@ -1,37 +1,47 @@
 import { useEffect, useState } from 'react';
-import { AudioLines, Download, ListMusic, Settings, UsersRound, Warehouse } from 'lucide-react';
+import { AudioLines, Download, ListMusic, Settings, Warehouse } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 
 type NavSection = 'files' | 'playlists' | 'rooms' | 'speech' | 'downloads' | 'settings';
-const items: Array<{ section: NavSection; label: string; shortLabel: string; icon: typeof Warehouse }> = [
-    { section: 'files', label: 'کمد من', shortLabel: 'کمد من', icon: Warehouse },
+type NavItem = { section: NavSection; label: string; shortLabel: string; icon: typeof Warehouse };
+
+const items: NavItem[] = [
+    { section: 'files', label: 'کمد من', shortLabel: 'کمد', icon: Warehouse },
     { section: 'playlists', label: 'پلی‌لیست‌ها', shortLabel: 'پلی‌لیست', icon: ListMusic },
-    { section: 'rooms', label: 'هم‌پخش', shortLabel: 'هم‌پخش', icon: UsersRound },
     { section: 'speech', label: 'متن و صدا', shortLabel: 'متن و صدا', icon: AudioLines },
-    { section: 'downloads', label: 'دانلودها', shortLabel: 'دانلودها', icon: Download },
+    { section: 'downloads', label: 'دانلودها', shortLabel: 'دانلود', icon: Download },
     { section: 'settings', label: 'تنظیمات', shortLabel: 'تنظیمات', icon: Settings },
 ];
 
 export default function Sidebar() {
     const { activeSection, setActiveSection } = useAppStore();
-    const [settingsView,setSettingsView]=useState('home');
-    useEffect(()=>{const sync=(event:Event)=>setSettingsView((event as CustomEvent<{view:string}>).detail?.view||'home');window.addEventListener('komod-settings-view',sync);return()=>window.removeEventListener('komod-settings-view',sync)},[]);
+    const [settingsView, setSettingsView] = useState('home');
+
+    useEffect(() => {
+        const sync = (event: Event) => setSettingsView((event as CustomEvent<{ view: string }>).detail?.view || 'home');
+        window.addEventListener('komod-settings-view', sync);
+        return () => window.removeEventListener('komod-settings-view', sync);
+    }, []);
+
     const isSharedWorkspace = Boolean(localStorage.getItem('komod-active-workspace'));
-    const visibleItems = isSharedWorkspace ? items.filter(item => item.section !== 'playlists' && item.section !== 'rooms') : items;
-    // هم‌پخش یک ابزار مشارکتی است، نه مقصد روزمره. روی موبایل فضای
-    // ناوبری را برای بخش‌های اصلی نگه می‌داریم و آن را از ابزارها باز می‌کنیم.
-    const mobileItems = visibleItems.filter(item => item.section !== 'rooms');
+    // هم‌پخش موقتاً از ناوبری ثابت برداشته شده و از ابزارها/منوهای مربوط
+    // به پلی‌لیست قابل دسترسی می‌ماند. این کار در موبایل افقی هم جا را آزاد می‌کند.
+    const visibleItems = isSharedWorkspace ? items.filter(item => item.section !== 'playlists') : items;
+    const isSelected = (section: NavSection) => section === 'speech'
+        ? activeSection === 'settings' && settingsView === 'tts'
+        : activeSection === section && (section !== 'settings' || settingsView !== 'tts');
+
     const selectSection = (section: NavSection) => {
         if (section === 'speech') {
             localStorage.setItem('komod-settings-target', 'tts');
-            const url=new URL(window.location.href);
-            url.pathname='/';
+            const url = new URL(window.location.href);
+            url.pathname = '/';
             url.searchParams.set('settings','tts');
             url.searchParams.delete('section');
             window.history.pushState({}, '', `${url.pathname}${url.search}${url.hash}`);
             setActiveSection('settings');
             window.dispatchEvent(new PopStateEvent('popstate'));
-            window.setTimeout(()=>window.dispatchEvent(new Event('komod-open-tts')),0);
+            window.setTimeout(() => window.dispatchEvent(new Event('komod-open-tts')), 0);
             return;
         }
         if (section === 'settings') localStorage.setItem('komod-settings-target', 'home');
@@ -41,11 +51,34 @@ export default function Sidebar() {
         window.dispatchEvent(new PopStateEvent('popstate'));
         if (section === 'settings') window.dispatchEvent(new Event('komod-open-settings-home'));
     };
+
     return <>
-        <aside className="fixed inset-y-0 right-0 z-40 hidden w-24 flex-col items-center border-l border-white/[0.07] bg-dark-900/[.98] py-5 shadow-xl shadow-black/10 md:flex">
-            <button onClick={() => selectSection('files')} className="mb-7 flex flex-col items-center gap-2" aria-label="کمد من"><img src="/komod.svg" alt="کمد" className="h-10 w-10 rounded-xl object-contain shadow-lg shadow-primary-500/20" /><span className="text-xs font-bold">کمد</span></button>
-            <nav className="flex w-full flex-1 flex-col gap-2 px-2">{visibleItems.map(({ section, label, icon: Icon }) => {const selected=section==='speech'?activeSection==='settings'&&settingsView==='tts':activeSection===section&&(section!=='settings'||settingsView!=='tts');return <button key={section} aria-current={selected?'page':undefined} onClick={() => selectSection(section)} className={`group relative flex min-h-16 flex-col items-center justify-center gap-1.5 overflow-hidden rounded-2xl px-1 text-[11px] transition ${selected ? 'bg-gradient-to-b from-primary-500/20 to-primary-500/[.08] text-primary-100 shadow-inner shadow-white/[.03]' : 'text-dark-400 hover:bg-white/[0.05] hover:text-white'}`}>{selected&&<span className="absolute inset-y-3 right-0 w-0.5 rounded-full bg-primary-400 shadow-[0_0_12px_rgba(192,132,252,.8)]"/>}<Icon className={`h-5 w-5 transition-transform ${selected?'scale-110':'group-hover:scale-105'}`} /><span>{label}</span></button>})}</nav>
+        <aside className="komod-side-rail fixed inset-y-0 right-0 z-40 hidden w-24 flex-col items-center py-4 md:flex">
+            <button type="button" onClick={() => selectSection('files')} className="komod-side-brand" aria-label="کمد من">
+                <span className="komod-side-brand-mark"><img src="/komod.svg" alt="" className="h-9 w-9 object-contain" /></span>
+                <span className="text-[11px] font-black tracking-tight">کمد</span>
+            </button>
+            <nav className="mt-5 flex w-full flex-1 flex-col gap-1.5 px-2.5" aria-label="بخش‌های اصلی">
+                {visibleItems.map(({ section, label, icon: Icon }) => {
+                    const selected = isSelected(section);
+                    return <button type="button" key={section} aria-current={selected ? 'page' : undefined} onClick={() => selectSection(section)} className={`komod-side-item group ${selected ? 'is-active' : ''}`}>
+                        <span className="komod-side-icon"><Icon className="h-5 w-5" strokeWidth={selected ? 2.35 : 1.9} /></span>
+                        <span>{label}</span>
+                    </button>;
+                })}
+            </nav>
+            <span className="mb-1 h-1 w-8 rounded-full bg-white/10" aria-hidden="true" />
         </aside>
-        <nav className={`fixed inset-x-2 bottom-[max(.4rem,env(safe-area-inset-bottom))] z-[110] grid h-[4.25rem] ${isSharedWorkspace?'grid-cols-4':'grid-cols-5'} overflow-hidden rounded-2xl border border-white/10 bg-dark-900/[.98] px-1 shadow-xl shadow-black/25 md:hidden`}>{mobileItems.map(({ section, shortLabel, icon: Icon }) => {const selected=section==='speech'?activeSection==='settings'&&settingsView==='tts':activeSection===section&&(section!=='settings'||settingsView!=='tts');return <button key={section} aria-current={selected?'page':undefined} onClick={() => selectSection(section)} className={`relative flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 text-[9px] transition ${selected ? 'text-primary-200' : 'text-dark-400 active:bg-white/[.04]'}`}>{selected&&<span className="absolute inset-x-2 top-0 h-0.5 rounded-full bg-primary-400"/>}<span className={`flex h-8 w-9 items-center justify-center rounded-xl transition ${selected ? 'bg-primary-500/15' : ''}`}><Icon className={`h-5 w-5 ${selected?'scale-105':''}`} /></span><span className="max-w-full truncate px-0.5">{shortLabel}</span></button>})}</nav>
+
+        <nav className={`komod-bottom-dock ${isSharedWorkspace ? 'grid-cols-4' : 'grid-cols-5'} md:hidden`} aria-label="نوار اصلی">
+            {visibleItems.map(({ section, shortLabel, label, icon: Icon }) => {
+                const selected = isSelected(section);
+                return <button type="button" key={section} aria-label={label} aria-current={selected ? 'page' : undefined} onClick={() => selectSection(section)} className={`komod-dock-item ${selected ? 'is-active' : ''}`}>
+                    <span className="komod-dock-icon"><Icon className="h-[1.35rem] w-[1.35rem]" strokeWidth={selected ? 2.45 : 1.9} /></span>
+                    <span className="komod-dock-label">{shortLabel}</span>
+                    <span className="komod-dock-dot" aria-hidden="true" />
+                </button>;
+            })}
+        </nav>
     </>;
 }

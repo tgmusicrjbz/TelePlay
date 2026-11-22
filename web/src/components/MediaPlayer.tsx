@@ -1069,7 +1069,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
                     onPointerDown={isVideo ? undefined : revealControls}
                 >
                     {/* Top bar */}
-                    <div data-player-controls className={`absolute inset-x-0 top-0 z-30 flex items-center justify-between gap-2 bg-gradient-to-b from-black/80 to-transparent ${compactInline?'p-2':'p-3 sm:p-4'} ${isVideo ? 'overflow-hidden' : ''}`}>
+                    <div data-player-controls data-player-top className={`absolute inset-x-0 top-0 z-30 flex items-center justify-between gap-2 bg-gradient-to-b from-black/80 to-transparent ${compactInline?'p-2':'p-3 sm:p-4'} ${isVideo ? 'overflow-hidden' : ''}`}>
                         <div className={`min-w-0 flex-1 ${inlineExpanded?'pl-24':''}`}>
                             {isVideo && <h3 dir="auto" className={`w-full truncate text-start font-medium text-white ${compactInline?'text-sm':'text-base sm:text-lg'}`} title={cleanFileName}>{cleanFileName}</h3>}
                         </div>
@@ -1171,7 +1171,7 @@ function MediaPlayerContent({ file, onClose, isMinimized, setMinimized, inline =
                         </div>
 
                         {/* Control buttons */}
-                        {!isVideo && <div dir="ltr" className="flex items-center justify-between gap-3">
+                        {!isVideo && <div data-player-audio-actions dir="ltr" className="flex items-center justify-between gap-3">
                             {!isVideo ? <div className="flex items-center gap-1"><button disabled={!canShuffle} onClick={shuffleAndContinue} className="rounded-full p-2 text-white/75 hover:bg-white/10 disabled:opacity-30" title="تصادفی کردن ادامه صف"><Shuffle className="h-5 w-5"/></button><button disabled={!hasQueue} onClick={() => setAutoAdvance(!autoAdvance)} className={`rounded-full p-2 disabled:opacity-30 ${autoAdvance ? 'bg-primary-500/25 text-primary-200' : 'text-white/75 hover:bg-white/10'}`} title={`پخش پیوسته ${autoAdvance?'روشن':'خاموش'}`}><ListEnd className="h-5 w-5"/></button><button onClick={() => setRepeatMode(repeatMode === 'off' ? 'all' : repeatMode === 'all' ? 'one' : 'off')} className={`rounded-full p-2 ${repeatMode !== 'off' ? 'bg-primary-500/25 text-primary-200' : 'text-white/75 hover:bg-white/10'}`} title="تکرار"><Repeat2 className="h-5 w-5"/></button></div> : <div />}
                             <div className="flex items-center gap-3">
                             <div className="relative">
