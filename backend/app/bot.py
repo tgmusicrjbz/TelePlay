@@ -64,7 +64,10 @@ current_drawers: dict[int, int | None] = {}
 upload_drawers: dict[int, int | None] = {}
 show_file_actions: dict[int, bool] = {}
 link_delivery_modes: dict[int, str] = {}
+stt_ask_prompt_modes: dict[int, bool] = {}
+link_notify_modes: dict[int, bool] = {}
 pending_stt_modes: dict[int, str] = {}
+pending_private_stt_prompts: dict[int, tuple[int, str, datetime]] = {}
 pending_group_actions: dict[tuple[int, int], tuple[str, datetime] | tuple[str, datetime, int]] = {}
 pending_private_deliveries: dict[int, tuple[str, int, str, str, str, datetime]] = {}
 pending_link_quality: dict[str, dict] = {}
@@ -82,7 +85,7 @@ SORT_LABELS = {"name": "نام", "type": "نوع", "size": "حجم", "duration":
 YOUTUBE_QUALITY_OPTIONS = (
     ("🎵 فقط صدا", "audio"),
     ("📱 ۳۶۰p", "360"),
-    ("⚖️ ۴۸۰p", "480"),
+    ("📺 ۴۸۰p", "480"),
     ("🎬 ۷۲۰p", "720"),
     ("✨ ۱۰۸۰p", "1080"),
 )
@@ -877,6 +880,8 @@ async def load_user_ui_state(telegram_id: int, *, force: bool = False) -> None:
         upload_drawers[telegram_id] = state.upload_drawer_id
         show_file_actions[telegram_id] = bool(state.show_file_actions)
         link_delivery_modes[telegram_id] = state.link_delivery_mode if state.link_delivery_mode in {"both", "library", "telegram"} else "both"
+        stt_ask_prompt_modes[telegram_id] = bool(state.stt_ask_prompt)
+        link_notify_modes[telegram_id] = bool(state.link_notify_enabled)
         library_filters[telegram_id] = set(_json_list(state.library_filters_json, []))
         search_filters[telegram_id] = set(_json_list(state.search_filters_json, []))
         if state.search_query:
@@ -914,6 +919,8 @@ async def persist_user_ui_state(telegram_id: int) -> None:
         state.upload_drawer_id = upload_drawers.get(telegram_id)
         state.show_file_actions = show_file_actions.get(telegram_id, True)
         state.link_delivery_mode = link_delivery_modes.get(telegram_id, "both")
+        state.stt_ask_prompt = stt_ask_prompt_modes.get(telegram_id, False)
+        state.link_notify_enabled = link_notify_modes.get(telegram_id, True)
         state.library_filters_json = json.dumps(sorted(library_filters.get(telegram_id, set())))
         state.search_filters_json = json.dumps(sorted(search_filters.get(telegram_id, set())))
         state.search_query = search_queries.get(telegram_id)
@@ -1409,6 +1416,8 @@ async def render_bot_settings(message: Message, telegram_id: int) -> None:
     actions = show_file_actions.get(telegram_id, True)
     mode = link_delivery_modes.get(telegram_id, "both")
     mode_label = {"both": "تلگرام و کمد", "library": "فقط کمد", "telegram": "فقط تلگرام"}[mode]
+    ask_prompt = stt_ask_prompt_modes.get(telegram_id, False)
+    link_notify = link_notify_modes.get(telegram_id, True)
     await safe_edit(
         message,
         "⚙️ **تنظیم فایل و لینک**\nرفتار فایل‌های ذخیره‌شده و لینک‌ها.",
@@ -1418,6 +1427,8 @@ async def render_bot_settings(message: Message, telegram_id: int) -> None:
             [InlineKeyboardButton("هم کمد، هم تلگرام" + (" ✓" if mode == "both" else ""), callback_data="bot_link_delivery:both")],
             [InlineKeyboardButton("فقط کمد" + (" ✓" if mode == "library" else ""), callback_data="bot_link_delivery:library"),
              InlineKeyboardButton("فقط تلگرام" + (" ✓" if mode == "telegram" else ""), callback_data="bot_link_delivery:telegram")],
+            [InlineKeyboardButton(f"📝 پرسیدن پرامپت صوت به متن: {'روشن' if ask_prompt else 'خاموش'}", callback_data="bot_toggle_stt_prompt")],
+            [InlineKeyboardButton(f"🔔 پیام پایان دریافت لینک: {'روشن' if link_notify else 'خاموش'}", callback_data="bot_toggle_link_notify")],
             [InlineKeyboardButton("↩️ منوی اصلی", callback_data="home")],
         ]),
     )
@@ -2120,7 +2131,7 @@ async def tts_command(client, message: Message):
 
 @tg_client.on_message(filters.command("stt") & filters.private)
 @react_to_request("✍️")
-async def stt_command(client, message: Message):
+async def stt_command(client, message: Message, source_message: Message | None = None, explicit_prompt: str | None = None, explicit_output_mode: str | None = None):
     """Transcribe a replied audio/video, whether or not it is already stored."""
     user = await get_or_create_user(
         message.from_user.id, message.from_user.username,
@@ -2137,8 +2148,13 @@ async def stt_command(client, message: Message):
     if replied is None and any(getattr(message, name, None) for name in ("audio", "voice", "video", "video_note", "document")):
         replied = message
     command_text = str(message.text or message.caption or "")
-    option = command_text.split(maxsplit=1)[1].strip().lower() if len(command_text.split(maxsplit=1)) > 1 else ""
-    output_mode = "temporary" if option in {"temp", "temporary", "موقت"} else "save"
+    option = command_text.split(maxsplit=1)[1].strip() if len(command_text.split(maxsplit=1)) > 1 else ""
+    option_parts = option.split(maxsplit=1)
+    mode_token = option_parts[0].casefold() if option_parts else ""
+    known_modes = {"temp", "temporary", "موقت", "save", "ذخیره"}
+    output_mode = explicit_output_mode or ("temporary" if mode_token in {"temp", "temporary", "موقت"} else "save")
+    inline_prompt = option_parts[1].strip() if mode_token in known_modes and len(option_parts) > 1 else ("" if mode_token in known_modes else option)
+    custom_prompt = explicit_prompt.strip() if explicit_prompt is not None else inline_prompt.strip()
     if replied is None:
         if option:
             pending_stt_modes[message.from_user.id] = output_mode
@@ -2157,6 +2173,12 @@ async def stt_command(client, message: Message):
     media = next((getattr(replied, name, None) for name in ("audio", "voice", "video", "video_note", "document") if replied and getattr(replied, name, None)), None)
     if media is None:
         await reply_to_request(message, await bot_message("stt_reply_required"))
+        return
+    if stt_ask_prompt_modes.get(message.from_user.id, False) and explicit_prompt is None and not custom_prompt:
+        pending_private_stt_prompts[message.from_user.id] = (
+            replied.id, output_mode, datetime.now(timezone.utc) + timedelta(minutes=3),
+        )
+        await reply_to_request(message, "✍️ پرامپت تبدیل را در پیام بعدی بفرست. برای تبدیل عادی فقط یک خط تیره (`-`) بفرست.")
         return
     cleanup_source = False
     async with async_session() as db:
@@ -2207,12 +2229,12 @@ async def stt_command(client, message: Message):
     folder_id = await get_active_drawer_id(message.from_user.id)
     source_name = Path(source.file_name).stem.strip() or "صدا"
     preferences = load_tts_settings(user)
-    routed_stt_model = route_ai_model(preferences, "stt", int(source.duration or 0))
+    routed_stt_model = route_ai_model(preferences, "stt", int(source.duration or 0), bool(custom_prompt))
     routed_text_model = route_ai_model(preferences, "text", 0)
     job = STTJob(
         user_id=user.id, source_file_id=source.id, title=f"📝 متن {source_name}"[:180],
         folder_id=folder_id, output_mode=output_mode, telegram_id=message.from_user.id,
-        api_keys=personal_keys, cleanup_source=cleanup_source,
+        api_keys=personal_keys, cleanup_source=cleanup_source, prompt=custom_prompt,
         stt_model=routed_stt_model, text_model=routed_text_model, stt_mode=preferences["stt_mode"],
         request_message_id=message.id,
     )
@@ -2347,7 +2369,8 @@ async def private_group_delivery_command(client, message: Message):
         return
     command = (message.command or ["sendto"])[0].lower()
     recipient_arg = (message.command or [])[1] if len(message.command or []) > 1 else ""
-    replied = message.reply_to_message
+    await load_user_ui_state(message.from_user.id)
+    replied = source_message or message.reply_to_message
     media_kind = next((
         name for name in ("audio", "voice", "video", "video_note", "animation", "document", "photo")
         if replied and getattr(replied, name, None)
@@ -2572,7 +2595,7 @@ async def group_tts_command(client, message: Message, source_message: Message | 
 
 @tg_client.on_message(filters.command("stt") & filters.group)
 @react_to_request("✍️")
-async def group_stt_command(client, message: Message, source_message: Message | None = None):
+async def group_stt_command(client, message: Message, source_message: Message | None = None, explicit_prompt: str | None = None):
     """Transcribe replied group media and return a temporary Markdown file."""
     if not message.from_user:
         return
@@ -2582,6 +2605,17 @@ async def group_stt_command(client, message: Message, source_message: Message | 
     media = next((getattr(replied, name, None) for name in ("audio", "voice", "video", "video_note", "document") if replied and getattr(replied, name, None)), None)
     if media is None:
         await reply_to_request(message, "روی یک صدا، ویدیو یا فایل صوتی ریپلای کن و `/stt` را بفرست.")
+        return
+    command_text = str(message.text or message.caption or "")
+    inline_prompt = command_text.split(maxsplit=1)[1].strip() if command_text.startswith("/stt") and len(command_text.split(maxsplit=1)) > 1 else ""
+    custom_prompt = explicit_prompt.strip() if explicit_prompt is not None else inline_prompt
+    async with async_session() as db:
+        group_preferences = await db.get(TelegramGroupSettings, message.chat.id)
+    if group_preferences and group_preferences.stt_ask_prompt and explicit_prompt is None and not custom_prompt:
+        pending_group_actions[(message.chat.id, message.from_user.id)] = (
+            "stt_prompt", datetime.now(timezone.utc) + timedelta(minutes=3), replied.id,
+        )
+        await reply_to_request(message, "✍️ پرامپت تبدیل را بفرست. برای رونویسی عادی فقط یک خط تیره (`-`) بفرست.")
         return
     mime = getattr(media, "mime_type", None) or ("audio/ogg" if replied.voice else "video/mp4" if replied.video or replied.video_note else "application/octet-stream")
     if not (mime.startswith("audio/") or mime.startswith("video/") or replied.audio or replied.voice or replied.video or replied.video_note):
@@ -2623,14 +2657,14 @@ async def group_stt_command(client, message: Message, source_message: Message | 
             await db.commit()
             await db.refresh(source)
         preferences = load_tts_settings(user)
-        routed_stt_model = route_ai_model(preferences, "stt", int(source.duration or 0))
+        routed_stt_model = route_ai_model(preferences, "stt", int(source.duration or 0), bool(custom_prompt))
         routed_text_model = route_ai_model(preferences, "text", 0)
         status_message = await reply_to_request(message, await bot_message("stt_queued", queue_note=""))
         job = STTJob(
             user_id=user.id, source_file_id=source.id,
             title=f"📝 متن {Path(source.file_name).stem or 'صدا'}"[:180], folder_id=None,
             output_mode="temporary", telegram_id=message.chat.id, api_keys=personal_keys,
-            cleanup_source=True, delete_telegram_source=False, stt_model=routed_stt_model,
+            cleanup_source=True, delete_telegram_source=False, stt_model=routed_stt_model, prompt=custom_prompt,
             text_model=routed_text_model, stt_mode=preferences["stt_mode"],
             request_message_id=message.id,
         )
@@ -2709,7 +2743,24 @@ async def handle_pending_group_action(client, message: Message):
         await reply_to_request(message, "⏱ زمان این درخواست تمام شد؛ دوباره از منوی گروه انتخابش کن.")
         return
     pending_group_actions.pop(key, None)
-    if action == "tts":
+    if action == "stt_prompt":
+        prompt_text = str(message.text or message.caption or "").strip()
+        if not prompt_text:
+            pending_group_actions[key] = (action, expires_at, prompt_message_id)
+            await reply_to_request(message, "پرامپت را به‌صورت متن بفرست؛ برای حالت عادی فقط `-` بفرست.")
+            return
+        try:
+            source_message = await client.get_messages(message.chat.id, int(prompt_message_id or 0))
+            if not source_message:
+                raise RuntimeError("source message unavailable")
+            await group_stt_command(
+                client, message, source_message,
+                explicit_prompt="" if prompt_text in {"-", "—"} else prompt_text,
+            )
+        except Exception as error:
+            logger.exception("Pending group STT prompt failed chat=%s user=%s: %s", message.chat.id, message.from_user.id, error)
+            await reply_to_request(message, "❌ فایل اصلی یا پرامپت در دسترس نبود؛ دوباره `/stt` را بفرست.")
+    elif action == "tts":
         if not (message.text or message.caption or "").strip():
             await reply_to_request(message, "برای متن به صدا، یک پیام متنی بفرست.")
             return
@@ -2850,6 +2901,14 @@ async def handle_pending_stt_media(client, message: Message):
     """Claim the next media for STT before the ordinary file saver sees it."""
     output_mode = pending_stt_modes.pop(message.from_user.id, None)
     if output_mode is None:
+        return
+    await load_user_ui_state(message.from_user.id)
+    if stt_ask_prompt_modes.get(message.from_user.id, False):
+        pending_private_stt_prompts[message.from_user.id] = (
+            message.id, output_mode, datetime.now(timezone.utc) + timedelta(minutes=3),
+        )
+        await reply_to_request(message, "✍️ حالا پرامپت تبدیل را بفرست. برای تبدیل عادی فقط `-` بفرست.")
+        message.stop_propagation()
         return
     asyncio.create_task(acknowledge_request(client, message, "✍️"))
     claim = (message.chat.id, message.id)
@@ -3744,6 +3803,7 @@ async def handle_import_link(client, message: Message):
     if not matches:
         return
     destination_id = None
+    notify_enabled = True
     if message.chat.type != enums.ChatType.PRIVATE:
         if not await is_connected_group(message.chat.id):
             return
@@ -3755,11 +3815,22 @@ async def handle_import_link(client, message: Message):
             if destination is None:
                 return
             user = await db.get(User, destination.user_id)
+            group_preferences = await db.get(TelegramGroupSettings, message.chat.id)
+            notify_enabled = bool(group_preferences.link_notify_enabled) if group_preferences else True
+            global_notify = await db.get(AppSetting, "telegram_link_notifications_enabled")
+            if global_notify is not None and global_notify.value.strip().lower() in {"0", "false", "off"}:
+                notify_enabled = False
             destination_id = destination.id
         if user is None or not user.is_active:
             return
     else:
         user = await get_or_create_user(message.from_user.id, message.from_user.username, message.from_user.first_name, message.from_user.last_name)
+        await load_user_ui_state(message.from_user.id)
+        notify_enabled = link_notify_modes.get(message.from_user.id, True)
+        async with async_session() as db:
+            global_notify = await db.get(AppSetting, "telegram_link_notifications_enabled")
+        if global_notify is not None and global_notify.value.strip().lower() in {"0", "false", "off"}:
+            notify_enabled = False
     if not link_importer.available:
         await reply_to_request(message, await bot_message("link_service_unavailable"))
         message.stop_propagation()
@@ -3777,6 +3848,7 @@ async def handle_import_link(client, message: Message):
             "chat_id": message.chat.id,
             "is_group_import": destination_id is not None,
             "delivery_mode": "telegram" if destination_id is not None else link_delivery_modes.get(message.from_user.id, "both"),
+            "notify_enabled": notify_enabled,
         }
         prompt = await reply_to_request(
             message,
@@ -3811,7 +3883,7 @@ async def handle_import_link(client, message: Message):
             url = raw_url.rstrip(".,;!?)]}>'\"")
             positions.append(await link_importer.enqueue(ImportJob(
                 url=url, user_id=user.id, telegram_id=user.telegram_id, folder_id=None,
-                notify=True, notification_chat_id=message.chat.id if is_group_import else None,
+                notify=notify_enabled, notification_chat_id=message.chat.id if is_group_import else None,
                 request_message_id=message.id,
                 visible_to_user=not is_group_import,
                 default_folder=not is_group_import,
@@ -3827,6 +3899,33 @@ async def handle_import_link(client, message: Message):
         logger.exception("Could not enqueue link import: %s", error)
         await safe_edit(status_message, await bot_message("link_enqueue_failed"))
         asyncio.create_task(delete_preview_later(client, status_message.chat.id, status_message.id, 30))
+    message.stop_propagation()
+
+
+@tg_client.on_message(filters.private & filters.text & ~filters.regex(r"^/"), group=-3)
+async def handle_private_stt_prompt(client, message: Message):
+    pending = pending_private_stt_prompts.get(message.from_user.id)
+    if pending is None:
+        return
+    source_message_id, output_mode, expires_at = pending
+    pending_private_stt_prompts.pop(message.from_user.id, None)
+    if datetime.now(timezone.utc) >= expires_at:
+        await reply_to_request(message, "⏱ زمان واردکردن پرامپت تمام شد؛ دوباره `/stt` را بفرست.")
+        message.stop_propagation()
+        return
+    prompt_text = str(message.text or "").strip()
+    try:
+        source_message = await client.get_messages(message.chat.id, source_message_id)
+        if not source_message:
+            raise RuntimeError("source message unavailable")
+        await stt_command(
+            client, message, source_message=source_message,
+            explicit_prompt="" if prompt_text in {"-", "—"} else prompt_text,
+            explicit_output_mode=output_mode,
+        )
+    except Exception as error:
+        logger.exception("Pending private STT prompt failed user=%s: %s", message.from_user.id, error)
+        await reply_to_request(message, "❌ فایل اصلی یا پرامپت در دسترس نبود؛ دوباره `/stt` را بفرست.")
     message.stop_propagation()
 
 
@@ -3915,7 +4014,7 @@ async def handle_callback(client, callback: CallbackQuery):
                 selected_quality = quality if "youtu" in url.lower() else "auto"
                 positions.append(await link_importer.enqueue(ImportJob(
                     url=url, user_id=pending["user_id"], telegram_id=pending["telegram_id"], folder_id=None,
-                    quality=selected_quality, notify=True,
+                    quality=selected_quality, notify=bool(pending.get("notify_enabled", True)),
                     notification_chat_id=pending["chat_id"] if is_group_import else None,
                     request_message_id=pending["request_message_id"], visible_to_user=not is_group_import,
                     default_folder=not is_group_import, save_to_library=delivery_mode != "telegram",
@@ -4547,6 +4646,20 @@ async def handle_callback(client, callback: CallbackQuery):
         await persist_user_ui_state(callback.from_user.id)
         await render_bot_settings(callback.message, callback.from_user.id)
         await callback.answer("ذخیره شد.")
+
+    elif data == "bot_toggle_stt_prompt":
+        await load_user_ui_state(callback.from_user.id)
+        stt_ask_prompt_modes[callback.from_user.id] = not stt_ask_prompt_modes.get(callback.from_user.id, False)
+        await persist_user_ui_state(callback.from_user.id)
+        await render_bot_settings(callback.message, callback.from_user.id)
+        await callback.answer("تنظیم پرامپت ذخیره شد.")
+
+    elif data == "bot_toggle_link_notify":
+        await load_user_ui_state(callback.from_user.id)
+        link_notify_modes[callback.from_user.id] = not link_notify_modes.get(callback.from_user.id, True)
+        await persist_user_ui_state(callback.from_user.id)
+        await render_bot_settings(callback.message, callback.from_user.id)
+        await callback.answer("تنظیم پیام پایان ذخیره شد.")
 
     elif data == "bot_cycle_link_delivery":
         modes = ["both", "library", "telegram"]

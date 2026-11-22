@@ -812,7 +812,9 @@ class LinkImportService:
                     worker=worker_index,
                 )
                 await self._persist_status(job.id)
-                playlist_title, playlist_entries = await asyncio.to_thread(_youtube_playlist_entries, job.url)
+                playlist_title, playlist_entries = await asyncio.wait_for(
+                    asyncio.to_thread(_youtube_playlist_entries, job.url), timeout=60,
+                )
                 if playlist_title:
                     self.statuses[job.id].update(title=playlist_title[:300])
                     await self._persist_status(job.id)
@@ -826,9 +828,14 @@ class LinkImportService:
                         self.statuses[job.id].update(message=f"مورد {source_index} از {len(sources)}", progress=progress)
                         await self._persist_status(job.id)
                     if classify_import_url(source["url"]) == "pinterest":
-                        downloaded = await asyncio.to_thread(_download_pinterest, source["url"])
+                        downloaded = await asyncio.wait_for(
+                            asyncio.to_thread(_download_pinterest, source["url"]), timeout=240,
+                        )
                     else:
-                        downloaded = await self._download(client, job, source["url"], job.quality)
+                        download_timeout = max(180, int(settings.youtube_helper_timeout_seconds) + 90)
+                        downloaded = await asyncio.wait_for(
+                            self._download(client, job, source["url"], job.quality), timeout=download_timeout,
+                        )
                     for item_index, item in enumerate(downloaded, 1):
                         if item.get("temp_dir"):
                             temporary_directories.add(item["temp_dir"])
@@ -842,11 +849,13 @@ class LinkImportService:
                     continue
                 self.statuses[job.id].update(state="saving", message="در حال ذخیره در کمد", progress=80)
                 await self._persist_status(job.id)
-                saved = await self._store(client, job, items)
+                saved = await asyncio.wait_for(
+                    self._store(client, job, items), timeout=max(180, len(items) * 120),
+                )
                 if not saved:
                     raise RuntimeError("هیچ فایل قابل ذخیره‌ای در پاسخ پیدا نشد")
                 if job.send_to_telegram:
-                    await self._send_to_user(job, saved)
+                    await asyncio.wait_for(self._send_to_user(job, saved), timeout=max(120, len(saved) * 90))
                 if job.instagram_event_id:
                     from .instagram_inbox import record_instagram_delivery
                     await record_instagram_delivery(job.instagram_event_id, saved)

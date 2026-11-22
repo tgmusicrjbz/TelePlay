@@ -1680,15 +1680,18 @@ export interface AdminTelegramGroup {
     chat_id:number; title:string; approved:boolean; chat_type:string; requested_at:string;
     requested_by?:{telegram_id:number;name:string}|null;
     tts_enabled:boolean; stt_enabled:boolean; link_enabled:boolean;
+    stt_ask_prompt:boolean; link_notify_enabled:boolean;
     tts_daily_limit:number; stt_daily_limit:number; link_daily_limit:number;
     member_tts_daily_limit:number; member_stt_daily_limit:number; member_link_daily_limit:number; voice_name:string;
     usage:{tts_count:number;stt_count:number;link_count:number};
     usage_periods:{seven_days:{tts_count:number;stt_count:number;link_count:number};thirty_days:{tts_count:number;stt_count:number;link_count:number};active_members:number};
 }
-export type AdminTelegramGroupUpdate = Partial<Pick<AdminTelegramGroup,'approved'|'tts_enabled'|'stt_enabled'|'link_enabled'|'tts_daily_limit'|'stt_daily_limit'|'link_daily_limit'|'member_tts_daily_limit'|'member_stt_daily_limit'|'member_link_daily_limit'|'voice_name'>>;
+export type AdminTelegramGroupUpdate = Partial<Pick<AdminTelegramGroup,'approved'|'tts_enabled'|'stt_enabled'|'link_enabled'|'stt_ask_prompt'|'link_notify_enabled'|'tts_daily_limit'|'stt_daily_limit'|'link_daily_limit'|'member_tts_daily_limit'|'member_stt_daily_limit'|'member_link_daily_limit'|'voice_name'>>;
 export const useAdminTelegramGroups = (enabled=true) => useQuery({queryKey:['adminTelegramGroups'],enabled,queryFn:async()=>(await api.get<AdminTelegramGroup[]>('/admin/groups')).data});
 export const useUpdateAdminTelegramGroup = () => {const queryClient=useQueryClient();return useMutation({mutationFn:async({chatId,payload}:{chatId:number;payload:AdminTelegramGroupUpdate})=>(await api.patch<AdminTelegramGroup>(`/admin/groups/${chatId}`,payload)).data,onSuccess:()=>queryClient.invalidateQueries({queryKey:['adminTelegramGroups']})})};
 export const useRemoveAdminTelegramGroup = () => {const queryClient=useQueryClient();return useMutation({mutationFn:async(chatId:number)=>(await api.delete(`/admin/groups/${chatId}`)).data,onSuccess:()=>queryClient.invalidateQueries({queryKey:['adminTelegramGroups']})})};
+export const useAdminTelegramOptions = () => useQuery({queryKey:['adminTelegramOptions'],queryFn:async()=>(await api.get<{link_notify_enabled:boolean}>('/admin/groups/options')).data});
+export const useUpdateAdminTelegramOptions = () => {const queryClient=useQueryClient();return useMutation({mutationFn:async(payload:{link_notify_enabled:boolean})=>(await api.patch('/admin/groups/options',payload)).data,onSuccess:()=>queryClient.invalidateQueries({queryKey:['adminTelegramOptions']})})};
 export const useAccountPreferences = (enabled = true) => useQuery({ queryKey: ['accountPreferences'], queryFn: async () => (await api.get<AccountPreferences>('/accounts/preferences')).data, enabled, staleTime: 60_000 });
 export const useVaultStatus = (enabled = true) => useQuery({ queryKey: ['vaultStatus'], queryFn: async () => (await api.get<VaultStatus>('/accounts/vault')).data, enabled, staleTime: 30_000 });
 export const useSetVaultPassword = () => {

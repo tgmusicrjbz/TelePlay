@@ -11,6 +11,7 @@ import logging
 import mimetypes
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
@@ -36,6 +37,59 @@ settings = get_settings()
 TERMINAL_STATES = {"done", "error", "cancelled"}
 STT_SEGMENT_SECONDS = 10 * 60
 STT_SEGMENT_THRESHOLD_SECONDS = 18 * 60
+
+TIMESTAMP_REQUEST_MARKERS = ("timestamp", "time stamp", "timecode", "تایم‌استمپ", "تایم استمپ", "زمان‌بندی", "کد زمانی")
+TIMESTAMP_PREFIX = re.compile(
+    r"^\s*(?:\[|\()?\d{1,2}:\d{2}(?::\d{2})?(?:[.,]\d{1,3})?(?:\s*(?:-->|-|–|تا)\s*\d{1,2}:\d{2}(?::\d{2})?(?:[.,]\d{1,3})?)?(?:\]|\))?\s*[:：-]?\s*"
+)
+
+
+def prompt_requests_timestamps(prompt: str) -> bool:
+    normalized = prompt.casefold()
+    return any(marker in normalized for marker in TIMESTAMP_REQUEST_MARKERS)
+
+
+def normalize_transcript(markdown: str, *, keep_timestamps: bool = False) -> str:
+    """Remove unsolicited timecodes and reflow hard-wrapped prose into paragraphs."""
+    lines: list[str] = []
+    for raw in markdown.replace("\r\n", "\n").split("\n"):
+        line = raw.strip()
+        if not keep_timestamps:
+            line = TIMESTAMP_PREFIX.sub("", line).strip()
+        lines.append(line)
+
+    blocks: list[str] = []
+    prose: list[str] = []
+
+    def flush_prose() -> None:
+        if not prose:
+            return
+        joined = " ".join(prose).strip()
+        sentences = re.split(r"(?<=[.!?؟])\s+", joined)
+        current: list[str] = []
+        current_length = 0
+        for sentence in sentences:
+            if current and (len(current) >= 4 or current_length + len(sentence) > 520):
+                blocks.append(" ".join(current))
+                current, current_length = [], 0
+            if sentence:
+                current.append(sentence)
+                current_length += len(sentence) + 1
+        if current:
+            blocks.append(" ".join(current))
+        prose.clear()
+
+    for line in lines:
+        if not line:
+            flush_prose()
+            continue
+        if re.match(r"^(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|>|```|\|)", line):
+            flush_prose()
+            blocks.append(line)
+        else:
+            prose.append(line)
+    flush_prose()
+    return "\n\n".join(block for block in blocks if block).strip()
 
 
 def format_segment_time(seconds: int) -> str:
@@ -254,7 +308,9 @@ class GeminiSTTProvider:
         instruction = (
             "محتوای این فایل صوتی یا ویدیویی را بدون خلاصه‌سازی و بدون تغییر معنا، دقیق رونویسی کن. "
             "اصطلاحات تخصصی و کلمات انگلیسی را به همان زبان نگه دار. خروجی فقط Markdown خوانا باشد؛ "
-            "برای پاراگراف‌ها و گوینده‌های متفاوت ساختار مناسب بساز و هیچ توضیح اضافه‌ای درباره فرایند ننویس."
+            "جمله‌های مرتبط را در پاراگراف‌های طبیعی و خوانا قرار بده و برای تغییر موضوع یا گوینده پاراگراف تازه بساز. "
+            "مگر اینکه کاربر صریحاً خواسته باشد، هیچ تایم‌استمپ، بازه زمانی یا کد زمانی ننویس. "
+            "هیچ توضیح اضافه‌ای درباره فرایند ننویس."
         )
         if custom_prompt.strip():
             instruction += f"\n\nدستور تکمیلی کاربر:\n{custom_prompt.strip()}"
@@ -667,14 +723,13 @@ class STTQueue:
                         await self._persist_status(job.id)
 
                         async def transcribe_segment(index: int) -> tuple[int, str]:
-                            start = index * STT_SEGMENT_SECONDS
-                            end = min(source_duration, (index + 1) * STT_SEGMENT_SECONDS)
                             segment_prompt = (
                                 f"{job.prompt.strip()}\n\n" if job.prompt.strip() else ""
                             ) + f"این بخش {index + 1} از {total_segments} فایل است. متن همین بخش را کامل و بدون خلاصه‌سازی بنویس."
                             async with self.request_semaphore:
                                 content = await provider.transcribe(segments[index], "audio/mpeg", segment_prompt)
-                            return index, f"## بخش {index + 1} · {format_segment_time(start)} تا {format_segment_time(end)}\n\n{content.strip()}"
+                            content = normalize_transcript(content, keep_timestamps=prompt_requests_timestamps(job.prompt))
+                            return index, f"## بخش {index + 1}\n\n{content}"
 
                         results = await asyncio.gather(*(transcribe_segment(index) for index in range(batch_start, batch_end)))
                         for index, content in results:
@@ -686,6 +741,7 @@ class STTQueue:
                     self.statuses[job.id].update(state="transcribing", message="در حال تبدیل", progress=45)
                     await self._persist_status(job.id)
                     markdown = await provider.transcribe(media_path, mime_type, job.prompt)
+                    markdown = normalize_transcript(markdown, keep_timestamps=prompt_requests_timestamps(job.prompt))
             if self.controls.get(job.id):
                 return
             for index, instruction in enumerate(job.post_prompts or []):
@@ -695,6 +751,8 @@ class STTQueue:
                 self.statuses[job.id].update(state="transcribing", message=f"پردازش هوشمند؛ مرحله {index + 1} از {len(job.post_prompts or [])}", progress=progress)
                 await self._persist_status(job.id)
                 markdown = await provider.refine_text(markdown, instruction)
+            timestamp_prompt = "\n".join([job.prompt, *(job.post_prompts or [])])
+            markdown = normalize_transcript(markdown, keep_timestamps=prompt_requests_timestamps(timestamp_prompt))
             if job.output_mode == "temporary":
                 self.statuses[job.id].update(state="done", message="متن آماده است", progress=100, content=markdown, finished_at=datetime.utcnow().isoformat())
                 await self._persist_status(job.id)

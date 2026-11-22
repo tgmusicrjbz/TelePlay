@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.database import Base, async_session, engine
 from app.models import ProcessingJob, User
 from app.processing_jobs import create_job, delete_finished_jobs, delete_job, job_status, list_job_statuses, load_jobs
-from app.stt import GeminiSTTProvider, STTJob, STTQueue, extract_interaction_text, format_segment_time, split_long_media
+from app.stt import GeminiSTTProvider, STTJob, STTQueue, extract_interaction_text, format_segment_time, normalize_transcript, prompt_requests_timestamps, split_long_media
 from app.tts import GeminiRequestError
 
 
@@ -27,6 +27,12 @@ class STTQueueTests(unittest.IsolatedAsyncioTestCase):
     def test_interaction_text_supports_direct_and_nested_responses(self):
         self.assertEqual(extract_interaction_text({"output_text": "  سلام  "}), "سلام")
         self.assertEqual(extract_interaction_text({"steps": [{"type": "model_output", "content": [{"type": "text", "text": "متن"}]}]}), "متن")
+
+    def test_transcript_removes_unsolicited_timestamps_and_reflows_lines(self):
+        result = normalize_transcript("[00:01] جمله اول.\n00:04 - جمله دوم.\n\nگوینده دوم\nادامه صحبت")
+        self.assertNotIn("00:01", result)
+        self.assertEqual(result, "جمله اول. جمله دوم.\n\nگوینده دوم ادامه صحبت")
+        self.assertTrue(prompt_requests_timestamps("خروجی را با تایم‌استمپ بنویس"))
 
     def test_long_media_is_split_into_ordered_ten_minute_chunks(self):
         with tempfile.TemporaryDirectory() as directory:

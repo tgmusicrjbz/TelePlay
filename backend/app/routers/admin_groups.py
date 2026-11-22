@@ -9,13 +9,14 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from .. import telegram
 from ..database import get_db
-from ..models import GroupCabinet, GroupCabinetItem, TelegramDestination, TelegramGroupSettings, TelegramGroupUsage, User
+from ..models import AppSetting, GroupCabinet, GroupCabinetItem, TelegramDestination, TelegramGroupSettings, TelegramGroupUsage, User
 from ..group_tools import get_group_voice, get_or_create_group_cabinet, set_group_voice
 from ..tts import VOICE_OPTIONS
 from .accounts import require_admin
 
 router = APIRouter(prefix="/admin/groups", tags=["Admin Telegram groups"])
 OPERATIONS = ("tts", "stt", "link")
+LINK_NOTIFY_SETTING = "telegram_link_notifications_enabled"
 
 
 class GroupSettingsUpdate(BaseModel):
@@ -23,6 +24,8 @@ class GroupSettingsUpdate(BaseModel):
     tts_enabled: bool | None = None
     stt_enabled: bool | None = None
     link_enabled: bool | None = None
+    stt_ask_prompt: bool | None = None
+    link_notify_enabled: bool | None = None
     tts_daily_limit: int | None = None
     stt_daily_limit: int | None = None
     link_daily_limit: int | None = None
@@ -32,6 +35,10 @@ class GroupSettingsUpdate(BaseModel):
     voice_name: str | None = None
     group_cabinet_max_bytes: int | None = None
     group_cabinet_member_daily_limit: int | None = None
+
+
+class TelegramOptionsUpdate(BaseModel):
+    link_notify_enabled: bool
 
 
 async def _serialize_groups(db: AsyncSession) -> list[dict]:
@@ -88,6 +95,8 @@ async def _serialize_groups(db: AsyncSession) -> list[dict]:
             **{f"{operation}_enabled": bool(getattr(group, f"{operation}_enabled")) for operation in OPERATIONS},
             **{f"{operation}_daily_limit": int(getattr(group, f"{operation}_daily_limit")) for operation in OPERATIONS},
             **{f"member_{operation}_daily_limit": int(getattr(group, f"member_{operation}_daily_limit")) for operation in OPERATIONS},
+            "stt_ask_prompt": bool(group.stt_ask_prompt),
+            "link_notify_enabled": bool(group.link_notify_enabled),
             "usage": {f"{operation}_count": int(getattr(usage, f"{operation}_count", 0)) for operation in OPERATIONS},
             "usage_periods": {
                 "seven_days": periods["seven"], "thirty_days": periods["thirty"],
@@ -104,6 +113,24 @@ async def _serialize_groups(db: AsyncSession) -> list[dict]:
 @router.get("")
 async def list_groups(_: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
     return await _serialize_groups(db)
+
+
+@router.get("/options")
+async def telegram_options(_: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    row = await db.get(AppSetting, LINK_NOTIFY_SETTING)
+    return {"link_notify_enabled": row is None or row.value.strip().lower() not in {"0", "false", "off"}}
+
+
+@router.patch("/options")
+async def update_telegram_options(payload: TelegramOptionsUpdate, _: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    row = await db.get(AppSetting, LINK_NOTIFY_SETTING)
+    value = "true" if payload.link_notify_enabled else "false"
+    if row is None:
+        db.add(AppSetting(key=LINK_NOTIFY_SETTING, value=value))
+    else:
+        row.value = value
+    await db.commit()
+    return {"link_notify_enabled": payload.link_notify_enabled}
 
 
 @router.patch("/{chat_id}")

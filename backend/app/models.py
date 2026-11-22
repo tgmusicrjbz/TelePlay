@@ -108,6 +108,8 @@ class BotUserState(Base):
     batch_target: Mapped[Optional[str]] = mapped_column(String(255))
     show_file_actions: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     link_delivery_mode: Mapped[str] = mapped_column(String(16), default="both", nullable=False)
+    stt_ask_prompt: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    link_notify_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
@@ -157,6 +159,8 @@ class TelegramGroupSettings(Base):
     tts_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     stt_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     link_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    stt_ask_prompt: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    link_notify_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     tts_daily_limit: Mapped[int] = mapped_column(Integer, default=20, nullable=False)
     stt_daily_limit: Mapped[int] = mapped_column(Integer, default=20, nullable=False)
     link_daily_limit: Mapped[int] = mapped_column(Integer, default=100, nullable=False)
