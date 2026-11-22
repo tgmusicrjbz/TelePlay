@@ -1617,7 +1617,9 @@ export default function FileBrowser() {
                             <button disabled={!selectedItemCount} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-red-300 disabled:opacity-30" aria-label="حذف" title="حذف" onClick={requestSelectionDelete}><Trash2 className="h-5 w-5" /></button>
                             <button className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${showSelectionMore?'bg-white/[.08] text-primary-200':'text-dark-300'}`} aria-label="کارهای بیشتر" title="کارهای بیشتر" onClick={()=>setShowSelectionMore(value=>!value)}><MoreHorizontal className="h-5 w-5"/></button>
                             <button className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-dark-300" aria-label="پایان انتخاب گروهی" title="پایان انتخاب" onClick={cancelSelection}><X className="h-5 w-5" /></button>
-                            {showSelectionMore&&<div dir="rtl" className="black-glass-menu absolute inset-x-0 top-[calc(100%+.5rem)] grid grid-cols-2 gap-2 rounded-2xl p-2 shadow-2xl">
+                            {showSelectionMore&&createPortal(<div className="fixed inset-0 z-[330] flex items-end bg-black/60 p-3 pb-[calc(5.5rem+env(safe-area-inset-bottom))] backdrop-blur-sm" onClick={()=>setShowSelectionMore(false)}><div dir="rtl" className="black-glass-menu grid max-h-[65dvh] w-full grid-cols-2 gap-2 overflow-y-auto rounded-2xl p-2 shadow-2xl" onClick={event=>event.stopPropagation()}>
+                                <div className="col-span-2 flex items-center justify-between px-2 py-1"><strong className="text-sm">کارهای انتخاب‌شده‌ها</strong><button className="btn-icon h-9 w-9" onClick={()=>setShowSelectionMore(false)} aria-label="بستن"><X className="h-4 w-4"/></button></div>
+                                <button className="context-menu-item rounded-xl" onClick={()=>{toggleSelectAll();setShowSelectionMore(false)}}>{allVisibleSelected?<CheckSquare className="h-4 w-4"/>:<ListChecks className="h-4 w-4"/>}{allVisibleSelected?'لغو انتخاب همه':'انتخاب همه'}</button>
                                 {selectedPacksForActions.length===1&&selectedItems.length===0&&<button className="context-menu-item rounded-xl" onClick={()=>openSelectedPack(false)}><Boxes className="h-4 w-4"/>بازکردن جعبه</button>}
                                 {selectedPacksForActions.length===1&&selectedItems.length===0&&<button className="context-menu-item rounded-xl" onClick={()=>openSelectedPack(true)}><Pencil className="h-4 w-4"/>ویرایش جعبه</button>}
                                 {selectedPacksForActions.length>0&&<button className="context-menu-item rounded-xl" onClick={()=>void saveSelectedPacks()}><DownloadCloud className="h-4 w-4"/>ذخیره آفلاین</button>}
@@ -1633,7 +1635,8 @@ export default function FileBrowser() {
                                 {selectedFileIds.size>=2&&<button className="context-menu-item rounded-xl" onClick={selectFileRange}><ListChecks className="h-4 w-4"/>انتخاب فاصله</button>}
                                 {selectedTextFilesForActions.length>1&&<button className="context-menu-item rounded-xl" onClick={()=>{setShowCombineTexts(true);setShowSelectionMore(false)}}><Combine className="h-4 w-4"/>ترکیب متن‌ها</button>}
                                 {selectedItemCount>0&&<button className="context-menu-item rounded-xl text-red-300" onClick={requestSelectionDelete}><Trash2 className="h-4 w-4"/>حذف انتخاب‌ها</button>}
-                            </div>}
+                                {selectedItemCount===0&&<p className="col-span-2 p-4 text-center text-xs text-dark-400">هنوز موردی انتخاب نشده است.</p>}
+                            </div></div>,document.body)}
                         </div>
                     )}
                     {activeSection === 'playlists' ? <Suspense fallback={<SectionFallback/>}><PlaylistBrowser /></Suspense> : activeSection === 'rooms' ? <Suspense fallback={<SectionFallback/>}><RoomsPage /></Suspense> : activeSection === 'settings' ? <Suspense fallback={<SectionFallback/>}><SettingsPage /></Suspense> : activeSection === 'downloads' ? <Suspense fallback={<SectionFallback/>}><DownloadsPage /></Suspense> : <>
@@ -1642,9 +1645,9 @@ export default function FileBrowser() {
                             {activeSection==='files'&&<span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-primary-300/15 bg-primary-500/15 text-primary-200 shadow-lg shadow-primary-950/10">{breadcrumbs.length>1?<FolderIcon className="h-5 w-5"/>:<Home className="h-5 w-5"/>}</span>}
                             <div className="min-w-0 flex-1">
                                 <h1 className="truncate text-2xl font-black tracking-tight text-white sm:text-3xl">{sectionTitle}</h1>
-                                {activeSection==='files'&&<p className="mt-0.5 truncate text-xs text-dark-400">{breadcrumbs.length>1?'فایل‌ها، جعبه‌ها و کشوهای این بخش':'فایل‌ها و کشوها، کنار هم و آمادهٔ دسترسی'}</p>}
+                                {activeSection==='files'&&breadcrumbs.length>1&&<p className="mt-0.5 truncate text-xs text-dark-400">فایل‌ها، جعبه‌ها و کشوهای این بخش</p>}
                             </div>
-                            {activeSection === 'files' && <div className="hidden shrink-0 items-center gap-1.5 sm:flex"><span className="rounded-xl bg-white/[.045] px-2.5 py-1.5 text-xs text-dark-300"><b className="ml-1 text-dark-100">{shownFolderCount.toLocaleString('fa-IR')}</b>کشو</span><span className="rounded-xl bg-white/[.045] px-2.5 py-1.5 text-xs text-dark-300"><b className="ml-1 text-dark-100">{(shownPackCount+shownFileCount).toLocaleString('fa-IR')}</b>مورد</span></div>}
+                            {activeSection === 'files' && <div className="flex shrink-0 items-center gap-1"><span className="rounded-lg bg-white/[.045] px-2 py-1 text-[10px] text-dark-300 sm:rounded-xl sm:px-2.5 sm:py-1.5 sm:text-xs"><b className="ml-1 text-dark-100">{shownFolderCount.toLocaleString('fa-IR')}</b>کشو</span><span className="rounded-lg bg-white/[.045] px-2 py-1 text-[10px] text-dark-300 sm:rounded-xl sm:px-2.5 sm:py-1.5 sm:text-xs"><b className="ml-1 text-dark-100">{(shownPackCount+shownFileCount).toLocaleString('fa-IR')}</b>مورد</span></div>}
                         </div>
                         {selectedItemCount > 0 ? (
                             <div className="fixed left-6 right-6 top-20 z-40 mx-auto hidden max-w-4xl flex-nowrap items-center gap-1.5 overflow-x-auto rounded-2xl border border-primary-500/20 bg-dark-900/95 p-1.5 shadow-2xl backdrop-blur-xl sm:flex md:right-32 lg:left-8 [&_.btn-secondary]:flex [&_.btn-secondary]:h-10 [&_.btn-secondary]:w-10 [&_.btn-secondary]:shrink-0 [&_.btn-secondary]:items-center [&_.btn-secondary]:justify-center [&_.btn-secondary]:p-0 [&_.btn-secondary]:text-[0] [&_.btn-secondary>svg]:h-[18px] [&_.btn-secondary>svg]:w-[18px]">
@@ -1680,8 +1683,8 @@ export default function FileBrowser() {
                                         </div>)}
                                     </div>
                                 </div>}
-                                <div className="cabinet-command-bar flex flex-col items-stretch justify-between gap-2 rounded-[1.35rem] border border-white/[0.075] bg-dark-900/65 p-2 shadow-lg shadow-black/[.06] backdrop-blur-xl sm:flex-row sm:items-center">
-                                    <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto rounded-2xl bg-dark-950/35 p-1">
+                                <div className="cabinet-command-bar flex w-full flex-col items-stretch gap-2 rounded-[1.35rem] border border-white/[0.075] bg-dark-900/65 p-2 shadow-lg shadow-black/[.06] backdrop-blur-xl sm:w-fit sm:max-w-full sm:flex-row sm:items-center">
+                                    <div className="flex min-w-0 items-center gap-1 overflow-x-auto rounded-2xl bg-dark-950/35 p-1">
                                     <button title="تازه‌سازی" aria-label="تازه‌سازی" onClick={handleRefresh} className="flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl px-2.5 text-dark-400 transition hover:bg-white/[.05] hover:text-white sm:px-3"><RefreshCw className={`h-4 w-4 ${filesFetching ? 'animate-spin' : ''}`}/><span className="hidden text-xs font-semibold lg:inline">تازه‌سازی</span></button>
                                     <button title="فیلتر نوع فایل" aria-label="فیلتر نوع فایل" onClick={() => { setShowFilters(value => !value); setShowSort(false); }} className={`flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl px-2.5 text-xs font-semibold transition-colors sm:px-3 ${fileTypeFilter.length || showFilters ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:bg-white/[.05] hover:text-white'}`}>
                                         <SlidersHorizontal className="h-4 w-4" />
@@ -1697,11 +1700,9 @@ export default function FileBrowser() {
                                         <ListChecks className="h-4 w-4" />
                                         <span className="hidden lg:inline">انتخاب</span>
                                     </button>}
-                                    {!readOnlyWorkspace && (selectionMode || selectedItemCount > 0) && (
-                                        <button onClick={toggleSelectAll} disabled={visibleItemCount === 0} title={allVisibleSelected ? 'لغو انتخاب همه' : someVisibleSelected ? 'انتخاب دوبارهٔ همه' : 'انتخاب همه'} aria-label={allVisibleSelected ? 'لغو انتخاب همه' : someVisibleSelected ? 'بخشی انتخاب شده' : 'انتخاب همه'} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs transition-colors disabled:opacity-40 ${allVisibleSelected || someVisibleSelected ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:text-white'}`}>
+                                    {!readOnlyWorkspace && <button onClick={toggleSelectAll} disabled={visibleItemCount === 0 || (!selectionMode && selectedItemCount === 0)} title={allVisibleSelected ? 'لغو انتخاب همه' : someVisibleSelected ? 'انتخاب دوبارهٔ همه' : 'انتخاب همه'} aria-label={allVisibleSelected ? 'لغو انتخاب همه' : someVisibleSelected ? 'بخشی انتخاب شده' : 'انتخاب همه'} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs transition-colors disabled:pointer-events-none disabled:opacity-0 ${allVisibleSelected || someVisibleSelected ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:text-white'}`}>
                                             {allVisibleSelected ? <CheckSquare className="h-4 w-4" /> : someVisibleSelected ? <Minus className="h-4 w-4" /> : <Square className="h-4 w-4" />}
-                                        </button>
-                                    )}
+                                        </button>}
                                     </div>
                                     <div className="flex w-full shrink-0 items-center rounded-2xl border border-white/[.07] bg-dark-950/55 p-1 sm:w-auto" aria-label="انتخاب نما">
                                     <button title="نمای کارتی بزرگ" aria-label="نمای کارتی بزرگ" onClick={() => setViewMode('grid')} className={`flex h-10 flex-1 items-center justify-center rounded-xl transition sm:w-10 sm:flex-none ${viewMode === 'grid' ? 'bg-primary-600 text-white shadow' : 'text-dark-400 hover:bg-white/[.05] hover:text-white'}`}><Grid className="h-4 w-4" /></button>

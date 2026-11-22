@@ -39,10 +39,17 @@ try {
     assert.equal(playlistSource.includes('جست‌وجو در این پلی‌لیست…'), true, 'playlist details must include track search');
     assert.equal(playlistSource.includes('reorderedVisible'), true, 'filtered playlist reordering must preserve hidden track positions');
     assert.equal(playlistSource.includes('maxHeight: window.innerHeight - edge * 2'), true, 'playlist menus must stay inside the desktop viewport');
+    assert.equal(playlistSource.includes('const railClearance = window.innerWidth >= 768 ? 112 : edge'), true, 'desktop playlist menus must stay clear of the right navigation rail');
+    assert.equal(playlistSource.includes('style={{zIndex:2147483000}}'), true, 'playlist menus must render above the persistent navigation rail');
     assert.equal(browserSource.includes('aria-label="انتخاب نوع محتوا"'), false, 'the cabinet must not use the redundant files/folders segmented bar');
     assert.equal(browserSource.includes('cabinet-command-bar'), true, 'the cabinet must expose the consolidated command bar');
+    assert.equal(browserSource.includes('فایل‌ها و کشوها، کنار هم و آمادهٔ دسترسی'), false, 'the redundant cabinet subtitle must stay removed');
+    assert.equal(browserSource.includes('کارهای انتخاب‌شده‌ها'), true, 'mobile multi-selection must open a populated action sheet');
+    assert.equal(browserSource.includes('showSelectionMore&&createPortal'), true, 'mobile selection actions must escape the cabinet stacking context');
     assert.equal(speechSource.includes("window.confirm('همه موارد پایان‌یافته"), false, 'clearing speech history must not open a browser confirmation popup');
     assert.equal(apiSource.includes("queryClient.setQueryData<TTSJobStatus[]>(['tts-jobs'],items=>items?.filter"), true, 'TTS history deletion must update the UI optimistically');
+    assert.equal(speechSource.includes('createSTT.mutateAsync(payload)'), true, 'new STT jobs must update the shared history query immediately');
+    assert.equal(apiSource.includes("!['done','error','cancelled'].includes(job.state)"), true, 'STT history must keep polling while jobs are active');
     assert.equal(speechSource.includes("localStorage.getItem('komod-stt-picker-view')"), true, 'the STT cabinet picker must persist its selected view');
     assert.equal(speechSource.includes('نتایج جست‌وجو در همه کمد'), true, 'the STT picker must distinguish global search from folder browsing');
     assert.ok(speechSource.indexOf("label:'تنظیمات'") < speechSource.indexOf("sttPanel==='settings'&&<ModelUsageCard"), 'the STT model card must render below the panel tabs');

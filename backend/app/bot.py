@@ -67,6 +67,7 @@ link_delivery_modes: dict[int, str] = {}
 stt_ask_prompt_modes: dict[int, bool] = {}
 link_notify_modes: dict[int, bool] = {}
 pending_stt_modes: dict[int, str] = {}
+pending_stt_inline_prompts: dict[int, str] = {}
 pending_private_stt_prompts: dict[int, tuple[int, str, datetime]] = {}
 pending_group_actions: dict[tuple[int, int], tuple[str, datetime] | tuple[str, datetime, int]] = {}
 pending_private_deliveries: dict[int, tuple[str, int, str, str, str, datetime]] = {}
@@ -2158,9 +2159,11 @@ async def stt_command(client, message: Message, source_message: Message | None =
     if replied is None:
         if option:
             pending_stt_modes[message.from_user.id] = output_mode
+            pending_stt_inline_prompts[message.from_user.id] = custom_prompt
             await reply_to_request(message, await bot_message("stt_waiting_upload"))
         else:
             pending_stt_modes.pop(message.from_user.id, None)
+            pending_stt_inline_prompts.pop(message.from_user.id, None)
             await reply_to_request(message,
                 "📝 خروجی متن را چطور می‌خواهی؟",
                 reply_markup=InlineKeyboardMarkup([
@@ -2902,8 +2905,9 @@ async def handle_pending_stt_media(client, message: Message):
     output_mode = pending_stt_modes.pop(message.from_user.id, None)
     if output_mode is None:
         return
+    inline_prompt = pending_stt_inline_prompts.pop(message.from_user.id, "")
     await load_user_ui_state(message.from_user.id)
-    if stt_ask_prompt_modes.get(message.from_user.id, False):
+    if stt_ask_prompt_modes.get(message.from_user.id, False) and not inline_prompt:
         pending_private_stt_prompts[message.from_user.id] = (
             message.id, output_mode, datetime.now(timezone.utc) + timedelta(minutes=3),
         )
@@ -2915,7 +2919,7 @@ async def handle_pending_stt_media(client, message: Message):
     claimed_stt_messages.add(claim)
     async def process() -> None:
         try:
-            await _process_pending_stt_media(client, message, output_mode)
+            await _process_pending_stt_media(client, message, output_mode, inline_prompt)
         except Exception:
             logger.exception("Direct STT failed for user %s", message.from_user.id)
             with contextlib.suppress(Exception):
@@ -2928,7 +2932,7 @@ async def handle_pending_stt_media(client, message: Message):
     message.stop_propagation()
 
 
-async def _process_pending_stt_media(client, message: Message, output_mode: str) -> None:
+async def _process_pending_stt_media(client, message: Message, output_mode: str, prompt: str = "") -> None:
     """Prepare and queue a direct STT request without exposing its source in the cabinet."""
     user = await get_or_create_user(
         message.from_user.id, message.from_user.username,
@@ -2975,12 +2979,12 @@ async def _process_pending_stt_media(client, message: Message, output_mode: str)
     folder_id = await get_active_drawer_id(message.from_user.id)
     source_name = Path(source.file_name).stem.strip() or "صدا"
     preferences = load_tts_settings(user)
-    routed_stt_model = route_ai_model(preferences, "stt", int(source.duration or 0))
+    routed_stt_model = route_ai_model(preferences, "stt", int(source.duration or 0), bool(prompt.strip()))
     routed_text_model = route_ai_model(preferences, "text", 0)
     position = await stt_queue.enqueue(STTJob(
         user_id=user.id, source_file_id=source.id, title=f"📝 متن {source_name}"[:180],
         folder_id=folder_id, output_mode=output_mode, telegram_id=message.from_user.id,
-        api_keys=personal_keys, cleanup_source=True,
+        api_keys=personal_keys, cleanup_source=True, prompt=prompt.strip(),
         stt_model=routed_stt_model, text_model=routed_text_model, stt_mode=preferences["stt_mode"],
         request_message_id=message.id,
     ))
@@ -4681,6 +4685,7 @@ async def handle_callback(client, callback: CallbackQuery):
 
     elif data == "stt_start":
         pending_stt_modes.pop(callback.from_user.id, None)
+        pending_stt_inline_prompts.pop(callback.from_user.id, None)
         await callback.message.edit_text(
             "📝 **استخراج متن**\nاول مشخص کن خروجی کجا بماند.",
             reply_markup=InlineKeyboardMarkup([

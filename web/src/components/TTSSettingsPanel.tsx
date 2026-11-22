@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AudioLines, Check, ChevronLeft, ChevronRight, ClipboardCopy, Coins, FileAudio, FolderOpen, Grid3X3, Headphones, Home, LayoutGrid, List, Loader2, Maximize2, Minimize2, Pause, Play, Plus, Redo2, RotateCcw, Save, Sparkles, Square, Trash2, Undo2, Upload, Volume2, Wand2, X } from 'lucide-react';
-import { AIModelOption, api, Folder, formatFileSize, STTJobStatus, TelegramFile, useAllFiles, useCancelSTTJob, useClearFinishedSTTJobs, useClearFinishedTTSJobs, useControlTTSJob, useCreateTTSJob, useDeleteGeminiKeys, useDismissSTTJob, useDismissTTSJob, useFolderTree, useGeminiKeys, useRefineSTTText, useSTTJobs, useTestGeminiKeys, useTTSJobs, useTTSSettings, useUpdateGeminiKeys, useUpdateTTSSettings, useUploadFile } from '../lib/api';
+import { AIModelOption, api, Folder, formatFileSize, STTJobStatus, TelegramFile, useAllFiles, useCancelSTTJob, useClearFinishedSTTJobs, useClearFinishedTTSJobs, useControlTTSJob, useCreateSTTJob, useCreateTTSJob, useDeleteGeminiKeys, useDismissSTTJob, useDismissTTSJob, useFolderTree, useGeminiKeys, useRefineSTTText, useSTTJobs, useTestGeminiKeys, useTTSJobs, useTTSSettings, useUpdateGeminiKeys, useUpdateTTSSettings, useUploadFile } from '../lib/api';
 import CustomSelect from './CustomSelect';
 import { folderTreeLabel } from '../lib/folderTreeLabel';
 import SpeechJobProgress from './SpeechJobProgress';
@@ -196,6 +196,7 @@ export default function TTSSettingsPanel(){
     const testGeminiKeys=useTestGeminiKeys();
     const [geminiKeyInput,setGeminiKeyInput]=useState('');
     const create=useCreateTTSJob();
+    const createSTT=useCreateSTTJob();
     const control=useControlTTSJob();
     const dismiss=useDismissTTSJob();
     const clearFinished=useClearFinishedTTSJobs();
@@ -272,7 +273,7 @@ export default function TTSSettingsPanel(){
         let succeeded=0,failed=0,lastError:any=null;
         setSttPanel('history');
         for(let start=0;start<payloads.length;start+=6){
-            const results=await Promise.allSettled(payloads.slice(start,start+6).map(payload=>api.post('/stt/jobs',payload)));
+            const results=await Promise.allSettled(payloads.slice(start,start+6).map(payload=>createSTT.mutateAsync(payload)));
             results.forEach(result=>{if(result.status==='fulfilled')succeeded+=1;else{failed+=1;lastError=result.reason}});
         }
         setSttSubmitting(false);
