@@ -1331,3 +1331,14 @@ body {
     bottom: 8.75rem;
   }
 }
+/* Keep mixed Persian/Latin filenames and technical values visually stable. */
+bdi,
+[dir="auto"] {
+  unicode-bidi: plaintext;
+}
+
+.technical-value {
+  direction: ltr;
+  unicode-bidi: isolate;
+  font-variant-numeric: tabular-nums;
+}

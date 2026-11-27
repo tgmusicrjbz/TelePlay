@@ -127,7 +127,7 @@ export default function FileCard({
                 </div>
 
                 <div className="min-w-0 flex-1">
-                    <p className={`font-medium truncate text-sm ${selected ? 'text-primary-200' : 'text-white'}`}>{file.file_name}</p>
+                    <bdi dir="auto" className={`block truncate text-sm font-medium ${selected ? 'text-primary-200' : 'text-white'}`}>{file.file_name}</bdi>
                     {cardDisplay.fileDescription&&file.description && <p dir="auto" className="text-xs text-dark-400 line-clamp-2 mt-0.5" title={file.description}>{file.description}</p>}
                     {cardDisplay.fileTags&&<TagChips tags={file.tags} compact/>}
                     <div className="flex items-center gap-3 text-xs text-dark-400 mt-1">
@@ -239,9 +239,9 @@ export default function FileCard({
 
             <div className="flex min-w-0 items-start justify-between gap-1">
                 <div className="min-w-0 flex-1">
-                    <p className={`truncate font-medium transition-colors ${compact?'px-0.5 text-[10px]':dense?'text-xs':'text-sm'} ${selected ? 'text-primary-200' : 'text-white group-hover:text-primary-300'}`} title={file.file_name}>
+                    <bdi dir="auto" className={`block truncate font-medium transition-colors ${compact?'px-0.5 text-[10px]':dense?'text-xs':'text-sm'} ${selected ? 'text-primary-200' : 'text-white group-hover:text-primary-300'}`} title={file.file_name}>
                         {file.file_name}
-                    </p>
+                    </bdi>
                     {!tight&&cardDisplay.fileDescription&&file.description && <p dir="auto" className="mt-0.5 line-clamp-2 break-words text-xs text-dark-400" title={file.description}>{file.description}</p>}
                     {!tight&&cardDisplay.fileTags&&<TagChips tags={file.tags} compact/>}
                     {!tight&&<div className="mt-1 flex min-w-0 items-center gap-2 overflow-hidden">

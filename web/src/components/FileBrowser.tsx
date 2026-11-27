@@ -1796,7 +1796,7 @@ export default function FileBrowser() {
                                                 <div><h2 className="text-lg font-bold text-white">▶️ ادامه پخش</h2><p className="mt-1 text-xs text-dark-400">از همان جایی که رها کردی ادامه بده</p></div>
                                                 <span className="text-xs text-dark-500">{continueWatchingFiles.length.toLocaleString('fa-IR')} مورد</span>
                                             </div>
-                                            <div className={viewMode === 'list' ? 'flex flex-col gap-2' : viewMode === 'compact' ? 'grid grid-cols-4 gap-1.5 sm:grid-cols-6 lg:grid-cols-9 xl:grid-cols-12' : viewMode === 'dense' ? 'grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8' : 'grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5'}>
+                                            <div className={viewMode === 'list' ? 'flex flex-col gap-2' : viewMode === 'compact' ? 'grid grid-cols-4 gap-1.5 sm:grid-cols-6 lg:grid-cols-8 xl:grid-cols-9' : viewMode === 'dense' ? 'grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8' : 'grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5'}>
                                                 {continueWatchingFiles.map(file => <FileCard key={file.id} file={file} viewMode={viewMode} selected={false} selectionMode={false} onSelect={() => undefined} onPlay={() => handleFileOpen(file)} />)}
                                             </div>
                                         </section>
@@ -1807,7 +1807,7 @@ export default function FileBrowser() {
                                                 <div><h2 className="text-lg font-bold text-white">✨ تازه‌های کمد</h2><p className="mt-1 text-xs text-dark-400">فایل‌هایی که به‌تازگی اضافه شده‌اند</p></div>
                                                 <span className="text-xs text-dark-500">{recentlyAddedFiles.length.toLocaleString('fa-IR')} مورد</span>
                                             </div>
-                                            <div className={viewMode === 'list' ? 'flex flex-col gap-2' : viewMode === 'compact' ? 'grid grid-cols-4 gap-1.5 sm:grid-cols-6 lg:grid-cols-9 xl:grid-cols-12' : viewMode === 'dense' ? 'grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8' : 'grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5'}>
+                                            <div className={viewMode === 'list' ? 'flex flex-col gap-2' : viewMode === 'compact' ? 'grid grid-cols-4 gap-1.5 sm:grid-cols-6 lg:grid-cols-8 xl:grid-cols-9' : viewMode === 'dense' ? 'grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8' : 'grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5'}>
                                                 {recentlyAddedFiles.map(file => <FileCard key={file.id} file={file} viewMode={viewMode} selected={false} selectionMode={false} onSelect={() => undefined} onPlay={() => handleFileOpen(file)} />)}
                                             </div>
                                         </section>
@@ -1825,7 +1825,7 @@ export default function FileBrowser() {
                         <>
                              {/* Unified View */}
                              {shownFolderCount + shownPackCount + shownFileCount > 0 ? (
-                                <div className={viewMode === 'list' ? 'max-w-7xl mx-auto flex flex-col gap-2 pb-20' : viewMode === 'compact' ? 'max-w-7xl mx-auto grid grid-cols-4 gap-1.5 sm:grid-cols-6 lg:grid-cols-9 xl:grid-cols-12 pb-20' : viewMode === 'dense' ? 'max-w-7xl mx-auto grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2 pb-20' : 'max-w-7xl mx-auto grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4 pb-20'}>
+                                <div className={viewMode === 'list' ? 'max-w-7xl mx-auto flex flex-col gap-2 pb-20' : viewMode === 'compact' ? 'max-w-7xl mx-auto grid grid-cols-4 gap-1.5 sm:grid-cols-6 lg:grid-cols-8 xl:grid-cols-9 pb-20' : viewMode === 'dense' ? 'max-w-7xl mx-auto grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2 pb-20' : 'max-w-7xl mx-auto grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4 pb-20'}>
                                     {/* Folders */}
                                     {showFolders && visibleFolders?.map((folder) => (
                                         <FolderCard

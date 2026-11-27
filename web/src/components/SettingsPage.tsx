@@ -1,5 +1,5 @@
 import { createContext, lazy, Suspense, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, AlertTriangle, ArrowRight, AtSign, BookOpen, BrainCircuit, Camera, ChevronDown, ChevronLeft, AudioLines, Check, CheckCircle2, Copy, Database, Download, ExternalLink, FileStack, FileText, FoldVertical, FolderPlus, Gauge, Globe2, Grid2X2, HardDrive, Instagram, KeyRound, LayoutGrid, List, ListRestart, LockKeyhole, LogOut, MessageSquareText, MonitorSmartphone, Moon, MoreVertical, Palette, Pencil, Plus, RefreshCw, Search, Shield, Smartphone, Sparkles, Sun, Tags, Trash2, UnfoldVertical, UserRoundCog, Users, UsersRound, Warehouse, Wifi, WifiOff, XCircle } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowRight, AtSign, BookOpen, BrainCircuit, Camera, ChevronDown, ChevronLeft, AudioLines, Check, CheckCircle2, Copy, Database, Download, ExternalLink, FileStack, FileText, FoldVertical, FolderPlus, Gauge, Globe2, HardDrive, Instagram, KeyRound, ListRestart, LockKeyhole, LogOut, MessageSquareText, MonitorSmartphone, Moon, MoreVertical, Palette, Pencil, Plus, RefreshCw, Search, Shield, Smartphone, Sparkles, Sun, Tags, Trash2, UnfoldVertical, UserRoundCog, Users, UsersRound, Warehouse, Wifi, WifiOff, XCircle } from 'lucide-react';
 import { AdminUser, Folder, PublicShareItem, TelegramFile, TwoFactorSetup, User, api, formatFileSize, formatIranTime, formatPersianDate, useAccountPreferences, useAddAdminUser, useAdminErrors, useAdminHealth, useAdminStats, useAdminUsers, useClearAdminErrors, useClearSecurityEvents, useCredentials, useCurrentUser, useDeleteProfilePhoto, useDisableTwoFactor, useEnableTwoFactor, useFiles, useFolderTree, useGrantWorkspace, useLogoutAll, useLogoutOthers, usePublicShares, useRemoveAdminUser, useRemoveStorageChannel, useResetStorageChannel, useResolveAdminError, useRevokePublicShares, useRevokeSession, useRevokeWorkspace, useSecurityEvents, useSessions, useSetStorageChannel, useSetVaultPassword, useSetupTwoFactor, useStorageChannel, useStorageStats, useUnlockVault, useUpdateAccountPreferences, useUpdateAdminUser, useUpdateCredentials, useUpdateProfilePhoto, useVaultStatus, useWorkspaceGrants, useWorkspaces } from '../lib/api';
 import { activateAccount, forgetAccount, savedAccounts, saveAuthenticatedAccount, syncCurrentAccount } from '../lib/accounts';
 import { applyAppearanceMode, applyCustomTheme, applyTheme, appearanceThemes, colorThemes, ActiveTheme, AppearanceMode, ColorTheme, getStoredAppearanceMode, getStoredTheme, isLightAppearance } from '../lib/theme';
@@ -150,10 +150,7 @@ export default function SettingsPage() {
     const [vaultMessage,setVaultMessage]=useState<{kind:'ok'|'error';text:string}|null>(null);
     const [activeSubsection,setActiveSubsection]=useState<string|null>(()=>new URLSearchParams(window.location.search).get('section'));
     const [settingsQuery,setSettingsQuery]=useState('');
-    const [homeLayout,setHomeLayout]=useState<SettingsHomeLayout>(()=>{
-        const stored=localStorage.getItem('komod-settings-home-layout');
-        return stored==='list'||stored==='compact'?'list'===stored?'list':'compact':'cards';
-    });
+    const homeLayout:SettingsHomeLayout='cards';
     const accounts = savedAccounts();
     const incomingFolderOptions = useMemo(() => {
         const result = [{value:'default',label:'🗃️ کشوی پیش‌فرض'}];
@@ -401,7 +398,7 @@ export default function SettingsPage() {
             {view !== 'home' && <button className="btn-icon mt-1 shrink-0 text-primary-300" onClick={goBack} aria-label={view==='tts'&&sessionStorage.getItem('komod-settings-return-section')==='files'?'برگشت به کمد من':'برگشت به تنظیمات'}><ArrowRight className="h-5 w-5"/></button>}
             {view!=='home'&&<div className="min-w-0 flex-1"><h1 className="text-2xl font-bold sm:text-3xl">{viewTitle(view)}</h1>{viewSubtitle(view)&&<p className="mt-2 text-sm text-dark-400">{viewSubtitle(view)}</p>}</div>}
             <div className={`flex shrink-0 items-center gap-2 ${view==='home'?'w-full rounded-2xl border border-white/[.07] bg-dark-900/65 p-1.5':''}`}>
-                {view==='home'&&<><button type="button" onClick={()=>setAllSettingsGroups(true)} className="btn-icon h-10 w-10 shrink-0" title="بازکردن همه منوها" aria-label="بازکردن همه منوها"><UnfoldVertical className="h-4.5 w-4.5"/></button><button type="button" onClick={()=>setAllSettingsGroups(false)} className="btn-icon h-10 w-10 shrink-0" title="بستن همه منوها" aria-label="بستن همه منوها"><FoldVertical className="h-4.5 w-4.5"/></button><SettingsLayoutPicker value={homeLayout} onChange={next=>{setHomeLayout(next);localStorage.setItem('komod-settings-home-layout',next)}}/><span className="min-w-0 flex-1"/><button type="button" onClick={()=>changeConnectionMode(!forceOffline)} className={`btn-icon h-10 w-10 shrink-0 ${forceOffline?'border-primary-400/30 bg-primary-500/15 text-primary-200':'text-dark-300'}`} title={forceOffline?'رفتن به حالت آنلاین':'رفتن به حالت آفلاین'} aria-label={forceOffline?'حالت آفلاین؛ رفتن به حالت آنلاین':'حالت آنلاین؛ رفتن به حالت آفلاین'}>{forceOffline?<WifiOff className="h-4.5 w-4.5"/>:<Wifi className="h-4.5 w-4.5"/>}</button></>}
+                {view==='home'&&<><button type="button" onClick={()=>setAllSettingsGroups(true)} className="btn-icon h-10 w-10 shrink-0" title="بازکردن همه منوها" aria-label="بازکردن همه منوها"><UnfoldVertical className="h-4.5 w-4.5"/></button><button type="button" onClick={()=>setAllSettingsGroups(false)} className="btn-icon h-10 w-10 shrink-0" title="بستن همه منوها" aria-label="بستن همه منوها"><FoldVertical className="h-4.5 w-4.5"/></button><span className="min-w-0 flex-1"/><button type="button" onClick={()=>changeConnectionMode(!forceOffline)} className={`btn-icon h-10 w-10 shrink-0 ${forceOffline?'border-primary-400/30 bg-primary-500/15 text-primary-200':'text-dark-300'}`} title={forceOffline?'رفتن به حالت آنلاین':'رفتن به حالت آفلاین'} aria-label={forceOffline?'حالت آفلاین؛ رفتن به حالت آنلاین':'حالت آنلاین؛ رفتن به حالت آفلاین'}>{forceOffline?<WifiOff className="h-4.5 w-4.5"/>:<Wifi className="h-4.5 w-4.5"/>}</button></>}
                 <button type="button" className="btn-icon h-10 w-10 text-primary-200" title={isLightAppearance(appearanceMode)?'بازگشت به پوسته تاریک':'حالت روشن'} aria-label={isLightAppearance(appearanceMode)?'بازگشت به پوسته تاریک':'فعال‌کردن حالت روشن'} onClick={()=>chooseAppearanceMode(isLightAppearance(appearanceMode)?(localStorage.getItem('komod-last-dark-appearance') as AppearanceMode||'dark'):'light')}>{isLightAppearance(appearanceMode)?<Moon className="h-4.5 w-4.5"/>:<Sun className="h-4.5 w-4.5"/>}</button>
             </div>
         </header>
@@ -594,14 +591,6 @@ function SharingScopePicker({folders,folderIds,setFolderIds,fileIds,setFileIds,f
         </section>
     </div>;
 }
-function SettingsLayoutPicker({value,onChange}:{value:SettingsHomeLayout;onChange:(value:SettingsHomeLayout)=>void}) {
-    const options:Array<{value:SettingsHomeLayout;label:string;icon:React.ReactElement}>=[
-        {value:'cards',label:'کارت‌ها',icon:<LayoutGrid/>},
-        {value:'list',label:'فهرست',icon:<List/>},
-        {value:'compact',label:'فشرده',icon:<Grid2X2/>},
-    ];
-    return <div className="flex shrink-0 items-center gap-0.5 rounded-xl border border-white/[.08] bg-dark-950/55 p-0.5" role="radiogroup" aria-label="نوع نمایش تنظیمات">{options.map(option=><button key={option.value} type="button" role="radio" aria-checked={value===option.value} title={`نمای ${option.label}`} aria-label={`نمای ${option.label}`} onClick={()=>onChange(option.value)} className={`flex h-9 w-9 items-center justify-center rounded-lg transition ${value===option.value?'bg-primary-500 text-white shadow-md shadow-primary-950/30':'text-dark-400 hover:bg-white/[.05] hover:text-white'}`}><span className="[&>svg]:h-4 [&>svg]:w-4">{option.icon}</span></button>)}</div>;
-}
 const SETTINGS_GROUPS_MODE_KEY='komod-settings-groups-mode';
 const SETTINGS_GROUPS_EVENT='komod-settings-groups-toggle';
 function setAllSettingsGroups(open:boolean){localStorage.setItem(SETTINGS_GROUPS_MODE_KEY,open?'open':'closed');window.dispatchEvent(new CustomEvent(SETTINGS_GROUPS_EVENT,{detail:{open}}));}
@@ -631,7 +620,8 @@ function ProfileAvatar({user,className='h-11 w-11'}:{user?:User;className?:strin
         if(user.has_profile_photo){void api.get('/accounts/profile-photo',{responseType:'blob'}).then(({data})=>{if(!active)return;objectUrl=URL.createObjectURL(data);setPhoto(objectUrl)}).catch(fallback)}else fallback();
         return()=>{active=false;if(objectUrl)URL.revokeObjectURL(objectUrl)};
     },[user?.telegram_id,user?.has_profile_photo,user?.profile_photo_updated_at]);
-    return <span className={`${className} flex shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-primary-300/20 bg-gradient-to-br from-primary-500/25 to-pink-500/15 text-lg font-black text-primary-100 shadow-lg shadow-black/10`}>{photo?<img src={photo} alt={`عکس پروفایل ${name}`} referrerPolicy="no-referrer" className="h-full w-full object-cover" onError={()=>{if(user?.telegram_id)localStorage.removeItem(`komod-profile-photo-${user.telegram_id}`);setPhoto(null)}}/>:<span>{name.trim().charAt(0).toLocaleUpperCase('fa')}</span>}</span>;
+    const initial=name.trim().match(/[\p{L}\p{N}]/u)?.[0]?.toLocaleUpperCase('fa')||'ک';
+    return <span className={`${className} flex shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-primary-300/20 bg-gradient-to-br from-primary-500/25 to-pink-500/15 text-lg font-black text-primary-100 shadow-lg shadow-black/10`}>{photo?<img src={photo} alt={`عکس پروفایل ${name}`} referrerPolicy="no-referrer" className="h-full w-full object-cover" onError={()=>{if(user?.telegram_id)localStorage.removeItem(`komod-profile-photo-${user.telegram_id}`);setPhoto(null)}}/>:<span>{initial}</span>}</span>;
 }
 function ProfileSummaryCard({user,title}:{user?:User;title:string}) {
     return <div className="flex min-w-0 items-center gap-3 rounded-2xl border border-white/[.07] bg-dark-950/30 p-3.5"><ProfileAvatar user={user} className="h-12 w-12"/><span className="min-w-0"><strong dir="auto" className="block truncate text-sm">{title}</strong><small className="mt-0.5 block truncate text-dark-500">{user?.username?`@${user.username}`:'حساب فعال'}</small></span></div>;

@@ -174,7 +174,7 @@ export default function MarkdownContent({ content, fontSize = 15, lineHeight = 2
         '--md-link':palette.link,'--md-quote':palette.quote,'--md-formula':palette.formula,'--md-inline-code':palette.inlineCodeText,
         '--md-inline-code-bg':palette.inlineCodeBackground,'--md-code':palette.codeText,'--md-code-bg':palette.codeBackground,
     } as React.CSSProperties):undefined;
-    return <div className={`markdown-reader-canvas ${palette?'markdown-reader-canvas--custom p-2 sm:p-3':''} mx-auto w-full ${wide?'max-w-none':'max-w-3xl'} overflow-hidden rounded-2xl transition-colors`} style={paletteStyle}>
+    return <div className={`markdown-reader-canvas ${palette?'markdown-reader-canvas--custom p-2 sm:p-3':''} mx-auto w-full ${wide?'max-w-none':'max-w-[46rem]'} overflow-hidden rounded-2xl transition-colors`} style={paletteStyle}>
         <article dir={direction} className={`markdown-article ${palette?'markdown-article--custom':`markdown-article--${theme}`} markdown-font--${fontFamily} w-full max-w-none overflow-hidden rounded-2xl border p-4 shadow-inner transition-colors sm:p-6 ${wrap ? 'break-words' : 'overflow-x-auto whitespace-pre'}`} style={{fontSize, lineHeight, textAlign: align}}>
             <ReactMarkdown
                 remarkPlugins={[remarkGfm,remarkKomodMath,remarkBreaks]}
