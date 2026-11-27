@@ -604,8 +604,9 @@ class TTSQueue:
         if not self.available and self.queue.empty():
             return
         if not any(not task.done() for task in self.tasks):
-            recovered_key_count = max((len(job.api_keys or []) for job in list(self.queue._queue)), default=0)
-            worker_count = min(4, max(1, len(self.provider.api_keys), recovered_key_count))
+            # One active file at a time keeps ordering deterministic and avoids
+            # several long syntheses competing for memory/network bandwidth.
+            worker_count = 1
             self.tasks = [asyncio.create_task(self._run(), name=f"gemini-tts-worker-{index + 1}") for index in range(worker_count)]
             self.task = self.tasks[0]
 
@@ -665,7 +666,7 @@ class TTSQueue:
         if not self.available and not job.api_keys:
             raise RuntimeError("GEMINI_API_KEYS is not configured")
         if job.api_keys and not self.available and not any(not task.done() for task in self.tasks):
-            worker_count = min(4, len(job.api_keys))
+            worker_count = 1
             self.tasks = [asyncio.create_task(self._run(), name=f"gemini-tts-worker-{index + 1}") for index in range(worker_count)]
             self.task = self.tasks[0]
         else:

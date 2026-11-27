@@ -2,6 +2,7 @@
 Folder management API endpoints.
 """
 from typing import Optional, List
+import json
 import logging
 import re
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -72,6 +73,22 @@ async def ensure_default_folder(db: AsyncSession, user_id: int) -> Folder:
     ).values(folder_id=folder.id))
     await db.flush()
     return folder
+
+
+async def resolve_incoming_folder(db: AsyncSession, user: User, file_type: str) -> Folder:
+    """Resolve a validated global or per-type destination for new files."""
+    try:
+        routing = json.loads(user.incoming_file_routing_json or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        routing = {}
+    folder_id = routing.get("folder_id")
+    if routing.get("mode") == "type":
+        folder_id = (routing.get("types") or {}).get(file_type, folder_id)
+    if folder_id is not None:
+        folder = (await db.execute(select(Folder).where(Folder.id == folder_id, Folder.user_id == user.id))).scalar_one_or_none()
+        if folder is not None:
+            return folder
+    return await ensure_default_folder(db, user.id)
 
 
 async def get_all_folder_counts(db: AsyncSession, user_id: int, include_hidden: bool = False) -> dict[int, int]:

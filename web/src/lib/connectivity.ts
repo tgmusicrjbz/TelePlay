@@ -5,6 +5,8 @@ export type ConnectivityState = 'online' | 'offline' | 'checking';
 const EVENT_NAME = 'komod-connectivity-changed';
 let state: ConnectivityState = navigator.onLine ? 'checking' : 'offline';
 let lastCheckedAt = 0;
+let lastReachableAt = 0;
+let consecutiveFailures = 0;
 let pendingProbe: Promise<boolean> | null = null;
 const subscribers = new Set<() => void>();
 let stopMonitoring: (() => void) | null = null;
@@ -30,19 +32,27 @@ const publish = (next: ConnectivityState) => {
 };
 
 export const connectivityState = () => forcedOffline() || !navigator.onLine ? 'offline' : state;
-// Treat the short reachability probe as offline for cache-backed reads. This
-// keeps startup instant on captive portals and unstable mobile connections.
-export const isEffectivelyOnline = () => connectivityState() === 'online';
+// A reachability check is advisory. While it is running, requests may proceed;
+// otherwise every cold start waits for /health before loading useful content.
+export const isEffectivelyOnline = () => connectivityState() !== 'offline';
 
 export const markServerReachable = () => {
     lastCheckedAt = Date.now();
+    lastReachableAt = lastCheckedAt;
+    consecutiveFailures = 0;
     if (!forcedOffline() && navigator.onLine) publish('online');
 };
 
 export const markServerUnreachable = () => {
     lastCheckedAt = Date.now();
-    publish('offline');
+    consecutiveFailures += 1;
+    // Do not interrupt playback or switch the whole app to offline because of
+    // one lost packet. Require repeated failures after a short grace period.
+    const recentlyReachable = lastReachableAt > 0 && Date.now() - lastReachableAt < 20_000;
+    if (consecutiveFailures >= 3 && !recentlyReachable) publish('offline');
 };
+
+const markBrowserOffline = () => { lastCheckedAt=Date.now(); consecutiveFailures=3; publish('offline'); };
 
 export async function checkServerReachability(options: { force?: boolean; timeout?: number } = {}): Promise<boolean> {
     if (forcedOffline() || !navigator.onLine) {
@@ -79,7 +89,7 @@ function beginMonitoring() {
         subscribers.forEach(callback => callback());
     };
     const browserOnline = () => { publish('checking'); void checkServerReachability({ force: true }); };
-    const browserOffline = () => markServerUnreachable();
+    const browserOffline = () => markBrowserOffline();
     const onVisible = () => {
         if (document.visibilityState === 'visible') void checkServerReachability({ force: state === 'offline' });
     };

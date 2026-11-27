@@ -622,12 +622,18 @@ class AccountPreferences(BaseModel):
     delete_storage_files: bool = True
     youtube_caption_template: str = Field(default="📝 [عنوان]\n📺 [سازنده]\n🔗 [لینک]", max_length=1000)
     instagram_caption_template: str = Field(default="📝 [عنوان]\n📷 [سازنده]\n🔗 [لینک]", max_length=1000)
+    incoming_routing_mode: str = Field(default="all", pattern="^(all|type)$")
+    incoming_folder_id: Optional[int] = None
+    incoming_type_folders: dict[str, Optional[int]] = Field(default_factory=dict)
 
 
 class AccountPreferencesUpdate(BaseModel):
     delete_storage_files: Optional[bool] = None
     youtube_caption_template: Optional[str] = Field(default=None, max_length=1000)
     instagram_caption_template: Optional[str] = Field(default=None, max_length=1000)
+    incoming_routing_mode: Optional[str] = Field(default=None, pattern="^(all|type)$")
+    incoming_folder_id: Optional[int] = None
+    incoming_type_folders: Optional[dict[str, Optional[int]]] = None
 
 
 class VaultStatus(BaseModel):

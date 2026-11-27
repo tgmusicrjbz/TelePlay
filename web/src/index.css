@@ -1308,3 +1308,26 @@ body {
     font-size: .65rem;
   }
 }
+
+/* Give the desktop audio player fixed visual zones. Artwork, secondary tools
+   and transport controls no longer compete for the same vertical space. */
+@media (min-width: 768px) and (min-height: 621px) {
+  .video-player[data-media-kind="audio"]:not([data-inline="true"]) [data-player-tools] {
+    top: 4.5rem;
+  }
+
+  .video-player[data-media-kind="audio"]:not([data-inline="true"]) [data-player-artwork] {
+    top: 8rem;
+    bottom: 14.5rem;
+  }
+
+  .video-player[data-media-kind="audio"]:not([data-inline="true"]) [data-player-artwork] > div {
+    width: min(36dvh, 18rem) !important;
+    height: min(36dvh, 18rem) !important;
+    margin-bottom: 1rem !important;
+  }
+
+  .video-player[data-media-kind="audio"]:not([data-inline="true"]) [data-player-transport] {
+    bottom: 8.75rem;
+  }
+}

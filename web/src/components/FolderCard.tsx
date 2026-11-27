@@ -132,7 +132,7 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
 
                 <div className="min-w-0 flex-1">
                     <p className={`flex items-center gap-1.5 font-medium truncate text-sm transition-colors ${selected ? 'text-primary-300' : 'text-white group-hover:text-primary-300'}`}><span className="truncate">{folder.name}</span></p>
-                    {cardDisplay.folderCount&&<p className="text-xs text-dark-400 mt-0.5">
+                    {cardDisplay.folderCount&&folder.file_count>0&&<p className="text-xs text-dark-400 mt-0.5">
                         {folder.file_count.toLocaleString('fa-IR')} فایل
                     </p>}
                     {cardDisplay.folderDescription&&folder.description && <p dir="auto" className="text-xs text-dark-400 truncate mt-1" title={folder.description}>{folder.description}</p>}
@@ -213,7 +213,7 @@ export default function FolderCard({ folder, viewMode, selected, selectionMode =
             <p className={`flex min-w-0 items-center gap-1.5 truncate font-medium transition-all ${compact?'text-[10px]':dense?'text-xs':'text-sm'} ${selected ? 'text-primary-300' : 'text-white group-hover:text-primary-300'}`} title={folder.name}>
                 <span className="truncate">{folder.name}</span>
             </p>
-            {!tight&&cardDisplay.folderCount&&<p className="mt-1 truncate text-xs text-dark-500">
+            {!tight&&cardDisplay.folderCount&&folder.file_count>0&&<p className="mt-1 truncate text-xs text-dark-500">
                 {folder.file_count.toLocaleString('fa-IR')} فایل
             </p>}
             {!tight&&cardDisplay.folderDescription&&folder.description && <p dir="auto" className="mt-1 truncate text-xs text-dark-400" title={folder.description}>{folder.description}</p>}

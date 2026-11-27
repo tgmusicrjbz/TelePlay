@@ -35,4 +35,13 @@ describe('connectivity probes', () => {
         await connectivity.checkServerReachability({ force: true });
         expect(fetchMock).toHaveBeenCalledWith(`${window.location.origin}/health`, expect.any(Object));
     });
+
+    it('keeps the app usable through a transient server failure', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('temporary network failure')));
+        const connectivity = await import('./connectivity');
+        expect(connectivity.isEffectivelyOnline()).toBe(true);
+        expect(await connectivity.checkServerReachability({ force: true, timeout: 100 })).toBe(false);
+        expect(connectivity.connectivityState()).not.toBe('offline');
+        expect(connectivity.isEffectivelyOnline()).toBe(true);
+    });
 });

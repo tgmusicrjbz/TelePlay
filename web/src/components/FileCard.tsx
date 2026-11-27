@@ -136,7 +136,7 @@ export default function FileCard({
                             {getSmallIcon()}
                             <span>{typeLabel}</span>
                         </span>}
-                        {cardDisplay.fileSize&&<span>{formatFileSize(file.file_size)}</span>}
+                        {cardDisplay.fileSize&&file.file_size>0&&<span>{formatFileSize(file.file_size)}</span>}
                         {!textFirst&&cardDisplay.fileDuration&&file.duration && (
                             <>
                                 <span className="w-1 h-1 rounded-full bg-dark-600"></span>
@@ -253,7 +253,7 @@ export default function FileCard({
                             {getSmallIcon()}
                             <span>{typeLabel}</span>
                         </span>}
-                        {cardDisplay.fileSize&&<p className="text-[10px] text-dark-500">
+                        {cardDisplay.fileSize&&file.file_size>0&&<p className="text-[10px] text-dark-500">
                             {formatFileSize(file.file_size)}
                         </p>}
                     </div>}

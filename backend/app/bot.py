@@ -24,7 +24,7 @@ from sqlalchemy.orm import selectinload
 
 from .telegram import tg_client, forward_to_storage_channel, delete_from_storage_channel
 from . import telegram
-from .routers.folders import ensure_default_folder
+from .routers.folders import ensure_default_folder, resolve_incoming_folder
 from .database import async_session
 from .models import User, File, Folder, LoginCode, Playlist, PlaylistItem, BotUserState, TelegramDestination, TelegramGroupSettings, GroupCabinet, GroupCabinetItem, GroupCabinetMember, AppSetting
 from .config import get_settings
@@ -3446,6 +3446,12 @@ async def _handle_file_impl(client, message: Message, status_msg: Message):
         file_type = "image"
     else:
         return
+
+    # A routing preference is stronger than the remembered bot drawer, while
+    # an explicit [folder: ...] caption remains the highest priority.
+    if not requested_folder and (user.incoming_file_routing_json or "{}").strip() != "{}":
+        async with async_session() as db:
+            active_drawer_id = (await resolve_incoming_folder(db, user, file_type)).id
     
     try:
         # Telegram's file_unique_id is stable for the same media. Reuse the
@@ -3671,7 +3677,11 @@ async def import_personal_channel_post(message: Message) -> None:
         requested_folder = str(caption_meta.get("folder") or "").strip()
         folder = await resolve_caption_folder(user.id, requested_folder) if requested_folder else None
         if folder is None:
-            folder = await ensure_default_folder(db, user.id)
+            tentative_type = "text" if message.text and not any(getattr(message, field, None) for field in ("video", "audio", "voice", "animation", "video_note", "document", "photo")) else "document"
+            if tentative_type != "text":
+                mime_hint = getattr(next((getattr(message, field, None) for field in ("video", "audio", "voice", "animation", "video_note", "document") if getattr(message, field, None)), None), "mime_type", "") or ""
+                tentative_type = "video" if any(getattr(message, field, None) for field in ("video", "animation", "video_note")) else "audio" if any(getattr(message, field, None) for field in ("audio", "voice")) else "image" if getattr(message, "photo", None) or mime_hint.startswith("image/") else "document"
+            folder = await resolve_incoming_folder(db, user, tentative_type)
         if message.text and not any(getattr(message, field, None) for field in ("video", "audio", "voice", "animation", "video_note", "document", "photo")):
             content = message.text.strip()
             if not content:
@@ -3954,7 +3964,7 @@ async def handle_text_note(client, message: Message):
         title = sanitize_filename(plain_content.strip().splitlines()[0][:80])
         async with async_session() as db:
             if active_drawer_id is None:
-                active_drawer_id = (await ensure_default_folder(db, user.id)).id
+                active_drawer_id = (await resolve_incoming_folder(db, user, "text")).id
             note = File(
                 user_id=user.id, folder_id=active_drawer_id, channel_message_id=stored.id, storage_channel_id=target_channel_id,
                 file_id=f"text:{stored.id}", file_unique_id=f"text:{stored.id}",

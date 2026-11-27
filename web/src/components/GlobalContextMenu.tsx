@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../lib/store';
-import { TelegramFile, Folder, api, canPreviewText, sendFilesToTelegram, useTextFirstMode, useUpdateFile, useUpdateFolder, useUploadFile } from '../lib/api';
+import { TelegramFile, Folder, api, canPreviewText, sendFilesToTelegram, useCreateTTSJob, useTextFirstMode, useUpdateFile, useUpdateFolder, useUploadFile } from '../lib/api';
 import { Play, Download, DownloadCloud, Link, Edit, FolderInput, Trash2, Globe, ShieldOff, HardDriveDownload, Eye, EyeOff, AlignLeft, ListPlus, Heart, Info, Pin, Tags, ChevronDown, ChevronUp, X, AudioLines, Send, Palette, Image as ImageIcon, Boxes, BookOpen, Sparkles } from 'lucide-react';
 import { saveFileOffline } from '../lib/offline';
 import { useQueryClient } from '@tanstack/react-query';
@@ -13,6 +13,7 @@ export default function GlobalContextMenu() {
     const queryClient=useQueryClient();
     const updateFolder = useUpdateFolder();
     const uploadFile = useUploadFile();
+    const createTTS = useCreateTTSJob();
     const menuRef = useRef<HTMLDivElement>(null);
     const [copiedId, setCopiedId] = useState<string | null>(null);
     const [showMore, setShowMore] = useState(false);
@@ -177,7 +178,7 @@ export default function GlobalContextMenu() {
         try {
             const { data } = await api.get<{content:string}>(`/files/${file.id}/text`);
             const title = file.file_name.replace(/\.(txt|md|markdown|json|csv|log|xml|ya?ml)$/i, '').trim() || 'صدای ساخته‌شده';
-            await api.post('/tts/jobs', { text: data.content, title });
+            await createTTS.mutateAsync({ text: data.content, title, output_mode:'save' });
             addToast('متن به صف ساخت صدا اضافه شد.');
         } catch (error: any) {
             addToast(error?.response?.data?.detail || 'تبدیل متن به صدا شروع نشد.', 'error');

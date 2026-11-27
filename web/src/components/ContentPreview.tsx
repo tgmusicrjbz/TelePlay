@@ -115,11 +115,11 @@ export default function ContentPreview() {
                 return textAttachmentPosition==='start' ? `${attachment.trim()}\n\n${description}` : `${description}${attachment}`;
             }
             try {
-                if (!navigator.onLine) {
-                    const cached = await getOfflineText(file.id);
-                    if (!cached) throw new Error('این متن هنوز برای استفاده آفلاین ذخیره نشده است.');
-                    return cached.content;
-                }
+                // Downloads already contain the complete text. Prefer that
+                // local copy even while online so opening a Markdown note is instant.
+                const cached = await getOfflineText(file.id);
+                if (cached) return cached.content;
+                if (!navigator.onLine) throw new Error('این متن هنوز برای استفاده آفلاین ذخیره نشده است.');
                 const { data } = await api.get<{ content: string }>(`/files/${file.id}/text`);
                 await cacheTextFile(file, data.content);
                 return data.content;

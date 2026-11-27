@@ -71,7 +71,7 @@ export interface RoomMember { user_id:number; telegram_id:number; name:string; u
 export interface RoomMessage { id:number; user_id:number; name:string; content:string; created_at:string; client_id?:string|null; pending?:boolean; }
 export interface WatchRoom { id:string; name:string; theme:string; has_password:boolean; max_members:number; chat_enabled:boolean; voice_enabled:boolean; queue_visible_to_viewers:boolean; current_index:number; playback_position:number; playback_rate:number; is_playing:boolean; state_updated_at:string; expires_at:string; created_at:string; owner_user_id:number; owner_name:string; my_role:'owner'|'controller'|'viewer'|null; members:RoomMember[]; items:TelegramFile[]; messages?:RoomMessage[]; }
 export interface RoomCreatePayload { name:string; theme:string; password?:string; expires_in_minutes:number; max_members:number; chat_enabled:boolean; voice_enabled:boolean; queue_visible_to_viewers?:boolean; playlist_id?:number; file_ids:number[]; allowed_users:string[]; controllers:string[]; }
-export interface AccountPreferences { delete_storage_files: boolean; youtube_caption_template: string; instagram_caption_template: string; }
+export interface AccountPreferences { delete_storage_files: boolean; youtube_caption_template: string; instagram_caption_template: string; incoming_routing_mode:'all'|'type'; incoming_folder_id:number|null; incoming_type_folders:Partial<Record<'text'|'video'|'audio'|'image'|'document',number|null>>; }
 export interface TagDefinition { name: string; color: string; category?: string; file_count?: number; }
 export interface TagSettings { tags: TagDefinition[]; excluded_tags: string[]; show_file_tags: boolean; display_limit: number; }
 export interface SavedFilter {
@@ -1814,7 +1814,14 @@ export const useCreateTTSJob = () => {
     const queryClient = useQueryClient();
     return useMutation({
         mutationFn: async (payload: {text:string;title:string;folder_id?:number|null;voice?:string;style?:string;speed?:number;auto_expression?:boolean;gender?:TTSSettings['gender'];pitch?:TTSSettings['pitch'];use_case?:TTSSettings['use_case'];output_mode?:'save'|'preview'|'telegram'}) => (await api.post<{job_id:string;queue_position:number;message:string;quota_cost:number;quota_remaining:number|null}>('/tts/jobs', payload)).data,
-        onSuccess: () => { queryClient.invalidateQueries({queryKey:['tts-jobs']}); queryClient.invalidateQueries({queryKey:['tts-settings']}); },
+        onSuccess: (result,payload) => {
+            queryClient.setQueryData<TTSJobStatus[]>(['tts-jobs'],current => {
+                if(current?.some(job=>job.id===result.job_id))return current;
+                const queued={id:result.job_id,title:payload.title,state:'queued',message:'منتظر نوبت',progress:0,created_at:new Date().toISOString()} as TTSJobStatus;
+                return [queued,...(current||[])];
+            });
+            queryClient.invalidateQueries({queryKey:['tts-jobs']}); queryClient.invalidateQueries({queryKey:['tts-settings']});
+        },
     });
 };
 export const useControlTTSJob = () => {
@@ -1857,8 +1864,8 @@ export const useSTTJobs = (enabled=true) => useQuery<STTJobStatus[]>({
     refetchInterval:query=>(query.state.data||[]).some(job=>!['done','error','cancelled'].includes(job.state))?1500:false,
 });
 export const useCreateSTTJob = () => { const queryClient=useQueryClient(); return useMutation({
-    mutationFn:async(payload:{file_id:number;title:string;prompt?:string;post_prompts?:string[];folder_id?:number|null;output_mode:'temporary'|'save'})=>(await api.post('/stt/jobs',payload)).data,
-    onSuccess:()=>{queryClient.invalidateQueries({queryKey:['stt-jobs']});queryClient.invalidateQueries({queryKey:['tts-settings']});},
+    mutationFn:async(payload:{file_id:number;title:string;prompt?:string;post_prompts?:string[];folder_id?:number|null;output_mode:'temporary'|'save'})=>(await api.post<{job_id:string;queue_position:number;message:string}>('/stt/jobs',payload)).data,
+    onSuccess:(result,payload)=>{queryClient.setQueryData<STTJobStatus[]>(['stt-jobs'],current=>{if(current?.some(job=>job.id===result.job_id))return current;const queued={id:result.job_id,title:payload.title,state:'queued',message:'منتظر نوبت',progress:0,created_at:new Date().toISOString(),source_file_id:payload.file_id,output_mode:payload.output_mode} as STTJobStatus;return[queued,...(current||[])]});queryClient.invalidateQueries({queryKey:['stt-jobs']});queryClient.invalidateQueries({queryKey:['tts-settings']});},
 }); };
 export const useCancelSTTJob = () => { const queryClient=useQueryClient(); return useMutation({
     mutationFn:async(id:string)=>(await api.post<STTJobStatus>(`/stt/jobs/${id}/cancel`)).data,

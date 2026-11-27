@@ -84,12 +84,12 @@ export default function SettingsPage() {
     const updateProfilePhoto = useUpdateProfilePhoto();
     const deleteProfilePhoto = useDeleteProfilePhoto();
     const { data: workspaces = [] } = useWorkspaces(view==='access');
-    const { data: folderTree = [] } = useFolderTree(false,view==='access');
+    const { data: folderTree = [] } = useFolderTree(false,view==='access'||view==='files');
     const { data: grants = [] } = useWorkspaceGrants(view==='access');
     const { data: adminUsers = [], isLoading: adminUsersLoading, isError: adminUsersError, refetch: refetchAdminUsers } = useAdminUsers(Boolean(user?.is_admin&&view==='admin-users'));
     const { data: adminStats, isLoading: adminStatsLoading, refetch: refetchAdminStats } = useAdminStats(Boolean(user?.is_admin&&view==='admin'));
     const { data: adminHealth, isLoading: adminHealthLoading, isError: adminHealthError, isFetching: adminHealthFetching, refetch: refetchAdminHealth } = useAdminHealth(Boolean(user?.is_admin&&view==='admin'));
-    const { data: accountPreferences } = useAccountPreferences(view==='storage');
+    const { data: accountPreferences } = useAccountPreferences(view==='storage'||view==='files');
     const { data: storageChannel } = useStorageChannel(view==='storage');
     const { data: credentials } = useCredentials(view==='security');
     const { data: vaultStatus } = useVaultStatus(view==='security');
@@ -171,6 +171,14 @@ export default function SettingsPage() {
         return [...matching].sort((a,b)=>Number(b.telegram_id<0&&!b.is_active)-Number(a.telegram_id<0&&!a.is_active));
     }, [adminQuery, adminUsers]);
     const saveStorageChannel = async () => { const channelId=Number(storageChannelInput.trim()); if(!Number.isSafeInteger(channelId)){setStorageChannelMessage({kind:'error',text:'آیدی عددی معتبر کانال را وارد کن.'});return;} try{const result=await setStorageChannel.mutateAsync(channelId);setStorageChannelMessage({kind:'ok',text:`کانال «${result.title||'انتخاب‌شده'}» برای فایل‌های تازه فعال شد.`});setStorageChannelInput('');}catch(error:any){setStorageChannelMessage({kind:'error',text:error?.response?.data?.detail||'اتصال کانال انجام نشد.'});} };
+    const saveIncomingRouting = async (patch:Partial<Pick<NonNullable<typeof accountPreferences>,'incoming_routing_mode'|'incoming_folder_id'|'incoming_type_folders'>>) => {
+        const next={...accountPreferences,...patch};
+        await updateAccountPreferences.mutateAsync(patch);
+        localStorage.setItem('komod-incoming-routing-mode',next.incoming_routing_mode||'all');
+        localStorage.setItem('komod-incoming-folder',next.incoming_folder_id==null?'default':String(next.incoming_folder_id));
+        localStorage.setItem('komod-incoming-type-folders',JSON.stringify(next.incoming_type_folders||{}));
+        window.dispatchEvent(new Event('komod-incoming-folder-changed'));
+    };
 
     useEffect(() => applyTheme(theme), [theme]);
     useEffect(() => { if (user) syncCurrentAccount(user); }, [user]);
@@ -518,7 +526,7 @@ export default function SettingsPage() {
 
         {view === 'files' && <div className="space-y-4"><Card id="files-root" icon={<Warehouse/>} title="فایل‌های بدون کشوی قبلی"><p className="mt-2 text-sm text-dark-400">مشخص کن محتوای کشوی پیش‌فرض در صفحه اصلی دیده شود یا داخل «فایل‌های من» بماند.</p><CustomSelect className="mt-3" value={localStorage.getItem('komod-root-files-mode') || 'folder'} onChange={value => { localStorage.setItem('komod-root-files-mode', value); window.dispatchEvent(new Event('komod-root-mode-changed')); }} options={[{value:'folder',label:'🗃️ نمایش داخل کشوی «فایل‌های من»'},{value:'files',label:'📦 نمایش مستقیم در صفحه اصلی'}]}/></Card></div>}
 
-        {view === 'files' && <Card id="files-incoming" icon={<FolderPlus/>} title="محل فایل‌های تازه" subtitle="مقصد پیش‌فرض فایل‌ها و لینک‌هایی که از صفحهٔ اصلی اضافه می‌کنی."><CustomSelect className="mt-3" value={localStorage.getItem('komod-incoming-folder') || 'default'} onChange={value => { localStorage.setItem('komod-incoming-folder', String(value)); window.dispatchEvent(new Event('komod-incoming-folder-changed')); }} options={incomingFolderOptions}/></Card>}
+        {view === 'files' && <Card id="files-incoming" icon={<FolderPlus/>} title="محل فایل‌های تازه" subtitle="مقصد فایل‌های بعدی را یک‌جا یا بر اساس نوع فایل مشخص کن."><div className="mt-4 grid grid-cols-2 gap-1 rounded-xl border border-white/[.07] bg-dark-950/45 p-1"><button type="button" onClick={()=>void saveIncomingRouting({incoming_routing_mode:'all'})} className={`min-h-10 rounded-lg text-xs font-semibold ${accountPreferences?.incoming_routing_mode!=='type'?'bg-primary-500 text-white':'text-dark-400'}`}>یک مقصد برای همه</button><button type="button" onClick={()=>void saveIncomingRouting({incoming_routing_mode:'type'})} className={`min-h-10 rounded-lg text-xs font-semibold ${accountPreferences?.incoming_routing_mode==='type'?'bg-primary-500 text-white':'text-dark-400'}`}>مقصد بر اساس نوع</button></div>{accountPreferences?.incoming_routing_mode!=='type'?<CustomSelect className="mt-3" value={accountPreferences?.incoming_folder_id==null?'default':String(accountPreferences.incoming_folder_id)} onChange={value=>void saveIncomingRouting({incoming_folder_id:value==='default'?null:Number(value)})} options={incomingFolderOptions}/>:<div className="mt-3 grid gap-3 sm:grid-cols-2">{([{key:'text',label:'فایل‌های متنی'},{key:'audio',label:'فایل‌های صوتی'},{key:'video',label:'فایل‌های ویدیویی'},{key:'image',label:'تصویرها'},{key:'document',label:'سایر فایل‌ها'}] as const).map(item=><CustomSelect key={item.key} label={item.label} value={accountPreferences?.incoming_type_folders?.[item.key]==null?'default':String(accountPreferences.incoming_type_folders[item.key])} onChange={value=>void saveIncomingRouting({incoming_type_folders:{...(accountPreferences?.incoming_type_folders||{}),[item.key]:value==='default'?null:Number(value)}})} options={incomingFolderOptions}/>)}</div>}</Card>}
 
         {view === 'files' && <Card id="files-links" icon={<Download/>} title="مقصد لینک‌ها" subtitle="برای هر سرویس کشوی پیش‌فرض جداگانه تعیین کن."><div className="mt-4 grid gap-3 sm:grid-cols-2"><CustomSelect label="لینک‌های یوتیوب" value={youtubeFolder} onChange={value=>{setYoutubeFolder(String(value));localStorage.setItem('komod-youtube-folder',String(value));}} options={[{value:'none',label:'هر بار انتخاب می‌کنم'},...incomingFolderOptions]}/><CustomSelect label="لینک‌های اینستاگرام" value={instagramFolder} onChange={value=>{setInstagramFolder(String(value));localStorage.setItem('komod-instagram-folder',String(value));}} options={[{value:'none',label:'هر بار انتخاب می‌کنم'},...incomingFolderOptions]}/><CustomSelect label="لینک‌های پینترست" value={pinterestFolder} onChange={value=>{setPinterestFolder(String(value));localStorage.setItem('komod-pinterest-folder',String(value));}} options={[{value:'none',label:'هر بار انتخاب می‌کنم'},...incomingFolderOptions]}/></div></Card>}
 

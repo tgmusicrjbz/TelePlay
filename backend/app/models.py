@@ -35,6 +35,7 @@ class User(Base):
     tag_settings_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
     tag_exclusions_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
     saved_filters_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    incoming_file_routing_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
     show_file_tags: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     file_tag_limit: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
     tts_settings_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)

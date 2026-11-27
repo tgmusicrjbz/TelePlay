@@ -486,8 +486,9 @@ class STTQueue:
             await self._recover()
             self._recovered = True
         if (self.available or not self.queue.empty()) and not any(not task.done() for task in self.tasks):
-            recovered_key_count = max((len(job.api_keys or []) for job in list(self.queue._queue)), default=0)
-            worker_count = min(4, max(1, len(self.provider.api_keys), recovered_key_count))
+            # Process files serially. Long-file chunks may still use the
+            # provider efficiently inside a job, but two files never overlap.
+            worker_count = 1
             self.tasks = [asyncio.create_task(self._run(), name=f"gemini-stt-worker-{index + 1}") for index in range(worker_count)]
             self.task = self.tasks[0]
 
@@ -539,7 +540,7 @@ class STTQueue:
         if not self.available and not job.api_keys:
             raise RuntimeError("GEMINI_API_KEYS is not configured")
         if job.api_keys and not self.available and not any(not task.done() for task in self.tasks):
-            worker_count = min(4, len(job.api_keys))
+            worker_count = 1
             self.tasks = [asyncio.create_task(self._run(), name=f"gemini-stt-worker-{index + 1}") for index in range(worker_count)]
             self.task = self.tasks[0]
         else:

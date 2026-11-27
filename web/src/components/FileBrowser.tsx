@@ -4,7 +4,7 @@
 import { lazy, Suspense, useEffect, useCallback, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Folder as FolderIcon, Grid, Grid3X3, LayoutGrid, List, Search, ChevronRight, Home, Clipboard, ArrowUp, Film, Music, Image as ImageIcon, FileText, StickyNote, FolderInput, Trash2, Pencil, X, SlidersHorizontal, Boxes, ArrowDown, ArrowDownUp, Plus, CheckSquare, Square, ListChecks, ListPlus, Upload, Star, RefreshCw, Link2, DownloadCloud, Download, Send, Eye, EyeOff, Minus, Play, Tags, Cloud, CloudOff, FileAudio, Sparkles, BookmarkPlus, Combine, MoreHorizontal } from 'lucide-react';
-import { api, useFiles, useFolders, useFolderTree, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, Pack, useActivityFeed, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile, useImportLink, useTagSettings, useUnlockVault, useWorkspaces, sendFilesToTelegram, useTTSJobs, useSTTJobs, SavedFilter, useSavedFilters, useUpdateSavedFilters, usePacks, useExpandSmartSearch, formatFileSize, LibraryChangeDetail, useDeletePack, useUpdatePack } from '../lib/api';
+import { api, useFiles, useFolders, useFolderTree, useUpdateFile, useUpdateFolder, useDeleteFolder, useDeleteFiles, useMoveFiles, TelegramFile, Folder, Pack, useActivityFeed, useDeleteFolders, useMoveFolders, canPreviewText, SortCriterion, SortField, serializeSort, useBatchUpdateFiles, BatchFileEdit, useUploadFile, useImportLink, useTagSettings, useUnlockVault, useWorkspaces, sendFilesToTelegram, useTTSJobs, useSTTJobs, SavedFilter, useSavedFilters, useUpdateSavedFilters, usePacks, useExpandSmartSearch, formatFileSize, LibraryChangeDetail, useDeletePack, useUpdatePack, useAccountPreferences } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { cacheAllTextNotes, queueOfflineText, saveFileOffline, savePackOffline } from '../lib/offline';
 import FileCard from './FileCard';
@@ -30,6 +30,7 @@ import UploadProgressPanel, { type UploadPanelMode, type UploadProgress } from '
 import YouTubeQualityPicker from './YouTubeQualityPicker';
 import AddToolsMenu from './AddToolsMenu';
 import { downloadFileToDevice } from '../lib/deviceDownload';
+import MarkdownContent from './MarkdownContent';
 
 // Heavy sections are downloaded only when the user opens them. Vite still
 // precaches the resulting chunks in the service worker, so they remain
@@ -354,6 +355,7 @@ export default function FileBrowser() {
     const [textFileName, setTextFileName] = useState('یادداشت تازه');
     const [textContent, setTextContent] = useState('');
     const [textFolder, setTextFolder] = useState<number | null>(null);
+    const [textEditorPreview, setTextEditorPreview] = useState(false);
     const [contentScope, setContentScope] = useState<'all' | 'files' | 'folders'>('all');
     const {data:savedFilters=[]} = useSavedFilters();
     const updateSavedFilters = useUpdateSavedFilters();
@@ -368,6 +370,7 @@ export default function FileBrowser() {
     const folderSortValue = serializeSort(sortCriteria.filter(item => ['name', 'created', 'updated', 'count'].includes(item.field)));
     const [rootFilesMode, setRootFilesMode] = useState(() => localStorage.getItem('komod-root-files-mode') || 'folder');
     const [incomingFolderSetting, setIncomingFolderSetting] = useState(() => localStorage.getItem('komod-incoming-folder') || 'default');
+    const {data:incomingPreferences}=useAccountPreferences();
     const { data: rootFolders } = useFolders(null, folderSortValue, false, showHidden);
     const { data: folderTree, isLoading: folderTreeLoading, error: folderTreeError } = useFolderTree(showHidden);
     const importFolderOptions = useMemo(() => {
@@ -388,7 +391,14 @@ export default function FileBrowser() {
     },[folderTree]);
     const defaultFolder = rootFolders?.find(folder => folder.is_default);
     const effectiveFolderId = currentFolderId === null && rootFilesMode === 'files' && defaultFolder ? defaultFolder.id : currentFolderId;
-    const incomingFolderId = currentFolderId ?? (incomingFolderSetting !== 'default' && Number.isFinite(Number(incomingFolderSetting)) ? Number(incomingFolderSetting) : defaultFolder?.id ?? null);
+    const incomingFolderId = currentFolderId ?? incomingPreferences?.incoming_folder_id ?? (incomingFolderSetting !== 'default' && Number.isFinite(Number(incomingFolderSetting)) ? Number(incomingFolderSetting) : defaultFolder?.id ?? null);
+    const incomingFolderForType = (type:'text'|'video'|'audio'|'image'|'document') => {
+        if(currentFolderId!==null)return currentFolderId;
+        if(incomingPreferences?.incoming_routing_mode==='type')return incomingPreferences.incoming_type_folders?.[type]??defaultFolder?.id??null;
+        if(incomingPreferences)return incomingFolderId;
+        if(localStorage.getItem('komod-incoming-routing-mode')!=='type')return incomingFolderId;
+        try{const value=JSON.parse(localStorage.getItem('komod-incoming-type-folders')||'{}')?.[type];return value==null?defaultFolder?.id??null:Number(value)}catch{return incomingFolderId}
+    };
 
     useEffect(() => {
         if (!activeWorkspaceId || activeSection !== 'playlists') return;
@@ -603,7 +613,8 @@ export default function FileBrowser() {
         try {
             for (const file of selected) {
                 setUploadProgress({name:file.name,index:uploaded+1,total:selected.length,percent:0,phase:'uploading'});
-                const saved = await uploadFileMutation.mutateAsync({ file, folderId: incomingFolderId, signal: controller.signal, onProgress: percent => setUploadProgress({name:file.name,index:uploaded+1,total:selected.length,percent,phase:percent >= 100 ? 'processing' : 'uploading'}) });
+                const kind=file.type.startsWith('video/')?'video':file.type.startsWith('audio/')?'audio':file.type.startsWith('image/')?'image':file.type.startsWith('text/')||/\.(md|txt)$/i.test(file.name)?'text':'document';
+                const saved = await uploadFileMutation.mutateAsync({ file, folderId: incomingFolderForType(kind), signal: controller.signal, onProgress: percent => setUploadProgress({name:file.name,index:uploaded+1,total:selected.length,percent,phase:percent >= 100 ? 'processing' : 'uploading'}) });
                 if (saved.is_shortcut) shortcuts += 1;
                 uploaded += 1;
             }
@@ -1645,7 +1656,6 @@ export default function FileBrowser() {
                             {activeSection==='files'&&<span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-primary-300/15 bg-primary-500/15 text-primary-200 shadow-lg shadow-primary-950/10">{breadcrumbs.length>1?<FolderIcon className="h-5 w-5"/>:<Home className="h-5 w-5"/>}</span>}
                             <div className="min-w-0 flex-1">
                                 <h1 className="truncate text-2xl font-black tracking-tight text-white sm:text-3xl">{sectionTitle}</h1>
-                                {activeSection==='files'&&breadcrumbs.length>1&&<p className="mt-0.5 truncate text-xs text-dark-400">فایل‌ها، جعبه‌ها و کشوهای این بخش</p>}
                             </div>
                             {activeSection === 'files' && <div className="flex shrink-0 items-center gap-1"><span className="rounded-lg bg-white/[.045] px-2 py-1 text-[10px] text-dark-300 sm:rounded-xl sm:px-2.5 sm:py-1.5 sm:text-xs"><b className="ml-1 text-dark-100">{shownFolderCount.toLocaleString('fa-IR')}</b>کشو</span><span className="rounded-lg bg-white/[.045] px-2 py-1 text-[10px] text-dark-300 sm:rounded-xl sm:px-2.5 sm:py-1.5 sm:text-xs"><b className="ml-1 text-dark-100">{(shownPackCount+shownFileCount).toLocaleString('fa-IR')}</b>مورد</span></div>}
                         </div>
@@ -1957,7 +1967,7 @@ export default function FileBrowser() {
                 {openPackId!==null&&<PackViewer packId={openPackId} initialFileId={restorePackFileId} onClose={()=>{setOpenPackId(null);setRestorePackFileId(null)}} onOpenFile={handleFileOpen}/>}
             </Suspense>
             {showVaultPrompt && <div className="fixed inset-0 z-[190] flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-4" onClick={()=>setShowVaultPrompt(false)}><div className="w-full max-w-sm rounded-t-3xl border border-white/10 bg-dark-900 p-5 sm:rounded-3xl" onClick={event=>event.stopPropagation()}><div className="flex items-center gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary-500/15 text-primary-200"><EyeOff className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h2 className="font-bold">گاوصندوق</h2><p className="text-xs text-dark-400">موارد مخفی را کنار بقیهٔ فایل‌ها ببین.</p></div><button className="btn-icon" onClick={()=>setShowVaultPrompt(false)}><X className="h-5 w-5"/></button></div>{!sessionStorage.getItem('komod-vault-token')&&<input autoFocus type="password" value={vaultPassword} onChange={event=>setVaultPassword(event.target.value)} className="input mt-4 w-full" placeholder="رمز گاوصندوق"/>}<div className="mt-4 grid gap-2"><button disabled={unlockVault.isPending||(!sessionStorage.getItem('komod-vault-token')&&!vaultPassword)} onClick={()=>void showVaultItems()} className="btn-primary min-h-11 disabled:opacity-40">نمایش موارد مخفی</button>{showHidden&&<button onClick={closeVaultItems} className="min-h-10 rounded-xl text-sm text-red-300 hover:bg-red-500/10">بستن گاوصندوق</button>}</div></div></div>}
-            <AddToolsMenu open={showAddMenu} onClose={()=>setShowAddMenu(false)} onUpload={()=>uploadInputRef.current?.click()} onCreateText={()=>{setTextFolder(incomingFolderId);setShowTextComposer(true)}} onCreateFolder={()=>setShowNewFolder(true)} onImportLink={openImportLink} onImportDrive={openImportDrive} onOpenTTS={()=>openSpeechTools('tts')} onOpenSTT={()=>openSpeechTools('stt')} onWatchTogether={openWatchTogether}/>
+            <AddToolsMenu open={showAddMenu} onClose={()=>setShowAddMenu(false)} onUpload={()=>uploadInputRef.current?.click()} onCreateText={()=>{setTextFolder(incomingFolderForType('text'));setTextEditorPreview(false);setShowTextComposer(true)}} onCreateFolder={()=>setShowNewFolder(true)} onImportLink={openImportLink} onImportDrive={openImportDrive} onOpenTTS={()=>openSpeechTools('tts')} onOpenSTT={()=>openSpeechTools('stt')} onWatchTogether={openWatchTogether}/>
             <UploadProgressPanel progress={uploadProgress} mode={uploadPanelMode} onModeChange={setUploadPanelMode} onCancel={()=>uploadAbortRef.current?.abort()}/>
             {showSendPicker&&<div className="fixed inset-0 z-[280] flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-4" onClick={()=>setShowSendPicker(false)}><section dir="rtl" className="w-full max-w-md rounded-t-3xl border border-white/10 bg-dark-900 p-5 shadow-2xl sm:rounded-3xl" onClick={event=>event.stopPropagation()}><header className="flex items-center gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary-500/15 text-primary-200"><Send className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h2 className="font-bold">ارسال به تلگرام</h2><p className="mt-1 text-xs text-dark-400">{selectedFilesForActions.length.toLocaleString('fa-IR')} فایل و {selectedPacksForActions.length.toLocaleString('fa-IR')} جعبه انتخاب شده است.</p></div><button className="btn-icon" onClick={()=>setShowSendPicker(false)}><X className="h-5 w-5"/></button></header><DeliveryTargetPicker value={sendDestinationIds} onChange={setSendDestinationIds}/><div className="mt-5 grid grid-cols-2 gap-2"><button disabled={sendingToTelegram} onClick={()=>void sendSelectedToTelegram(sendDestinationIds)} className="btn-primary min-h-11 disabled:opacity-40">{sendingToTelegram?'در حال ارسال…':'ارسال'}</button><button className="btn-secondary" onClick={()=>setShowSendPicker(false)}>لغو</button></div></section></div>}
             <ImportQueuePanel jobs={importJobs} mode={importPanelMode} onModeChange={setImportPanelMode} onCancelAll={()=>void cancelAllImportJobs()} onClearFinished={()=>void clearFinishedImportJobs()} onControl={(jobId,action)=>void controlImportJob(jobId,action)}/>
@@ -2009,14 +2019,14 @@ export default function FileBrowser() {
                     <div className="mt-5 flex gap-2"><button type="button" className="btn-secondary flex-1" onClick={()=>setShowImportDrive(false)}>لغو</button><button disabled={(!extractImportUrls(driveUrl).length&&!driveSelected.size)||driveSubmitting} className="btn-primary flex-1 disabled:opacity-50">{driveSubmitting?'در حال ثبت…':`افزودن ${driveSelected.size?driveSelected.size.toLocaleString('fa-IR'):''}`}</button></div>
                 </form>
             </div>}            {showTextComposer && (
-                <div className="fixed inset-0 z-[170] flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-4" onClick={() => setShowTextComposer(false)}>
-                    <form className="w-full max-w-2xl rounded-t-3xl border border-white/10 bg-dark-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl sm:rounded-3xl sm:p-5" onClick={event => event.stopPropagation()} onSubmit={handleCreateText}>
+                <div className="fixed inset-0 z-[170] flex justify-center bg-black/80 p-0 backdrop-blur-sm sm:p-4" onClick={() => setShowTextComposer(false)}>
+                    <form className="flex h-full w-full max-w-6xl flex-col overflow-hidden bg-dark-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl sm:h-[calc(100dvh-2rem)] sm:rounded-3xl sm:border sm:border-white/10 sm:p-5" onClick={event => event.stopPropagation()} onSubmit={handleCreateText}>
                         <div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary-500/15 text-primary-200"><StickyNote className="h-5 w-5"/></span><div className="min-w-0 flex-1"><h2 className="font-bold">یادداشت تازه</h2><p className="text-xs text-dark-400">متن بلند یا مارک‌داون را مستقیم در کمد ذخیره کن.</p></div><button type="button" className="btn-icon" onClick={() => setShowTextComposer(false)}><X className="h-5 w-5"/></button></div>
                         {(!navigator.onLine||forceOffline)&&<p className="mt-4 rounded-xl border border-amber-400/20 bg-amber-500/[.08] px-3 py-2 text-xs leading-6 text-amber-200">این یادداشت روی همین دستگاه ذخیره می‌شود و بعد از اتصال، خودکار به کمد اضافه خواهد شد.</p>}
-                        <input className="input mt-4 w-full" value={textFileName} onChange={event => setTextFileName(event.target.value)} placeholder="نام یادداشت" maxLength={240}/>
-                        <CustomSelect className="mt-3" placement="top" label="کشوی مقصد" value={String(textFolder ?? 'root')} onChange={value=>setTextFolder(value==='root'?null:Number(value))} options={[{value:'root',label:'🗃️ فایل‌های من'},...importFolderOptions]}/>
-                        <textarea autoFocus className="input mt-3 min-h-[45vh] w-full resize-y font-mono leading-7" value={textContent} onChange={event => setTextContent(event.target.value)} placeholder="متنت را اینجا بنویس…"/>
-                        <div className="mt-4 flex gap-2"><button type="button" className="btn-secondary flex-1" onClick={() => setShowTextComposer(false)}>لغو</button><button disabled={!textContent.trim() || uploadFileMutation.isPending} className="btn-primary flex-1 disabled:opacity-50">{uploadFileMutation.isPending ? 'در حال ذخیره…' : (!navigator.onLine||forceOffline) ? 'ذخیره روی دستگاه' : 'ذخیره متن'}</button></div>
+                        <div className="mt-4 grid shrink-0 gap-2 sm:grid-cols-[minmax(0,1fr)_18rem]"><input className="input w-full" value={textFileName} onChange={event => setTextFileName(event.target.value)} placeholder="نام یادداشت" maxLength={240}/><CustomSelect placement="bottom" label="کشوی مقصد" value={String(textFolder ?? 'root')} onChange={value=>setTextFolder(value==='root'?null:Number(value))} options={[{value:'root',label:'🗃️ فایل‌های من'},...importFolderOptions]}/></div>
+                        <div className="mt-3 flex shrink-0 items-center justify-between rounded-xl border border-white/[.07] bg-dark-950/40 p-1"><span className="px-2 text-xs text-dark-400">ویرایشگر مارک‌داون</span><div className="grid grid-cols-2 gap-1"><button type="button" onClick={()=>setTextEditorPreview(false)} className={`rounded-lg px-3 py-1.5 text-xs ${!textEditorPreview?'bg-primary-500/15 text-primary-100':'text-dark-400'}`}>نوشتن</button><button type="button" onClick={()=>setTextEditorPreview(true)} className={`rounded-lg px-3 py-1.5 text-xs ${textEditorPreview?'bg-primary-500/15 text-primary-100':'text-dark-400'}`}>پیش‌نمایش</button></div></div>
+                        <div className="mt-3 min-h-0 flex-1 overflow-hidden rounded-2xl border border-white/[.07] bg-dark-950/30">{textEditorPreview?<div className="h-full overflow-y-auto p-4 sm:p-6"><MarkdownContent content={textContent||'*پیش‌نمایش یادداشت اینجا نمایش داده می‌شود.*'}/></div>:<textarea autoFocus dir="auto" className="h-full min-h-[50dvh] w-full resize-none bg-transparent p-4 font-mono leading-8 outline-none sm:min-h-0" value={textContent} onChange={event => setTextContent(event.target.value)} placeholder="# عنوان یادداشت&#10;&#10;متنت را با مارک‌داون بنویس…"/>}</div>
+                        <div className="mt-4 flex shrink-0 gap-2"><button type="button" className="btn-secondary flex-1 sm:flex-none sm:px-8" onClick={() => setShowTextComposer(false)}>لغو</button><button disabled={!textContent.trim() || uploadFileMutation.isPending} className="btn-primary flex-1 sm:flex-none sm:px-10 disabled:opacity-50">{uploadFileMutation.isPending ? 'در حال ذخیره…' : (!navigator.onLine||forceOffline) ? 'ذخیره روی دستگاه' : 'ذخیره یادداشت'}</button></div>
                     </form>
                 </div>
             )}

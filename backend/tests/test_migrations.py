@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
-HEAD_REVISION = "20261122_0021"
+HEAD_REVISION = "20261128_0022"
 
 
 def migration_env(database_path: Path) -> dict[str, str]:
@@ -70,6 +70,7 @@ class MigrationTests(unittest.TestCase):
             self.assertIn("profile_photo_mime", user_columns)
             self.assertIn("profile_photo_updated_at", user_columns)
             self.assertIn("can_create_rooms", user_columns)
+            self.assertIn("incoming_file_routing_json", user_columns)
             self.assertIn("queue_visible_to_viewers", room_columns)
 
     def test_existing_current_schema_is_adopted_without_data_loss(self):

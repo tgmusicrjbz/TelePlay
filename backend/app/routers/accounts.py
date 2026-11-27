@@ -735,10 +735,17 @@ async def remove_storage_channel(channel_id: int, current_user: User = Depends(g
 
 @router.get("/accounts/preferences", response_model=AccountPreferences)
 async def get_account_preferences(current_user: User = Depends(get_current_user)):
+    try:
+        routing = json.loads(current_user.incoming_file_routing_json or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        routing = {}
     return AccountPreferences(
         delete_storage_files=current_user.delete_storage_files,
         youtube_caption_template=current_user.youtube_caption_template,
         instagram_caption_template=current_user.instagram_caption_template,
+        incoming_routing_mode=routing.get("mode", "all"),
+        incoming_folder_id=routing.get("folder_id"),
+        incoming_type_folders=routing.get("types", {}),
     )
 
 
@@ -754,12 +761,25 @@ async def update_account_preferences(
         current_user.youtube_caption_template = payload.youtube_caption_template.strip()
     if payload.instagram_caption_template is not None:
         current_user.instagram_caption_template = payload.instagram_caption_template.strip()
+    routing_fields = {"incoming_routing_mode", "incoming_folder_id", "incoming_type_folders"}
+    if payload.model_fields_set & routing_fields:
+        try:
+            current = json.loads(current_user.incoming_file_routing_json or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            current = {}
+        mode = payload.incoming_routing_mode or current.get("mode", "all")
+        folder_id = payload.incoming_folder_id if "incoming_folder_id" in payload.model_fields_set else current.get("folder_id")
+        type_folders = payload.incoming_type_folders if payload.incoming_type_folders is not None else current.get("types", {})
+        allowed_types = {"text", "video", "audio", "image", "document"}
+        type_folders = {key: value for key, value in type_folders.items() if key in allowed_types}
+        requested_ids = {value for value in [folder_id, *type_folders.values()] if value is not None}
+        if requested_ids:
+            valid_ids = set((await db.execute(select(Folder.id).where(Folder.user_id == current_user.id, Folder.id.in_(requested_ids)))).scalars().all())
+            if valid_ids != requested_ids:
+                raise HTTPException(status_code=404, detail="یکی از کشوهای مقصد پیدا نشد.")
+        current_user.incoming_file_routing_json = json.dumps({"mode": mode, "folder_id": folder_id, "types": type_folders})
     await db.commit()
-    return AccountPreferences(
-        delete_storage_files=current_user.delete_storage_files,
-        youtube_caption_template=current_user.youtube_caption_template,
-        instagram_caption_template=current_user.instagram_caption_template,
-    )
+    return await get_account_preferences(current_user)
 
 
 @router.get("/accounts/vault", response_model=VaultStatus)
